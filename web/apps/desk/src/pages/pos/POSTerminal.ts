@@ -1364,9 +1364,7 @@ export class POSTerminal extends LitElement {
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
     const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
-      ? (payPlanNow.typedMethod === 'account'
-        ? 'A charge to account cannot be more than what is owed'
-        : 'A card or check cannot be more than what is owed')
+      ? `A card, check or account charge cannot be more than ${fmt(payPlanNow.limitCents ?? total)} here`
       : 'The added tenders are more than the sale now: clear them and choose again';
     const ready = this._till !== null && hasLines && open;
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
@@ -1498,7 +1496,7 @@ export class POSTerminal extends LitElement {
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
-      : !plan.ok && plan.over === 'typed' ? 'Type no more than is owed'
+      : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
@@ -1643,7 +1641,8 @@ export class POSTerminal extends LitElement {
     const productLines = lines.filter((l) => l.parent_line_id === null);
     const hasLines = productLines.length > 0;
     const completed = sale?.status === 'completed';
-    const progress = panelProgress(this._step, completed);
+    const tenderChosen = this._tenderMethod !== null || this._pendingTenders.length > 0;
+    const progress = panelProgress(this._step, completed, tenderChosen);
     const openKey = completed || this._till === null ? null : this._open;
     const customerValue = this._customer?.name ?? 'Walk-in sale';
 

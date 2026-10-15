@@ -63,6 +63,16 @@ export function aiHeadline(s: AIState | null): string {
     return s.test_status === 'refused' || s.test_status === 'failed' ? 'AI Features Off' : 'AI Features Not Tested';
 }
 
+/**
+ * The lead line over Tech Admin's AI settings. A key the provider refused (or
+ * whose test failed) is said once, in the status card, so the lead line names
+ * only the state; every other state keeps the full line.
+ */
+export function aiLeadLine(s: AIState | null): string {
+    if (s?.configured && (s.test_status === 'refused' || s.test_status === 'failed')) return 'AI off';
+    return aiStatusLine(s);
+}
+
 /** What PIM's image generation makes with the chosen provider. */
 export interface ImageWords {
     kind: 'illustration' | 'image';

@@ -718,4 +718,23 @@
   .animate-enter {
     @apply animate-fade-in animate-slide-up;
   }
+
+  /* A horizontal strip's scrollbar in the app's colours: thin, the thumb a
+     token read that follows the mode, so the browser's white system bar never
+     shows in dark. scrollbar-color for the engines that read it, the webkit
+     pseudo rules for the rest. */
+  .gable-scrollbar-x {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--gb-zinc-500) / 0.7) transparent;
+  }
+  .gable-scrollbar-x::-webkit-scrollbar {
+    height: 6px;
+  }
+  .gable-scrollbar-x::-webkit-scrollbar-thumb {
+    background: rgb(var(--gb-zinc-500) / 0.7);
+    border-radius: 9999px;
+  }
+  .gable-scrollbar-x::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }

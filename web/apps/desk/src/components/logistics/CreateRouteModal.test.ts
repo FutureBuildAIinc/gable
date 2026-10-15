@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './CreateRouteModal'
 import type { GableCreateRouteModal } from './CreateRouteModal'
 import { mountAsync, update, q, text } from '../../test/dom.ts'
-import { jsonResponse } from '../../test/dom.ts'
+import { jsonResponse, chooseOption } from '../../test/dom.ts'
 
 let posts: string[]
 
@@ -57,6 +57,35 @@ describe('gable-create-route-modal required picks', () => {
     expect(message.getAttribute('role')).toBe('alert')
     expect(text(message)).toContain('vehicle')
     expect(text(message)).toContain('driver')
+    expect(posts).toEqual([])
+  })
+
+  it('the Scheduled Date field reads as required', async () => {
+    const el = await open()
+    const field = q<HTMLElement>(el, 'gable-date-field')
+    expect(field.querySelector('input')!.getAttribute('aria-required')).toBe('true')
+  })
+
+  it('a cleared date says the date is missing in words and sends nothing', async () => {
+    const el = await open()
+    const selects = Array.from(el.querySelectorAll('gable-select'))
+    await chooseOption(selects[0] as HTMLElement & { value: string }, 'v-1')
+    await chooseOption(selects[1] as HTMLElement & { value: string }, 'd-1')
+    await update(el, {})
+    const field = q<HTMLElement>(el, 'gable-date-field')
+    const box = field.querySelector('input')!
+    box.value = ''
+    box.dispatchEvent(new Event('input'))
+    box.dispatchEvent(new FocusEvent('blur'))
+    await update(el, {})
+    q<HTMLFormElement>(el, 'form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await update(el, {})
+    const message = q<HTMLElement>(el, '[data-testid="route-form-error"]')
+    expect(message.getAttribute('role')).toBe('alert')
+    expect(text(message).toLowerCase()).toContain('scheduled date')
+    expect(text(message).toLowerCase()).not.toContain('vehicle')
+    expect(text(message).toLowerCase()).not.toContain('driver')
+    expect(box.getAttribute('aria-invalid')).toBe('true')
     expect(posts).toEqual([])
   })
 })

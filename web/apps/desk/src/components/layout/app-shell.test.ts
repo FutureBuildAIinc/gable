@@ -98,6 +98,23 @@ describe('gable-app-shell — chrome', () => {
     const el = await shellAt('/orders')
     expect(q(el, 'header gable-branch-switcher')).toBeTruthy()
   })
+
+  it('draws the tab strip and menu band scrollbars in the app\'s colours', async () => {
+    // With many modules open the strips scroll; the bar must be the app's
+    // thin themed one (the gable-scrollbar-x utility), in both modes, never
+    // the browser's white system bar. no-scrollbar was never defined anywhere.
+    const el = await shellAt('/orders')
+    const strip = q(el, 'nav[aria-label="Open modules"]')
+    expect(strip.className).toContain('gable-scrollbar-x')
+    expect(strip.className).not.toContain('no-scrollbar')
+    // /orders has a menu band; it scrolls the same way.
+    const menuBand = Array.from(el.querySelectorAll('div')).find(
+      (d) => d.className.includes('h-11') && d.className.includes('overflow-x-auto'),
+    )
+    if (!menuBand) throw new Error('no menu band on /orders')
+    expect(menuBand.className).toContain('gable-scrollbar-x')
+    expect(menuBand.className).not.toContain('no-scrollbar')
+  })
 })
 
 describe('gable-app-shell — workspace tabs', () => {

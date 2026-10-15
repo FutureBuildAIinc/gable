@@ -10,7 +10,7 @@ import type { TenderIn } from '../../services/POSService';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
-    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method'] };
+    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method']; limitCents?: number };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
 
@@ -31,7 +31,9 @@ export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn |
     let tenders = added;
     if (sum(added) < totalCents && entry !== null && entry.amount_cents > 0) {
         if (entry.method !== 'cash' && addedNonCash + entry.amount_cents > totalCents) {
-            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method };
+            // The limit a typed card, check or account tender must stay under:
+            // the total less the other non cash tenders already added.
+            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method, limitCents: totalCents - addedNonCash };
         }
         tenders = [...added, entry];
     }
@@ -56,14 +58,17 @@ const ORDER: PanelKey[] = ['customer', 'payment', 'summary'];
 
 /**
  * The three panels as one linear walk: the panels before the current step are
- * done, the current one is lit, the rest wait. A completed sale has walked all
- * three, so all three are done.
+ * done, the current one is lit, the rest wait. Payment is the exception: it
+ * ticks only once a tender is chosen, so a Summary reached with no tender
+ * ("Tender: None yet") does not show Payment as done. A completed sale has
+ * walked all three, so all three are done.
  */
-export function panelProgress(step: PanelKey, completed: boolean): PanelProgress {
+export function panelProgress(step: PanelKey, completed: boolean, tenderChosen: boolean): PanelProgress {
     if (completed) return { customer: 'done', payment: 'done', summary: 'done' };
     const at = ORDER.indexOf(step);
     const stateOf = (k: PanelKey): PanelState => {
         const i = ORDER.indexOf(k);
+        if (k === 'payment' && i < at && !tenderChosen) return 'upcoming';
         return i < at ? 'done' : i === at ? 'current' : 'upcoming';
     };
     return { customer: stateOf('customer'), payment: stateOf('payment'), summary: stateOf('summary') };

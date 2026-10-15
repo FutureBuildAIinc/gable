@@ -21,30 +21,56 @@ import { formatDay, parseDay, todayDay, weekStart, weekdayNames, monthName } fro
 
 let nextId = 0;
 
-// The popover's box: w-64 is 256px; the grid with its header is about 320px.
+/**
+ * The open calendars, last opened last. While any calendar is open, the first
+ * Escape anywhere in the page or its dialog closes only the topmost one (the
+ * key is captured at the document, so a modal behind never sees it; the next
+ * Escape is the dialog's own).
+ */
+const openCalendars: GableDateField[] = [];
+
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || openCalendars.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openCalendars[openCalendars.length - 1].closeFromAnywhere();
+}, true);
+
+// The popover's box estimate for the first render (w-64 is 256px; the grid
+// with its header is about 320px); the measured size replaces it on the next.
 const POPOVER_W = 256;
 const POPOVER_H = 320;
 const POPOVER_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 
+export interface PopoverSize {
+    width: number;
+    height: number;
+}
+
 /**
- * Where the calendar pops, from the field's box and the viewport: under the
- * field, clamped sideways into the screen, and flipped above the field when
- * the space below is short and the space above is longer. Fixed positioning,
- * so a modal's scroll or hidden overflow never clips it.
+ * Where the calendar pops, from the field's box, the popover's size and the
+ * viewport: under the field when there is room (height, the gap and the
+ * screen margin all counted, so a near fit never clamps up over the field),
+ * otherwise directly above it (its bottom edge the gap over the field's top
+ * edge, so it never covers the field or its label), clamped inside the
+ * screen on every side. Fixed positioning, so a modal's scroll or hidden
+ * overflow never clips it.
  */
 export function placePopover(
     rect: { left: number; bottom: number; top: number },
+    size: PopoverSize,
     viewportW: number,
     viewportH: number,
 ): { top: number; left: number } {
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - POPOVER_W - VIEWPORT_MARGIN));
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - size.width - VIEWPORT_MARGIN));
     const below = viewportH - rect.bottom;
-    if (below < POPOVER_H + POPOVER_GAP && rect.top > below) {
-        return { top: Math.max(VIEWPORT_MARGIN, rect.top - POPOVER_H - POPOVER_GAP), left };
+    const above = rect.top;
+    if (below >= size.height + POPOVER_GAP + VIEWPORT_MARGIN || (below >= above && above < size.height + POPOVER_GAP + VIEWPORT_MARGIN)) {
+        const top = Math.min(rect.bottom + POPOVER_GAP, viewportH - size.height - VIEWPORT_MARGIN);
+        return { top, left };
     }
-    const top = rect.bottom + POPOVER_GAP;
-    return { top: Math.min(top, viewportH - POPOVER_H - VIEWPORT_MARGIN), left };
+    return { top: Math.max(VIEWPORT_MARGIN, rect.top - POPOVER_GAP - size.height), left };
 }
 
 @customElement('gable-date-field')
@@ -59,6 +85,10 @@ export class GableDateField extends LitElement {
     /** The accessible name of the text box. */
     @property({ type: String }) label = '';
     @property({ type: Boolean }) disabled = false;
+    /** Required, as the app's select reads it (aria-required on the box). */
+    @property({ type: Boolean }) required = false;
+    /** Marked wrong by the form that holds it (aria-invalid, the red edge). */
+    @property({ type: Boolean }) invalid = false;
 
     @state() private _text = '';
     @state() private _open = false;
@@ -70,6 +100,9 @@ export class GableDateField extends LitElement {
     @state() private _popLeft = 0;
 
     private _id = `gable-date-field-${++nextId}`;
+    // The size the open popover was last placed with: the estimate at open,
+    // then the measured box (updated() re-places on the first real measure).
+    private _placedSize: PopoverSize = { width: POPOVER_W, height: POPOVER_H };
     // True while the grid holds the keyboard focus, so a re-render that
     // replaces the focused cell's node (the month turned) knows to give the
     // focus to the day the move landed on.
@@ -95,6 +128,8 @@ export class GableDateField extends LitElement {
 
     disconnectedCallback() {
         document.removeEventListener('mousedown', this._outside);
+        const at = openCalendars.indexOf(this);
+        if (at >= 0) openCalendars.splice(at, 1);
         this._unwatchViewport();
         super.disconnectedCallback();
     }
@@ -167,33 +202,82 @@ export class GableDateField extends LitElement {
             this._onTextCommit();
         } else if (e.key === 'ArrowDown' && !this._open) {
             e.preventDefault();
-            this._openCalendar();
-        } else if (e.key === 'Escape' && this._open) {
-            e.preventDefault();
-            this._close();
+            this._openCommittingTyped(true);
         }
+        // Escape while the calendar is open is the document listener's: it
+        // fires ahead of this one and keeps the key from the dialog behind.
     }
 
-    private _openCalendar() {
+    /**
+     * Open the calendar, committing a typed day first: the calendar opens on
+     * the day the box shows. The button's click needs this as much as
+     * ArrowDown does: the button keeps the box's focus (its mousedown is
+     * prevented), so no blur commit happens before a mouse open.
+     */
+    private _openCommittingTyped(byKeyboard = false) {
+        const typed = parseDay(this._text);
+        if (typed && this._inBounds(typed) && typed !== this.value) this._commit(typed);
+        this._openCalendar(byKeyboard);
+    }
+
+    /**
+     * The box the calendar anchors to: the text box, extended over the field's
+     * own label when the page draws it as the sibling just before the field,
+     * so a flipped calendar covers neither.
+     */
+    private _anchorRect(): { left: number; top: number; bottom: number } | null {
+        const box = this.querySelector('input');
+        if (!box) return null;
+        const r = box.getBoundingClientRect();
+        let top = r.top;
+        const before = this.previousElementSibling;
+        if (before instanceof HTMLLabelElement) {
+            top = Math.min(top, before.getBoundingClientRect().top);
+        }
+        return { left: r.left, top, bottom: r.bottom };
+    }
+
+    private _place() {
+        const rect = this._anchorRect();
+        if (!rect) return;
+        const at = placePopover(rect, this._placedSize, window.innerWidth, window.innerHeight);
+        this._popTop = at.top;
+        this._popLeft = at.left;
+    }
+
+    private _openCalendar(byKeyboard = false) {
         if (this.disabled) return;
         const base = this.value && this._inBounds(this.value) ? this.value : todayDay();
         const [y, m] = base.split('-').map(Number);
         this._viewYear = y;
         this._viewMonth = m;
         this._focusDay = base;
-        const rect = this.querySelector('input')?.getBoundingClientRect();
-        if (rect) {
-            const at = placePopover(rect, window.innerWidth, window.innerHeight);
-            this._popTop = at.top;
-            this._popLeft = at.left;
-        }
+        // Opened by keyboard, the day goes straight under the focus.
+        if (byKeyboard) this._refocus = true;
+        this._placedSize = { width: POPOVER_W, height: POPOVER_H };
+        this._place();
         this._open = true;
+        if (!openCalendars.includes(this)) openCalendars.push(this);
         this._watchViewport();
     }
 
     private _close() {
         if (this._open) this._unwatchViewport();
+        const at = openCalendars.indexOf(this);
+        if (at >= 0) openCalendars.splice(at, 1);
         this._open = false;
+    }
+
+    /**
+     * Escape anywhere while this calendar is open (the document listener):
+     * close, and hand the focus back to the box only when the calendar held
+     * it; a focus elsewhere in the page stays where it was.
+     */
+    closeFromAnywhere() {
+        if (!this._open) return;
+        const held = this.contains(document.activeElement);
+        this._close();
+        if (held) this.querySelector('input')?.focus();
     }
 
     private _pick(day: string) {
@@ -243,11 +327,6 @@ export class GableDateField extends LitElement {
                 e.preventDefault();
                 this._pick(day);
                 break;
-            case 'Escape':
-                e.preventDefault();
-                this._close();
-                this.querySelector('input')?.focus();
-                break;
             case 'Tab':
                 this._close();
                 break;
@@ -283,7 +362,8 @@ export class GableDateField extends LitElement {
     }
 
     render() {
-        const inputClasses = `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${this._invalid ? 'border-safety-red' : 'border-white/10'}`;
+        const wrong = this._invalid || this.invalid;
+        const inputClasses = `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${wrong ? 'border-safety-red' : 'border-white/10'}`;
         return html`
             <div class="relative">
                 <input
@@ -294,7 +374,8 @@ export class GableDateField extends LitElement {
                     aria-haspopup="dialog"
                     aria-controls="${this._id}-grid"
                     aria-label=${this.label || 'Date'}
-                    aria-invalid=${this._invalid ? 'true' : 'false'}
+                    aria-required=${this.required ? 'true' : nothing}
+                    aria-invalid=${wrong ? 'true' : 'false'}
                     placeholder="Choose a date"
                     .value=${this._text}
                     ?disabled=${this.disabled}
@@ -308,7 +389,7 @@ export class GableDateField extends LitElement {
                     tabindex="-1"
                     aria-label=${this._open ? 'Close the calendar' : 'Open the calendar'}
                     ?disabled=${this.disabled}
-                    @click=${() => (this._open ? this._close() : this._openCalendar())}
+                    @click=${() => (this._open ? this._close() : this._openCommittingTyped())}
                     @mousedown=${(e: Event) => e.preventDefault()}
                     class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition-colors"
                 >${icon(Calendar, 16)}</button>
@@ -413,6 +494,19 @@ export class GableDateField extends LitElement {
                     pop.showPopover();
                 } catch {
                     // already showing
+                }
+            }
+            // The first render placed the popover on the estimate; with the
+            // real box measured, place it again so a flipped calendar's
+            // bottom edge sits on the field, not a guess above it.
+            if (pop) {
+                const measured: PopoverSize = {
+                    width: pop.offsetWidth || POPOVER_W,
+                    height: pop.offsetHeight || POPOVER_H,
+                };
+                if (measured.width !== this._placedSize.width || measured.height !== this._placedSize.height) {
+                    this._placedSize = measured;
+                    this._place();
                 }
             }
             const btn = this.querySelector(`#${this._id}-grid button[tabindex="0"]`) as HTMLElement | null;

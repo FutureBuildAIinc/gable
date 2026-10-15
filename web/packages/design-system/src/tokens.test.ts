@@ -359,3 +359,13 @@ describe('Gable light contrast (WCAG 2), computed from the tokens', () => {
     expect(r).toBeGreaterThanOrEqual(needed)
   })
 })
+
+describe('the strips scrollbar utility', () => {
+  it('is thin and drawn from the tokens, so dark and light both follow', () => {
+    // The tab strip's scrollbar is the app's own: thin, the thumb a token
+    // read, so the browser's white system bar never shows in dark.
+    expect(css).toMatch(/\.gable-scrollbar-x\s*\{[^}]*scrollbar-width:\s*thin/)
+    expect(css).toMatch(/\.gable-scrollbar-x\s*\{[^}]*scrollbar-color:\s*rgb\(var\(--gb-[a-z0-9-]+\)[^)]*\)\s+transparent/)
+    expect(css).toMatch(/\.gable-scrollbar-x::-webkit-scrollbar-thumb\s*\{[^}]*background:\s*rgb\(var\(--gb-/)
+  })
+})

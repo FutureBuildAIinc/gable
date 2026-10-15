@@ -294,7 +294,7 @@ export class GableAppShell extends LitElement {
     const tab = workspace.tabs.find((t) => t.key === key);
     const active = activeMenuPath(menu, router.currentPath);
     return html`
-      <div class="flex items-center gap-1 px-4 md:px-6 h-11 bg-deep-space/60 border-b border-white/5 overflow-x-auto no-scrollbar">
+      <div class="flex items-center gap-1 px-4 md:px-6 h-11 bg-deep-space/60 border-b border-white/5 overflow-x-auto gable-scrollbar-x">
         ${tab
           ? html`<span class="flex items-center gap-2 pr-3 mr-2 border-r border-white/10 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 shrink-0">
               ${icon(tab.icon, 13)} ${tab.label}
@@ -358,7 +358,7 @@ export class GableAppShell extends LitElement {
         <!-- Workspace tab strip -->
         <nav
           aria-label="Open modules"
-          class="sticky top-16 z-30 flex items-end gap-1 px-3 md:px-5 pt-1.5 bg-slate-steel/60 backdrop-blur-xl border-b border-white/5 overflow-x-auto no-scrollbar"
+          class="sticky top-16 z-30 flex items-end gap-1 px-3 md:px-5 pt-1.5 bg-slate-steel/60 backdrop-blur-xl border-b border-white/5 overflow-x-auto gable-scrollbar-x"
         >
           ${workspace.tabs.map((t) => this._tab(t))}
           <button
