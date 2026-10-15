@@ -13,6 +13,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -393,5 +394,45 @@ func TestSalesSummary_CollectedIsNetOfRefundsAndVoids(t *testing.T) {
 	}
 	if math.Round(got.TotalCollected*100) != 600 {
 		t.Errorf("TotalCollected = %v, want 6.00 (1000 less the 400 refund; the voided 3200 and the 700 outside are out)", got.TotalCollected)
+	}
+}
+
+// With no start and end the Sales Summary's window is the yard's business day
+// and the thirty days before it, not the server's: a payment dated the day
+// after the yard's today is out, and one dated thirty days before it is in.
+func TestSalesSummary_TheDefaultWindowIsTheYardsDay(t *testing.T) {
+	w := newDayWorld(t)
+	w.record(w.yard, 500, 0)
+	w.record(w.yard, 700, -30) // the window's first day
+	w.record(w.yard, 900, 1)   // the yard's tomorrow: never in it
+	ctx := branchctx.With(context.Background(), &branchctx.Context{UserSub: "u", BranchID: &w.yard})
+	got, err := reporting.NewService(reporting.NewRepository(w.db)).GetSalesSummary(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Round(got.TotalCollected*100) != 1200 {
+		t.Errorf("TotalCollected = %v, want 12.00 (500 today and 700 thirty days back; the yard's tomorrow 900 out)", got.TotalCollected)
+	}
+	if want := w.day().Format("2006-01-02"); got.EndDate != want {
+		t.Errorf("EndDate = %s, want the yard's day %s", got.EndDate, want)
+	}
+}
+
+// A payment taken through the payment service with no received_on is dated by
+// its own yard's day, so it is on today's card (the yard's evening, west of
+// UTC, is the case this PR was opened for).
+func TestToday_APaymentWithNoReceivedOnLandsOnTheYardsDay(t *testing.T) {
+	w := newDayWorld(t)
+	if _, err := w.db.Pool.Exec(context.Background(), `UPDATE locations SET timezone = $2 WHERE id = $1`, w.yard, w.zone); err != nil {
+		t.Fatal(err)
+	}
+	svc := payment.NewService(w.db, payment.NewRepository(w.db), w.svc)
+	if _, err := svc.Create(context.Background(), &payment.Input{CustomerID: w.customer, BranchID: &w.yard, AmountCents: 1500, Method: payment.PaymentMethod("CASH")},
+		payment.Caller{Actor: "u-test"}); err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+	got := w.read(&w.yard, nil)
+	if got.today != 1500 || got.trendToday != 1500 || got.tillNet != 1500 {
+		t.Errorf("card %d, trend %d, till %d, want all 1500", got.today, got.trendToday, got.tillNet)
 	}
 }

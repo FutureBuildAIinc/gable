@@ -864,9 +864,10 @@ func TestUserBranchEndpoints_EmptyListsAreArrays(t *testing.T) {
 
 // CHARACTERIZATION: with no auth claims on the request — which is the state of
 // the demo and staging deployments, where AUTH_MODE=dev leaves claims nil —
-// /me/branches returns every active branch and marks the first one home. This
-// is a deliberate dev-mode affordance; it is pinned so that it cannot silently
-// become production behaviour.
+// /me/branches returns every active branch and marks none of them home: the
+// local caller is no one in particular, so a home flag would show one yard as
+// home to every demo persona. This is a deliberate dev-mode affordance; it is
+// pinned so that it cannot silently become production behaviour.
 func TestListMyBranches_UnauthenticatedReturnsAllActiveBranches(t *testing.T) {
 	repo := newFakeRepo()
 	repo.branches = []Location{
@@ -887,11 +888,10 @@ func TestListMyBranches_UnauthenticatedReturnsAllActiveBranches(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d branches, want the 2 active ones", len(got))
 	}
-	if !got[0].IsHome {
-		t.Error("the first branch was not flagged home")
-	}
-	if got[1].IsHome {
-		t.Error("more than one branch was flagged home")
+	for _, b := range got {
+		if b.IsHome {
+			t.Errorf("branch %s was flagged home for the local dev caller, want none", b.Code)
+		}
 	}
 	if got[0].Timezone != "America/Vancouver" {
 		t.Errorf("Timezone = %q, want it carried into the summary", got[0].Timezone)

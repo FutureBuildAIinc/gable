@@ -8,12 +8,8 @@ import { ToastService } from '../lib/toast-service.ts';
 import { formatDay } from '../lib/dates.ts';
 import { ReportingService } from '../services/ReportingService.ts';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting.ts';
+import { formatDollars } from '../lib/money.ts';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide';
-
-/** Dollars with the sign before the dollar mark: -$4.00, never $-4.00. */
-function money(n: number): string {
-    return `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
-}
 
 @customElement('gable-daily-till')
 export class GableDailyTill extends LitElement {
@@ -69,13 +65,13 @@ export class GableDailyTill extends LitElement {
                                 ${icon(DollarSign, 24)} Collected (${formatDay(till.date)})
                             </h2>
                             <span class="text-3xl font-mono font-bold text-white">
-                                ${money(till.net_collected)}
+                                ${formatDollars(till.net_collected)}
                             </span>
                         </div>
 
                         ${till.refunds > 0 ? html`
                             <p class="text-xs text-zinc-500 mb-4" data-testid="till-parts">
-                                Received ${money(till.received)} less refunds ${money(till.refunds)} is net ${money(till.net_collected)}
+                                Received ${formatDollars(till.received)} less refunds ${formatDollars(till.refunds)} is net ${formatDollars(till.net_collected)}
                             </p>
                         ` : nothing}
 
@@ -113,7 +109,7 @@ export class GableDailyTill extends LitElement {
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Collected</span>
-                                <span class="block text-2xl font-mono text-emerald-400">${money(summary.total_collected)}</span>
+                                <span class="block text-2xl font-mono text-emerald-400">${formatDollars(summary.total_collected)}</span>
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5 col-span-2">
                                 <div class="flex justify-between items-center">
