@@ -143,7 +143,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "account_number": "RFC-001",
+            "account_number": "QFC-001",
             "address": "610 Plywood Ct, West Kelowna BC",
             "balance_cents": 999999,
             "branch_ids": [
@@ -153,10 +153,10 @@
             "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
-            "email": "billing@ridgelineformwork.example",
+            "email": "billing@quillfieldformwork.example",
             "id": "<id-5>",
             "is_active": true,
-            "name": "Ridgeline Formwork Ltd",
+            "name": "Quillfield Formwork Ltd",
             "payment_terms": {
               "code": "NET30",
               "id": "<id-3>",

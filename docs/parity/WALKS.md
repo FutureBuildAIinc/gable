@@ -70,12 +70,12 @@ offer and the server enforces no role; a real dealer signs in through its identi
    the desk and Point of Sale only, and the header names Jordan Pike, Cashier.
 2. **A counter sale on account (Jordan Pike).** Open Point of Sale: the Counter opens on Kelowna Main Yard's register,
    `REG-01`, with the till closed: nothing can be rung until it opens. Open Till with a float of $200.00: the till's
-   sale opens, `POS-000001`. In the Customer panel find "Kelbrook": Kelbrook Construction shows its credit available and
-   its open balance; enter a purchase order (`KB-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
+   sale opens, `POS-000001`. In the Customer panel find "Tarnwick": Tarnwick Construction shows its credit available and
+   its open balance; enter a purchase order (`TC-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
    `LUM-248-PREM` (the result shows the stock on hand at this yard) and press Enter: twelve 2x4x8 SPF Premium at the
    customer's price. Then 4 of `OSB-12` (7/16 OSB 4x8). Choose Charge to account and Pay: "Sale POS-000001 complete",
    and the customer's credit available drops by the sale's total. The completed sale stays on screen, with Void and
-   Return, until New Sale. The sale posts an invoice to Kelbrook's account carrying the purchase order; Robin sees it in
+   Return, until New Sale. The sale posts an invoice to Tarnwick's account carrying the purchase order; Robin sees it in
    step 7.
 3. **A quote from a material list (Avery Brooks).** Open Quotes and the Quote Builder. Pick the customer. Open "From a
    material list", paste a list (for example `24 2x4x8 SPF`, `6 sheets 7/16 OSB`, `10 boxes 3 in deck screws`, `4
@@ -86,12 +86,12 @@ offer and the server enforces no role; a real dealer signs in through its identi
    each line to its product. Mark it sent and Convert to Order: the order opens with the quote's lines and prices,
    ready to confirm.
 4. **A sale at a second yard for a customer of the first (Drew Patel).** Sign in as Drew Patel: the Counter opens on Lake
-   Country Outpost's register, `REG-LK`. Open Till. Find "Big White": Big White Cabin Co, a Kelowna Main Yard account,
+   Country Outpost's register, `REG-LK`. Open Till. Find "Snowfern": Snowfern Cabin Co, a Kelowna Main Yard account,
    is found here too, with its standing (every customer is a dealer wide account that any yard may sell to). Sell 10 of
    `LUM-248-PREM` on account (the stock shown is Lake Country's own) and Pay. The customer now trades at Lake Country as
    well: its first document here linked it to the yard, and the link is audited.
 5. **Receiving a purchase order (Casey Lin).** Open Purchasing: the list shows each order's number, vendor, yard and
-   total. Open the newest order, at the top of the list: sent to Okanagan Hardware Distribution for Kelowna Main Yard,
+   total. Open the newest order, at the top of the list: sent to Fernbank Hardware Distribution for Kelowna Main Yard,
    with two lines of joist hangers (the seed draws its other orders at random, so the numbers differ from run to run).
    Receive Items: the bins
    offered are Kelowna Main Yard's only (`KEL-A` to `KEL-D`). Confirm Receipt: the order moves to Received and the stock
@@ -100,8 +100,8 @@ offer and the server enforces no role; a real dealer signs in through its identi
    tab: Kelowna Main Yard's stock. Switch the yard in the header to West Kelowna Satellite, then to Lake Country Outpost:
    the tab shows each yard's own stock.
 7. **AR and a statement (Robin Diaz).** Open Reporting and AR Aging: each Kelowna Main Yard customer's open balance by
-   age, with Kelbrook Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
-   Big White Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
+   age, with Tarnwick Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
+   Snowfern Cabin Co carries its Lake Country charge there. Open Customer Statement for Tarnwick Construction: each
    invoice and payment in the period with the running balance, and Print for the dealer's statement.
 8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
    counter's account charges included), the collected trend (the chart headed "Collected, last 7 days"), the top customers, the stock alerts
@@ -173,10 +173,10 @@ Steps:
    must list the nine people above, each with its home yard flagged and the owner, finance and purchasing people on
    all three yards.
 5. The yard's receiving work: purchasing's purchase order list at `KEL-MAIN` must show one `SENT` order to
-   Okanagan Hardware Distribution with two lines and nothing received, ready to receive.
+   Fernbank Hardware Distribution with two lines and nothing received, ready to receive.
 6. Credit: the customer directory shows `Glenmore Heritage Reno` over its credit limit (orders land on hold) and
-   `Ridgeline Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
-7. AR: the AR aging and `Kelbrook Construction`'s statement have open invoices at more than one yard.
+   `Quillfield Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
+7. AR: the AR aging and `Tarnwick Construction`'s statement have open invoices at more than one yard.
 
 ### The cross yard sale (M1, ruling A)
 
@@ -184,10 +184,10 @@ Proves: AR-01 (customers are dealer wide accounts, the link follows trade). Act 
 yard `WK`, granted `WK` only), or send `X-Branch-Id` of `WK` through the API.
 
 1. Find a customer whose home yard is the main yard. In the desk's customer directory with the switcher on `WK`,
-   search `Big White Cabin`. It must be found, with its home yard shown as Kelowna Main Yard. Through the API:
-   `curl -s -H "X-Branch-Id: <WK branch id>" "http://127.0.0.1:8080/api/v1/customers?q=Big%20White"` must return it
+   search `Snowfern Cabin`. It must be found, with its home yard shown as Kelowna Main Yard. Through the API:
+   `curl -s -H "X-Branch-Id: <WK branch id>" "http://127.0.0.1:8080/api/v1/customers?q=Snowfern"` must return it
    (before ruling A a yard's desk saw only its own customers), and its `branch_ids` must list `KEL-MAIN` only.
-2. Quote it at `KEL-MAIN`: switcher on `KEL-MAIN`, new quote for Big White Cabin Co with one line of any product, send
+2. Quote it at `KEL-MAIN`: switcher on `KEL-MAIN`, new quote for Snowfern Cabin Co with one line of any product, send
    it. API: `curl -s -X POST -H "X-Branch-Id: <KEL-MAIN id>" -H 'Content-Type: application/json'
    -d '{"customer_id":"<customer id>","lines":[{"product_id":"<product id>","quantity":"10","unit_price_ten_thousandths":10000}]}'
    http://127.0.0.1:8080/api/v1/quotes` answers 201. The customer's `branch_ids` must still list `KEL-MAIN` only (it

@@ -8,17 +8,17 @@
   "vendors": [
     {
       "key": "GABLE_INTERNAL",
-      "name": "Gable Lumber & Supply",
-      "category": "Internal yard feed",
+      "name": "Larkmere Building Products",
+      "category": "Lumber and sheet goods",
       "payment_terms": "Net 30",
       "average_lead_time_days": 3,
       "fill_rate": 97.5,
       "ship_to": ["KEL-MAIN", "WK", "LK"],
-      "notes": "In-house yard feed."
+      "notes": "Dimension lumber, sheet goods and cornice trim."
     },
     {
       "key": "OK_HDW",
-      "name": "Okanagan Hardware Distribution",
+      "name": "Fernbank Hardware Distribution",
       "category": "Hardware distribution",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
@@ -48,7 +48,7 @@
     },
     {
       "key": "VAL_RMX",
-      "name": "Valley Ready-Mix Concrete",
+      "name": "Bramblewood Ready-Mix Concrete",
       "category": "Concrete and masonry",
       "payment_terms": "Net 15",
       "average_lead_time_days": 2,
@@ -78,7 +78,7 @@
     },
     {
       "key": "PAC_WD",
-      "name": "Pacific Window & Door",
+      "name": "Tamarack Window & Door",
       "category": "Windows and doors",
       "payment_terms": "2% 10 Net 30",
       "average_lead_time_days": 21,
@@ -98,7 +98,7 @@
     },
     {
       "key": "RIDGE_FRAM",
-      "name": "Ridgeline Frame and Truss",
+      "name": "Cedarflat Frame and Truss",
       "category": "Engineered roof trusses",
       "payment_terms": "Net 30",
       "average_lead_time_days": 10,
@@ -134,7 +134,7 @@
       "average_lead_time_days": 8,
       "fill_rate": 94.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented. Composite decking of invented brand Ridgeline Deck."
+      "notes": "Invented. Composite decking."
     },
     {
       "key": "FAST_GR",
@@ -147,8 +147,8 @@
       "notes": "Invented fastener vendor, the invented brand Granby Fasteners."
     },
     {
-      "key": "PROFRAME",
-      "name": "ProFrame Connectors",
+      "key": "KEL_CONN",
+      "name": "Kelowna Framing Connectors Ltd",
       "category": "Framing connectors",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
@@ -218,7 +218,7 @@
     },
     {
       "key": "PEAK_ROOF",
-      "name": "Peak Roofing Supply",
+      "name": "Wrenfield Roofing Supply",
       "category": "Asphalt roofing",
       "payment_terms": "Net 45",
       "average_lead_time_days": 7,
@@ -228,7 +228,7 @@
     },
     {
       "key": "METAL_ROOF_OK",
-      "name": "Mountain Metal Roofing",
+      "name": "Corbinwood Metal Roofing",
       "category": "Metal roofing",
       "payment_terms": "Net 30",
       "average_lead_time_days": 10,
@@ -248,7 +248,7 @@
     },
     {
       "key": "FOAM_OK",
-      "name": "OK Foam and Insulation",
+      "name": "Thistledown Foam and Insulation",
       "category": "Spray and rigid foam",
       "payment_terms": "Net 30",
       "average_lead_time_days": 7,
@@ -274,11 +274,11 @@
       "average_lead_time_days": 5,
       "fill_rate": 95.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented. Paint of invented brand Ridgeline Paint. Interior and exterior paint, stain, brushes, rollers, sundries."
+      "notes": "Invented. Interior and exterior paint, stain, brushes, rollers, sundries."
     },
     {
-      "key": "PROFRAME_TOOL",
-      "name": "ProFrame Tools",
+      "key": "OK_TOOLS",
+      "name": "Sagebrush Power Tool Supply",
       "category": "Power tools",
       "payment_terms": "Net 30",
       "average_lead_time_days": 7,
@@ -288,13 +288,13 @@
     },
     {
       "key": "HARD_WON",
-      "name": "Stone Hardware",
+      "name": "Anvilgrove Hand Tools",
       "category": "Hand tools",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
       "fill_rate": 95.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented hand tools brand. Hammers, saws, levels, tape measures."
+      "notes": "Invented hand tools vendor. Hammers, saws, levels, tape measures."
     },
     {
       "key": "OK_PLUMB",
@@ -317,8 +317,8 @@
       "notes": "Invented. Wire, boxes, conduit, devices, lighting."
     },
     {
-      "key": "RIDGELINE_GARDEN",
-      "name": "Gable Garden Supply",
+      "key": "GARDEN_SUPPLY",
+      "name": "Marrowfield Garden Supply",
       "category": "Lawn and garden",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,

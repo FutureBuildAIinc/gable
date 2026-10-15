@@ -365,7 +365,7 @@ func TestLogServices_NeverFail(t *testing.T) {
 	if err := email.SendEmailWithAttachment(context.Background(),
 		[]string{"controller@example.com", "gm@example.com"},
 		"Scheduled Report: AR aging", "Attached.", "ar_aging_2026-08-20.csv",
-		[]byte("Customer,Total\nKelbrook Homes,1200\n")); err != nil {
+		[]byte("Customer,Total\nTarnwick Homes,1200\n")); err != nil {
 		t.Errorf("LogEmailService.SendEmailWithAttachment: %v", err)
 	}
 	// Zero recipients and an empty attachment are the caller's mistake to

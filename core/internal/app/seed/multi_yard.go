@@ -152,31 +152,31 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 
 	kel := yards["KEL-MAIN"]
 
-	// Ridgeline Formwork stands close to its credit limit: a $20,000 limit and
+	// Quillfield Formwork stands close to its credit limit: a $20,000 limit and
 	// one open invoice of $18,816.00 posted through the AR core. It is a
 	// customer of the seed's own, so no scenario that reads another customer's
 	// credit moves.
 	if ar != nil && yards["WK"] != uuid.Nil {
 		cid, branch, err := seedCustomer(db, demoCustomer{
-			Name: "Ridgeline Formwork Ltd", Acct: "RFC-001", Email: "billing@ridgelineformwork.example", Phone: "250-555-3300",
+			Name: "Quillfield Formwork Ltd", Acct: "QFC-001", Email: "billing@quillfieldformwork.example", Phone: "250-555-3300",
 			Addr: "610 Plywood Ct, West Kelowna BC", Tier: "SILVER", Terms: "NET30", PriceLevel: "Contractor",
 			CreditLimit: 20000, PrimaryBranch: yards["WK"],
 		}, priceLevelIDs["Contractor"])
 		if err != nil {
-			log.Printf("Seed: Ridgeline Formwork: %v", err)
+			log.Printf("Seed: Quillfield Formwork: %v", err)
 		} else {
-			seedExec(db, "Ridgeline ship to", `INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
-				VALUES ($1, 'MAIN', 'Ridgeline Formwork Ltd', '610 Plywood Ct, West Kelowna BC', TRUE)
+			seedExec(db, "Quillfield ship to", `INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
+				VALUES ($1, 'MAIN', 'Quillfield Formwork Ltd', '610 Plywood Ct, West Kelowna BC', TRUE)
 				ON CONFLICT (customer_id, code) DO NOTHING`, cid)
 			var invCount int
 			db.QueryRow(`SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, cid).Scan(&invCount)
 			if invCount == 0 {
 				orderID, invID := uuid.New(), uuid.New()
 				on := seedNow().AddDate(0, 0, -12)
-				seedExec(db, "Ridgeline order", `INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
+				seedExec(db, "Quillfield order", `INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
 					VALUES ($1, $2, $3, 18816.00, 16800.00, 'FULFILLED', $4, 'PICKUP',
 						COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'), 'LEGACY')`, orderID, cid, branch, on)
-				seedExec(db, "Ridgeline invoice", `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
+				seedExec(db, "Quillfield invoice", `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
 						due_date, payment_terms_id, invoice_date, created_at)
 					VALUES ($1, $2, $3, $4, 'UNPAID', 18816.00, 16800.00, 0.12, 2016.00, $5::date,
 						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6)`,
@@ -193,12 +193,12 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 				for _, l := range lines {
 					if _, ok := skuToID[l.SKU]; !ok {
 						ready = false
-						log.Printf("Seed: Ridgeline Formwork lines not written: product %s is missing", l.SKU)
+						log.Printf("Seed: Quillfield Formwork lines not written: product %s is missing", l.SKU)
 					}
 				}
 				if ready {
 					for j, l := range lines {
-						seedExec(db, "Ridgeline order line "+l.SKU, `INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+						seedExec(db, "Quillfield order line "+l.SKU, `INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
 								description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
 								quantity_allocated, quantity_fulfilled)
 							SELECT $1, p.id, $3, $4, 'PRODUCT', $5,
@@ -206,7 +206,7 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 								0, $3
 							FROM products p WHERE p.id = $2`, orderID, skuToID[l.SKU], l.Qty, l.Price, j)
 					}
-					seedExec(db, "Ridgeline invoice lines", `INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
+					seedExec(db, "Quillfield invoice lines", `INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
 							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
 							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
@@ -218,7 +218,7 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 	}
 
 	// A purchase order sent to a vendor and ready to receive at the main yard.
-	if vid, ok := vendorIDs["Okanagan Hardware Distribution"]; ok && kel != uuid.Nil {
+	if vid, ok := vendorIDs["Fernbank Hardware Distribution"]; ok && kel != uuid.Nil {
 		var po string
 		db.QueryRow(`INSERT INTO purchase_orders (vendor_id, branch_id, status) VALUES ($1, $2, 'SENT') RETURNING id`, vid, kel).Scan(&po)
 		if po != "" {
@@ -239,9 +239,9 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 	// an open quote there and the customer_branches row with its audit row, the
 	// shape the link follows trade rule writes.
 	crossYard := []struct{ Customer, Yard, SKU string }{
-		{"Kelbrook Construction", "WK", "LUM-2610-PREM"},
-		{"Okanagan Homes Ltd", "LK", "LUM-2612-PREM"},
-		{"Lake Country Builders", "KEL-MAIN", "LUM-448-PT"},
+		{"Tarnwick Construction", "WK", "LUM-2610-PREM"},
+		{"Thornmere Homes Ltd", "LK", "LUM-2612-PREM"},
+		{"Alderfold Builders", "KEL-MAIN", "LUM-448-PT"},
 	}
 	for _, c := range crossYard {
 		cid, ok := customerIDs[c.Customer]

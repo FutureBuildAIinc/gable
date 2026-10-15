@@ -12,7 +12,7 @@ import './TopCustomersTable.ts'
 import type { GableTopCustomersTable } from './TopCustomersTable.ts'
 import { mount, q, text, flush } from '../../test/dom'
 
-const CUSTOMER = { customer_id: 'cust-1', customer_name: 'Kelbrook Construction', total_revenue: 186600, order_count: 4 }
+const CUSTOMER = { customer_id: 'cust-1', customer_name: 'Tarnwick Construction', total_revenue: 186600, order_count: 4 }
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -25,8 +25,8 @@ describe('top customers table', () => {
     })
 
     const link = q<HTMLAnchorElement>(el, 'a[href="/accounts/cust-1"]')
-    expect(link.getAttribute('aria-label')).toBe("Open Kelbrook Construction's account")
-    expect(text(el)).toContain('Kelbrook Construction')
+    expect(link.getAttribute('aria-label')).toBe("Open Tarnwick Construction's account")
+    expect(text(el)).toContain('Tarnwick Construction')
   })
 
   it('a click anywhere on the row follows the row\'s link', async () => {

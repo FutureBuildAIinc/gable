@@ -988,7 +988,7 @@ func TestOrderTaxResolution(t *testing.T) {
 	// A ship-to with its own rate, set as the customer's default.
 	shipTo := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, city, region, postal_code, tax_rate, is_default, is_active)
-		VALUES ($1, $2, 'SITE', 'The site', '1 Golden Way', 'Kelbrook', 'BC', 'V0A 1A0', 0.120000, TRUE, TRUE)`,
+		VALUES ($1, $2, 'SITE', 'The site', '1 Golden Way', 'Tarnwick', 'BC', 'V0A 1A0', 0.120000, TRUE, TRUE)`,
 		shipTo, f.customerID); err != nil {
 		t.Fatal(err)
 	}

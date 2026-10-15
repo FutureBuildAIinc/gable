@@ -214,16 +214,16 @@ func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {
 var dispatchRecencyOrder = []string{
 	"Peachland Framing Crew",
 	"Summerland Roofers",
-	"Big White Cabin Co",
-	"Kelbrook Construction",
-	"Mission Hill Custom",
+	"Snowfern Cabin Co",
+	"Tarnwick Construction",
+	"Pellmoor Custom",
 	"Westbank Decks & Fence",
 	"Glenmore Heritage Reno",
 	"Vernon Valley Construction",
 	"Okanagan DIY Owner",
-	"Lake Country Builders",
-	"Predator Ridge Renos",
-	"Okanagan Homes Ltd",
+	"Alderfold Builders",
+	"Stonehollow Renos",
+	"Thornmere Homes Ltd",
 	"Knox Mountain Landscapes",
 }
 
