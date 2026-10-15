@@ -125,8 +125,13 @@ func TestTotalsNeverSplitAndTheFootNeverStandsAlone(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Contains(pageOf(sdoc, "Legal name:"), []byte("Total:")) {
-				t.Errorf("statement: the foot's page does not hold the aging total")
+			// the closing balance, the aging title, its buckets and its total
+			// share the foot's page
+			page = pageOf(sdoc, "Legal name:")
+			for _, want := range []string{"Closing balance:", "Aging as of", "Over 90", "Total:"} {
+				if !bytes.Contains(page, []byte(want)) {
+					t.Errorf("statement: the foot's page does not hold %q", want)
+				}
 			}
 		})
 	}
