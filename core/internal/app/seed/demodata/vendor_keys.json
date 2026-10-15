@@ -147,8 +147,8 @@
       "notes": "Invented fastener vendor, the invented brand Granby Fasteners."
     },
     {
-      "key": "PROFRAME",
-      "name": "ProFrame Connectors",
+      "key": "KEL_CONN",
+      "name": "Kelowna Framing Connectors Ltd",
       "category": "Framing connectors",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
@@ -277,8 +277,8 @@
       "notes": "Invented. Paint of invented brand Ridgeline Paint. Interior and exterior paint, stain, brushes, rollers, sundries."
     },
     {
-      "key": "PROFRAME_TOOL",
-      "name": "ProFrame Tools",
+      "key": "OK_TOOLS",
+      "name": "Okanagan Power Tool Supply",
       "category": "Power tools",
       "payment_terms": "Net 30",
       "average_lead_time_days": 7,
