@@ -25,6 +25,9 @@ function block(selector: string): Record<string, string> {
   return out
 }
 
+/** The donut's second light series: the palette's blue mixed a tenth toward the card (`#f8f3ec`), so it sits between the deep green and the sage in lightness. */
+const LIGHT_DONUT_BLUE = '#1c7798'
+
 const dark = block(':root')
 const light = block(':root[data-theme="light"]')
 
@@ -179,6 +182,8 @@ describe('Industrial Dark is unchanged', () => {
       'map-note': '#666666',
       'chart-tick': colors.zinc[600],
       'chart-fulfilled': colors.indigo[400],
+      'chart-series-1': '#00FFA3',
+      'chart-series-2': '#38BDF8',
       'picture-plate': '#FFFFFF',
       tile: '#0A0B10',
     }
@@ -299,6 +304,31 @@ describe('Gable light holds the palette values', () => {
     }
   })
 
+  it('every light value of the tokens that carry their own dark value', () => {
+    const sv = LIGHT_PALETTE.surfaces
+    const n = LIGHT_PALETTE.neutrals
+    const byName: Record<string, string> = {
+      'portal-ground': sv.ground,
+      'portal-panel': sv.card,
+      'chip-ground': sv.card,
+      shade: sv.ground,
+      'photo-btn': sv.paper,
+      'map-note': n['500'],
+      'chart-tick': n['500'],
+      'chart-fulfilled': sv['sage-fill'],
+      'chart-series-1': sv['green-hover'],
+      'chart-series-2': LIGHT_DONUT_BLUE,
+      'picture-plate': sv.ground,
+      tile: sv.raised,
+    }
+    for (const [name, value] of Object.entries(byName)) {
+      expect(light[`--gb-${name}`], name).toBe(channels(value))
+    }
+    expect(light['--gb-hover-row']).toBe(channels(sv.ground))
+    expect(light['--gb-hover-row-a']).toBe('0.7')
+    expect(light['--gb-tile-shadow']).toBe('0 1px 2px rgb(34 31 29 / 0.14)')
+  })
+
   it('the derived fuchsia ramp', () => {
     for (const step of STEPS) {
       expect(light[`--gb-fuchsia-${step}`], `fuchsia-${step}`).toBe(channels(LIGHT_FUCHSIA[step]))
@@ -317,6 +347,22 @@ describe('Gable light holds the palette values', () => {
     for (const key of Object.keys(dark).filter((k) => k.startsWith('--gb-'))) {
       expect(light, key).toHaveProperty([key])
     }
+  })
+})
+
+describe('the order donut in light', () => {
+  const series = ['chart-series-1', 'chart-series-2', 'chart-fulfilled']
+
+  it('spreads its first three series apart in lightness, so it reads in greyscale', () => {
+    const l = series.map((name) => luminance(hex(light, name)))
+    expect(l[0]).toBeLessThan(l[1])
+    expect(l[1]).toBeLessThan(l[2])
+    expect(l[1] - l[0]).toBeGreaterThanOrEqual(0.05)
+    expect(l[2] - l[1]).toBeGreaterThanOrEqual(0.05)
+  })
+
+  it.each(series)('%s reads against the card as a graphic (3:1)', (name) => {
+    expect(ratio(hex(light, name), hex(light, 'slate-steel'))).toBeGreaterThanOrEqual(3)
   })
 })
 

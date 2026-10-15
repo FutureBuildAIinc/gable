@@ -103,6 +103,8 @@ export const gableTheme = {
             'map-note': channel('map-note'),
             'chart-tick': channel('chart-tick'),
             'chart-fulfilled': channel('chart-fulfilled'),
+            'chart-series-1': channel('chart-series-1'),
+            'chart-series-2': channel('chart-series-2'),
             // A picture's plate (white in dark, the warm ground in light) and a tile on a card
             'picture-plate': channel('picture-plate'),
             tile: channel('tile'),
@@ -148,7 +150,7 @@ export const gableTheme = {
             'elevation-1': 'var(--gb-elevation-1)',
             'elevation-2': 'var(--gb-elevation-2)',
             'elevation-3': 'var(--gb-elevation-3)',
-            'tile': 'var(--gb-tile-shadow)',
+            'raised': 'var(--gb-tile-shadow)',
             'glow': 'var(--gb-glow)',
             'glow-soft': 'var(--gb-glow-soft)',
             'glow-10-30': 'var(--gb-glow-10-30)',
