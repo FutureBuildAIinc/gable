@@ -414,3 +414,18 @@ func TestStatementSaysItsListedDocumentsFollowTheYard(t *testing.T) {
 	mustNotContain(t, doc, "cover the whole account")
 	mustNotContain(t, doc, "other yards")
 }
+
+// The emailed statement names its period in the dealer's style, as the
+// attachment does, never year first.
+func TestStatementPeriodReadsInTheDealersStyle(t *testing.T) {
+	st := &account.Statement{From: "2026-06-01", To: "2026-06-30"}
+	if got, want := styledService("en-CA").StatementPeriod(context.Background(), st), "Jun 1, 2026 to Jun 30, 2026"; got != want {
+		t.Errorf("period = %q, want %q", got, want)
+	}
+	if got, want := styledService("en-GB").StatementPeriod(context.Background(), st), "1 Jun 2026 to 30 Jun 2026"; got != want {
+		t.Errorf("period = %q, want %q", got, want)
+	}
+	if got, want := NewService(newRepo()).StatementPeriod(context.Background(), st), "Jun 1, 2026 to Jun 30, 2026"; got != want {
+		t.Errorf("period with no profile = %q, want %q", got, want)
+	}
+}
