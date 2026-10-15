@@ -2,11 +2,12 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { creditLimitInputText, customerRequestFromCustomer, parseCreditLimitCents } from '../../services/CustomerService.ts';
 import { CUSTOMER_TIERS } from '../../types/customer.ts';
 import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
-import { BUTTON_PRIMARY, BUTTON_QUIET, INPUT_CLASS, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
+import { BUTTON_PRIMARY, BUTTON_QUIET, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
 
 /**
  * The customer header form, for create (no `customer`) and edit. It builds the whole header
@@ -124,17 +125,13 @@ export class GableCustomerForm extends LitElement {
                     ${labeled(
                         id('tier'),
                         'Tier',
-                        html`<select id=${id('tier')} .value=${this.tier} @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier; }} class=${INPUT_CLASS}>
-                            ${CUSTOMER_TIERS.map(t => html`<option value=${t} ?selected=${t === this.tier}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)}
-                        </select>`,
+                        html`<gable-select id=${id('tier')} label="Tier" .value=${this.tier} .options=${CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))} @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier; }}></gable-select>`,
                         err.tier,
                     )}
                     ${labeled(
                         id('terms'),
                         'Payment terms',
-                        html`<select id=${id('terms')} .value=${this.termsId} @change=${(e: Event) => { this.termsId = (e.target as HTMLSelectElement).value; }} class=${INPUT_CLASS}>
-                            ${this.termOptions.map(o => html`<option value=${o.id} ?selected=${o.id === this.termsId}>${o.label}</option>`)}
-                        </select>`,
+                        html`<gable-select id=${id('terms')} label="Payment terms" .value=${this.termsId} .options=${this.termOptions.map(o => ({ value: o.id, label: o.label }))} @change=${(e: Event) => { this.termsId = (e.target as HTMLSelectElement).value; }}></gable-select>`,
                         err.payment_terms_id,
                     )}
                     ${labeled(

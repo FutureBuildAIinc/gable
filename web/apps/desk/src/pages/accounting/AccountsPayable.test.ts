@@ -25,7 +25,7 @@ import './AccountsPayable'
 import type { LitElement } from 'lit'
 import type { VendorInvoice, APPayment, APAgingSummary } from '../../types/ap'
 import type { Vendor } from '../../types/vendor'
-import { mountAsync, text, jsonResponse, clickByText, update, flush, q } from '../../test/dom'
+import { mountAsync, text, jsonResponse, clickByText, update, flush, q, chooseOption } from '../../test/dom'
 
 const VENDOR_ID = '11111111-1111-1111-1111-111111111111'
 const BRANCH_ID = '22222222-2222-4222-8222-222222222222'
@@ -276,10 +276,8 @@ describe('accounts payable: writing the wire scales', () => {
   ) {
     await clickByText(el, 'button', 'Log Vendor Bill')
 
-    const selects = Array.from(el.querySelectorAll<HTMLSelectElement>('select'))
-    const vendorSelect = selects[0]
-    vendorSelect.value = VENDOR_ID
-    vendorSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const selects = Array.from(el.querySelectorAll<HTMLElement & { value: string }>('gable-select'))
+    await chooseOption(selects[0], VENDOR_ID)
 
     const setText = (input: HTMLInputElement, value: string) => {
       input.value = value
@@ -358,9 +356,8 @@ describe('accounts payable: writing the wire scales', () => {
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     await clickByText(el, 'button', 'Record Payment')
-    const vendorSelect = el.querySelector<HTMLSelectElement>('select')!
-    vendorSelect.value = VENDOR_ID
-    vendorSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const vendorSelect = el.querySelector<HTMLElement & { value: string }>('gable-select')!
+    await chooseOption(vendorSelect, VENDOR_ID)
     await update(el, {})
 
     const checkbox = el.querySelector<HTMLInputElement>('input[type="checkbox"]')

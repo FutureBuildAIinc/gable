@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { Truck, Users, Plus, Pencil, Trash2, AlertTriangle, RefreshCw, X, Upload } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service.ts';
+import { confirmDialog } from '../../components/ui/app-dialog.ts';
 import { formatDay } from '../../lib/dates.ts';
 import '../../components/ui/gable-date-field.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
@@ -168,10 +170,18 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleVehicleDelete() {
-    if (!this._vehicleModalVehicle || !confirm('Delete this vehicle? This action cannot be undone.')) return;
+    // Taken before the question: the modal can close while it is open.
+    const vehicle = this._vehicleModalVehicle;
+    if (!vehicle) return;
+    if (!await confirmDialog({
+      title: 'Delete this vehicle?',
+      body: 'This action cannot be undone.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })) return;
     this._vDeleting = true;
     try {
-      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id, this._vehicleModalVehicle.revision);
+      await deliveryService.deleteVehicle(vehicle.id, vehicle.revision);
       this._onSaved();
       this._closeVehicleModal();
     } catch { ToastService.error('Failed to delete vehicle'); } finally { this._vDeleting = false; }
@@ -238,10 +248,18 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleDriverDelete() {
-    if (!this._driverModalDriver || !confirm('Remove this driver? This action cannot be undone.')) return;
+    // Taken before the question: the modal can close while it is open.
+    const driver = this._driverModalDriver;
+    if (!driver) return;
+    if (!await confirmDialog({
+      title: 'Remove this driver?',
+      body: 'This action cannot be undone.',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    })) return;
     this._dDeleting = true;
     try {
-      await deliveryService.deleteDriver(this._driverModalDriver.id, this._driverModalDriver.revision);
+      await deliveryService.deleteDriver(driver.id, driver.revision);
       this._onSaved();
       this._closeDriverModal();
     } catch { ToastService.error('Failed to delete driver'); } finally { this._dDeleting = false; }
@@ -502,13 +520,11 @@ export class FleetManagement extends LitElement {
               ${this._renderField('Name', this._vForm.name, (v: string) => { this._vForm = { ...this._vForm, name: v }; }, true)}
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">Type</label>
-                <select
+                <gable-select
                   .value=${this._vForm.vehicle_type}
+                  .options=${VEHICLE_TYPES.map(t => ({ value: t, label: t.replace(/_/g, ' ') }))}
                   @change=${(e: Event) => { this._vForm = { ...this._vForm, vehicle_type: (e.target as HTMLSelectElement).value as VehicleType }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${VEHICLE_TYPES.map(t => html`<option value="${t}" ?selected=${this._vForm.vehicle_type === t}>${t.replace(/_/g, ' ')}</option>`)}
-                </select>
+                ></gable-select>
               </div>
             </div>
             <div class="grid grid-cols-2 gap-4">
@@ -584,13 +600,11 @@ export class FleetManagement extends LitElement {
             <div class="grid grid-cols-3 gap-4">
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">CDL Class</label>
-                <select
+                <gable-select
                   .value=${this._dForm.cdl_class || ''}
+                  .options=${CDL_CLASSES.map(c => ({ value: c, label: c || 'None' }))}
                   @change=${(e: Event) => { this._dForm = { ...this._dForm, cdl_class: (e.target as HTMLSelectElement).value || undefined }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${CDL_CLASSES.map(c => html`<option value="${c}" ?selected=${(this._dForm.cdl_class || '') === c}>${c || 'None'}</option>`)}
-                </select>
+                ></gable-select>
               </div>
               ${this._renderDateField('CDL Expiry', this._dForm.cdl_expiry || '', (v: string) => { this._dForm = { ...this._dForm, cdl_expiry: v || undefined }; })}
               ${this._renderDateField('Hire Date', this._dForm.hire_date || '', (v: string) => { this._dForm = { ...this._dForm, hire_date: v || undefined }; })}
@@ -598,13 +612,11 @@ export class FleetManagement extends LitElement {
             ${isEdit ? html`
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">Status</label>
-                <select
+                <gable-select
                   .value=${this._dForm.status}
+                  .options=${DRIVER_STATUSES.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))}
                   @change=${(e: Event) => { this._dForm = { ...this._dForm, status: (e.target as HTMLSelectElement).value as DriverStatus }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${DRIVER_STATUSES.map(s => html`<option value="${s}" ?selected=${this._dForm.status === s}>${s.replace(/_/g, ' ')}</option>`)}
-                </select>
+                ></gable-select>
               </div>
             ` : nothing}
           </div>

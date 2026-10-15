@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -11,7 +12,6 @@ import { CustomerService } from '../../services/CustomerService.ts';
 import { apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { CUSTOMER_TIERS } from '../../types/customer.ts';
 import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
-import { INPUT_CLASS } from './formFields.ts';
 import { Search, DollarSign, Building2, User, Plus } from 'lucide';
 import './CustomerForm.ts';
 
@@ -211,26 +211,23 @@ export class GableAccountsPage extends LitElement {
                             />
                         </div>
 
-                        <select
-                            aria-label="Tier"
+                        <gable-select
+                            label="Tier"
                             .value=${this.tier}
+                            .options=${[{ value: '', label: 'All tiers' }, ...CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))]}
                             @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier | ''; this.onServerFilterChange(); }}
-                            class="${INPUT_CLASS} !w-auto !rounded-lg"
-                        >
-                            <option value="">All tiers</option>
-                            ${CUSTOMER_TIERS.map(t => html`<option value=${t}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)}
-                        </select>
+                        ></gable-select>
 
-                        <select
-                            aria-label="Status"
+                        <gable-select
+                            label="Status"
                             .value=${this.status}
+                            .options=${[
+                                { value: 'all', label: 'Active and inactive' },
+                                { value: 'active', label: 'Active' },
+                                { value: 'inactive', label: 'Inactive' },
+                            ]}
                             @change=${(e: Event) => { this.status = (e.target as HTMLSelectElement).value as 'all' | 'active' | 'inactive'; this.onServerFilterChange(); }}
-                            class="${INPUT_CLASS} !w-auto !rounded-lg"
-                        >
-                            <option value="all">Active and inactive</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
+                        ></gable-select>
 
                         <div class="bg-slate-steel/50 p-1 rounded-lg flex items-center border border-white/5">
                             ${this.renderFilterButton('all', 'All')}

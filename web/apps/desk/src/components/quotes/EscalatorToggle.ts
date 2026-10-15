@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { TrendingUp, AlertTriangle, Link2, Calendar, Percent, BarChart3 } from 'lucide';
@@ -143,16 +144,11 @@ export class GableEscalatorToggle extends LitElement {
               ` : html`
                 <div>
                   <label class="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Market Index</label>
-                  <select
+                  <gable-select
                     .value=${this.escalator.market_index_id || ''}
+                    .options=${[{ value: '', label: 'Select Index...' }, ...this._indices.map(idx => ({ value: idx.id, label: `${idx.name} (${idx.current_value.toFixed(2)} ${idx.unit})` }))]}
                     @change=${(e: Event) => this._handleIndexChange((e.target as HTMLSelectElement).value)}
-                    class="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/20 transition-colors"
-                  >
-                    <option value="">Select Index...</option>
-                    ${this._indices.map(idx => html`
-                      <option value=${idx.id}>${idx.name} (${idx.current_value.toFixed(2)} ${idx.unit})</option>
-                    `)}
-                  </select>
+                  ></gable-select>
                 </div>
               `}
 

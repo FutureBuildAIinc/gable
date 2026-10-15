@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -67,14 +68,11 @@ export class DriverRouteList extends LitElement {
                             Select Driver
                         </label>
                         <div class="relative">
-                            <select
+                            <gable-select
                                 .value=${this.selectedDriver}
+                                .options=${[{ value: '', label: 'Choose your profile...' }, ...this.drivers.map(d => ({ value: d.id, label: d.name }))]}
                                 @change=${(e: Event) => { this.selectedDriver = (e.target as HTMLSelectElement).value; }}
-                                class="w-full bg-black/20 border border-white/10 text-white rounded-lg p-3 appearance-none focus:outline-none focus:border-gable-green/50 transition-colors"
-                            >
-                                <option value="">Choose your profile...</option>
-                                ${this.drivers.map(d => html`<option value="${d.id}">${d.name}</option>`)}
-                            </select>
+                            ></gable-select>
                             <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                 ${icon(ChevronRight, 16, 'text-zinc-500 rotate-90')}
                             </div>

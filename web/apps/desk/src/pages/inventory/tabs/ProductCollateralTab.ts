@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Trash2, Copy, Loader2, FileText, RefreshCw, AlertTriangle } from 'lucide';
@@ -94,33 +95,27 @@ export class GableProductCollateralTab extends LitElement {
                     <div class="flex flex-wrap items-end gap-4">
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Type</label>
-                            <select
+                            <gable-select
                                 .value=${this.type}
+                                .options=${TYPES.map(t => ({ value: t.value, label: t.label }))}
                                 @change=${(e: Event) => this.type = (e.target as HTMLSelectElement).value as CollateralType}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${TYPES.map(t => html`<option value="${t.value}">${t.label}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Tone</label>
-                            <select
+                            <gable-select
                                 .value=${this.tone}
+                                .options=${TONES.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))}
                                 @change=${(e: Event) => this.tone = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${TONES.map(t => html`<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Audience</label>
-                            <select
+                            <gable-select
                                 .value=${this.audience}
+                                .options=${AUDIENCES.map(a => ({ value: a, label: a.charAt(0).toUpperCase() + a.slice(1) }))}
                                 @change=${(e: Event) => this.audience = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${AUDIENCES.map(a => html`<option value="${a}">${a.charAt(0).toUpperCase() + a.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <button
                             @click=${this._handleGenerate}

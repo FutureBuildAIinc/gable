@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select';
 import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
@@ -11,6 +12,7 @@ import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
+import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 
@@ -110,17 +112,27 @@ export class POSTerminal extends LitElement {
    */
   private _onYardChanged = () => {
     if (this._revertingYard) return;
-    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) {
-      this._revertingYard = true;
-      try {
-        branchContext.setCurrent(this._yardId);
-      } finally {
-        this._revertingYard = false;
-      }
+    if (!this._saleHasLines) {
+      this._yardId = branchContext.currentId;
+      void this._loadRegisters();
       return;
     }
-    this._yardId = branchContext.currentId;
-    void this._loadRegisters();
+    const askedYard = branchContext.currentId;
+    void confirmDialog({ title: this._leaveSaleQuestion(), confirmLabel: 'Leave sale', cancelLabel: 'Stay' }).then((leave) => {
+      if (!leave) {
+        // A newer yard change asked its own question in the meantime; leave it be.
+        if (branchContext.currentId !== askedYard) return;
+        this._revertingYard = true;
+        try {
+          branchContext.setCurrent(this._yardId);
+        } finally {
+          this._revertingYard = false;
+        }
+        return;
+      }
+      this._yardId = askedYard;
+      void this._loadRegisters();
+    });
   };
 
   private get _saleHasLines(): boolean {
@@ -211,10 +223,10 @@ export class POSTerminal extends LitElement {
   }
 
   /** False when the cashier declined to leave the open sale. */
-  private _chooseRegister(id: string): boolean {
+  private async _chooseRegister(id: string): Promise<boolean> {
     const next = this._registers.find((r) => r.id === id);
     if (!next || next.id === this._registerId) return true;
-    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) return false;
+    if (this._saleHasLines && !(await confirmDialog({ title: this._leaveSaleQuestion(), confirmLabel: 'Leave sale', cancelLabel: 'Stay' }))) return false;
     localStorage.setItem(this._storageKey(), next.id);
     this._register = next;
     void this._openRegister();
@@ -261,7 +273,7 @@ export class POSTerminal extends LitElement {
   private async _beginCloseTill() {
     if (!this._till) return;
     // The same question a register change asks: declining keeps till and sale.
-    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) return;
+    if (this._saleHasLines && !(await confirmDialog({ title: this._leaveSaleQuestion(), confirmLabel: 'Leave sale', cancelLabel: 'Stay' }))) return;
     try {
       this._tillBusy = true;
       this._tillReport = await posService.tillReport(this._till.id);
@@ -465,14 +477,11 @@ export class POSTerminal extends LitElement {
             ${c.jobs.length > 0 ? html`
               <div>
                 <label class="block text-xs text-slate-400" for="pos-job">Job</label>
-                <div class="relative mt-1">
-                  <select id="pos-job" .value=${this._jobId} ?disabled=${finished}
+                <div class="mt-1">
+                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
+                    .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
                     @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
-                    class="w-full appearance-none rounded border border-white/10 bg-slate-steel py-2 pl-2 pr-7 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40">
-                    <option value="">No job</option>
-                    ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
-                  </select>
-                  <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-slate-400" aria-hidden="true">&#9662;</span>
+                  ></gable-select>
                 </div>
               </div>` : nothing}
           </div>
@@ -670,7 +679,11 @@ export class POSTerminal extends LitElement {
     if (!sale || sale.status !== 'open') return;
     const ids = sale.lines.filter((l) => l.parent_line_id === null).map((l) => l.id);
     if (ids.length === 0) return;
-    if (!window.confirm(`Remove all ${ids.length} line${ids.length === 1 ? '' : 's'} from sale ${sale.number}?`)) return;
+    if (!await confirmDialog({
+      title: `Remove all ${ids.length} line${ids.length === 1 ? '' : 's'} from sale ${sale.number}?`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    })) return;
     for (const id of ids) {
       if (this._sale?.id !== sale.id) return;
       await this._removeItem(id);
@@ -1044,7 +1057,7 @@ export class POSTerminal extends LitElement {
       this._error = 'Only a completed sale is voided, while its drawer is open';
       return;
     }
-    const reason = window.prompt('Void reason?');
+    const reason = await promptDialog({ title: `Void sale ${sale.number}?`, label: 'Reason', required: true, confirmLabel: 'Void sale', tone: 'danger' });
     if (!reason) return;
     try {
       const voided = await posService.voidSale(sale.id, sale.revision, reason);
@@ -1209,13 +1222,16 @@ export class POSTerminal extends LitElement {
       `)}
       <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
         <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Refund</label>
-        <select .value=${this._returnMethod}
-          @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
-          style="flex:1;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none">
-          <option value="cash">Cash (out of the drawer)</option>
-          <option value="card">Card (back on the card)</option>
-          <option value="account">Account credit</option>
-        </select>
+        <div style="flex:1">
+          <gable-select .value=${this._returnMethod}
+            .options=${[
+              { value: 'cash', label: 'Cash (out of the drawer)' },
+              { value: 'card', label: 'Card (back on the card)' },
+              { value: 'account', label: 'Account credit' },
+            ]}
+            @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
+          ></gable-select>
+        </div>
       </div>
       <input type="text" .value=${this._returnReason}
         @input=${(e: Event) => { this._returnReason = (e.target as HTMLInputElement).value; }}
@@ -1256,14 +1272,16 @@ export class POSTerminal extends LitElement {
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
                   <label class="sr-only" for="pos-register-picker">Register</label>
-                  <select id="pos-register-picker" data-testid="pos-register-picker"
+                  <gable-select id="pos-register-picker" data-testid="pos-register-picker"
+                    .value=${this._registerId}
+                    .options=${this._registers.map((r) => ({ value: r.id, label: `${r.branch_code} ${r.name}` }))}
                     @change=${(e: Event) => {
                       const picker = e.target as HTMLSelectElement;
-                      if (!this._chooseRegister(picker.value)) picker.value = this._registerId;
+                      void this._chooseRegister(picker.value).then((chosen) => {
+                        if (!chosen) picker.value = this._registerId;
+                      });
                     }}
-                    class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
-                    ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
-                  </select>` : nothing}
+                  ></gable-select>` : nothing}
               </p>` : nothing}
           </div>
           <nav class="flex flex-wrap items-center gap-2" aria-label="Sale progress">

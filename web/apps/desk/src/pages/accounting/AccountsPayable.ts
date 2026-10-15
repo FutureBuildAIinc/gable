@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils';
@@ -654,14 +655,11 @@ export class AccountsPayable extends LitElement {
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Vendor Name *</label>
-                                        <select
+                                        <gable-select
                                             .value=${this.billVendorId}
+                                            .options=${this.vendors.map(v => ({ value: v.id, label: v.name }))}
                                             @change=${(e: Event) => { this.billVendorId = (e.target as HTMLSelectElement).value; }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        >
-                                            ${this.vendors.map(v => html`<option value=${v.id}>${v.name}</option>`)}
-                                        </select>
+                                        ></gable-select>
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Invoice Number *</label>
@@ -761,17 +759,14 @@ export class AccountsPayable extends LitElement {
                                                 </div>
                                                 <div class="col-span-3">
                                                     <label class="text-[10px] text-zinc-500 block mb-1">GL Account *</label>
-                                                    <select
+                                                    <gable-select
                                                         .value=${line.gl_account_id}
+                                                        .options=${this.glAccounts.map(a => ({ value: a.id, label: `[${a.code}] ${a.name}` }))}
                                                         @change=${(e: Event) => {
                                                             this.billLines[idx].gl_account_id = (e.target as HTMLSelectElement).value;
                                                             this.requestUpdate();
                                                         }}
-                                                        class="w-full bg-zinc-800 border border-zinc-700 text-white text-xs rounded px-2 py-1.5 outline-none focus:border-emerald-500"
-                                                        required
-                                                    >
-                                                        ${this.glAccounts.map(a => html`<option value=${a.id}>[${a.code}] ${a.name}</option>`)}
-                                                    </select>
+                                                    ></gable-select>
                                                 </div>
                                                 <div class="col-span-1 text-center mt-4">
                                                     <button
@@ -848,19 +843,16 @@ export class AccountsPayable extends LitElement {
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Vendor Name *</label>
-                                        <select
+                                        <gable-select
                                             .value=${this.payVendorId}
+                                            .options=${this.vendors.map(v => ({ value: v.id, label: v.name }))}
                                             @change=${(e: Event) => {
                                                 this.payVendorId = (e.target as HTMLSelectElement).value;
                                                 this.paySelectedInvoiceIds = [];
                                                 this.payAmount = 0.00;
                                                 this._updateVendorOutstandingInvoices();
                                             }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        >
-                                            ${this.vendors.map(v => html`<option value=${v.id}>${v.name}</option>`)}
-                                        </select>
+                                        ></gable-select>
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Payment Amount ($) *</label>
@@ -875,16 +867,11 @@ export class AccountsPayable extends LitElement {
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Payment Method *</label>
-                                        <select
+                                        <gable-select
                                             .value=${this.payMethod}
+                                            .options=${['CHECK', 'ACH', 'WIRE'].map(m => ({ value: m, label: m }))}
                                             @change=${(e: Event) => { this.payMethod = (e.target as HTMLSelectElement).value as PaymentMethod; }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        >
-                                            <option value="CHECK">CHECK</option>
-                                            <option value="ACH">ACH</option>
-                                            <option value="WIRE">WIRE</option>
-                                        </select>
+                                        ></gable-select>
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Payment Date *</label>

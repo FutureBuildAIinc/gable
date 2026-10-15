@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { router } from '../lib/router.ts';
@@ -587,13 +588,12 @@ export class GableQuoteBuilder extends LitElement {
                 </td>
                 <td class="px-2 py-3">
                     ${line.uom === '' || err ? html`
-                        <select aria-label="Unit of measure"
-                            class="w-20 bg-deep-space border border-rose-500/40 rounded px-1 py-1 text-white font-mono text-xs outline-none"
-                            .value=${line.uom}
-                            @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}>
-                            <option value="" ?selected=${line.uom === ''}>Unit...</option>
-                            ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
-                        </select>
+                        <div class="w-20">
+                            <gable-select label="Unit of measure"
+                                .value=${line.uom}
+                                .options=${[{ value: '', label: 'Unit...' }, ...QUOTE_UOM_CODES.map(code => ({ value: code, label: code }))]}
+                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}></gable-select>
+                        </div>
                         ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
                     ` : html`<span class="font-mono text-xs text-zinc-400">${line.uom}</span>`}
                 </td>
@@ -742,12 +742,9 @@ export class GableQuoteBuilder extends LitElement {
                                 <div class="space-y-4">
                                     <div>
                                         <label class="block text-xs text-zinc-500 mb-1.5">Assign truck</label>
-                                        <select .value=${this.selectedVehicleId || ''}
-                                            @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}
-                                            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blueprint-blue/50">
-                                            <option value="">Select a truck...</option>
-                                            ${this.vehicles.map(v => html`<option value="${v.id}">${v.name} — ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})</option>`)}
-                                        </select>
+                                        <gable-select .value=${this.selectedVehicleId || ''}
+                                            .options=${[{ value: '', label: 'Select a truck...' }, ...this.vehicles.map(v => ({ value: v.id, label: `${v.name} — ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})` }))]}
+                                            @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}></gable-select>
                                         ${this.vehicles.length === 0 ? html`<p class="text-xs text-zinc-500 mt-1">No vehicles in fleet. Add vehicles in Fleet Management.</p>` : nothing}
                                     </div>
                                     <div>

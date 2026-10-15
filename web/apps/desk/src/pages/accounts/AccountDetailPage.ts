@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -368,13 +369,11 @@ export class GableAccountDetail extends LitElement {
                     <form @submit=${this.submitApply} class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-zinc-400 mb-1">Invoice</label>
-                            <select
+                            <gable-select
                                 .value=${this.applyInvoiceId}
+                                .options=${this.openInvoices.map(i => ({ value: i.id, label: `${i.number} (${formatCents(i.open_cents)} open)` }))}
                                 @change=${(e: Event) => this.applyInvoiceId = (e.target as HTMLSelectElement).value}
-                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
-                            >
-                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${formatCents(i.open_cents)} open)</option>`)}
-                            </select>
+                            ></gable-select>
                             ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${formatCents(invoice.open_cents)} open</p>` : nothing}
                         </div>
                         <div>

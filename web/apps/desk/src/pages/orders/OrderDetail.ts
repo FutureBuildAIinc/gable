@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { formatDateTime } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { openAuthedPdf } from '../../lib/authedPdf.ts';
+import { confirmDialog, promptDialog } from '../../components/ui/app-dialog.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
@@ -95,7 +96,7 @@ export class GableOrderDetail extends LitElement {
      */
     private async handleConfirm() {
         if (!this.order) return;
-        if (!confirm('Confirm this order?')) return;
+        if (!await confirmDialog({ title: 'Confirm this order?' })) return;
         this.processing = true;
         try {
             const updated = await OrderService.confirmOrder(this.order.id, this.order.revision);
@@ -183,7 +184,7 @@ export class GableOrderDetail extends LitElement {
 
     private async handleCancel() {
         if (!this.order) return;
-        const reason = prompt('Cancel this order. Reason:');
+        const reason = await promptDialog({ title: 'Cancel this order', label: 'Reason', required: true, confirmLabel: 'Cancel order', tone: 'danger' });
         if (!reason) return;
         this.processing = true;
         try {

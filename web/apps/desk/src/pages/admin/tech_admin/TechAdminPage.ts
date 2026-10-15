@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
+import { confirmDialog } from '../../../components/ui/app-dialog.ts';
 import { aiHeadline, aiIsOn, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
@@ -122,7 +124,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleRevokeKey(id: string) {
-        if (!confirm('Are you sure you want to revoke this key? integrations using it will break immediately.')) return;
+        if (!await confirmDialog({
+            title: 'Revoke this API key?',
+            body: 'Integrations using it will break immediately. This cannot be undone.',
+            confirmLabel: 'Revoke key',
+            tone: 'danger',
+        })) return;
         try {
             this.keyError = null;
             await techAdminService.revokeKey(id);
@@ -228,23 +235,25 @@ export class TechAdminPage extends LitElement {
                 <h3 class="text-white font-medium">Provider</h3>
                 <p class="text-sm text-slate-400">Choose OpenRouter or the native Anthropic provider (Sonnet 5.5 or better). When no key is set for the chosen provider, AI is off and no feature fakes a result.</p>
                 <div class="grid grid-cols-2 gap-3">
-                    <select
-                        aria-label="AI provider"
+                    <gable-select
+                        label="AI provider"
                         .value=${this.aiProvider}
+                        .options=${[
+                            { value: 'openrouter', label: 'OpenRouter' },
+                            { value: 'anthropic', label: 'Anthropic (native)' },
+                        ]}
                         @change=${(e: Event) => this.aiProvider = (e.target as HTMLSelectElement).value as 'openrouter' | 'anthropic'}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm">
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="anthropic">Anthropic (native)</option>
-                    </select>
-                    <select
-                        aria-label="Anthropic model"
+                    ></gable-select>
+                    <gable-select
+                        label="Anthropic model"
                         .value=${this.aiModel}
                         ?disabled=${this.aiProvider !== 'anthropic'}
+                        .options=${[
+                            { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+                            { value: 'claude-opus-5-5', label: 'Opus 5.5' },
+                        ]}
                         @change=${(e: Event) => this.aiModel = (e.target as HTMLSelectElement).value}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm disabled:opacity-50">
-                        <option value="claude-sonnet-5-5">Sonnet 5.5</option>
-                        <option value="claude-opus-5-5">Opus 5.5</option>
-                    </select>
+                    ></gable-select>
                 </div>
                 ${this.aiProvider === 'anthropic' ? html`
                     <input
@@ -269,7 +278,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteAIKey() {
-        if (!confirm('Remove the admin-configured API key? If an environment variable is set, it will be used as fallback.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured API key?',
+            body: 'If an environment variable is set, it will be used as fallback.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteAIKey();
             this.aiSuccess = 'Admin API key removed.';
@@ -310,7 +324,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteORSKey() {
-        if (!confirm('Remove the admin-configured OpenRouteService key? If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured OpenRouteService key?',
+            body: 'If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteORSKey();
             this.routingSuccess = 'Admin routing key removed.';
@@ -363,7 +382,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeletePartner(id: string) {
-        if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
+        if (!await confirmDialog({
+            title: 'Remove this EDI partner?',
+            body: 'This disconnects their catalog sync and cannot be undone.',
+            confirmLabel: 'Remove partner',
+            tone: 'danger',
+        })) return;
         try {
             this.ediError = null;
             await ediService.deletePartner(id);

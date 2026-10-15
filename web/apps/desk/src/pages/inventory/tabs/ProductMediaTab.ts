@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Trash2, Star, Loader2, Image as ImageIcon, AlertTriangle } from 'lucide';
@@ -117,15 +118,11 @@ export class GableProductMediaTab extends LitElement {
                         <div class="flex flex-wrap items-end gap-4">
                             <div>
                                 <label class="block text-xs text-zinc-500 mb-1">Style</label>
-                                <select
+                                <gable-select
                                     .value=${this._imageStyle}
+                                    .options=${STYLES.map(s => ({ value: s, label: s ? s.charAt(0).toUpperCase() + s.slice(1).replace('-', ' ') : 'Auto' }))}
                                     @change=${(e: Event) => this._imageStyle = (e.target as HTMLSelectElement).value}
-                                    class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                                >
-                                    ${STYLES.map(s => html`
-                                        <option value="${s}">${s ? s.charAt(0).toUpperCase() + s.slice(1).replace('-', ' ') : 'Auto'}</option>
-                                    `)}
-                                </select>
+                                ></gable-select>
                             </div>
                             <button
                                 @click=${this._handleGenerate}

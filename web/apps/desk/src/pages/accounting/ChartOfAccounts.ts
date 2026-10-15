@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -137,13 +138,11 @@ export class ChartOfAccounts extends LitElement {
                                 </div>
                                 <div>
                                     <label class="text-xs text-zinc-500 block mb-1">Type</label>
-                                    <select
-                                        class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                                    <gable-select
                                         .value=${this.form.type}
+                                        .options=${ACCOUNT_TYPES.map(t => ({ value: t, label: t }))}
                                         @change=${(e: Event) => this._updateForm('type', (e.target as HTMLSelectElement).value)}
-                                    >
-                                        ${ACCOUNT_TYPES.map(t => html`<option value="${t}">${t}</option>`)}
-                                    </select>
+                                    ></gable-select>
                                 </div>
                                 <div>
                                     <label class="text-xs text-zinc-500 block mb-1">Subtype</label>

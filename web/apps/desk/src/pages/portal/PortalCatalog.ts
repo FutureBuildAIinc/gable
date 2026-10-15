@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -106,30 +107,21 @@ export class PortalCatalog extends LitElement {
                             class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:border-gable-green/50 transition-colors text-sm"
                         />
                     </div>
-                    <select
+                    <gable-select
                         .value=${this.category}
+                        .options=${[{ value: '', label: 'All Categories' }, ...this._categories.map(c => ({ value: c, label: c }))]}
                         @change=${(e: Event) => { this.category = (e.target as HTMLSelectElement).value; this._scheduleFetch(); }}
-                        class="px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-gable-green/50 transition-colors appearance-none"
-                    >
-                        <option value="">All Categories</option>
-                        ${this._categories.map(c => html`<option value="${c}">${c}</option>`)}
-                    </select>
-                    <select
+                    ></gable-select>
+                    <gable-select
                         .value=${this.species}
+                        .options=${[{ value: '', label: 'All Species' }, ...this._speciesList.map(s => ({ value: s, label: s }))]}
                         @change=${(e: Event) => { this.species = (e.target as HTMLSelectElement).value; this._scheduleFetch(); }}
-                        class="px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-gable-green/50 transition-colors appearance-none"
-                    >
-                        <option value="">All Species</option>
-                        ${this._speciesList.map(s => html`<option value="${s}">${s}</option>`)}
-                    </select>
-                    <select
+                    ></gable-select>
+                    <gable-select
                         .value=${this.grade}
+                        .options=${[{ value: '', label: 'All Grades' }, ...this._grades.map(g => ({ value: g, label: g }))]}
                         @change=${(e: Event) => { this.grade = (e.target as HTMLSelectElement).value; this._scheduleFetch(); }}
-                        class="px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-gable-green/50 transition-colors appearance-none"
-                    >
-                        <option value="">All Grades</option>
-                        ${this._grades.map(g => html`<option value="${g}">${g}</option>`)}
-                    </select>
+                    ></gable-select>
                 </div>
 
                 <!-- Filter summary -->
