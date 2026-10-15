@@ -99,6 +99,18 @@ func TestDatesAreWordsInTheDealersLocale(t *testing.T) {
 		{"en-GB", "2026-09-05", "5 Sept 2026"},
 		{"en-NZ", "2026-01-01", "1 Jan 2026"},
 		{"en-IE", "2026-12-31", "31 Dec 2026"},
+		{"en-AU", "2026-06-30", "30 June 2026"},
+		{"en-AU", "2026-07-04", "4 July 2026"},
+		{"en-AU", "2026-09-01", "1 Sept 2026"},
+		{"en-IN", "2026-06-30", "30 Jun 2026"},
+		{"en-ZA", "2026-09-01", "01 Sept 2026"},
+		{"en-ZA", "2026-01-05", "05 Jan 2026"},
+		// extension and variant subtags after the region do not hide it
+		{"en-GB-oxendict", "2026-06-30", "30 Jun 2026"},
+		{"en-GB-u-ca-gregory", "2026-09-05", "5 Sept 2026"},
+		{"en_au", "2026-06-30", "30 June 2026"},
+		// a script subtag is not a region: the desk reads it as en-US words
+		{"en-Latn-GB", "2026-06-30", "Jun 30, 2026"},
 		// a locale the module has no table for reads en-US in words, never numerals
 		{"fr-CA", "2026-06-30", "Jun 30, 2026"},
 		{"", "2026-06-30", "Jun 30, 2026"},
