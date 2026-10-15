@@ -136,3 +136,32 @@ func TestTotalsNeverSplitAndTheFootNeverStandsAlone(t *testing.T) {
 		})
 	}
 }
+
+// A statement with many open documents has a closing group taller than the
+// cap: it runs as it comes, but its last row stays with the foot, so the legal
+// name and the remit to never stand alone on the last page.
+func TestFootNeverStandsAloneUnderManyOpenDocuments(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-1"}
+	for _, open := range []int{15, 16, 18, 20, 25, 30, 40} {
+		for _, lines := range []int{0, 2, 11, 20, 26, 31, 33, 35, 40} {
+			sl := make([]account.StatementLine, lines)
+			for k := range sl {
+				sl[k] = account.StatementLine{Date: "2026-06-30", Type: "INVOICE", Description: "Invoice", AmountCents: 100, BalanceAfterCents: 100}
+			}
+			ods := make([]account.OpenDocument, open)
+			for k := range ods {
+				ods[k] = account.OpenDocument{Kind: "invoice", Number: fmt.Sprintf("OD-%04d", k), Date: "2026-06-01", TotalCents: 100, OpenCents: 100}
+			}
+			st := &account.Statement{CustomerID: uuid.New(), From: "2026-06-01", To: "2026-06-30",
+				Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: sl, OpenDocuments: ods, ClosingBalanceCents: 100}}}
+			doc, err := styledService("en-US").WithStatements(&fakeStatements{st: st}).GenerateStatementPDF(context.Background(), st, cust)
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := fmt.Sprintf("OD-%04d", open-1)
+			if !bytes.Contains(pageOf(doc, "Legal name:"), []byte(last)) {
+				t.Errorf("%d open documents, %d lines: the foot stands alone (its page does not hold %s)", open, lines, last)
+			}
+		}
+	}
+}
