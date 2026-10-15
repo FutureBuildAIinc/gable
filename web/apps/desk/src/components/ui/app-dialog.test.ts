@@ -237,6 +237,44 @@ describe('gable-app-dialog over another dialog', () => {
     clickCancel()
     await result
   })
+
+  it('the scrim follows the modal when the window is resized', async () => {
+    const veil = document.createElement('div')
+    const panel = document.createElement('div')
+    panel.setAttribute('data-modal-panel', '')
+    let top = 10
+    panel.getBoundingClientRect = () =>
+      ({ top, left: 20, width: 200, height: 100, right: 220, bottom: top + 100, x: 20, y: top, toJSON: () => ({}) }) as DOMRect
+    veil.appendChild(panel)
+    document.body.appendChild(veil)
+    const result = confirmDialog({ title: 'Delete this vehicle?', tone: 'danger' })
+    const el = await settleDialog()
+    expect(q<HTMLElement>(el, '[data-dialog-scrim]').style.top).toBe('10px')
+    top = 50
+    window.dispatchEvent(new Event('resize'))
+    await el.updateComplete
+    expect(q<HTMLElement>(el, '[data-dialog-scrim]').style.top).toBe('50px')
+    clickCancel()
+    await result
+    veil.remove()
+  })
+
+  it('the scrim goes away when the modal behind closes mid question', async () => {
+    const veil = document.createElement('div')
+    const panel = document.createElement('div')
+    panel.setAttribute('data-modal-panel', '')
+    veil.appendChild(panel)
+    document.body.appendChild(veil)
+    const result = confirmDialog({ title: 'Delete this vehicle?', tone: 'danger' })
+    const el = await settleDialog()
+    expect(el.querySelector('[data-dialog-scrim]')).not.toBeNull()
+    veil.remove()
+    window.dispatchEvent(new Event('resize'))
+    await el.updateComplete
+    expect(el.querySelector('[data-dialog-scrim]')).toBeNull()
+    clickCancel()
+    await result
+  })
 })
 
 describe('gable-app-dialog in the top layer', () => {
