@@ -12,11 +12,15 @@ import './TechAdminPage'
 import type { TechAdminPage } from './TechAdminPage'
 import { mountAsync, update, flush, text, jsonResponse, q } from '../../../test/dom'
 
-function serve(settings: Record<string, unknown>) {
+function serve(settings: Record<string, unknown>, opts: { testResult?: Record<string, unknown> } = {}) {
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: RequestInfo | URL) => {
-      if (String(input).includes('/api/v1/admin/settings/ai')) return Promise.resolve(jsonResponse(settings))
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/v1/admin/settings/ai/test') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(opts.testResult ?? { ok: true, message: 'Connection ok' }))
+      }
+      if (url.includes('/api/v1/admin/settings/ai')) return Promise.resolve(jsonResponse(settings))
       return Promise.resolve(jsonResponse([]))
     }),
   )
@@ -69,6 +73,22 @@ describe('Tech Admin AI words follow the chosen provider', () => {
     expect(q(el, '[data-testid="ai-test-message"]')).toBeTruthy()
     const body = text(el)
     expect(body.match(/refused the saved key/g)?.length ?? 0, 'the refusal sentence shows once').toBe(1)
+  })
+
+  it('after Test connection the refusal is still said once', async () => {
+    const REFUSAL = 'OpenRouter refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.'
+    serve(
+      { ...BASE, provider: 'openrouter', model: '', configured: true, key_hint: '****stub', source: 'admin', test_status: 'refused', test_message: REFUSAL },
+      { testResult: { ok: false, message: REFUSAL } },
+    )
+    const el = await openAITab()
+    const test = Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Test connection')
+    if (!test) throw new Error('no Test connection button')
+    test.click()
+    await flush()
+    await update(el, {})
+    const body = text(el)
+    expect(body.match(/refused the saved key/g)?.length ?? 0, 'the card says it; the button line must not repeat it').toBe(1)
   })
 
   it('a save the provider refuses adds no red banner repeating the sentence', async () => {
