@@ -1132,9 +1132,10 @@ export class POSTerminal extends LitElement {
       <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Open Till</h2>
       <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Count the starting cash in the drawer and enter the opening float.</p>
       <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Opening float ($)</label>
-      <input type="number" step="0.01" .value=${this._openingFloat}
+      <input type="number" step="0.01" .value=${this._openingFloat} data-testid="till-float-amount"
         @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; }}
-        style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="200.00" />
+        class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
+        style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="Type the counted amount" />
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
         <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
