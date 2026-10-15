@@ -144,10 +144,13 @@ components:
         today_revenue:
           type: integer
           format: int64
-          description: Cents collected today.
+          description: >-
+            The branch's day net collections in cents at the caller's yard:
+            payments received (their own branch, never a voided payment) less
+            refunds paid out that day.
         today_revenue_change:
           type: number
-          description: Percentage change against yesterday; 0 when yesterday collected nothing.
+          description: Percentage change of the net against yesterday's net; 0 when yesterday's net is not above zero.
         active_orders:
           type: integer
         pending_dispatch:

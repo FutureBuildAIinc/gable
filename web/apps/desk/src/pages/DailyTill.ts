@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { ToastService } from '../lib/toast-service.ts';
@@ -66,6 +66,12 @@ export class GableDailyTill extends LitElement {
                                 $${till.total_collected.toFixed(2)}
                             </span>
                         </div>
+
+                        ${till.refunds > 0 ? html`
+                            <p class="text-xs text-zinc-500 mb-4" data-testid="till-parts">
+                                Received $${till.received.toFixed(2)} less refunds $${till.refunds.toFixed(2)} is net $${till.net_collected.toFixed(2)}
+                            </p>
+                        ` : nothing}
 
                         <div class="space-y-4">
                             ${Object.entries(till.by_method).map(([method, amount]) => html`
