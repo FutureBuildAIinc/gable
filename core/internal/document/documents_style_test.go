@@ -5,7 +5,6 @@ package document
 
 import (
 	"bytes"
-	"bytes"
 	"context"
 	"testing"
 	"time"
