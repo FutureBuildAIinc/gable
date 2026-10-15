@@ -107,6 +107,14 @@ describe('dashboard charts follow the mode', () => {
     await frame()
     const cfg = built.at(-1)!
     expect(cfg.data.datasets[0].borderColor).toBe('rgb(0 255 163 / 1)')
+    // the fill is scriptable and built from the chart's own drawing area
+    const fill = cfg.data.datasets[0].backgroundColor as unknown as (c: unknown) => unknown
+    expect(typeof fill).toBe('function')
+    expect(fill({ chart: { chartArea: undefined } })).toBe('transparent')
+    const spy = vi.fn(() => ({ addColorStop: (_o: number, c: string) => stops.push(c) }))
+    fill({ chart: { chartArea: { top: 12, bottom: 290 }, ctx: { createLinearGradient: spy } } })
+    // from the area's top to its bottom (the $0 axis), not from the canvas's height
+    expect(spy).toHaveBeenCalledWith(0, 12, 0, 290)
     expect(stops).toEqual(['rgb(0 255 163 / 0.3)', 'rgb(0 255 163 / 0)'])
     expect(cfg.options.scales.y.ticks.color).toBe('rgb(82 82 91 / 1)')
 
@@ -178,5 +186,24 @@ describe('dashboard charts follow the mode', () => {
     // removed from the page: nothing is left watching
     el.remove()
     expect(observers.every((o) => o.disconnected)).toBe(true)
+  })
+
+  // An element that leaves the page before the frame that would build its
+  // chart builds nothing: no chart and no observer is left behind.
+  it.each([
+    ['gable-order-status-chart', { statusBreakdown: { confirmed: 3, draft: 1 } }],
+    ['gable-revenue-trend-chart', { data: [{ date: 'd1', revenue: 1000 }] }],
+  ])('%s builds nothing when it leaves before its next frame', async (tag, props) => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    } as unknown as CanvasRenderingContext2D)
+    observers.length = 0
+    built.length = 0
+    const el = await mount<GableOrderStatusChart>(tag, props as never)
+    el.remove()
+    await frame()
+    await frame()
+    expect(built.length).toBe(0)
+    expect(observers.filter((o) => !o.disconnected).length).toBe(0)
   })
 })

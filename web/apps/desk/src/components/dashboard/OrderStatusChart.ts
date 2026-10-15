@@ -83,6 +83,8 @@ export class GableOrderStatusChart extends LitElement {
     private _renderChart() {
         // Defer to next frame to ensure DOM is ready
         requestAnimationFrame(() => {
+            // Gone before its frame: build nothing, so no chart or observer is left.
+            if (!this.isConnected) return;
             const canvas = this.querySelector<HTMLCanvasElement>('#orderStatusCanvas');
             if (!canvas) return;
 

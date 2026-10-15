@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, it, expect, afterEach } from 'vitest'
-import { channelsToHex, themeHex, cssVarColor, brandOnCard, brandLabelOnCard, brandLabelOnTint, inkOrPaperOn } from './theme-colors.ts'
+import { channelsToHex, themeHex, cssVarColor, brandOnCard, brandLabelOnCard, brandLabelOnTint, inkOrPaperOn, brandFillWithLabel } from './theme-colors.ts'
 
 describe('theme colours', () => {
   afterEach(() => document.documentElement.removeAttribute('style'))
@@ -111,6 +111,68 @@ describe('theme colours', () => {
       expect(inkOrPaperOn('#8a8a8a')).toBe('rgb(var(--gb-white))')
       // paper on a deep green is the better label
       expect(inkOrPaperOn('#046c43')).toBe('rgb(var(--gb-black))')
+    })
+  })
+
+  describe('the label is measured against the surface it is drawn on', () => {
+    afterEach(() => {
+      document.documentElement.removeAttribute('data-theme')
+      document.documentElement.removeAttribute('style')
+    })
+
+    it('uses portal-panel for the nav row, so the two cannot drift apart', () => {
+      document.documentElement.dataset.theme = 'light'
+      const root = document.documentElement.style
+      root.setProperty('--gb-gable-green', '4 108 67')
+      root.setProperty('--gb-slate-steel', '248 243 236')
+      // a panel darker than the card: a brand that reads on the card, not on the panel
+      root.setProperty('--gb-portal-panel', '150 145 140')
+      expect(brandLabelOnCard('#46423d')).toBe('#46423d')
+      expect(brandLabelOnTint('#46423d', 0.08)).toBe('#046c43')
+    })
+  })
+
+  describe('brandFillWithLabel (a label on a tenant fill reaches 4.5:1)', () => {
+    afterEach(() => {
+      document.documentElement.removeAttribute('data-theme')
+      document.documentElement.removeAttribute('style')
+    })
+
+    function ratio(a: string, b: string): number {
+      const lum = (h: string) => {
+        const v = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+          .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+        return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+      }
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+      return (hi + 0.05) / (lo + 0.05)
+    }
+
+    it('keeps the fill and the black label in dark', () => {
+      expect(brandFillWithLabel('#c84baf')).toEqual({ fill: '#c84baf', label: 'rgb(var(--gb-black))' })
+    })
+
+    it('steps a mid tone fill until its label reaches 4.5:1', () => {
+      document.documentElement.dataset.theme = 'light'
+      const root = document.documentElement.style
+      root.setProperty('--gb-black', '252 250 246')
+      root.setProperty('--gb-white', '34 31 29')
+      // neither paper nor ink reaches 4.5:1 on this brand as it is
+      const inkOn = ratio('#221f1d', '#c84baf')
+      const paperOn = ratio('#fcfaf6', '#c84baf')
+      expect(Math.max(inkOn, paperOn)).toBeLessThan(4.5)
+      const { fill, label } = brandFillWithLabel('#c84baf')
+      const labelHex = label === 'rgb(var(--gb-white))' ? '#221f1d' : '#fcfaf6'
+      expect(fill).not.toBe('#c84baf')
+      expect(ratio(labelHex, fill)).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it('leaves a fill that already works', () => {
+      document.documentElement.dataset.theme = 'light'
+      const root = document.documentElement.style
+      root.setProperty('--gb-black', '252 250 246')
+      root.setProperty('--gb-white', '34 31 29')
+      expect(brandFillWithLabel('#046c43').fill).toBe('#046c43')
     })
   })
 })

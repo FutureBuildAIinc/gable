@@ -74,10 +74,11 @@ const HEX = /^#[0-9A-Fa-f]{3}$|^#[0-9A-Fa-f]{6}$/
  * `needed` against the ground it is drawn on: the card, or the card with the
  * brand itself tinted over it at `tint` alpha (an active row).
  */
-function brandAtLeast(brand: string, needed: number, tint = 0): string {
+function brandAtLeast(brand: string, needed: number, tint = 0, groundToken = 'slate-steel'): string {
   if (document.documentElement.dataset.theme !== 'light') return brand
   if (!HEX.test(brand)) return brand
-  const card = themeHex('slate-steel', '')
+  let card = themeHex(groundToken, '')
+  if (!card.startsWith('#')) card = themeHex('slate-steel', '')
   if (!card.startsWith('#')) return brand
   const b = rgbOf(brand)
   const c = rgbOf(card)
@@ -87,10 +88,11 @@ function brandAtLeast(brand: string, needed: number, tint = 0): string {
 
 /**
  * A brand label drawn on a row tinted with the brand at `tint` alpha (the
- * portal's active nav item): 4.5:1 against that row, not the bare card.
+ * portal's active nav item): 4.5:1 against that row, measured on the surface
+ * the row is drawn on (portal-panel), not the bare card.
  */
 export function brandLabelOnTint(brand: string, tint: number): string {
-  return brandAtLeast(brand, 4.5, tint)
+  return brandAtLeast(brand, 4.5, tint, 'portal-panel')
 }
 
 /**
@@ -105,4 +107,41 @@ export function inkOrPaperOn(fill: string): string {
   if (!paperHex.startsWith('#') || !inkHex.startsWith('#')) return paper
   const f = rgbOf(fill)
   return contrast(rgbOf(inkHex), f) > contrast(rgbOf(paperHex), f) ? 'rgb(var(--gb-white))' : paper
+}
+
+function mixTo(from: [number, number, number], to: [number, number, number], t: number): string {
+  return '#' + from.map((v, k) => Math.round(v * (1 - t) + to[k] * t).toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * A tenant brand fill and the label to draw on it. Dark keeps the fill and
+ * the black label it always had. In light, when neither paper nor ink reaches
+ * 4.5:1 on a mid tone fill, the fill is stepped (toward paper or ink, as
+ * brandOnCard steps a brand) until the better label does.
+ */
+export function brandFillWithLabel(fill: string): { fill: string; label: string } {
+  const paper = 'rgb(var(--gb-black))'
+  const ink = 'rgb(var(--gb-white))'
+  if (document.documentElement.dataset.theme !== 'light' || !HEX.test(fill)) return { fill, label: paper }
+  const paperHex = themeHex('black', '')
+  const inkHex = themeHex('white', '')
+  if (!paperHex.startsWith('#') || !inkHex.startsWith('#')) return { fill, label: paper }
+  const P = rgbOf(paperHex)
+  const I = rgbOf(inkHex)
+  const best = (f: [number, number, number]) => {
+    const cp = contrast(P, f)
+    const ci = contrast(I, f)
+    return ci > cp ? { c: ci, label: ink } : { c: cp, label: paper }
+  }
+  const start = rgbOf(fill)
+  let pick = best(start)
+  if (pick.c >= 4.5) return { fill, label: pick.label }
+  // step toward the end that makes the better label stronger
+  const toward = pick.label === ink ? P : I
+  for (let t = 0.05; t <= 1.0001; t += 0.05) {
+    const hex = mixTo(start, toward, t)
+    pick = best(rgbOf(hex))
+    if (pick.c >= 4.5) return { fill: hex, label: pick.label }
+  }
+  return { fill, label: pick.label }
 }

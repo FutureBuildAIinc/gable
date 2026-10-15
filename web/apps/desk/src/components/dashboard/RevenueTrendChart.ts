@@ -67,6 +67,8 @@ export class GableRevenueTrendChart extends LitElement {
 
     private _renderChart() {
         requestAnimationFrame(() => {
+            // Gone before its frame: build nothing, so no chart or observer is left.
+            if (!this.isConnected) return;
             const canvas = this.querySelector<HTMLCanvasElement>('#revenueTrendCanvas');
             if (!canvas) return;
 
@@ -82,10 +84,17 @@ export class GableRevenueTrendChart extends LitElement {
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
 
-            // Create gradient
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-            gradient.addColorStop(0, themeColor('gable-green', 0.3));
-            gradient.addColorStop(1, themeColor('gable-green', 0));
+            // The fill is scriptable: it is built from the chart's own drawing
+            // area (top to the axis), so it is right at creation and after any
+            // resize, whatever the canvas's own height was when it was made.
+            const gradient = (c: { chart: Chart }) => {
+                const area = c.chart.chartArea;
+                if (!area) return 'transparent';
+                const g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                g.addColorStop(0, themeColor('gable-green', 0.3));
+                g.addColorStop(1, themeColor('gable-green', 0));
+                return g;
+            };
 
             this._chart = new Chart(canvas, {
                 type: 'line',

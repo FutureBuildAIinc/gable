@@ -9,7 +9,7 @@ import { LogIn, AlertCircle, Loader2 } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalConfig } from '../../types/portal';
 import { onThemeChange } from '@gable/design-system';
-import { themeHex, brandOnCard, brandLabelOnCard, inkOrPaperOn } from '../../lib/theme-colors.ts';
+import { themeHex, brandOnCard, brandLabelOnCard, brandFillWithLabel } from '../../lib/theme-colors.ts';
 
 @customElement('gable-portal-login')
 export class PortalLogin extends LitElement {
@@ -66,6 +66,7 @@ export class PortalLogin extends LitElement {
 
     render() {
         const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
+        const signIn = brandFillWithLabel(primaryColor);
 
         return html`
             <div
@@ -148,7 +149,7 @@ export class PortalLogin extends LitElement {
                                 type="submit"
                                 ?disabled=${this.loading}
                                 class="w-full py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                                style="background-color: ${primaryColor}; color: ${inkOrPaperOn(primaryColor)}; box-shadow: 0 4px 20px ${primaryColor}40"
+                                style="background-color: ${signIn.fill}; color: ${signIn.label}; box-shadow: 0 4px 20px ${primaryColor}40"
                             >
                                 ${this.loading
                                     ? icon(Loader2, 18, 'animate-spin')
