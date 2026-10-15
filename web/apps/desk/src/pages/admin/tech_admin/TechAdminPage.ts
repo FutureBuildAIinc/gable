@@ -9,7 +9,7 @@ import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
 import { confirmDialog } from '../../../components/ui/app-dialog.ts';
-import { aiHeadline, aiIsOn, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { aiHeadline, aiIsOn, aiLeadLine, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
@@ -207,8 +207,10 @@ export class TechAdminPage extends LitElement {
         if (s?.test_status === 'passed') {
             this.aiSuccess = `${saved} and tested. AI is on.`;
         } else if (s?.test_status === 'refused' || s?.test_status === 'failed') {
+            // The card the save reloaded already says the refusal; no banner
+            // repeats the sentence.
             this.aiSuccess = null;
-            this.aiError = s.test_message || aiStatusLine(s);
+            this.aiError = null;
         } else {
             this.aiSuccess = `${saved}.`;
         }
@@ -631,7 +633,7 @@ export class TechAdminPage extends LitElement {
                         AI Provider
                     </h2>
                     <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; the chosen provider's key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
-                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiStatusLine(this.aiSettings)}</p>
+                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiLeadLine(this.aiSettings)}</p>
                 </div>
 
                 ${this._renderProviderCard()}
