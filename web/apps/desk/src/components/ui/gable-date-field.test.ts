@@ -335,3 +335,21 @@ describe('the calendar opens in the browser top layer', () => {
     }
   })
 })
+
+describe('the popover defaults are cleared', () => {
+  it('inset and margin are cleared before top and left', async () => {
+    // The browser gives every popover inset: 0 and margin: auto, which would
+    // centre the calendar in the space below and right of its field. jsdom has
+    // no popover stylesheet, so the leg reads the inline styles: the clearing
+    // must be written, ahead of the placement.
+    const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
+    await openCalendar(el)
+    const pop = q<HTMLElement>(el, '[role="dialog"]')
+    expect(pop.style.margin).toBe('0px')
+    const style = pop.getAttribute('style') ?? ''
+    expect(style).toContain('inset: auto')
+    expect(style.indexOf('inset: auto')).toBeLessThan(style.indexOf('top:'))
+    expect(pop.style.top).toBe('4px')
+    expect(pop.style.left).toBe('8px')
+  })
+})
