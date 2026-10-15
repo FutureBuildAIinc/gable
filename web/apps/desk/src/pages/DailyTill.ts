@@ -8,6 +8,7 @@ import { ToastService } from '../lib/toast-service.ts';
 import { formatDay } from '../lib/dates.ts';
 import { ReportingService } from '../services/ReportingService.ts';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting.ts';
+import { formatDollars } from '../lib/utils.ts';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide';
 
 @customElement('gable-daily-till')
@@ -61,16 +62,16 @@ export class GableDailyTill extends LitElement {
                     <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
                         <div class="flex items-center justify-between mb-6">
                             <h2 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
-                                ${icon(DollarSign, 24)} Daily Till (${formatDay(till.date)})
+                                ${icon(DollarSign, 24)} Collected (${formatDay(till.date)})
                             </h2>
                             <span class="text-3xl font-mono font-bold text-white">
-                                $${till.total_collected.toFixed(2)}
+                                ${formatDollars(till.net_collected)}
                             </span>
                         </div>
 
                         ${till.refunds > 0 ? html`
                             <p class="text-xs text-zinc-500 mb-4" data-testid="till-parts">
-                                Received $${till.received.toFixed(2)} less refunds $${till.refunds.toFixed(2)} is net $${till.net_collected.toFixed(2)}
+                                Received ${formatDollars(till.received)} less refunds ${formatDollars(till.refunds)} is net ${formatDollars(till.net_collected)}
                             </p>
                         ` : nothing}
 
@@ -108,7 +109,7 @@ export class GableDailyTill extends LitElement {
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5">
                                 <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Total Collected</span>
-                                <span class="block text-2xl font-mono text-emerald-400">$${summary.total_collected.toFixed(2)}</span>
+                                <span class="block text-2xl font-mono text-emerald-400">${formatDollars(summary.total_collected)}</span>
                             </div>
                             <div class="p-4 bg-black/20 rounded border border-white/5 col-span-2">
                                 <div class="flex justify-between items-center">

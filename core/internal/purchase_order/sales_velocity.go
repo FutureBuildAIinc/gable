@@ -77,3 +77,45 @@ func (r *VelocityRepository) ListSalesVelocity(ctx context.Context, lookbackDays
 	}
 	return out, nil
 }
+
+// YardVelocity is one product's net units sold at one yard (the order's own
+// branch) over the lookback window.
+type YardVelocity struct {
+	ProductID uuid.UUID
+	BranchID  uuid.UUID
+	UnitsSold float64
+}
+
+// ListSalesVelocityByYard is ListSalesVelocity split by the order's branch, for
+// the per yard recommendations (FROM-PRINCIPAL item 135 b). It reads the same
+// reach as ListSalesVelocity: the context branch, else the granted branches,
+// else every branch.
+func (r *VelocityRepository) ListSalesVelocityByYard(ctx context.Context, lookbackDays int) ([]YardVelocity, error) {
+	if lookbackDays <= 0 {
+		lookbackDays = 90
+	}
+	q := `
+		SELECT ol.product_id, o.branch_id, SUM(ol.quantity)::float8
+		FROM order_lines ol
+		JOIN orders o ON o.id = ol.order_id
+		WHERE ol.product_id IS NOT NULL
+		  AND o.status <> 'CANCELLED'
+		  AND ol.created_at >= now() - ($1::int * INTERVAL '1 day')
+		  AND ` + middleware.Wall("o", 2, 3) + `
+		GROUP BY ol.product_id, o.branch_id`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, lookbackDays,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("query sales velocity by yard: %w", err)
+	}
+	defer rows.Close()
+	var out []YardVelocity
+	for rows.Next() {
+		var v YardVelocity
+		if err := rows.Scan(&v.ProductID, &v.BranchID, &v.UnitsSold); err != nil {
+			return nil, fmt.Errorf("scan sales velocity by yard row: %w", err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}

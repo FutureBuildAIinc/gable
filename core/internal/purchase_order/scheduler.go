@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -202,18 +203,26 @@ func (s *Scheduler) runCreateReorders(ctx context.Context) {
 	status := runStatusSuccess
 	errMsg := ""
 	posCreated := 0
+	skipped := 0
 
 	defer func() {
 		if p := recover(); p != nil {
 			status = runStatusFailed
 			errMsg = fmt.Sprintf("panic: %v", p)
 		}
-		if ferr := s.service.FinishReorderRun(ctx, runID, status, posCreated, 0, 0, errMsg); ferr != nil {
+		if ferr := s.service.FinishReorderRun(ctx, runID, status, posCreated, 0, skipped, errMsg); ferr != nil {
 			log.Printf("reorder scheduler: failed to record run finish: %v", ferr)
 		}
 	}()
 
-	count, err := s.service.CreateReorders(ctx)
+	res, err := s.service.CreateReordersRun(ctx)
+	count := res.Created
+	if len(res.NoReorderQty) > 0 {
+		// Not a failure: the run succeeded and ordered what it could. The
+		// record names what it left alone and why.
+		skipped = len(res.NoReorderQty)
+		errMsg = "no reorder quantity set: " + strings.Join(res.NoReorderQty, ", ")
+	}
 	if err != nil {
 		status = runStatusFailed
 		errMsg = err.Error()

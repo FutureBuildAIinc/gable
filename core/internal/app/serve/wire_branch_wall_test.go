@@ -1124,22 +1124,23 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 type poRecSummary struct {
 	Items []struct {
 		ProductID     string  `json:"product_id"`
+		BranchID      string  `json:"branch_id"`
 		CurrentStock  float64 `json:"current_stock"`
 		AvgDailySales float64 `json:"avg_daily_sales"`
 	} `json:"items"`
 }
 
-// The purchase order recommendations route runs behind the branch middleware,
-// so its stock read and its sales velocity read must scope to the SAME branch
-// set: a bound purchasing user held to branch A is recommended from branch
-// A's stock and branch A's sales, never its branches' stock against every
-// branch's demand; a bound user with no grants sees no stock and no sales,
-// so the product carries no recommendation at all; an administrator without
-// a header reads every branch's stock and demand, as before.
+// The purchase order recommendations route runs behind the branch middleware
+// and reads per yard (item 135 b): a row is one product at one yard, from that
+// yard's stock and that yard's sales. A bound purchasing user held to branch A
+// sees branch A's row only; a user with no grants sees no row at all (a
+// product in no yard in reach is no yard's signal); an administrator with no
+// header reads a row per yard, yard A at 5 stock and 1 a day, yard B at 50 and
+// 10 a day, never one company row of 55 and 11.
 func TestBranchWall_PORecommendationScoping(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
-	A := f.branchA.String()
+	A, B := f.branchA.String(), f.branchB.String()
 	ctx := context.Background()
 
 	for _, r := range []struct {
@@ -1180,49 +1181,44 @@ func TestBranchWall_PORecommendationScoping(t *testing.T) {
 		}
 	}
 
-	itemFor := func(t *testing.T, body []byte, productID string) (found bool, stock, sales float64) {
+	type yardRow struct{ stock, sales float64 }
+	rowsFor := func(t *testing.T, body []byte, productID string) map[string]yardRow {
 		t.Helper()
 		var sum poRecSummary
 		if err := json.Unmarshal(body, &sum); err != nil {
 			t.Fatalf("recommendations body: %v\n%s", err, body)
 		}
+		out := map[string]yardRow{}
 		for _, it := range sum.Items {
 			if it.ProductID == productID {
-				return true, it.CurrentStock, it.AvgDailySales
+				out[it.BranchID] = yardRow{it.CurrentStock, it.AvgDailySales}
 			}
 		}
-		return false, 0, 0
+		return out
 	}
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantStock               float64
-		wantSales               float64
-		wantSalesAsserted       bool
+		want                    map[string]yardRow
 	}{
-		// The fixture product carries no sales history outside the seeded
-		// orders, so a caller that sees neither stock nor real sales falls
-		// back to the synthetic velocity proxy; only the stock number is
-		// asserted there.
-		{"purchasing, header A", "purchasing", "u-a", A, 5, 1, true},
-		{"purchasing, no header", "purchasing", "u-a", "", 5, 1, true},
-		{"purchasing u-none, no header", "purchasing", "u-none", "", 0, 0, false},
-		{"admin, no header", "admin", "boss", "", 55, 11, true},
+		{"purchasing, header A", "purchasing", "u-a", A, map[string]yardRow{A: {5, 1}}},
+		{"purchasing, no header", "purchasing", "u-a", "", map[string]yardRow{A: {5, 1}}},
+		{"purchasing u-none, no header", "purchasing", "u-none", "", map[string]yardRow{}},
+		{"admin, no header", "admin", "boss", "", map[string]yardRow{A: {5, 1}, B: {50, 10}}},
 	} {
 		status, body := f.callBody(t, "GET", "/api/v1/purchase-orders/recommendations", "", c.role, c.sub, c.header)
 		if status != http.StatusOK {
 			t.Errorf("recommendations, %s: %d, want 200", c.name, status)
 			continue
 		}
-		found, stock, sales := itemFor(t, body, f.productID.String())
-		if !found {
-			t.Errorf("recommendations, %s: product absent from the recommendations", c.name)
+		got := rowsFor(t, body, f.productID.String())
+		if len(got) != len(c.want) {
+			t.Errorf("recommendations, %s: rows by yard = %v, want %v", c.name, got, c.want)
 			continue
 		}
-		if stock != c.wantStock {
-			t.Errorf("recommendations, %s: current_stock = %v, want %v", c.name, stock, c.wantStock)
-		}
-		if c.wantSalesAsserted && sales != c.wantSales {
-			t.Errorf("recommendations, %s: avg_daily_sales = %v, want %v", c.name, sales, c.wantSales)
+		for yard, w := range c.want {
+			if g, ok := got[yard]; !ok || g != w {
+				t.Errorf("recommendations, %s: yard %s = %v, want %v", c.name, yard, g, w)
+			}
 		}
 	}
 }

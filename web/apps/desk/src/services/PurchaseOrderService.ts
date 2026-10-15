@@ -61,7 +61,7 @@ export const PurchaseOrderService = {
         return page.items;
     },
 
-    async generateReorders(): Promise<{ count: number }> {
+    async generateReorders(): Promise<{ count: number; no_reorder_qty: string[] }> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/purchase-orders/reorder-check`, {
             method: 'POST',
         });

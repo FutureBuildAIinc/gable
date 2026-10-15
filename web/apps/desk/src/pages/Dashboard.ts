@@ -20,6 +20,7 @@ import type {
 // Side-effect imports: register child custom elements
 import '../components/dashboard/KPICard.ts';
 import '../components/dashboard/RevenueTrendChart.ts';
+import { formatCents } from '../lib/utils.ts';
 import '../components/dashboard/OrderStatusChart.ts';
 import '../components/dashboard/TopCustomersTable.ts';
 import '../components/dashboard/InventoryAlertsWidget.ts';
@@ -96,10 +97,6 @@ export class GableDashboard extends LitElement {
         }
     }
 
-    private formatCurrency(cents: number) {
-        return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-    }
-
     render() {
         const currentDate = formatDay(todayDay());
 
@@ -168,8 +165,8 @@ export class GableDashboard extends LitElement {
                 <!-- KPI Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <gable-kpi-card
-                        card-title="Today's Revenue"
-                        .value=${this.summary ? this.formatCurrency(this.summary.today_revenue) : '$0.00'}
+                        card-title="Collected today"
+                        .value=${this.summary ? formatCents(this.summary.today_revenue) : '$0.00'}
                         .trend=${this.summary?.today_revenue_change ?? undefined}
                         .iconHtml=${icon(DollarSign, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
@@ -196,7 +193,7 @@ export class GableDashboard extends LitElement {
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Outstanding AR"
-                        .value=${this.summary ? this.formatCurrency(this.summary.outstanding_ar) : '$0.00'}
+                        .value=${this.summary ? formatCents(this.summary.outstanding_ar) : '$0.00'}
                         .subValue=${this.summary ? `${this.summary.outstanding_ar_count} invoices` : undefined}
                         .iconHtml=${icon(CreditCard, 20, 'w-5 h-5')}
                         ?loading=${this.loading}

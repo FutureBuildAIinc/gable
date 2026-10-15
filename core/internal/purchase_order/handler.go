@@ -287,7 +287,7 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
-	count, err := h.service.CreateReorders(r.Context())
+	res, err := h.service.CreateReordersRun(r.Context())
 	if err != nil {
 		// The branch resolution's refusals (a 403 naming branch_id for a
 		// caller with no grants, a 400 naming it when several grants could
@@ -303,9 +303,16 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// no_reorder_qty names the products the run left alone because they
+	// carry no reorder quantity and no deficit (a yard exactly at its point).
+	left := res.NoReorderQty
+	if left == nil {
+		left = []string{}
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
-		"count":  count,
+		"status":         "success",
+		"count":          res.Created,
+		"no_reorder_qty": left,
 	})
 }
 

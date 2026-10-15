@@ -6,11 +6,12 @@ package dashboard
 import (
 	"context"
 	"fmt"
-	"github.com/gablelbm/gable/pkg/collections"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/yardstock"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,16 @@ type Repository interface {
 // PostgresRepository implements Repository for Postgres.
 type PostgresRepository struct {
 	db *database.DB
+}
+
+// BusinessDay is the default branch's business date now, the day the
+// dashboard's day figures are for; the service keys its caches by it.
+func (r *PostgresRepository) BusinessDay(ctx context.Context) (string, error) {
+	var day string
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+collections.TodaySQL+`::text`).Scan(&day); err != nil {
+		return "", fmt.Errorf("failed to read the business day: %w", err)
+	}
+	return day, nil
 }
 
 // NewRepository creates a new dashboard repository.
@@ -164,7 +175,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE ` + middleware.Wall("l", 2, 3) + `
 		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id, y.name, y.code
-		HAVING COALESCE(SUM(i.quantity), 0) <= COALESCE(p.reorder_point, 10)
+		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "COALESCE(p.reorder_point, 10)") + `
 		ORDER BY COALESCE(SUM(i.quantity), 0) ASC, p.sku ASC, l.branch_id ASC
 		LIMIT $1
 	`
@@ -297,42 +308,15 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 	return activity, nil
 }
 
-// GetRevenueTrend returns daily revenue for the last N days, walled to the
-// caller's reach through the order or the invoice each payment settles.
+// GetRevenueTrend returns the daily net collections for the last N days at
+// the caller's yard (the payment's own branch, walled by the caller's reach).
 func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error) {
-	// The days are the default branch's business days, in its zone, the day
-	// Today's Revenue is cut on: the last N days are today and the N-1 before
-	// it, each the day's net collections (payments received by their own yard,
-	// less refunds paid out, never a voided payment).
-	zone := collections.DefaultBranchZoneSQL
-	query := `
-		WITH win AS (
-			SELECT ` + collections.TodaySQL + ` AS d, $1::int AS n
-		),
-		received AS (
-			SELECT (p.created_at AT TIME ZONE ` + zone + `)::date AS day, SUM(ROUND(p.amount * 100)::bigint) AS cents
-			FROM payments p
-			WHERE p.status = 'POSTED'
-			  AND p.created_at >= (((SELECT d - (n - 1) FROM win))::timestamp AT TIME ZONE ` + zone + `)
-			  AND p.created_at < (((SELECT d + 1 FROM win))::timestamp AT TIME ZONE ` + zone + `)
-			  AND ` + middleware.Wall("p", 2, 3) + `
-			GROUP BY 1
-		),
-		refunded AS (
-			SELECT r.refunded_on AS day, SUM(ROUND(r.amount * 100)::bigint) AS cents
-			FROM payment_refunds r
-			LEFT JOIN payments rp ON rp.id = r.payment_id
-			LEFT JOIN credit_memos rm ON rm.id = r.credit_memo_id
-			WHERE r.status = 'COMPLETE'
-			  AND r.refunded_on BETWEEN (SELECT d - (n - 1) FROM win) AND (SELECT d FROM win)
-			  AND (rp.id IS NULL OR rp.status = 'POSTED')
-			  AND (` + middleware.Wall("rp", 2, 3) + ` OR ` + middleware.Wall("rm", 2, 3) + `)
-			GROUP BY 1
-		)
-		SELECT COALESCE(rc.day, rf.day) AS date, (COALESCE(rc.cents, 0) - COALESCE(rf.cents, 0))::bigint AS revenue
-		FROM received rc FULL JOIN refunded rf ON rf.day = rc.day
-		ORDER BY date ASC
-	`
+	// The days are the default branch's business days: the last N are today
+	// and the N-1 before it, each the day's net collections at the caller's
+	// yard (pkg/collections: payments by received_on and their own branch,
+	// less refunds paid out, never a voided payment), the card's definition.
+	query := `SELECT date, cents AS revenue FROM (` +
+		collections.NetByDay("("+collections.TodaySQL+") - ($1::int - 1)", collections.TodaySQL, 2, 3) + `) d`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query revenue trend: %w", err)

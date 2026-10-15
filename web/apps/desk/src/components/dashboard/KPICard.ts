@@ -52,17 +52,17 @@ export class GableKPICard extends LitElement {
             `;
         }
 
-        // Parse numeric value if string starts with $
-        const numericValue = typeof this.value === 'string' && this.value.startsWith('$')
-            ? parseFloat(this.value.replace(/[^0-9.-]+/g, ''))
+        // A currency string is "$1,234.50" or "-$5.00": the sign comes before the dollar mark.
+        const isCurrency = typeof this.value === 'string' && /^-?\$/.test(this.value);
+        const negative = isCurrency && (this.value as string).startsWith('-');
+        const numericValue = isCurrency
+            ? Math.abs(parseFloat((this.value as string).replace(/[^0-9.]+/g, '')))
             : typeof this.value === 'number' ? this.value : 0;
-
-        const isCurrency = typeof this.value === 'string' && this.value.startsWith('$');
 
         const displayValue = typeof this.value === 'number'
             ? this.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
             : isCurrency
-                ? numericValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                ? `${negative && numericValue !== 0 ? '-' : ''}$${numericValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : this.value;
 
         const card = html`
@@ -78,7 +78,6 @@ export class GableKPICard extends LitElement {
                     </div>
 
                     <div class="text-3xl font-mono font-bold tracking-tight ${this.valueColor} flex items-baseline gap-1">
-                        ${isCurrency ? html`<span>$</span>` : nothing}
                         <span>${displayValue}</span>
                     </div>
 

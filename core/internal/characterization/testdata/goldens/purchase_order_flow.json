@@ -1,6 +1,7 @@
 [
   {
     "name": "purchase_order.recommendations",
+    "mask_body": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/purchase-orders/recommendations"
@@ -8,46 +9,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": {
-        "critical_count": 2,
-        "high_count": 0,
-        "items": [
-          {
-            "avg_daily_sales": 1,
-            "current_stock": 0,
-            "days_until_out": 0,
-            "estimated_cost": 683.4,
-            "lead_time_days": 7,
-            "product_id": "<id-1>",
-            "product_name": "Golden harness stud",
-            "product_sku": "GOLD-HARNESS-2X4",
-            "reorder_point": 8.31,
-            "safety_stock": 1.31,
-            "std_dev_sales": 0.3,
-            "suggested_qty": 268,
-            "urgency": "CRITICAL"
-          },
-          {
-            "avg_daily_sales": 500,
-            "current_stock": 30,
-            "days_until_out": 0.1,
-            "estimated_cost": 14330.25,
-            "lead_time_days": 7,
-            "product_id": "<id-2>",
-            "product_name": "Golden item stud",
-            "product_sku": "GOLD-A-STUD",
-            "reorder_point": 4154.82,
-            "safety_stock": 654.82,
-            "std_dev_sales": 150,
-            "suggested_qty": 6369,
-            "urgency": "CRITICAL"
-          }
-        ],
-        "low_count": 0,
-        "medium_count": 0,
-        "total_estimated_cost": 15013.65,
-        "total_items": 2
-      }
+      "body": "<body>"
     }
   },
   {
@@ -96,7 +58,7 @@
             "new_qty": 88,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-3>",
+            "product_id": "<id-1>",
             "sku": "CORN2006"
           },
           {
@@ -105,7 +67,7 @@
             "new_qty": 100,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-4>",
+            "product_id": "<id-2>",
             "sku": "CORN2009"
           },
           {
@@ -114,7 +76,7 @@
             "new_qty": 93,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-5>",
+            "product_id": "<id-3>",
             "sku": "CORNCLEAR"
           },
           {
@@ -123,7 +85,7 @@
             "new_qty": 64,
             "old_point": 50,
             "old_qty": 120,
-            "product_id": "<id-6>",
+            "product_id": "<id-4>",
             "sku": "CORNCTRM412+"
           },
           {
@@ -132,7 +94,7 @@
             "new_qty": 104,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-7>",
+            "product_id": "<id-5>",
             "sku": "CORNCTRMG12+"
           },
           {
@@ -141,7 +103,7 @@
             "new_qty": 90,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-8>",
+            "product_id": "<id-6>",
             "sku": "CORNHMOLD14"
           },
           {
@@ -150,7 +112,7 @@
             "new_qty": 90,
             "old_point": 10,
             "old_qty": 25,
-            "product_id": "<id-9>",
+            "product_id": "<id-7>",
             "sku": "CORNPOLY18"
           },
           {
@@ -159,7 +121,7 @@
             "new_qty": 102,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-10>",
+            "product_id": "<id-8>",
             "sku": "CORNSFT1212"
           },
           {
@@ -168,7 +130,7 @@
             "new_qty": 73,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-11>",
+            "product_id": "<id-9>",
             "sku": "CORNSFT1612"
           },
           {
@@ -177,7 +139,7 @@
             "new_qty": 116,
             "old_point": 25,
             "old_qty": 60,
-            "product_id": "<id-12>",
+            "product_id": "<id-10>",
             "sku": "CORNSFT1612V"
           },
           {
@@ -186,7 +148,7 @@
             "new_qty": 108,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-13>",
+            "product_id": "<id-11>",
             "sku": "CORNSFT2408V"
           },
           {
@@ -195,7 +157,7 @@
             "new_qty": 44,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-14>",
+            "product_id": "<id-12>",
             "sku": "CORNSHTGR49"
           },
           {
@@ -204,7 +166,7 @@
             "new_qty": 39,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-15>",
+            "product_id": "<id-13>",
             "sku": "CORNTAPE"
           },
           {
@@ -213,7 +175,7 @@
             "new_qty": 24,
             "old_point": 8,
             "old_qty": 20,
-            "product_id": "<id-16>",
+            "product_id": "<id-14>",
             "sku": "DR-EXT-3680-STL"
           },
           {
@@ -222,7 +184,7 @@
             "new_qty": 54,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-17>",
+            "product_id": "<id-15>",
             "sku": "DR-INT-3080-6P"
           },
           {
@@ -231,7 +193,7 @@
             "new_qty": 111,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-18>",
+            "product_id": "<id-16>",
             "sku": "DR-INT-3280-6P"
           },
           {
@@ -240,7 +202,7 @@
             "new_qty": 42,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-19>",
+            "product_id": "<id-17>",
             "sku": "DR-INT-3680-6P"
           },
           {
@@ -249,7 +211,7 @@
             "new_qty": 110,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-20>",
+            "product_id": "<id-18>",
             "sku": "DW-12-REG"
           },
           {
@@ -258,7 +220,7 @@
             "new_qty": 91,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-21>",
+            "product_id": "<id-19>",
             "sku": "DW-58-FC"
           },
           {
@@ -267,7 +229,7 @@
             "new_qty": 66,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-22>",
+            "product_id": "<id-20>",
             "sku": "HANGER-210"
           },
           {
@@ -276,7 +238,7 @@
             "new_qty": 93,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-23>",
+            "product_id": "<id-21>",
             "sku": "HANGER-26"
           },
           {
@@ -285,7 +247,7 @@
             "new_qty": 67,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-24>",
+            "product_id": "<id-22>",
             "sku": "HANGER-28"
           },
           {
@@ -294,7 +256,7 @@
             "new_qty": 50,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-25>",
+            "product_id": "<id-23>",
             "sku": "HANGER-28FM"
           },
           {
@@ -303,7 +265,7 @@
             "new_qty": 96,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-26>",
+            "product_id": "<id-24>",
             "sku": "INS-R13-15"
           },
           {
@@ -312,7 +274,7 @@
             "new_qty": 108,
             "old_point": 25,
             "old_qty": 50,
-            "product_id": "<id-27>",
+            "product_id": "<id-25>",
             "sku": "INS-R19-15"
           },
           {
@@ -321,7 +283,7 @@
             "new_qty": 137,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-28>",
+            "product_id": "<id-26>",
             "sku": "INS-R30-24"
           },
           {
@@ -330,7 +292,7 @@
             "new_qty": 182,
             "old_point": 200,
             "old_qty": 600,
-            "product_id": "<id-29>",
+            "product_id": "<id-27>",
             "sku": "LUM-166-WRC"
           },
           {
@@ -339,7 +301,7 @@
             "new_qty": 123,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-30>",
+            "product_id": "<id-28>",
             "sku": "LUM-21012-NO2"
           },
           {
@@ -348,7 +310,7 @@
             "new_qty": 82,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-31>",
+            "product_id": "<id-29>",
             "sku": "LUM-21216-NO2"
           },
           {
@@ -357,7 +319,7 @@
             "new_qty": 95,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-32>",
+            "product_id": "<id-30>",
             "sku": "LUM-2410-PREM"
           },
           {
@@ -366,7 +328,7 @@
             "new_qty": 66,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-33>",
+            "product_id": "<id-31>",
             "sku": "LUM-2412-PREM"
           },
           {
@@ -375,7 +337,7 @@
             "new_qty": 167,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-34>",
+            "product_id": "<id-32>",
             "sku": "LUM-248-PREM"
           },
           {
@@ -384,7 +346,7 @@
             "new_qty": 199,
             "old_point": 300,
             "old_qty": 600,
-            "product_id": "<id-35>",
+            "product_id": "<id-33>",
             "sku": "LUM-2492-STUD"
           },
           {
@@ -393,7 +355,7 @@
             "new_qty": 117,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-36>",
+            "product_id": "<id-34>",
             "sku": "LUM-2610-PREM"
           },
           {
@@ -402,7 +364,7 @@
             "new_qty": 119,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-37>",
+            "product_id": "<id-35>",
             "sku": "LUM-2612-PREM"
           },
           {
@@ -411,7 +373,7 @@
             "new_qty": 52,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-38>",
+            "product_id": "<id-36>",
             "sku": "LUM-2616-PREM"
           },
           {
@@ -420,7 +382,7 @@
             "new_qty": 118,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-39>",
+            "product_id": "<id-37>",
             "sku": "LUM-2810-NO2"
           },
           {
@@ -429,7 +391,7 @@
             "new_qty": 86,
             "old_point": 50,
             "old_qty": 150,
-            "product_id": "<id-40>",
+            "product_id": "<id-38>",
             "sku": "LUM-2816-NO2"
           },
           {
@@ -438,7 +400,7 @@
             "new_qty": 98,
             "old_point": 80,
             "old_qty": 150,
-            "product_id": "<id-41>",
+            "product_id": "<id-39>",
             "sku": "LUM-4410-PT"
           },
           {
@@ -447,7 +409,7 @@
             "new_qty": 138,
             "old_point": 100,
             "old_qty": 200,
-            "product_id": "<id-42>",
+            "product_id": "<id-40>",
             "sku": "LUM-448-PT"
           },
           {
@@ -456,7 +418,7 @@
             "new_qty": 126,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-43>",
+            "product_id": "<id-41>",
             "sku": "LUM-448-WRC"
           },
           {
@@ -465,7 +427,7 @@
             "new_qty": 98,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-44>",
+            "product_id": "<id-42>",
             "sku": "LUM-6612-PT"
           },
           {
@@ -474,7 +436,7 @@
             "new_qty": 57,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-45>",
+            "product_id": "<id-43>",
             "sku": "LUMB14RLN3+"
           },
           {
@@ -483,7 +445,7 @@
             "new_qty": 56,
             "old_point": 1000,
             "old_qty": 5000,
-            "product_id": "<id-46>",
+            "product_id": "<id-44>",
             "sku": "LUMB24RLN3"
           },
           {
@@ -492,7 +454,7 @@
             "new_qty": 77,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-47>",
+            "product_id": "<id-45>",
             "sku": "LUMBUT24RL"
           },
           {
@@ -501,7 +463,7 @@
             "new_qty": 97,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-48>",
+            "product_id": "<id-46>",
             "sku": "MLD-BASE-MDF"
           },
           {
@@ -510,7 +472,7 @@
             "new_qty": 131,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-49>",
+            "product_id": "<id-47>",
             "sku": "MLD-CASE-MDF"
           },
           {
@@ -519,7 +481,7 @@
             "new_qty": 53,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-50>",
+            "product_id": "<id-48>",
             "sku": "NAIL-10D-50"
           },
           {
@@ -528,7 +490,7 @@
             "new_qty": 144,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-51>",
+            "product_id": "<id-49>",
             "sku": "NAIL-16D-50"
           },
           {
@@ -537,7 +499,7 @@
             "new_qty": 89,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-52>",
+            "product_id": "<id-50>",
             "sku": "OSB-12"
           },
           {
@@ -546,7 +508,7 @@
             "new_qty": 84,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-53>",
+            "product_id": "<id-51>",
             "sku": "OSB-34-TG"
           },
           {
@@ -555,7 +517,7 @@
             "new_qty": 108,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-54>",
+            "product_id": "<id-52>",
             "sku": "PLY-12-CDX"
           },
           {
@@ -564,7 +526,7 @@
             "new_qty": 311,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-55>",
+            "product_id": "<id-53>",
             "sku": "PLY-34-CDX"
           },
           {
@@ -573,7 +535,7 @@
             "new_qty": 75,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-56>",
+            "product_id": "<id-54>",
             "sku": "RF-ARCH-30"
           },
           {
@@ -582,7 +544,7 @@
             "new_qty": 83,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-57>",
+            "product_id": "<id-55>",
             "sku": "RF-DRIP-10"
           },
           {
@@ -591,7 +553,7 @@
             "new_qty": 65,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-58>",
+            "product_id": "<id-56>",
             "sku": "RF-EDGE-WHT"
           },
           {
@@ -600,7 +562,7 @@
             "new_qty": 39,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-59>",
+            "product_id": "<id-57>",
             "sku": "RF-FELT-15"
           },
           {
@@ -609,7 +571,7 @@
             "new_qty": 75,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-60>",
+            "product_id": "<id-58>",
             "sku": "RF-FLASH-PIPE"
           },
           {
@@ -618,7 +580,7 @@
             "new_qty": 93,
             "old_point": 60,
             "old_qty": 120,
-            "product_id": "<id-61>",
+            "product_id": "<id-59>",
             "sku": "RF-FLASH-STEP"
           },
           {
@@ -627,7 +589,7 @@
             "new_qty": 105,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-62>",
+            "product_id": "<id-60>",
             "sku": "RF-ICE-65"
           },
           {
@@ -636,7 +598,7 @@
             "new_qty": 66,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-63>",
+            "product_id": "<id-61>",
             "sku": "RF-ICE-WTR"
           },
           {
@@ -645,7 +607,7 @@
             "new_qty": 73,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-64>",
+            "product_id": "<id-62>",
             "sku": "RF-NAIL-125"
           },
           {
@@ -654,7 +616,7 @@
             "new_qty": 135,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-65>",
+            "product_id": "<id-63>",
             "sku": "RF-RIDGE-4"
           },
           {
@@ -663,7 +625,7 @@
             "new_qty": 118,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-66>",
+            "product_id": "<id-64>",
             "sku": "RF-SH-BLK"
           },
           {
@@ -672,7 +634,7 @@
             "new_qty": 111,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-67>",
+            "product_id": "<id-65>",
             "sku": "RF-SH-WW"
           },
           {
@@ -681,7 +643,7 @@
             "new_qty": 42,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-68>",
+            "product_id": "<id-66>",
             "sku": "RF-START"
           },
           {
@@ -690,7 +652,7 @@
             "new_qty": 68,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-69>",
+            "product_id": "<id-67>",
             "sku": "SCR-DECK-3-5"
           },
           {
@@ -699,7 +661,7 @@
             "new_qty": 137,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-70>",
+            "product_id": "<id-68>",
             "sku": "TIE-H1"
           }
         ]
@@ -730,7 +692,7 @@
             "new_qty": 263,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-3>",
+            "product_id": "<id-1>",
             "sku": "CORN2006"
           },
           {
@@ -739,7 +701,7 @@
             "new_qty": 298,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-4>",
+            "product_id": "<id-2>",
             "sku": "CORN2009"
           },
           {
@@ -748,7 +710,7 @@
             "new_qty": 277,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-5>",
+            "product_id": "<id-3>",
             "sku": "CORNCLEAR"
           },
           {
@@ -757,7 +719,7 @@
             "new_qty": 191,
             "old_point": 50,
             "old_qty": 120,
-            "product_id": "<id-6>",
+            "product_id": "<id-4>",
             "sku": "CORNCTRM412+"
           },
           {
@@ -766,7 +728,7 @@
             "new_qty": 312,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-7>",
+            "product_id": "<id-5>",
             "sku": "CORNCTRMG12+"
           },
           {
@@ -775,7 +737,7 @@
             "new_qty": 268,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-8>",
+            "product_id": "<id-6>",
             "sku": "CORNHMOLD14"
           },
           {
@@ -784,7 +746,7 @@
             "new_qty": 269,
             "old_point": 10,
             "old_qty": 25,
-            "product_id": "<id-9>",
+            "product_id": "<id-7>",
             "sku": "CORNPOLY18"
           },
           {
@@ -793,7 +755,7 @@
             "new_qty": 304,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-10>",
+            "product_id": "<id-8>",
             "sku": "CORNSFT1212"
           },
           {
@@ -802,7 +764,7 @@
             "new_qty": 218,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-11>",
+            "product_id": "<id-9>",
             "sku": "CORNSFT1612"
           },
           {
@@ -811,7 +773,7 @@
             "new_qty": 347,
             "old_point": 25,
             "old_qty": 60,
-            "product_id": "<id-12>",
+            "product_id": "<id-10>",
             "sku": "CORNSFT1612V"
           },
           {
@@ -820,7 +782,7 @@
             "new_qty": 324,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-13>",
+            "product_id": "<id-11>",
             "sku": "CORNSFT2408V"
           },
           {
@@ -829,7 +791,7 @@
             "new_qty": 131,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-14>",
+            "product_id": "<id-12>",
             "sku": "CORNSHTGR49"
           },
           {
@@ -838,7 +800,7 @@
             "new_qty": 116,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-15>",
+            "product_id": "<id-13>",
             "sku": "CORNTAPE"
           },
           {
@@ -847,7 +809,7 @@
             "new_qty": 70,
             "old_point": 8,
             "old_qty": 20,
-            "product_id": "<id-16>",
+            "product_id": "<id-14>",
             "sku": "DR-EXT-3680-STL"
           },
           {
@@ -856,7 +818,7 @@
             "new_qty": 161,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-17>",
+            "product_id": "<id-15>",
             "sku": "DR-INT-3080-6P"
           },
           {
@@ -865,7 +827,7 @@
             "new_qty": 332,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-18>",
+            "product_id": "<id-16>",
             "sku": "DR-INT-3280-6P"
           },
           {
@@ -874,7 +836,7 @@
             "new_qty": 125,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-19>",
+            "product_id": "<id-17>",
             "sku": "DR-INT-3680-6P"
           },
           {
@@ -883,7 +845,7 @@
             "new_qty": 329,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-20>",
+            "product_id": "<id-18>",
             "sku": "DW-12-REG"
           },
           {
@@ -892,7 +854,7 @@
             "new_qty": 273,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-21>",
+            "product_id": "<id-19>",
             "sku": "DW-58-FC"
           },
           {
@@ -901,7 +863,7 @@
             "new_qty": 196,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-22>",
+            "product_id": "<id-20>",
             "sku": "HANGER-210"
           },
           {
@@ -910,7 +872,7 @@
             "new_qty": 279,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-23>",
+            "product_id": "<id-21>",
             "sku": "HANGER-26"
           },
           {
@@ -919,7 +881,7 @@
             "new_qty": 200,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-24>",
+            "product_id": "<id-22>",
             "sku": "HANGER-28"
           },
           {
@@ -928,7 +890,7 @@
             "new_qty": 148,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-25>",
+            "product_id": "<id-23>",
             "sku": "HANGER-28FM"
           },
           {
@@ -937,7 +899,7 @@
             "new_qty": 286,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-26>",
+            "product_id": "<id-24>",
             "sku": "INS-R13-15"
           },
           {
@@ -946,7 +908,7 @@
             "new_qty": 323,
             "old_point": 25,
             "old_qty": 50,
-            "product_id": "<id-27>",
+            "product_id": "<id-25>",
             "sku": "INS-R19-15"
           },
           {
@@ -955,7 +917,7 @@
             "new_qty": 409,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-28>",
+            "product_id": "<id-26>",
             "sku": "INS-R30-24"
           },
           {
@@ -964,7 +926,7 @@
             "new_qty": 546,
             "old_point": 200,
             "old_qty": 600,
-            "product_id": "<id-29>",
+            "product_id": "<id-27>",
             "sku": "LUM-166-WRC"
           },
           {
@@ -973,7 +935,7 @@
             "new_qty": 368,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-30>",
+            "product_id": "<id-28>",
             "sku": "LUM-21012-NO2"
           },
           {
@@ -982,7 +944,7 @@
             "new_qty": 246,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-31>",
+            "product_id": "<id-29>",
             "sku": "LUM-21216-NO2"
           },
           {
@@ -991,7 +953,7 @@
             "new_qty": 283,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-32>",
+            "product_id": "<id-30>",
             "sku": "LUM-2410-PREM"
           },
           {
@@ -1000,7 +962,7 @@
             "new_qty": 198,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-33>",
+            "product_id": "<id-31>",
             "sku": "LUM-2412-PREM"
           },
           {
@@ -1009,7 +971,7 @@
             "new_qty": 499,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-34>",
+            "product_id": "<id-32>",
             "sku": "LUM-248-PREM"
           },
           {
@@ -1018,7 +980,7 @@
             "new_qty": 595,
             "old_point": 300,
             "old_qty": 600,
-            "product_id": "<id-35>",
+            "product_id": "<id-33>",
             "sku": "LUM-2492-STUD"
           },
           {
@@ -1027,7 +989,7 @@
             "new_qty": 349,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-36>",
+            "product_id": "<id-34>",
             "sku": "LUM-2610-PREM"
           },
           {
@@ -1036,7 +998,7 @@
             "new_qty": 355,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-37>",
+            "product_id": "<id-35>",
             "sku": "LUM-2612-PREM"
           },
           {
@@ -1045,7 +1007,7 @@
             "new_qty": 154,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-38>",
+            "product_id": "<id-36>",
             "sku": "LUM-2616-PREM"
           },
           {
@@ -1054,7 +1016,7 @@
             "new_qty": 353,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-39>",
+            "product_id": "<id-37>",
             "sku": "LUM-2810-NO2"
           },
           {
@@ -1063,7 +1025,7 @@
             "new_qty": 258,
             "old_point": 50,
             "old_qty": 150,
-            "product_id": "<id-40>",
+            "product_id": "<id-38>",
             "sku": "LUM-2816-NO2"
           },
           {
@@ -1072,7 +1034,7 @@
             "new_qty": 294,
             "old_point": 80,
             "old_qty": 150,
-            "product_id": "<id-41>",
+            "product_id": "<id-39>",
             "sku": "LUM-4410-PT"
           },
           {
@@ -1081,7 +1043,7 @@
             "new_qty": 413,
             "old_point": 100,
             "old_qty": 200,
-            "product_id": "<id-42>",
+            "product_id": "<id-40>",
             "sku": "LUM-448-PT"
           },
           {
@@ -1090,7 +1052,7 @@
             "new_qty": 376,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-43>",
+            "product_id": "<id-41>",
             "sku": "LUM-448-WRC"
           },
           {
@@ -1099,7 +1061,7 @@
             "new_qty": 293,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-44>",
+            "product_id": "<id-42>",
             "sku": "LUM-6612-PT"
           },
           {
@@ -1108,7 +1070,7 @@
             "new_qty": 171,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-45>",
+            "product_id": "<id-43>",
             "sku": "LUMB14RLN3+"
           },
           {
@@ -1117,7 +1079,7 @@
             "new_qty": 166,
             "old_point": 1000,
             "old_qty": 5000,
-            "product_id": "<id-46>",
+            "product_id": "<id-44>",
             "sku": "LUMB24RLN3"
           },
           {
@@ -1126,7 +1088,7 @@
             "new_qty": 229,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-47>",
+            "product_id": "<id-45>",
             "sku": "LUMBUT24RL"
           },
           {
@@ -1135,7 +1097,7 @@
             "new_qty": 289,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-48>",
+            "product_id": "<id-46>",
             "sku": "MLD-BASE-MDF"
           },
           {
@@ -1144,7 +1106,7 @@
             "new_qty": 393,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-49>",
+            "product_id": "<id-47>",
             "sku": "MLD-CASE-MDF"
           },
           {
@@ -1153,7 +1115,7 @@
             "new_qty": 157,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-50>",
+            "product_id": "<id-48>",
             "sku": "NAIL-10D-50"
           },
           {
@@ -1162,7 +1124,7 @@
             "new_qty": 430,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-51>",
+            "product_id": "<id-49>",
             "sku": "NAIL-16D-50"
           },
           {
@@ -1171,7 +1133,7 @@
             "new_qty": 265,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-52>",
+            "product_id": "<id-50>",
             "sku": "OSB-12"
           },
           {
@@ -1180,7 +1142,7 @@
             "new_qty": 252,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-53>",
+            "product_id": "<id-51>",
             "sku": "OSB-34-TG"
           },
           {
@@ -1189,7 +1151,7 @@
             "new_qty": 323,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-54>",
+            "product_id": "<id-52>",
             "sku": "PLY-12-CDX"
           },
           {
@@ -1198,7 +1160,7 @@
             "new_qty": 932,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-55>",
+            "product_id": "<id-53>",
             "sku": "PLY-34-CDX"
           },
           {
@@ -1207,7 +1169,7 @@
             "new_qty": 223,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-56>",
+            "product_id": "<id-54>",
             "sku": "RF-ARCH-30"
           },
           {
@@ -1216,7 +1178,7 @@
             "new_qty": 250,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-57>",
+            "product_id": "<id-55>",
             "sku": "RF-DRIP-10"
           },
           {
@@ -1225,7 +1187,7 @@
             "new_qty": 195,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-58>",
+            "product_id": "<id-56>",
             "sku": "RF-EDGE-WHT"
           },
           {
@@ -1234,7 +1196,7 @@
             "new_qty": 117,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-59>",
+            "product_id": "<id-57>",
             "sku": "RF-FELT-15"
           },
           {
@@ -1243,7 +1205,7 @@
             "new_qty": 224,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-60>",
+            "product_id": "<id-58>",
             "sku": "RF-FLASH-PIPE"
           },
           {
@@ -1252,7 +1214,7 @@
             "new_qty": 277,
             "old_point": 60,
             "old_qty": 120,
-            "product_id": "<id-61>",
+            "product_id": "<id-59>",
             "sku": "RF-FLASH-STEP"
           },
           {
@@ -1261,7 +1223,7 @@
             "new_qty": 314,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-62>",
+            "product_id": "<id-60>",
             "sku": "RF-ICE-65"
           },
           {
@@ -1270,7 +1232,7 @@
             "new_qty": 196,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-63>",
+            "product_id": "<id-61>",
             "sku": "RF-ICE-WTR"
           },
           {
@@ -1279,7 +1241,7 @@
             "new_qty": 218,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-64>",
+            "product_id": "<id-62>",
             "sku": "RF-NAIL-125"
           },
           {
@@ -1288,7 +1250,7 @@
             "new_qty": 405,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-65>",
+            "product_id": "<id-63>",
             "sku": "RF-RIDGE-4"
           },
           {
@@ -1297,7 +1259,7 @@
             "new_qty": 352,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-66>",
+            "product_id": "<id-64>",
             "sku": "RF-SH-BLK"
           },
           {
@@ -1306,7 +1268,7 @@
             "new_qty": 332,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-67>",
+            "product_id": "<id-65>",
             "sku": "RF-SH-WW"
           },
           {
@@ -1315,7 +1277,7 @@
             "new_qty": 125,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-68>",
+            "product_id": "<id-66>",
             "sku": "RF-START"
           },
           {
@@ -1324,7 +1286,7 @@
             "new_qty": 204,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-69>",
+            "product_id": "<id-67>",
             "sku": "SCR-DECK-3-5"
           },
           {
@@ -1333,7 +1295,7 @@
             "new_qty": 409,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-70>",
+            "product_id": "<id-68>",
             "sku": "TIE-H1"
           }
         ]
@@ -1361,7 +1323,7 @@
             "new_qty": 88,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-3>",
+            "product_id": "<id-1>",
             "sku": "CORN2006"
           },
           {
@@ -1370,7 +1332,7 @@
             "new_qty": 100,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-4>",
+            "product_id": "<id-2>",
             "sku": "CORN2009"
           },
           {
@@ -1379,7 +1341,7 @@
             "new_qty": 93,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-5>",
+            "product_id": "<id-3>",
             "sku": "CORNCLEAR"
           },
           {
@@ -1388,7 +1350,7 @@
             "new_qty": 64,
             "old_point": 50,
             "old_qty": 120,
-            "product_id": "<id-6>",
+            "product_id": "<id-4>",
             "sku": "CORNCTRM412+"
           },
           {
@@ -1397,7 +1359,7 @@
             "new_qty": 104,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-7>",
+            "product_id": "<id-5>",
             "sku": "CORNCTRMG12+"
           },
           {
@@ -1406,7 +1368,7 @@
             "new_qty": 90,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-8>",
+            "product_id": "<id-6>",
             "sku": "CORNHMOLD14"
           },
           {
@@ -1415,7 +1377,7 @@
             "new_qty": 90,
             "old_point": 10,
             "old_qty": 25,
-            "product_id": "<id-9>",
+            "product_id": "<id-7>",
             "sku": "CORNPOLY18"
           },
           {
@@ -1424,7 +1386,7 @@
             "new_qty": 102,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-10>",
+            "product_id": "<id-8>",
             "sku": "CORNSFT1212"
           },
           {
@@ -1433,7 +1395,7 @@
             "new_qty": 73,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-11>",
+            "product_id": "<id-9>",
             "sku": "CORNSFT1612"
           },
           {
@@ -1442,7 +1404,7 @@
             "new_qty": 116,
             "old_point": 25,
             "old_qty": 60,
-            "product_id": "<id-12>",
+            "product_id": "<id-10>",
             "sku": "CORNSFT1612V"
           },
           {
@@ -1451,7 +1413,7 @@
             "new_qty": 108,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-13>",
+            "product_id": "<id-11>",
             "sku": "CORNSFT2408V"
           },
           {
@@ -1460,7 +1422,7 @@
             "new_qty": 44,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-14>",
+            "product_id": "<id-12>",
             "sku": "CORNSHTGR49"
           },
           {
@@ -1469,7 +1431,7 @@
             "new_qty": 39,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-15>",
+            "product_id": "<id-13>",
             "sku": "CORNTAPE"
           },
           {
@@ -1478,7 +1440,7 @@
             "new_qty": 24,
             "old_point": 8,
             "old_qty": 20,
-            "product_id": "<id-16>",
+            "product_id": "<id-14>",
             "sku": "DR-EXT-3680-STL"
           },
           {
@@ -1487,7 +1449,7 @@
             "new_qty": 54,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-17>",
+            "product_id": "<id-15>",
             "sku": "DR-INT-3080-6P"
           },
           {
@@ -1496,7 +1458,7 @@
             "new_qty": 111,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-18>",
+            "product_id": "<id-16>",
             "sku": "DR-INT-3280-6P"
           },
           {
@@ -1505,7 +1467,7 @@
             "new_qty": 42,
             "old_point": 15,
             "old_qty": 30,
-            "product_id": "<id-19>",
+            "product_id": "<id-17>",
             "sku": "DR-INT-3680-6P"
           },
           {
@@ -1514,7 +1476,7 @@
             "new_qty": 110,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-20>",
+            "product_id": "<id-18>",
             "sku": "DW-12-REG"
           },
           {
@@ -1523,7 +1485,7 @@
             "new_qty": 91,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-21>",
+            "product_id": "<id-19>",
             "sku": "DW-58-FC"
           },
           {
@@ -1532,7 +1494,7 @@
             "new_qty": 66,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-22>",
+            "product_id": "<id-20>",
             "sku": "HANGER-210"
           },
           {
@@ -1541,7 +1503,7 @@
             "new_qty": 93,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-23>",
+            "product_id": "<id-21>",
             "sku": "HANGER-26"
           },
           {
@@ -1550,7 +1512,7 @@
             "new_qty": 67,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-24>",
+            "product_id": "<id-22>",
             "sku": "HANGER-28"
           },
           {
@@ -1559,7 +1521,7 @@
             "new_qty": 50,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-25>",
+            "product_id": "<id-23>",
             "sku": "HANGER-28FM"
           },
           {
@@ -1568,7 +1530,7 @@
             "new_qty": 96,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-26>",
+            "product_id": "<id-24>",
             "sku": "INS-R13-15"
           },
           {
@@ -1577,7 +1539,7 @@
             "new_qty": 108,
             "old_point": 25,
             "old_qty": 50,
-            "product_id": "<id-27>",
+            "product_id": "<id-25>",
             "sku": "INS-R19-15"
           },
           {
@@ -1586,7 +1548,7 @@
             "new_qty": 137,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-28>",
+            "product_id": "<id-26>",
             "sku": "INS-R30-24"
           },
           {
@@ -1595,7 +1557,7 @@
             "new_qty": 182,
             "old_point": 200,
             "old_qty": 600,
-            "product_id": "<id-29>",
+            "product_id": "<id-27>",
             "sku": "LUM-166-WRC"
           },
           {
@@ -1604,7 +1566,7 @@
             "new_qty": 123,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-30>",
+            "product_id": "<id-28>",
             "sku": "LUM-21012-NO2"
           },
           {
@@ -1613,7 +1575,7 @@
             "new_qty": 82,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-31>",
+            "product_id": "<id-29>",
             "sku": "LUM-21216-NO2"
           },
           {
@@ -1622,7 +1584,7 @@
             "new_qty": 95,
             "old_point": 150,
             "old_qty": 400,
-            "product_id": "<id-32>",
+            "product_id": "<id-30>",
             "sku": "LUM-2410-PREM"
           },
           {
@@ -1631,7 +1593,7 @@
             "new_qty": 66,
             "old_point": 100,
             "old_qty": 300,
-            "product_id": "<id-33>",
+            "product_id": "<id-31>",
             "sku": "LUM-2412-PREM"
           },
           {
@@ -1640,7 +1602,7 @@
             "new_qty": 167,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-34>",
+            "product_id": "<id-32>",
             "sku": "LUM-248-PREM"
           },
           {
@@ -1649,7 +1611,7 @@
             "new_qty": 199,
             "old_point": 300,
             "old_qty": 600,
-            "product_id": "<id-35>",
+            "product_id": "<id-33>",
             "sku": "LUM-2492-STUD"
           },
           {
@@ -1658,7 +1620,7 @@
             "new_qty": 117,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-36>",
+            "product_id": "<id-34>",
             "sku": "LUM-2610-PREM"
           },
           {
@@ -1667,7 +1629,7 @@
             "new_qty": 119,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-37>",
+            "product_id": "<id-35>",
             "sku": "LUM-2612-PREM"
           },
           {
@@ -1676,7 +1638,7 @@
             "new_qty": 52,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-38>",
+            "product_id": "<id-36>",
             "sku": "LUM-2616-PREM"
           },
           {
@@ -1685,7 +1647,7 @@
             "new_qty": 118,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-39>",
+            "product_id": "<id-37>",
             "sku": "LUM-2810-NO2"
           },
           {
@@ -1694,7 +1656,7 @@
             "new_qty": 86,
             "old_point": 50,
             "old_qty": 150,
-            "product_id": "<id-40>",
+            "product_id": "<id-38>",
             "sku": "LUM-2816-NO2"
           },
           {
@@ -1703,7 +1665,7 @@
             "new_qty": 98,
             "old_point": 80,
             "old_qty": 150,
-            "product_id": "<id-41>",
+            "product_id": "<id-39>",
             "sku": "LUM-4410-PT"
           },
           {
@@ -1712,7 +1674,7 @@
             "new_qty": 138,
             "old_point": 100,
             "old_qty": 200,
-            "product_id": "<id-42>",
+            "product_id": "<id-40>",
             "sku": "LUM-448-PT"
           },
           {
@@ -1721,7 +1683,7 @@
             "new_qty": 126,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-43>",
+            "product_id": "<id-41>",
             "sku": "LUM-448-WRC"
           },
           {
@@ -1730,7 +1692,7 @@
             "new_qty": 98,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-44>",
+            "product_id": "<id-42>",
             "sku": "LUM-6612-PT"
           },
           {
@@ -1739,7 +1701,7 @@
             "new_qty": 57,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-45>",
+            "product_id": "<id-43>",
             "sku": "LUMB14RLN3+"
           },
           {
@@ -1748,7 +1710,7 @@
             "new_qty": 56,
             "old_point": 1000,
             "old_qty": 5000,
-            "product_id": "<id-46>",
+            "product_id": "<id-44>",
             "sku": "LUMB24RLN3"
           },
           {
@@ -1757,7 +1719,7 @@
             "new_qty": 77,
             "old_point": 500,
             "old_qty": 2000,
-            "product_id": "<id-47>",
+            "product_id": "<id-45>",
             "sku": "LUMBUT24RL"
           },
           {
@@ -1766,7 +1728,7 @@
             "new_qty": 97,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-48>",
+            "product_id": "<id-46>",
             "sku": "MLD-BASE-MDF"
           },
           {
@@ -1775,7 +1737,7 @@
             "new_qty": 131,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-49>",
+            "product_id": "<id-47>",
             "sku": "MLD-CASE-MDF"
           },
           {
@@ -1784,7 +1746,7 @@
             "new_qty": 53,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-50>",
+            "product_id": "<id-48>",
             "sku": "NAIL-10D-50"
           },
           {
@@ -1793,7 +1755,7 @@
             "new_qty": 144,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-51>",
+            "product_id": "<id-49>",
             "sku": "NAIL-16D-50"
           },
           {
@@ -1802,7 +1764,7 @@
             "new_qty": 89,
             "old_point": 120,
             "old_qty": 300,
-            "product_id": "<id-52>",
+            "product_id": "<id-50>",
             "sku": "OSB-12"
           },
           {
@@ -1811,7 +1773,7 @@
             "new_qty": 84,
             "old_point": 100,
             "old_qty": 250,
-            "product_id": "<id-53>",
+            "product_id": "<id-51>",
             "sku": "OSB-34-TG"
           },
           {
@@ -1820,7 +1782,7 @@
             "new_qty": 108,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-54>",
+            "product_id": "<id-52>",
             "sku": "PLY-12-CDX"
           },
           {
@@ -1829,7 +1791,7 @@
             "new_qty": 311,
             "old_point": 80,
             "old_qty": 200,
-            "product_id": "<id-55>",
+            "product_id": "<id-53>",
             "sku": "PLY-34-CDX"
           },
           {
@@ -1838,7 +1800,7 @@
             "new_qty": 75,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-56>",
+            "product_id": "<id-54>",
             "sku": "RF-ARCH-30"
           },
           {
@@ -1847,7 +1809,7 @@
             "new_qty": 83,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-57>",
+            "product_id": "<id-55>",
             "sku": "RF-DRIP-10"
           },
           {
@@ -1856,7 +1818,7 @@
             "new_qty": 65,
             "old_point": 60,
             "old_qty": 150,
-            "product_id": "<id-58>",
+            "product_id": "<id-56>",
             "sku": "RF-EDGE-WHT"
           },
           {
@@ -1865,7 +1827,7 @@
             "new_qty": 39,
             "old_point": 30,
             "old_qty": 80,
-            "product_id": "<id-59>",
+            "product_id": "<id-57>",
             "sku": "RF-FELT-15"
           },
           {
@@ -1874,7 +1836,7 @@
             "new_qty": 75,
             "old_point": 20,
             "old_qty": 40,
-            "product_id": "<id-60>",
+            "product_id": "<id-58>",
             "sku": "RF-FLASH-PIPE"
           },
           {
@@ -1883,7 +1845,7 @@
             "new_qty": 93,
             "old_point": 60,
             "old_qty": 120,
-            "product_id": "<id-61>",
+            "product_id": "<id-59>",
             "sku": "RF-FLASH-STEP"
           },
           {
@@ -1892,7 +1854,7 @@
             "new_qty": 105,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-62>",
+            "product_id": "<id-60>",
             "sku": "RF-ICE-65"
           },
           {
@@ -1901,7 +1863,7 @@
             "new_qty": 66,
             "old_point": 20,
             "old_qty": 50,
-            "product_id": "<id-63>",
+            "product_id": "<id-61>",
             "sku": "RF-ICE-WTR"
           },
           {
@@ -1910,7 +1872,7 @@
             "new_qty": 73,
             "old_point": 30,
             "old_qty": 60,
-            "product_id": "<id-64>",
+            "product_id": "<id-62>",
             "sku": "RF-NAIL-125"
           },
           {
@@ -1919,7 +1881,7 @@
             "new_qty": 135,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-65>",
+            "product_id": "<id-63>",
             "sku": "RF-RIDGE-4"
           },
           {
@@ -1928,7 +1890,7 @@
             "new_qty": 118,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-66>",
+            "product_id": "<id-64>",
             "sku": "RF-SH-BLK"
           },
           {
@@ -1937,7 +1899,7 @@
             "new_qty": 111,
             "old_point": 50,
             "old_qty": 100,
-            "product_id": "<id-67>",
+            "product_id": "<id-65>",
             "sku": "RF-SH-WW"
           },
           {
@@ -1946,7 +1908,7 @@
             "new_qty": 42,
             "old_point": 40,
             "old_qty": 80,
-            "product_id": "<id-68>",
+            "product_id": "<id-66>",
             "sku": "RF-START"
           },
           {
@@ -1955,7 +1917,7 @@
             "new_qty": 68,
             "old_point": 40,
             "old_qty": 100,
-            "product_id": "<id-69>",
+            "product_id": "<id-67>",
             "sku": "SCR-DECK-3-5"
           },
           {
@@ -1964,7 +1926,7 @@
             "new_qty": 137,
             "old_point": 200,
             "old_qty": 500,
-            "product_id": "<id-70>",
+            "product_id": "<id-68>",
             "sku": "TIE-H1"
           }
         ]
@@ -1993,42 +1955,42 @@
           {
             "cost": 20,
             "description": "r1b c sheet goods",
-            "product_id": "<id-55>",
+            "product_id": "<id-53>",
             "quantity": 10
           },
           {
             "cost": 8,
             "description": "r1b c lumber",
-            "product_id": "<id-34>",
+            "product_id": "<id-32>",
             "quantity": 5
           }
         ],
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-72>",
+        "branch_id": "<id-70>",
         "created_at": "<ts+0d>",
-        "id": "<id-73>",
+        "id": "<id-71>",
         "lines": [
           {
             "cost": 20,
             "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-55>",
+            "id": "<id-72>",
+            "po_id": "<id-71>",
+            "product_id": "<id-53>",
             "qty_received": 0,
             "quantity": 10
           },
           {
             "cost": 8,
             "description": "r1b c lumber",
-            "id": "<id-75>",
-            "po_id": "<id-73>",
-            "product_id": "<id-34>",
+            "id": "<id-73>",
+            "po_id": "<id-71>",
+            "product_id": "<id-32>",
             "qty_received": 0,
             "quantity": 5
           }
@@ -2037,7 +1999,7 @@
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     }
   },
@@ -2051,27 +2013,27 @@
           {
             "cost": 9,
             "description": "r1b c draft only",
-            "product_id": "<id-34>",
+            "product_id": "<id-32>",
             "quantity": 1
           }
         ],
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-72>",
+        "branch_id": "<id-70>",
         "created_at": "<ts+0d>",
-        "id": "<id-76>",
+        "id": "<id-74>",
         "lines": [
           {
             "cost": 9,
             "description": "r1b c draft only",
-            "id": "<id-77>",
-            "po_id": "<id-76>",
-            "product_id": "<id-34>",
+            "id": "<id-75>",
+            "po_id": "<id-74>",
+            "product_id": "<id-32>",
             "qty_received": 0,
             "quantity": 1
           }
@@ -2080,7 +2042,7 @@
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     }
   },
@@ -2088,31 +2050,31 @@
     "name": "purchase_order.get.c",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-73>"
+      "path": "/api/v1/purchase-orders/<id-71>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-72>",
+        "branch_id": "<id-70>",
         "created_at": "<ts+0d>",
-        "id": "<id-73>",
+        "id": "<id-71>",
         "lines": [
           {
             "cost": 8,
             "description": "r1b c lumber",
-            "id": "<id-75>",
-            "po_id": "<id-73>",
-            "product_id": "<id-34>",
+            "id": "<id-73>",
+            "po_id": "<id-71>",
+            "product_id": "<id-32>",
             "qty_received": 0,
             "quantity": 5
           },
           {
             "cost": 20,
             "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-55>",
+            "id": "<id-72>",
+            "po_id": "<id-71>",
+            "product_id": "<id-53>",
             "qty_received": 0,
             "quantity": 10
           }
@@ -2121,7 +2083,7 @@
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     }
   },
@@ -2129,7 +2091,7 @@
     "name": "purchase_order.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-78>"
+      "path": "/api/v1/purchase-orders/<id-76>"
     },
     "response": {
       "status": 404,
@@ -2140,7 +2102,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-79>"
+          "request_id": "<id-77>"
         }
       }
     }
@@ -2160,7 +2122,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-80>"
+          "request_id": "<id-78>"
         }
       }
     }
@@ -2169,7 +2131,7 @@
     "name": "purchase_order.freight.list.empty",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-73>/freight"
+      "path": "/api/v1/purchase-orders/<id-71>/freight"
     },
     "response": {
       "status": 200,
@@ -2192,7 +2154,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-81>"
+          "request_id": "<id-79>"
         }
       }
     }
@@ -2201,12 +2163,12 @@
     "name": "purchase_order.receive.draft",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-76>/receive",
+      "path": "/api/v1/purchase-orders/<id-74>/receive",
       "body": {
         "lines": [
           {
-            "line_id": "<id-77>",
-            "location_id": "<id-82>",
+            "line_id": "<id-75>",
+            "location_id": "<id-80>",
             "qty_received": 1
           }
         ]
@@ -2221,7 +2183,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-83>"
+          "request_id": "<id-81>"
         }
       }
     }
@@ -2241,7 +2203,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-84>"
+          "request_id": "<id-82>"
         }
       }
     }
@@ -2250,7 +2212,7 @@
     "name": "purchase_order.submit.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-78>/submit"
+      "path": "/api/v1/purchase-orders/<id-76>/submit"
     },
     "response": {
       "status": 500,
@@ -2261,7 +2223,7 @@
           "message": "Internal Server Error"
         },
         "meta": {
-          "request_id": "<id-85>"
+          "request_id": "<id-83>"
         }
       }
     }
@@ -2270,7 +2232,7 @@
     "name": "purchase_order.submit",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/submit"
+      "path": "/api/v1/purchase-orders/<id-71>/submit"
     },
     "response": {
       "status": 200,
@@ -2298,7 +2260,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-86>"
+          "request_id": "<id-84>"
         }
       }
     }
@@ -2307,7 +2269,7 @@
     "name": "purchase_order.receive.bad_body",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
       "body": "not an object"
     },
     "response": {
@@ -2319,7 +2281,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-87>"
+          "request_id": "<id-85>"
         }
       }
     }
@@ -2328,9 +2290,67 @@
     "name": "purchase_order.receive.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-78>/receive",
+      "path": "/api/v1/purchase-orders/<id-76>/receive",
       "body": {
         "lines": []
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-86>"
+        }
+      }
+    }
+  },
+  {
+    "name": "purchase_order.receive.bad_line_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
+      "body": {
+        "lines": [
+          {
+            "line_id": "nope",
+            "location_id": "<id-80>",
+            "qty_received": 1
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Internal Server Error"
+        },
+        "meta": {
+          "request_id": "<id-87>"
+        }
+      }
+    }
+  },
+  {
+    "name": "purchase_order.receive.unknown_line",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
+      "body": {
+        "lines": [
+          {
+            "line_id": "<id-76>",
+            "location_id": "<id-80>",
+            "qty_received": 1
+          }
+        ]
       }
     },
     "response": {
@@ -2348,68 +2368,10 @@
     }
   },
   {
-    "name": "purchase_order.receive.bad_line_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
-      "body": {
-        "lines": [
-          {
-            "line_id": "nope",
-            "location_id": "<id-82>",
-            "qty_received": 1
-          }
-        ]
-      }
-    },
-    "response": {
-      "status": 500,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-89>"
-        }
-      }
-    }
-  },
-  {
-    "name": "purchase_order.receive.unknown_line",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
-      "body": {
-        "lines": [
-          {
-            "line_id": "<id-78>",
-            "location_id": "<id-82>",
-            "qty_received": 1
-          }
-        ]
-      }
-    },
-    "response": {
-      "status": 500,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-90>"
-        }
-      }
-    }
-  },
-  {
     "name": "purchase_order.freight.upload.before_receive",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/freight",
+      "path": "/api/v1/purchase-orders/<id-71>/freight",
       "body": {
         "field": "file",
         "filename": "freight.txt",
@@ -2426,7 +2388,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-91>"
+          "request_id": "<id-89>"
         }
       }
     }
@@ -2435,12 +2397,12 @@
     "name": "purchase_order.receive.partial",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
       "body": {
         "lines": [
           {
-            "line_id": "<id-74>",
-            "location_id": "<id-82>",
+            "line_id": "<id-72>",
+            "location_id": "<id-80>",
             "qty_received": 4
           }
         ]
@@ -2458,31 +2420,31 @@
     "name": "purchase_order.get.after_partial",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-73>"
+      "path": "/api/v1/purchase-orders/<id-71>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-72>",
+        "branch_id": "<id-70>",
         "created_at": "<ts+0d>",
-        "id": "<id-73>",
+        "id": "<id-71>",
         "lines": [
           {
             "cost": 8,
             "description": "r1b c lumber",
-            "id": "<id-75>",
-            "po_id": "<id-73>",
-            "product_id": "<id-34>",
+            "id": "<id-73>",
+            "po_id": "<id-71>",
+            "product_id": "<id-32>",
             "qty_received": 0,
             "quantity": 5
           },
           {
             "cost": 20,
             "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-55>",
+            "id": "<id-72>",
+            "po_id": "<id-71>",
+            "product_id": "<id-53>",
             "qty_received": 4,
             "quantity": 10
           }
@@ -2491,7 +2453,7 @@
         "source": "MANUAL",
         "status": "PARTIAL",
         "updated_at": "<ts+0d>",
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     }
   },
@@ -2499,7 +2461,7 @@
     "name": "purchase_order.freight.upload",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/freight",
+      "path": "/api/v1/purchase-orders/<id-71>/freight",
       "body": {
         "field": "file",
         "filename": "freight.txt",
@@ -2516,7 +2478,7 @@
           "message": "AI is off. An administrator turns it on in Tech Admin, AI, by choosing a provider and entering its key. Until then, enter the freight total by hand."
         },
         "meta": {
-          "request_id": "<id-92>"
+          "request_id": "<id-90>"
         }
       }
     }
@@ -2525,7 +2487,7 @@
     "name": "purchase_order.freight.upload.wrong_field",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/freight",
+      "path": "/api/v1/purchase-orders/<id-71>/freight",
       "body": {
         "field": "invoice",
         "filename": "freight.txt",
@@ -2542,7 +2504,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-93>"
+          "request_id": "<id-91>"
         }
       }
     }
@@ -2568,7 +2530,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-94>"
+          "request_id": "<id-92>"
         }
       }
     }
@@ -2577,7 +2539,7 @@
     "name": "purchase_order.freight.upload.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-78>/freight",
+      "path": "/api/v1/purchase-orders/<id-76>/freight",
       "body": {
         "field": "file",
         "filename": "freight.txt",
@@ -2594,7 +2556,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-95>"
+          "request_id": "<id-93>"
         }
       }
     }
@@ -2603,7 +2565,7 @@
     "name": "purchase_order.freight.list",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-73>/freight"
+      "path": "/api/v1/purchase-orders/<id-71>/freight"
     },
     "response": {
       "status": 200,
@@ -2615,7 +2577,47 @@
     "name": "purchase_order.freight.apply.unknown_charge",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/freight/<id-78>/apply"
+      "path": "/api/v1/purchase-orders/<id-71>/freight/<id-76>/apply"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-94>"
+        }
+      }
+    }
+  },
+  {
+    "name": "purchase_order.freight.apply.bad_po_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders/not-a-uuid/freight/<id-76>/apply"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "BAD_REQUEST",
+          "message": "Bad Request"
+        },
+        "meta": {
+          "request_id": "<id-95>"
+        }
+      }
+    }
+  },
+  {
+    "name": "purchase_order.freight.apply.bad_charge_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/purchase-orders/<id-71>/freight/not-a-uuid/apply"
     },
     "response": {
       "status": 400,
@@ -2632,55 +2634,15 @@
     }
   },
   {
-    "name": "purchase_order.freight.apply.bad_po_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/purchase-orders/not-a-uuid/freight/<id-78>/apply"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-97>"
-        }
-      }
-    }
-  },
-  {
-    "name": "purchase_order.freight.apply.bad_charge_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/freight/not-a-uuid/apply"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-98>"
-        }
-      }
-    }
-  },
-  {
     "name": "purchase_order.receive.rest",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
       "body": {
         "lines": [
           {
-            "line_id": "<id-74>",
-            "location_id": "<id-82>",
+            "line_id": "<id-72>",
+            "location_id": "<id-80>",
             "qty_received": 6
           }
         ]
@@ -2698,31 +2660,31 @@
     "name": "purchase_order.get.after_receive",
     "request": {
       "method": "GET",
-      "path": "/api/v1/purchase-orders/<id-73>"
+      "path": "/api/v1/purchase-orders/<id-71>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-72>",
+        "branch_id": "<id-70>",
         "created_at": "<ts+0d>",
-        "id": "<id-73>",
+        "id": "<id-71>",
         "lines": [
           {
             "cost": 8,
             "description": "r1b c lumber",
-            "id": "<id-75>",
-            "po_id": "<id-73>",
-            "product_id": "<id-34>",
+            "id": "<id-73>",
+            "po_id": "<id-71>",
+            "product_id": "<id-32>",
             "qty_received": 0,
             "quantity": 5
           },
           {
             "cost": 20,
             "description": "r1b c sheet goods",
-            "id": "<id-74>",
-            "po_id": "<id-73>",
-            "product_id": "<id-55>",
+            "id": "<id-72>",
+            "po_id": "<id-71>",
+            "product_id": "<id-53>",
             "qty_received": 10,
             "quantity": 10
           }
@@ -2731,7 +2693,7 @@
         "source": "MANUAL",
         "status": "PARTIAL",
         "updated_at": "<ts+0d>",
-        "vendor_id": "<id-71>"
+        "vendor_id": "<id-69>"
       }
     }
   },
@@ -2739,12 +2701,12 @@
     "name": "purchase_order.receive.already_received",
     "request": {
       "method": "POST",
-      "path": "/api/v1/purchase-orders/<id-73>/receive",
+      "path": "/api/v1/purchase-orders/<id-71>/receive",
       "body": {
         "lines": [
           {
-            "line_id": "<id-74>",
-            "location_id": "<id-82>",
+            "line_id": "<id-72>",
+            "location_id": "<id-80>",
             "qty_received": 1
           }
         ]
@@ -2782,7 +2744,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "count": 1,
+        "count": 4,
+        "no_reorder_qty": [],
         "status": "success"
       }
     }
@@ -2810,7 +2773,7 @@
       "content_type": "application/json",
       "body": {
         "MANUAL": 16,
-        "REORDER": 1
+        "REORDER": 4
       }
     }
   }
