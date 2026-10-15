@@ -22,12 +22,16 @@ import (
 type style struct {
 	layout string
 	months *[12]string
+	// padDay writes the day with two digits ("01 Sept 2026"), as en-ZA does.
+	padDay bool
 }
 
 var (
 	monthsShort = [12]string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 	// the day first English locales spell September "Sept"
 	monthsSept = [12]string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"}
+	// en-AU also writes June and July in full
+	monthsAU = [12]string{"Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec"}
 )
 
 // layoutDay holds the parts of a day in the order a locale reads them.
@@ -37,11 +41,14 @@ const (
 )
 
 var dayLayouts = map[string]style{
-	"en-US": {layoutMonthFirst, &monthsShort},
-	"en-CA": {layoutMonthFirst, &monthsShort},
-	"en-GB": {layoutDayFirst, &monthsSept},
-	"en-NZ": {layoutDayFirst, &monthsSept},
-	"en-IE": {layoutDayFirst, &monthsSept},
+	"en-US": {layoutMonthFirst, &monthsShort, false},
+	"en-CA": {layoutMonthFirst, &monthsShort, false},
+	"en-GB": {layoutDayFirst, &monthsSept, false},
+	"en-NZ": {layoutDayFirst, &monthsSept, false},
+	"en-IE": {layoutDayFirst, &monthsSept, false},
+	"en-IN": {layoutDayFirst, &monthsSept, false},
+	"en-AU": {layoutDayFirst, &monthsAU, false},
+	"en-ZA": {layoutDayFirst, &monthsSept, true},
 }
 
 // newStyle returns the style for a BCP 47 tag; an empty, unknown or
@@ -53,14 +60,21 @@ func newStyle(tag string) style {
 	return dayLayouts["en-US"]
 }
 
-// canonicalTag writes "en_gb" and "EN-gb" as "en-GB"; a tag with a script or
-// further subtags is cut to its language and region.
+// canonicalTag writes "en_gb" and "EN-gb" as "en-GB": the language and the
+// region, which is the second subtag when it is two letters or three digits.
+// Variants and extensions after the region ("en-GB-oxendict") do not hide it;
+// a script in its place ("en-Latn-GB") is no region, and reads as en-US words
+// as the desk's Intl does.
 func canonicalTag(tag string) string {
 	parts := strings.FieldsFunc(tag, func(r rune) bool { return r == '-' || r == '_' })
 	if len(parts) < 2 {
 		return ""
 	}
-	return strings.ToLower(parts[0]) + "-" + strings.ToUpper(parts[len(parts)-1])
+	region := parts[1]
+	if len(region) != 2 {
+		return ""
+	}
+	return strings.ToLower(parts[0]) + "-" + strings.ToUpper(region)
 }
 
 // Day writes a business day (YYYY-MM-DD, or a midnight UTC timestamp of one)
@@ -86,6 +100,9 @@ func (s style) Date(t time.Time) string {
 	y, m, d := t.Date()
 	month := s.months[m-1]
 	day := strconv.Itoa(d)
+	if s.padDay && d < 10 {
+		day = "0" + day
+	}
 	year := strconv.Itoa(y)
 	if s.layout == layoutDayFirst {
 		return day + " " + month + " " + year
