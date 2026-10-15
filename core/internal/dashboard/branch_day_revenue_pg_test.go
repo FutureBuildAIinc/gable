@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strconv"
+	"math"
 	"testing"
 	"time"
 
@@ -77,26 +77,21 @@ func newDayWorld(t *testing.T) *dayWorld {
 // day is the branch's business date now.
 func (w *dayWorld) day() time.Time { return testutil.BranchDay(w.t, w.db) }
 
-// record writes a cash payment at yard through the AR core and places it at
-// the instant createdAt (a SQL expression of timestamptz), which the writer
-// leaves at NOW().
-func (w *dayWorld) record(yard uuid.UUID, cents int64, createdAt string) uuid.UUID {
+// record writes a cash payment at yard through the AR core, received on the
+// branch's day plus dayOffset. The writer stamps created_at at NOW() whatever
+// the date it names, as the demo import does for its whole history; no leg
+// moves created_at.
+func (w *dayWorld) record(yard uuid.UUID, cents int64, dayOffset int) uuid.UUID {
 	w.t.Helper()
-	ctx := context.Background()
 	var id uuid.UUID
-	err := w.db.RunInTx(ctx, func(ctx context.Context) error {
+	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
 		var e error
 		id, _, e = w.svc.RecordPayment(ctx, account.RecordPaymentIn{CustomerID: w.customer, BranchID: yard, Currency: "USD",
-			Method: "CASH", AmountCents: cents, ReceivedOn: w.day(), Actor: "u-test"})
+			Method: "CASH", AmountCents: cents, ReceivedOn: w.day().AddDate(0, 0, dayOffset), Actor: "u-test"})
 		return e
 	})
 	if err != nil {
 		w.t.Fatalf("record payment: %v", err)
-	}
-	if createdAt != "NOW()" {
-		if _, err := w.db.Pool.Exec(ctx, `UPDATE payments SET created_at = `+createdAt+` WHERE id = $1`, id); err != nil {
-			w.t.Fatalf("place payment: %v", err)
-		}
 	}
 	return id
 }
@@ -121,11 +116,6 @@ func (w *dayWorld) void(payment uuid.UUID) {
 	if err != nil {
 		w.t.Fatalf("void: %v", err)
 	}
-}
-
-// midnight is the instant the branch's today began, as a SQL expression.
-func (w *dayWorld) midnight() string {
-	return `((` + testutil.BranchDaySQL + `)::timestamp AT TIME ZONE '` + w.zone + `')`
 }
 
 // figures reads the card, the trend's point for today and the Daily Till for
@@ -181,7 +171,7 @@ func netCents(t *testing.T, till *reporting.DailyTillReport) int64 {
 		t.Fatal(err)
 	}
 	net, _ := m["net_collected"].(float64)
-	return int64(net*100 + 0.5)
+	return int64(math.Round(net * 100))
 }
 
 // yesterdayOf recovers yesterday from the change figure and today's.
@@ -198,7 +188,7 @@ func yesterdayOf(s *DashboardSummary) int64 {
 // granted user with no header alike.
 func TestToday_APaymentRecordedAtTheYardIsOnTheCardTheTrendAndTheTill(t *testing.T) {
 	w := newDayWorld(t)
-	w.record(w.yard, 1234, "NOW()")
+	w.record(w.yard, 1234, 0)
 	grantee := "bdr-" + uuid.NewString()[:8]
 	if _, err := w.db.Pool.Exec(context.Background(), `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, true, 'test')`, grantee, w.yard); err != nil {
 		t.Fatal(err)
@@ -217,8 +207,8 @@ func TestToday_APaymentRecordedAtTheYardIsOnTheCardTheTrendAndTheTill(t *testing
 // for the same customer is on that yard's card and its till, not this one's.
 func TestToday_APaymentBelongsToTheYardThatTookIt(t *testing.T) {
 	w := newDayWorld(t)
-	w.record(w.yard, 1000, "NOW()")
-	w.record(w.other, 640, "NOW()")
+	w.record(w.yard, 1000, 0)
+	w.record(w.other, 640, 0)
 	a, b := w.read(&w.yard, nil), w.read(&w.other, nil)
 	if a.today != 1000 || a.tillNet != 1000 || b.today != 640 || b.tillNet != 640 {
 		t.Errorf("yard A card %d till %d, yard B card %d till %d, want 1000/1000 and 640/640", a.today, a.tillNet, b.today, b.tillNet)
@@ -228,8 +218,8 @@ func TestToday_APaymentBelongsToTheYardThatTookIt(t *testing.T) {
 // A voided payment is never counted.
 func TestToday_AVoidedPaymentIsNeverCounted(t *testing.T) {
 	w := newDayWorld(t)
-	w.record(w.yard, 1000, "NOW()")
-	voided := w.record(w.yard, 3200, "NOW()")
+	w.record(w.yard, 1000, 0)
+	voided := w.record(w.yard, 3200, 0)
 	w.void(voided)
 	got := w.read(&w.yard, nil)
 	if got.today != 1000 || got.trendToday != 1000 || got.tillNet != 1000 {
@@ -241,9 +231,9 @@ func TestToday_AVoidedPaymentIsNeverCounted(t *testing.T) {
 // refunds paid out that day, a refund of an older payment included.
 func TestToday_NetCollectionsAreReceivedLessRefunds(t *testing.T) {
 	w := newDayWorld(t)
-	same := w.record(w.yard, 4000, "NOW()")
+	same := w.record(w.yard, 4000, 0)
 	w.refund(same, 400) // a refund of today's payment, today
-	older := w.record(w.yard, 2000, "NOW() - INTERVAL '48 hours'")
+	older := w.record(w.yard, 2000, -2)
 	w.refund(older, 500) // a refund today of an older payment
 	got := w.read(&w.yard, nil)
 	if want := int64(4000 - 400 - 500); got.today != want || got.trendToday != want || got.tillNet != want {
@@ -251,15 +241,16 @@ func TestToday_NetCollectionsAreReceivedLessRefunds(t *testing.T) {
 	}
 }
 
-// The day is cut as a half open range on the instant: one second before the
-// branch's midnight is yesterday's, one second after is today's.
-func TestToday_TheDaysEdgesAreTheBranchsMidnight(t *testing.T) {
+// The day is the payment's own business date (received_on): the day before
+// and the day after are not today's, for the card, the trend and the till.
+func TestToday_TheDaysEdgesAreTheBusinessDate(t *testing.T) {
 	w := newDayWorld(t)
-	w.record(w.yard, 100, w.midnight()+` - INTERVAL '1 second'`)                    // yesterday's last second
-	w.record(w.yard, 200, w.midnight()+` + INTERVAL '1 second'`)                    // today's first second
-	w.record(w.yard, 400, w.midnight()+` + INTERVAL '1 day' - INTERVAL '1 second'`) // today's last second
-	w.record(w.yard, 800, w.midnight()+` + INTERVAL '1 day' + INTERVAL '1 second'`) // tomorrow
-	s, err := w.repo.GetDashboardSummary(context.Background(), &w.yard, nil)
+	w.record(w.yard, 100, -1) // yesterday's
+	w.record(w.yard, 200, 0)  // today's
+	w.record(w.yard, 400, 0)  // today's
+	w.record(w.yard, 800, 1)  // tomorrow's: not in today
+	ctx := context.Background()
+	s, err := w.repo.GetDashboardSummary(ctx, &w.yard, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,31 +260,96 @@ func TestToday_TheDaysEdgesAreTheBranchsMidnight(t *testing.T) {
 	if got := yesterdayOf(s); got != 100 {
 		t.Errorf("yesterday = %d, want 100", got)
 	}
-}
-
-// The trend is today and the days before it, each on the branch's own day:
-// seven days is today and the six before, and nothing older.
-func TestTrend_TheWindowIsTodayAndTheDaysBefore(t *testing.T) {
-	w := newDayWorld(t)
-	for back, cents := range map[int]int64{0: 100, 6: 200, 7: 400} {
-		w.record(w.yard, cents, w.midnight()+` - INTERVAL '`+strconv.Itoa(back)+` days' + INTERVAL '12 hours'`)
-	}
-	points, err := w.repo.GetRevenueTrend(context.Background(), &w.yard, nil, 7)
+	points, err := w.repo.GetRevenueTrend(ctx, &w.yard, nil, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	day := w.day()
+	byDay := map[string]int64{}
+	for _, p := range points {
+		byDay[p.Date] = p.Revenue
+	}
+	today, yest := w.day().Format("2006-01-02"), w.day().AddDate(0, 0, -1).Format("2006-01-02")
+	if byDay[today] != 600 || byDay[yest] != 100 || len(byDay) != 2 {
+		t.Errorf("trend = %v, want today 600 and yesterday 100 only", byDay)
+	}
+	svc := reporting.NewService(reporting.NewRepository(w.db))
+	bctx := branchctx.With(ctx, &branchctx.Context{UserSub: "u", BranchID: &w.yard})
+	for day, want := range map[string]int64{today: 600, yest: 100} {
+		till, err := svc.GetDailyTill(bctx, day)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := netCents(t, till); got != want {
+			t.Errorf("till for %s = %d, want %d", day, got, want)
+		}
+	}
+}
+
+// The seeded demo's shape: every payment shares one created_at (the seed's
+// instant) and its received_on spreads over months. Today's card, the trend's
+// points and the till follow received_on, never created_at.
+func TestToday_FollowsReceivedOnNotTheSharedCreatedAt(t *testing.T) {
+	w := newDayWorld(t)
+	var total int64
+	for off := -60; off <= 0; off += 6 {
+		w.record(w.yard, int64(1000+off), off)
+		total += int64(1000 + off)
+	}
+	w.record(w.yard, 4000, -7) // seven days back: outside a seven day window
+	ctx := context.Background()
+	s, err := w.repo.GetDashboardSummary(ctx, &w.yard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.TodayRevenue != 1000 {
+		t.Errorf("TodayRevenue = %d, want only today's 1000 (the whole history is %d)", s.TodayRevenue, total)
+	}
+	points, err := w.repo.GetRevenueTrend(ctx, &w.yard, nil, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seven days back from today take offsets 0 and -6.
 	want := map[string]int64{
-		day.Format("2006-01-02"):                   100,
-		day.AddDate(0, 0, -6).Format("2006-01-02"): 200,
+		w.day().Format("2006-01-02"):                   1000,
+		w.day().AddDate(0, 0, -6).Format("2006-01-02"): 994,
 	}
 	if len(points) != len(want) {
 		t.Fatalf("trend = %+v, want exactly %v", points, want)
 	}
 	for _, p := range points {
 		if want[p.Date] != p.Revenue {
-			t.Errorf("trend point %s = %d, want %d", p.Date, p.Revenue, want[p.Date])
+			t.Errorf("trend %s = %d, want %d", p.Date, p.Revenue, want[p.Date])
 		}
+	}
+	if got := w.read(&w.yard, nil); got.tillNet != 1000 {
+		t.Errorf("till = %d, want 1000", got.tillNet)
+	}
+}
+
+// A payment recorded today with a received_on of yesterday is yesterday's: the
+// card's comparison, the trend and the till never count it as today's.
+func TestToday_ABackdatedPaymentIsOnTheDayItNames(t *testing.T) {
+	w := newDayWorld(t)
+	w.record(w.yard, 1000, 0)
+	w.record(w.yard, 500, -1)
+	got := w.read(&w.yard, nil)
+	if got.today != 1000 || got.tillNet != 1000 || got.trendToday != 1000 {
+		t.Errorf("card %d, trend %d, till %d, want all 1000", got.today, got.trendToday, got.tillNet)
+	}
+	if got.yesterday != 500 {
+		t.Errorf("yesterday = %d, want the backdated 500", got.yesterday)
+	}
+}
+
+// A refund today of an older payment alone makes today's net negative, read
+// as such on the card, the trend and the till.
+func TestToday_ARefundOnlyDayIsNegative(t *testing.T) {
+	w := newDayWorld(t)
+	older := w.record(w.yard, 2000, -3)
+	w.refund(older, 500)
+	got := w.read(&w.yard, nil)
+	if got.today != -500 || got.trendToday != -500 || got.tillNet != -500 {
+		t.Errorf("card %d, trend %d, till %d, want all -500", got.today, got.trendToday, got.tillNet)
 	}
 }
 
@@ -304,17 +360,38 @@ func TestDailyTill_ANoDateReadIsAlwaysFresh(t *testing.T) {
 	w := newDayWorld(t)
 	svc := reporting.NewService(reporting.NewRepository(w.db))
 	ctx := branchctx.With(context.Background(), &branchctx.Context{UserSub: "u", BranchID: &w.yard})
-	w.record(w.yard, 1000, "NOW()")
+	w.record(w.yard, 1000, 0)
 	first, err := svc.GetDailyTill(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.record(w.yard, 500, "NOW()")
+	w.record(w.yard, 500, 0)
 	second, err := svc.GetDailyTill(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a, b := netCents(t, first), netCents(t, second); a != 1000 || b != 1500 {
 		t.Errorf("till %d then %d cents, want 1000 then 1500", a, b)
+	}
+}
+
+// The Daily Till's Sales Summary counts collections the same way: by the
+// payment's business date, voided payments out and refunds in.
+func TestSalesSummary_CollectedIsNetOfRefundsAndVoids(t *testing.T) {
+	w := newDayWorld(t)
+	kept := w.record(w.yard, 1000, -2)
+	voided := w.record(w.yard, 3200, -2)
+	w.void(voided)
+	w.record(w.yard, 700, -10) // outside the period
+	w.refund(kept, 400)        // refunded today, inside the period
+	start := w.day().AddDate(0, 0, -3).Format("2006-01-02")
+	end := w.day().Format("2006-01-02")
+	ctx := branchctx.With(context.Background(), &branchctx.Context{UserSub: "u", BranchID: &w.yard})
+	got, err := reporting.NewService(reporting.NewRepository(w.db)).GetSalesSummary(ctx, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Round(got.TotalCollected*100) != 600 {
+		t.Errorf("TotalCollected = %v, want 6.00 (1000 less the 400 refund; the voided 3200 and the 700 outside are out)", got.TotalCollected)
 	}
 }

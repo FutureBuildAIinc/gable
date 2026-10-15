@@ -6712,7 +6712,7 @@ export interface paths {
         };
         /**
          * Net collections on one day at the caller's yard, by method
-         * @description Roles admin, owner, finance. The date defaults to the default branch's business day, the day the dashboard's Today's Revenue card is cut on; a date is that calendar day in the same zone. The day's figures are the card's: payments received at the caller's yard (their own branch, never a voided payment), the refunds paid out that day, and the net of the two. A dated report is cached for 60 seconds per date; one with no date never is. A date that is not YYYY-MM-DD is a 500.
+         * @description Roles admin, owner, finance. The date defaults to the default branch's business day, the day the dashboard's Today's Revenue card is cut on; a date is that calendar day in the same zone. The day's figures are the card's: payments received at the caller's yard by their business date received_on (their own branch, never a voided payment), the refunds paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no date never is. A date that is not YYYY-MM-DD is a 500.
          */
         get: operations["reportsDailyTill"];
         put?: never;
@@ -6732,7 +6732,7 @@ export interface paths {
         };
         /**
          * Invoiced, collected and outstanding totals for a period
-         * @description Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
+         * @description Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. total_collected is the period's net collections, counted as the dashboard card and the Daily Till count them (payments by received_on at the caller's yard, voided payments out, refunds paid out in the period less). A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
          */
         get: operations["reportsSalesSummary"];
         put?: never;
@@ -8559,7 +8559,7 @@ export interface components {
         DashboardSummary: {
             /**
              * Format: int64
-             * @description The branch's day net collections in cents at the caller's yard: payments received (their own branch, never a voided payment) less refunds paid out that day.
+             * @description The branch's day net collections in cents at the caller's yard (the card reads "Collected today"): payments received that day by their business date received_on (their own branch, never a voided payment) less refunds paid out that day by refunded_on.
              */
             today_revenue: number;
             /** @description Percentage change of the net against yesterday's net; 0 when yesterday's net is not above zero. */
