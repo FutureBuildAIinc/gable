@@ -120,6 +120,22 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'pos-till-state').textContent).toContain('Till open');
   });
 
+  it('ticks Payment on the Summary step only once a tender is chosen', async () => {
+    const el = await mount(sale());
+    q(el, 'pos-next-payment').click();
+    await el.updateComplete;
+    q(el, 'pos-next-summary').click();
+    await el.updateComplete;
+    // No tender chosen ("Tender: None yet"): Payment shows its number, not a
+    // tick, on the panel head and in the header's progress chip.
+    expect(q(el, 'panel-payment-toggle').querySelector('span')!.textContent).toBe('2');
+    expect(q(el, 'progress-payment').getAttribute('data-state')).not.toBe('done');
+    await chooseCash(el);
+    expect(q(el, 'panel-payment-toggle').querySelector('span')!.textContent).toBe('✓');
+    expect(q(el, 'progress-payment').getAttribute('data-state')).toBe('done');
+    el.remove();
+  });
+
   it('pays in cash with the tendered amount, sending one cash tender on the sale revision', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed', change_cents: 1350 }));
     const el = await mount(sale());

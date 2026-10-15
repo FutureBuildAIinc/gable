@@ -37,13 +37,20 @@ describe('payPlan', () => {
 
 describe('panelProgress', () => {
   it('walks Customer, Payment, Summary one step at a time', () => {
-    expect(panelProgress('customer', false)).toEqual({ customer: 'current', payment: 'upcoming', summary: 'upcoming' });
-    expect(panelProgress('payment', false)).toEqual({ customer: 'done', payment: 'current', summary: 'upcoming' });
-    expect(panelProgress('summary', false)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
+    expect(panelProgress('customer', false, false)).toEqual({ customer: 'current', payment: 'upcoming', summary: 'upcoming' });
+    expect(panelProgress('payment', false, false)).toEqual({ customer: 'done', payment: 'current', summary: 'upcoming' });
+    expect(panelProgress('summary', false, true)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
+  });
+
+  it('ticks Payment on the Summary step only once a tender is chosen', () => {
+    // A cashier can reach Summary with no tender chosen ("Tender: None
+    // yet"); Payment is not done until a tender is chosen.
+    expect(panelProgress('summary', false, false)).toEqual({ customer: 'done', payment: 'upcoming', summary: 'current' });
+    expect(panelProgress('summary', false, true).payment).toBe('done');
   });
 
   it('marks all three steps done on a completed sale', () => {
-    expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
+    expect(panelProgress('customer', true, false)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
   });
 });
 
