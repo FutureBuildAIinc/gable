@@ -26,6 +26,10 @@ export class NewPurchaseOrder extends LitElement {
     /** The yard a recommendation row is for; the order is created there. */
     @state() private branchId = '';
     @state() private branchName = '';
+    /** The vendor's name, shown beside the id a recommendation carried. */
+    @state() private vendorName = '';
+    /** True when a recommendation's product has no vendor: the person chooses one. */
+    @state() private noVendor = false;
     @state() private lines: LineWithKey[] = [];
     @state() private products: Product[] = [];
     @state() private loading = false;
@@ -42,8 +46,14 @@ export class NewPurchaseOrder extends LitElement {
         if (isFromRecommendation) {
             this.branchId = params.get('branch_id') || '';
             this.branchName = params.get('branch_name') || '';
-            const vendorName = params.get('vendor_name') || '';
-            if (vendorName) this.vendorId = vendorName;
+            // The vendor is the id the row carried; a name is never sent as an id.
+            const vendorId = params.get('vendor_id') || '';
+            if (vendorId) {
+                this.vendorId = vendorId;
+                this.vendorName = params.get('vendor_name') || '';
+            } else {
+                this.noVendor = true;
+            }
 
             const productId = params.get('product_id') || '';
             const description = params.get('description') || '';
@@ -89,7 +99,7 @@ export class NewPurchaseOrder extends LitElement {
 
     private async _handleSave() {
         if (!this.vendorId.trim()) {
-            ToastService.show('Enter a vendor ID', 'error');
+            ToastService.show(this.noVendor ? 'This product has no vendor. Enter the vendor ID first.' : 'Enter a vendor ID', 'error');
             return;
         }
         if (this.lines.length === 0) {
@@ -151,6 +161,14 @@ export class NewPurchaseOrder extends LitElement {
                     <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">
                         <div class="p-6">
                             <h2 class="text-lg font-medium text-white mb-4">Vendor</h2>
+                            ${this.vendorName ? html`
+                                <p data-testid="po-vendor" class="text-sm text-white mb-2">${this.vendorName}</p>
+                            ` : nothing}
+                            ${this.noVendor && !this.vendorId ? html`
+                                <p data-testid="po-no-vendor" class="text-sm text-amber-400 mb-2">
+                                    This product has no vendor set, so no vendor is filled in. Enter the vendor ID below to create the order.
+                                </p>
+                            ` : nothing}
                             <input
                                 type="text"
                                 placeholder="Vendor UUID"

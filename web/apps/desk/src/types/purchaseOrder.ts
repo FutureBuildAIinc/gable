@@ -106,6 +106,8 @@ export interface PurchaseRecommendation {
     product_id: string;
     product_sku: string;
     product_name: string;
+    /** The product's vendor, by id; absent when the product has none. */
+    vendor_id?: string;
     vendor_name?: string;
     current_stock: number;
     avg_daily_sales: number;

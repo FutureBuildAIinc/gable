@@ -13700,6 +13700,11 @@ export interface components {
             product_id: string;
             product_sku: string;
             product_name: string;
+            /**
+             * Format: uuid
+             * @description The product's vendor; absent when the product has none.
+             */
+            vendor_id?: string;
             vendor_name?: string;
             current_stock: number;
             avg_daily_sales: number;

@@ -564,6 +564,10 @@ components:
         product_id: { type: string, format: uuid }
         product_sku: { type: string }
         product_name: { type: string }
+        vendor_id:
+          type: string
+          format: uuid
+          description: The product's vendor; absent when the product has none.
         vendor_name: { type: string }
         current_stock: { type: number }
         avg_daily_sales: { type: number }

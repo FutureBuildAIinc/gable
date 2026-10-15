@@ -61,7 +61,11 @@ export class GablePurchasingRecommendations extends LitElement {
             qty: String(rec.suggested_qty),
             cost: String(rec.estimated_cost / rec.suggested_qty),
         });
-        if (rec.vendor_name) params.set('vendor_name', rec.vendor_name);
+        // The order is created for the vendor's id; the name is for the form to show.
+        if (rec.vendor_id) {
+            params.set('vendor_id', rec.vendor_id);
+            if (rec.vendor_name) params.set('vendor_name', rec.vendor_name);
+        }
         router.navigate(`/purchasing/new?${params.toString()}`);
     }
 

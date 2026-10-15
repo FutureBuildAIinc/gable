@@ -52,11 +52,14 @@ type PurchaseRecommendation struct {
 	// A recommendation is one product at one yard (item 135 b): the stock is
 	// that yard's, the sales are that yard's, and the suggestion is for that
 	// yard. A company wide figure never decides one.
-	BranchID      uuid.UUID    `json:"branch_id"`
-	BranchName    string       `json:"branch_name"`
-	ProductID     uuid.UUID    `json:"product_id"`
-	ProductSKU    string       `json:"product_sku"`
-	ProductName   string       `json:"product_name"`
+	BranchID    uuid.UUID `json:"branch_id"`
+	BranchName  string    `json:"branch_name"`
+	ProductID   uuid.UUID `json:"product_id"`
+	ProductSKU  string    `json:"product_sku"`
+	ProductName string    `json:"product_name"`
+	// VendorID is the product's vendor, by id, so a new purchase order from
+	// this row is created for that vendor; absent when the product has none.
+	VendorID      *uuid.UUID   `json:"vendor_id,omitempty"`
 	VendorName    string       `json:"vendor_name,omitempty"`
 	CurrentStock  float64      `json:"current_stock"`
 	AvgDailySales float64      `json:"avg_daily_sales"`
@@ -280,6 +283,7 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 			// vendor_id; fall back to display-name lookup for legacy rows.
 			leadTime := rs.config.DefaultLeadTimeDays
 			vendorName := ""
+			var vendorID *uuid.UUID
 			var matchedVendor *vendor.Vendor
 			if p.VendorID != nil {
 				if v, ok := vendorByID[*p.VendorID]; ok {
@@ -293,6 +297,8 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 			}
 			if matchedVendor != nil {
 				vendorName = matchedVendor.Name
+				id := matchedVendor.ID
+				vendorID = &id
 				if matchedVendor.AverageLeadTimeDays > 0 {
 					leadTime = matchedVendor.AverageLeadTimeDays
 				}
@@ -333,6 +339,7 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 				ProductID:     p.ID,
 				ProductSKU:    p.SKU,
 				ProductName:   p.Description,
+				VendorID:      vendorID,
 				VendorName:    vendorName,
 				CurrentStock:  math.Round(currentStock*100) / 100,
 				AvgDailySales: math.Round(avgDailySales*100) / 100,
