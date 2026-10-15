@@ -24,6 +24,20 @@ import (
 )
 
 // recentDate returns a timestamp drawn from the last `daysBack` days.
+// seedBranchZoneEnv names the time zone the seed gives the branches it writes.
+// The production seed leaves it unset and keeps its own zone; the
+// characterization run sets it to the zone its server reads, so the seed's
+// business day (the branch's calendar day) and the server's day cut are the
+// same day at every hour, not only outside the hours when UTC's date is ahead.
+const seedBranchZoneEnv = "SEED_BRANCH_TIMEZONE"
+
+func seedBranchZone() string {
+	if z := os.Getenv(seedBranchZoneEnv); z != "" {
+		return z
+	}
+	return "America/Vancouver"
+}
+
 func recentDate(daysBack int) time.Time {
 	return time.Now().AddDate(0, 0, -rand.Intn(daysBack))
 }
@@ -327,6 +341,7 @@ func Run() {
 	// because parent_id is NULL for branches and NULL != NULL in unique indexes.
 	// Pre-select instead: if a BRANCH with this code exists, UPDATE it; else INSERT.
 	branchIDs := make(map[string]uuid.UUID)
+	branchZone := seedBranchZone()
 	for _, b := range branches {
 		var id string
 		err := db.QueryRow(`SELECT id FROM locations WHERE type='BRANCH' AND code=$1 LIMIT 1`, b.Code).Scan(&id)
@@ -334,9 +349,9 @@ func Run() {
 			// Not found → insert.
 			err = db.QueryRow(`INSERT INTO locations
 				(id, code, type, description, path, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active)
-				VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'America/Vancouver', TRUE)
+				VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
 				RETURNING id`,
-				b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate).Scan(&id)
+				b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate, branchZone).Scan(&id)
 			if err != nil {
 				log.Printf("Branch %s insert: %v", b.Code, err)
 				continue
@@ -345,10 +360,10 @@ func Run() {
 			// Found → update in place.
 			_, err = db.Exec(`UPDATE locations SET
 				description=$2, name=$2, address=$3, city=$4, state=$5, zip=$6, phone=$7,
-				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone='America/Vancouver',
+				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone=$10,
 				active=TRUE, updated_at=NOW()
 				WHERE id=$1`,
-				id, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate)
+				id, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate, branchZone)
 			if err != nil {
 				log.Printf("Branch %s update: %v", b.Code, err)
 			}
