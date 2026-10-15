@@ -58,6 +58,24 @@ func (s *Service) LocalDate(ctx context.Context, branchID uuid.UUID, at time.Tim
 	return d, nil
 }
 
+// BusinessDate is the calendar date at the instant in the zone of the branch
+// a printed document belongs to, else of the default branch (the aging's
+// default), else UTC. A document names no branch only before it has one.
+func (s *Service) BusinessDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error) {
+	var d time.Time
+	err := s.ex(ctx).QueryRow(ctx, `
+		SELECT ($1::timestamptz AT TIME ZONE COALESCE(
+		        (SELECT timezone FROM locations WHERE id = $2),
+		        (SELECT l.timezone FROM locations l
+		          WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')),
+		        'UTC'))::date`,
+		at, branchID).Scan(&d)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read the document's date: %w", err)
+	}
+	return d, nil
+}
+
 // Now is the service clock (a test sets it).
 func (s *Service) Now() time.Time { return s.now() }
 

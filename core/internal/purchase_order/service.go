@@ -355,6 +355,24 @@ func (s *Service) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, erro
 	return s.repo.GetPO(ctx, id)
 }
 
+// GetPOForPrint is GetPO with the vendor's name filled, for the printed form.
+// The by id read the API answers is left as it was; only the document names
+// the vendor.
+func (s *Service) GetPOForPrint(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
+	po, err := s.repo.GetPO(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if po.VendorID != nil {
+		name, err := s.repo.VendorName(ctx, *po.VendorID)
+		if err != nil {
+			return nil, err
+		}
+		po.VendorName = name
+	}
+	return po, nil
+}
+
 // GetPOBranch returns the branch the purchase order belongs to, or nil when
 // there is no such purchase order. Unlike GetPO it never filters by the
 // caller's branch context: the branch wall needs the record's own branch to

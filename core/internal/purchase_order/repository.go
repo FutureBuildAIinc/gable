@@ -427,3 +427,13 @@ func (r *Repository) ListYardStock(ctx context.Context) ([]YardStock, error) {
 	}
 	return out, rows.Err()
 }
+
+// VendorName is a vendor's name; empty when there is no such vendor.
+func (r *Repository) VendorName(ctx context.Context, id uuid.UUID) (string, error) {
+	var name string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COALESCE((SELECT name FROM vendors WHERE id = $1), '')`, id).Scan(&name)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the vendor's name: %w", err)
+	}
+	return name, nil
+}

@@ -497,10 +497,11 @@ func (h *Handler) HandleEmailStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dealer := h.docSvc.DealerName(r.Context())
-	label := fmt.Sprintf("Statement %s to %s", st.From, st.To)
+	period := h.docSvc.StatementPeriod(r.Context(), st)
+	label := "Statement " + period
 	h.dispatch(r.Context(), outgoing{
 		to: email, subject: withDealer(label, dealer),
-		body:     closing("Please find your account statement for "+st.From+" to "+st.To+" attached.", dealer),
+		body:     closing("Please find your account statement for "+period+" attached.", dealer),
 		filename: "statement-" + cust.AccountNumber + ".pdf", pdf: pdf,
 		entry: emaildelivery.Entry{
 			BranchID: branchPtr(cust.PrimaryBranchID), DocumentType: emaildelivery.DocStatement,
@@ -588,7 +589,7 @@ func (h *Handler) HandlePrintPurchaseOrder(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, r, err)
 		return
 	}
-	po, err := h.poSvc.GetPO(r.Context(), id)
+	po, err := h.poSvc.GetPOForPrint(r.Context(), id)
 	if err != nil {
 		httpx.WriteError(w, r, httpx.NotFound("purchase order not found"))
 		return

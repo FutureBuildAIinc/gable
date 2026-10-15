@@ -68,6 +68,9 @@ type fakeStatements struct {
 	st      *account.Statement
 	aging   *account.AgingSummary
 	queries []account.AgingQuery
+	// zone is the yard's zone BusinessDate reads a moment in; nil leaves it be
+	zone        *time.Location
+	dayBranches []uuid.UUID
 }
 
 // AgingSummary answers the canned aging and records what it was asked.
@@ -81,6 +84,17 @@ func (f *fakeStatements) AgingSummary(_ context.Context, q account.AgingQuery) (
 
 func (*fakeStatements) LocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
 	return at, nil
+}
+
+// BusinessDate answers the day in the zone the fake holds, and records the
+// branch it was asked for.
+func (f *fakeStatements) BusinessDate(_ context.Context, branch uuid.UUID, at time.Time) (time.Time, error) {
+	f.dayBranches = append(f.dayBranches, branch)
+	if f.zone == nil {
+		return at, nil
+	}
+	y, m, d := at.In(f.zone).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
 }
 func (*fakeStatements) Now() time.Time { return time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC) }
 
@@ -224,7 +238,7 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "2026-02-01", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007", "-$22.70"} {
+	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "Feb 1, 2026", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007", "-$22.70"} {
 		mustContain(t, doc, want)
 	}
 	mustNotContain(t, doc, "$-")
@@ -252,8 +266,8 @@ func TestStatementCarriesTheAgingAsOfThePeriodsEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1000.01", "$200.02", "$30.03", "$4.00", "$0.50",
-		"Unapplied", "-$50.00", "Total", "$1184.56", "Net balance", "PAY-000009", "2026-02-20"} {
+	for _, want := range []string{"Aging as of Feb 28, 2026", "Current", "1-30", "31-60", "61-90", "Over 90", "$1,000.01", "$200.02", "$30.03", "$4.00", "$0.50",
+		"Unapplied", "-$50.00", "Total", "$1,184.56", "Net balance", "PAY-000009", "Feb 20, 2026"} {
 		mustContain(t, doc, want)
 	}
 	// the aging is asked as of the period's last day, on the due date, for this customer
@@ -276,7 +290,7 @@ func TestStatementDrawsTheAgingForAPaidUpAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, doc, "Aging as of 2026-02-28")
+	mustContain(t, doc, "Aging as of Feb 28, 2026")
 	mustContain(t, doc, "$0.00")
 }
 
@@ -413,4 +427,19 @@ func TestStatementSaysItsListedDocumentsFollowTheYard(t *testing.T) {
 	}
 	mustNotContain(t, doc, "cover the whole account")
 	mustNotContain(t, doc, "other yards")
+}
+
+// The emailed statement names its period in the dealer's style, as the
+// attachment does, never year first.
+func TestStatementPeriodReadsInTheDealersStyle(t *testing.T) {
+	st := &account.Statement{From: "2026-06-01", To: "2026-06-30"}
+	if got, want := styledService("en-CA").StatementPeriod(context.Background(), st), "Jun 1, 2026 to Jun 30, 2026"; got != want {
+		t.Errorf("period = %q, want %q", got, want)
+	}
+	if got, want := styledService("en-GB").StatementPeriod(context.Background(), st), "1 Jun 2026 to 30 Jun 2026"; got != want {
+		t.Errorf("period = %q, want %q", got, want)
+	}
+	if got, want := NewService(newRepo()).StatementPeriod(context.Background(), st), "Jun 1, 2026 to Jun 30, 2026"; got != want {
+		t.Errorf("period with no profile = %q, want %q", got, want)
+	}
 }
