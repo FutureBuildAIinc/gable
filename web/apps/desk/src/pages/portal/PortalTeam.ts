@@ -95,7 +95,7 @@ export class PortalTeam extends LitElement {
                     </div>
                     <button
                         @click=${() => router.navigate('/portal/team/invite')}
-                        class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-[0_0_15px_rgba(0,255,163,0.3)]"
+                        class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-glow"
                     >
                         ${icon(UserPlus, 18)} Invite Member
                     </button>
@@ -107,7 +107,7 @@ export class PortalTeam extends LitElement {
                         <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
                             ${icon(Users, 18, 'text-zinc-400')} Current Members
                         </h2>
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                             <div class="divide-y divide-white/5">
                                 ${this.users.map(user => html`
                                     <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors">
@@ -144,7 +144,7 @@ export class PortalTeam extends LitElement {
                                             ${user.status === 'Active' ? html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Inactive')}
-                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Deactivate User"
                                                 >
                                                     ${icon(XCircle, 18)}
@@ -152,7 +152,7 @@ export class PortalTeam extends LitElement {
                                             ` : html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Active')}
-                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Reactivate User"
                                                 >
                                                     ${icon(CheckCircle2, 18)}
@@ -171,7 +171,7 @@ export class PortalTeam extends LitElement {
                             <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
                                 ${icon(Clock, 18, 'text-zinc-400')} Pending Invites
                             </h2>
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                 <div class="divide-y divide-white/5">
                                     ${this.invites.map(invite => html`
                                         <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">

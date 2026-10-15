@@ -170,7 +170,7 @@ export class CustomerStatementPage extends LitElement {
                                 @blur=${() => setTimeout(() => { this.searchOpen = false; }, 150)}
                                 @focus=${() => { if (this.searchMatches.length) this.searchOpen = true; }}
                                 placeholder="Search by name or account number"
-                                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                                 data-testid="customer-search"
                             />
                             ${this.selectedCustomer ? html`
@@ -209,7 +209,7 @@ export class CustomerStatementPage extends LitElement {
                                 type="date"
                                 .value=${this.startDate}
                                 @input=${(e: Event) => this.startDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                             />
                         </div>
                         <div>
@@ -218,13 +218,13 @@ export class CustomerStatementPage extends LitElement {
                                 type="date"
                                 .value=${this.endDate}
                                 @input=${(e: Event) => this.endDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                             />
                         </div>
                         <button
                             @click=${this._loadStatement}
                             ?disabled=${this.loading || !this.selectedCustomer}
-                            class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all disabled:opacity-50"
+                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                             data-testid="generate-statement"
                         >
                             ${icon(Search, 16, 'w-4 h-4')}

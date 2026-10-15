@@ -99,37 +99,37 @@ export class GablePurchasingRecommendations extends LitElement {
                 <!-- Summary Cards -->
                 ${this.summary ? html`
                     <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                        <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                        <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                             <div class="p-4 text-center">
                                 ${icon(Package, 20, 'w-5 h-5 mx-auto mb-1 text-zinc-400')}
                                 <div class="text-2xl font-bold text-white font-mono">${this.summary.total_items}</div>
                                 <div class="text-xs text-zinc-500">Total Items</div>
                             </div>
                         </div>
-                        <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                        <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                             <div class="p-4 text-center">
                                 ${icon(AlertTriangle, 20, 'w-5 h-5 mx-auto mb-1 text-rose-400')}
                                 <div class="text-2xl font-bold text-rose-400 font-mono">${this.summary.critical_count}</div>
                                 <div class="text-xs text-zinc-500">Critical</div>
                             </div>
                         </div>
-                        <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                        <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                             <div class="p-4 text-center">
                                 ${icon(TrendingUp, 20, 'w-5 h-5 mx-auto mb-1 text-amber-400')}
                                 <div class="text-2xl font-bold text-amber-400 font-mono">${this.summary.high_count}</div>
                                 <div class="text-xs text-zinc-500">High</div>
                             </div>
                         </div>
-                        <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                        <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                             <div class="p-4 text-center">
                                 <div class="text-2xl font-bold text-blue-400 font-mono">${this.summary.medium_count}</div>
                                 <div class="text-xs text-zinc-500">Medium</div>
                             </div>
                         </div>
-                        <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                        <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                             <div class="p-4 text-center">
-                                ${icon(ShoppingCart, 20, 'w-5 h-5 mx-auto mb-1 text-[#00FFA3]')}
-                                <div class="text-2xl font-bold text-[#00FFA3] font-mono">
+                                ${icon(ShoppingCart, 20, 'w-5 h-5 mx-auto mb-1 text-gable-green')}
+                                <div class="text-2xl font-bold text-gable-green font-mono">
                                     $${this.summary.total_estimated_cost.toLocaleString('en-US', { minimumFractionDigits: 0 })}
                                 </div>
                                 <div class="text-xs text-zinc-500">Est. Total Cost</div>
@@ -144,7 +144,7 @@ export class GablePurchasingRecommendations extends LitElement {
                         <button
                             @click=${() => { this.filter = level; }}
                             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${this.filter === level
-                                ? 'bg-[#00FFA3]/20 text-[#00FFA3] border border-[#00FFA3]/30'
+                                ? 'bg-gable-green/20 text-gable-green border border-gable-green/30'
                                 : 'bg-white/5 text-zinc-400 hover:bg-white/10 border border-transparent'
                             }"
                         >
@@ -157,7 +157,7 @@ export class GablePurchasingRecommendations extends LitElement {
                 </div>
 
                 <!-- Recommendations Table -->
-                <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                     ${this.loading ? html`
                         <div class="text-center text-zinc-500 py-16">
                             ${icon(RefreshCw, 32, 'w-8 h-8 mx-auto mb-3 animate-spin text-zinc-600')}
@@ -207,12 +207,12 @@ export class GablePurchasingRecommendations extends LitElement {
                                                         ${rec.days_until_out >= 999 ? '999+' : rec.days_until_out.toFixed(0)}d
                                                     </span>
                                                 </td>
-                                                <td class="py-3 px-4 text-right text-sm font-mono font-medium text-[#00FFA3]">${rec.suggested_qty.toFixed(0)}</td>
+                                                <td class="py-3 px-4 text-right text-sm font-mono font-medium text-gable-green">${rec.suggested_qty.toFixed(0)}</td>
                                                 <td class="py-3 px-4 text-right text-sm font-mono text-zinc-300">$${rec.estimated_cost.toFixed(2)}</td>
                                                 <td class="py-3 px-4 text-right">
                                                     <button
                                                         @click=${() => this._handleCreatePO(rec)}
-                                                        class="px-3 py-1.5 bg-[#00FFA3] text-black text-xs font-semibold rounded-lg hover:bg-[#00FFA3]/90 transition-colors"
+                                                        class="px-3 py-1.5 bg-gable-green text-black text-xs font-semibold rounded-lg hover:bg-gable-green/90 transition-colors"
                                                     >
                                                         Create PO
                                                     </button>

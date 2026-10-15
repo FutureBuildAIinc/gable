@@ -33,7 +33,7 @@ import {
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
-import { icon, cn } from '@gable/design-system';
+import { icon, cn, useThemeSubject } from '@gable/design-system';
 import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
@@ -130,6 +130,7 @@ export class GableFrontDoor extends LitElement {
       }
       return;
     }
+    useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.roles;
     void this._loadCatalog();
@@ -154,6 +155,7 @@ export class GableFrontDoor extends LitElement {
       this._signInError = err instanceof Error ? err.message : String(err);
       return;
     }
+    useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.personaRole !== null ? [authCustody.personaRole] : [];
     void this._loadCatalog();
@@ -161,6 +163,7 @@ export class GableFrontDoor extends LitElement {
 
   private _signOut() {
     authCustody.signOut();
+    useThemeSubject(null);
     this._signInError = null;
     this._userName = null;
     this._roles = [];
@@ -209,6 +212,7 @@ export class GableFrontDoor extends LitElement {
           ${this._headerWord}
         </div>
         <div class="flex items-center gap-3 justify-self-end">
+          <gable-theme-toggle></gable-theme-toggle>
           ${signedIn ? html`
             ${this._userName && this._userName !== '' ? html`
               <div class="hidden sm:flex items-center gap-2">

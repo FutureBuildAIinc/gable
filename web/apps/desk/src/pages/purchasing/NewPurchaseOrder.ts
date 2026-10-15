@@ -129,7 +129,7 @@ export class NewPurchaseOrder extends LitElement {
                 <button
                     @click=${this._handleSave}
                     ?disabled=${this.loading}
-                    class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all disabled:opacity-50"
+                    class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                 >
                     ${icon(Save, 16, 'w-4 h-4')}
                     Create PO
@@ -146,7 +146,7 @@ export class NewPurchaseOrder extends LitElement {
                                 placeholder="Vendor UUID"
                                 .value=${this.vendorId}
                                 @input=${(e: Event) => this.vendorId = (e.target as HTMLInputElement).value}
-                                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none font-mono"
+                                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none font-mono"
                             />
                             <div class="mt-6 flex justify-between items-baseline">
                                 <span class="text-zinc-400">Total Cost</span>
@@ -163,7 +163,7 @@ export class NewPurchaseOrder extends LitElement {
                                 <h2 class="text-lg font-medium text-white">Line Items</h2>
                                 <button
                                     @click=${this._addLine}
-                                    class="flex items-center gap-1 text-sm text-[#00FFA3] hover:text-white transition-colors"
+                                    class="flex items-center gap-1 text-sm text-gable-green hover:text-white transition-colors"
                                 >
                                     ${icon(Plus, 16, 'w-4 h-4')}
                                     Add Line
@@ -184,7 +184,7 @@ export class NewPurchaseOrder extends LitElement {
                                                     <select
                                                         .value=${line.product_id}
                                                         @change=${(e: Event) => this._updateLine(line.key, 'product_id', (e.target as HTMLSelectElement).value)}
-                                                        class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none mt-1"
+                                                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none mt-1"
                                                     >
                                                         <option value="">Select product...</option>
                                                         ${this.products.map(p => html`
@@ -202,7 +202,7 @@ export class NewPurchaseOrder extends LitElement {
                                                     type="text"
                                                     .value=${line.description}
                                                     @input=${(e: Event) => this._updateLine(line.key, 'description', (e.target as HTMLInputElement).value)}
-                                                    class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none mt-1"
+                                                    class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none mt-1"
                                                 />
                                             </div>
                                             <div class="grid grid-cols-2 gap-3">
@@ -214,7 +214,7 @@ export class NewPurchaseOrder extends LitElement {
                                                         step="any"
                                                         .value=${String(line.quantity)}
                                                         @input=${(e: Event) => this._updateLine(line.key, 'quantity', Number((e.target as HTMLInputElement).value))}
-                                                        class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-[#00FFA3] outline-none mt-1"
+                                                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-gable-green outline-none mt-1"
                                                     />
                                                 </div>
                                                 <div>
@@ -225,7 +225,7 @@ export class NewPurchaseOrder extends LitElement {
                                                         step="0.01"
                                                         .value=${String(line.cost)}
                                                         @input=${(e: Event) => this._updateLine(line.key, 'cost', Number((e.target as HTMLInputElement).value))}
-                                                        class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-[#00FFA3] outline-none mt-1"
+                                                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-gable-green outline-none mt-1"
                                                     />
                                                 </div>
                                             </div>

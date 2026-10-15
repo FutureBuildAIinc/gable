@@ -251,7 +251,7 @@ export class GableMarketCheck extends LitElement {
         <div class="flex items-center gap-3">
           <button type="button" data-testid="run" @click=${() => this._run()}
             ?disabled=${this._picked.length === 0 || this._running}
-            class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
             ${icon(Play, 14)} Run check
           </button>
           ${this._pickSource ? html`<span class="text-xs text-slate-500">First pick: ${this._pickSource}.</span>` : nothing}

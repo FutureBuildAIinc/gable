@@ -212,7 +212,7 @@ export class DeliveryDetail extends LitElement {
                 </div>
 
                 <!-- Status Card -->
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl border-t-4 border-t-gable-green">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl border-t-4 border-t-gable-green">
                     <div class="p-6 text-center">
                         <div class="mx-auto w-fit px-3 py-1 rounded-full text-xs font-mono font-bold uppercase border mb-2 ${statusColor}">
                             ${d.status}
@@ -226,7 +226,7 @@ export class DeliveryDetail extends LitElement {
                 </div>
 
                 <!-- Location Card -->
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                     <div class="p-6 space-y-4">
                         <div class="flex items-start gap-4">
                             <div class="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
@@ -266,8 +266,8 @@ export class DeliveryDetail extends LitElement {
 
                 <!-- POD Modal -->
                 ${this.showPODModal ? html`
-                    <div class="fixed inset-0 bg-black/90 z-[100] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div class="bg-[#161821] w-full max-w-md rounded-2xl border border-white/10 p-6 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                    <div class="fixed inset-0 bg-backdrop/90 z-[100] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div class="bg-slate-steel w-full max-w-md rounded-2xl border border-white/10 p-6 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
                             <div class="flex justify-between items-center">
                                 <h2 class="text-xl font-bold text-white flex items-center gap-2">
                                     ${icon(PenTool, 20, 'text-gable-green')}
@@ -338,21 +338,21 @@ export class DeliveryDetail extends LitElement {
                                                 ${this.podPhotos.map((photo, idx) => html`
                                                     <div class="relative group rounded-lg overflow-hidden border border-white/10">
                                                         <img src="${photo.preview}" alt="POD ${idx}" class="w-full h-20 object-cover" />
-                                                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                        <div class="absolute inset-0 bg-backdrop/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                                                             <button
                                                                 @click=${() => this._togglePhotoType(idx)}
-                                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold ${photo.type === 'damage' ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}"
+                                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold ${photo.type === 'damage' ? 'bg-rose-500 text-plate' : 'bg-blue-500 text-plate'}"
                                                             >
                                                                 ${photo.type}
                                                             </button>
                                                             <button
                                                                 @click=${() => this._removePhoto(idx)}
-                                                                class="p-1 rounded bg-rose-500/80 text-white"
+                                                                class="p-1 rounded bg-rose-500/80 text-plate"
                                                             >
                                                                 ${icon(Trash2, 12)}
                                                             </button>
                                                         </div>
-                                                        <div class="absolute bottom-0 left-0 right-0 text-center text-[9px] font-bold py-0.5 ${photo.type === 'damage' ? 'bg-rose-500/80 text-white' : 'bg-blue-500/80 text-white'}">
+                                                        <div class="absolute bottom-0 left-0 right-0 text-center text-[9px] font-bold py-0.5 ${photo.type === 'damage' ? 'bg-rose-500/80 text-plate' : 'bg-blue-500/80 text-plate'}">
                                                             ${photo.type.toUpperCase()}
                                                         </div>
                                                     </div>
@@ -376,7 +376,7 @@ export class DeliveryDetail extends LitElement {
                                             <label class="text-xs font-mono uppercase text-zinc-500">Signature</label>
                                             <button @click=${() => this._clearSignature()} class="text-xs text-rose-400 font-medium hover:underline">Clear</button>
                                         </div>
-                                        <div class="bg-white rounded-lg overflow-hidden h-48 touch-none border-2 border-dashed border-zinc-600 relative">
+                                        <div class="bg-plate rounded-lg overflow-hidden h-48 touch-none border-2 border-dashed border-zinc-600 relative">
                                             <div class="absolute inset-0 flex items-center justify-center text-zinc-300 pointer-events-none opacity-20 text-3xl font-bold select-none">
                                                 SIGN HERE
                                             </div>

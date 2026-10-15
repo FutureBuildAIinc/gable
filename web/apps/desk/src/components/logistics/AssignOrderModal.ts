@@ -99,7 +99,7 @@ export class GableAssignOrderModal extends LitElement {
     if (!this.isOpen) return nothing;
 
     return html`
-      <div class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50" aria-hidden="true" @click=${this._close}></div>
+      <div class="fixed inset-0 bg-backdrop/80 backdrop-blur-sm z-50" aria-hidden="true" @click=${this._close}></div>
       <div class="fixed inset-0 flex items-center justify-center p-4 z-50 pointer-events-none">
         <dialog open class="w-full max-w-lg transform overflow-hidden rounded-2xl bg-slate-steel border border-white/10 p-6 shadow-xl pointer-events-auto relative">
           <div class="flex items-center justify-between mb-6 border-b border-white/10 pb-4">
@@ -141,7 +141,7 @@ export class GableAssignOrderModal extends LitElement {
                       <label
                         class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${this._selectedOrderId === order.id
                           ? 'bg-gable-green/10 border-gable-green/50'
-                          : 'bg-[#0A0B10] border-white/10 hover:border-white/20'
+                          : 'bg-deep-space border-white/10 hover:border-white/20'
                         }"
                       >
                         <input
@@ -174,7 +174,7 @@ export class GableAssignOrderModal extends LitElement {
                   @input=${(e: InputEvent) => this._instructions = (e.target as HTMLTextAreaElement).value}
                   rows="2"
                   placeholder="Gate code, dock preference, contact on arrival..."
-                  class="w-full bg-[#0A0B10] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-gable-green/50 focus:outline-none resize-none"
+                  class="w-full bg-deep-space border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-gable-green/50 focus:outline-none resize-none"
                 ></textarea>
               </div>
 

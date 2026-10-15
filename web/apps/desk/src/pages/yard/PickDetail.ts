@@ -106,7 +106,7 @@ export class PickDetail extends LitElement {
                         const isPicked = this.pickedItems.has(line.id);
                         return html`
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer ${isPicked
+                                class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer ${isPicked
                                     ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70'
                                     : 'border-white/5 hover:border-amber-400/30'
                                 }"
