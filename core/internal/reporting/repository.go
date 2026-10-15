@@ -7,10 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gablelbm/gable/pkg/collections"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -127,7 +128,9 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 		return nil, fmt.Errorf("failed to query daily till refunds: %w", err)
 	}
 	report.Refunds = refunds
-	report.NetCollected = report.Received - refunds
+	// Cents, so the sum of two dollar floats carries no binary dust.
+	report.Received = math.Round(report.Received*100) / 100
+	report.NetCollected = math.Round((report.Received-refunds)*100) / 100
 	report.TotalCollected = report.NetCollected
 	return report, nil
 }
@@ -151,14 +154,11 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
 
-	// 2. Collected
-	queryCollected := `
-		SELECT COALESCE(SUM(amount), 0)
-		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end, branch, grants).Scan(&report.TotalCollected)
+	// 2. Collected: the day's net collections over the period, counted as the
+	// dashboard's card and the Daily Till count them (pkg/collections: by the
+	// payment's received_on and own yard, voided payments out, refunds in).
+	queryCollected := `SELECT ` + collections.NetCentsBetween("$1::date", "$2::date", 3, 4) + `::float8 / 100`
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start.Format("2006-01-02"), end.Format("2006-01-02"), branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
