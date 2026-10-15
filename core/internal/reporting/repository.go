@@ -152,14 +152,20 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	}
 	branch, grants := reach(ctx)
 
+	// The period is business dates, the same on every half of the summary:
+	// invoices are cut on their own business date (invoice_date, as the
+	// statement reads it) and payments on received_on (pkg/collections), never
+	// on the instant a row was written.
+	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
+
 	// 1. Invoiced
 	queryInvoiced := `
 		SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
 		FROM invoices
-		WHERE created_at >= $1 AND created_at < $2 AND status != 'VOID'
+		WHERE invoice_date BETWEEN $1::date AND $2::date AND status != 'VOID'
 		  AND ` + middleware.Wall("", 3, 4) + `
 	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, from, to, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
@@ -168,7 +174,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// dashboard's card and the Daily Till count them (pkg/collections: by the
 	// payment's received_on and own yard, voided payments out, refunds in).
 	queryCollected := `SELECT ` + collections.NetCentsBetween("$1::date", "$2::date", 3, 4) + `::float8 / 100`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start.Format("2006-01-02"), end.Format("2006-01-02"), branch, grants).Scan(&report.TotalCollected)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, from, to, branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
@@ -188,7 +194,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	queryOutstanding := `
 		SELECT COALESCE(SUM(total_amount), 0)
 		FROM invoices
-		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL')
+		WHERE invoice_date BETWEEN $1::date AND $2::date AND status IN ('UNPAID', 'PARTIAL')
 		  AND ` + middleware.Wall("", 3, 4) + `
 	`
 	// Note: accurate AR needs to subtract partial payments.
@@ -204,7 +210,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
 	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
 
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end, branch, grants).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, from, to, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}

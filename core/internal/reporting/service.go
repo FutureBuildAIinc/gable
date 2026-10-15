@@ -99,15 +99,24 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 }
 
 func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) (*SalesSummaryReport, error) {
-	// Cache Key
-	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
+	// The yard's business day, read once: the cache key and the default window
+	// both use it, and a failed read is an error, never a silent fall back to
+	// the server's clock (in the yard's evening west of UTC the server's date
+	// is the yard's tomorrow).
+	var day string
 	if startStr == "" || endStr == "" {
-		// A default bound moves with the yard's day: key it by that day.
 		if d, ok := s.repo.(dayReader); ok {
-			if day, err := d.BusinessDay(ctx); err == nil {
-				key += ":" + day
+			var err error
+			if day, err = d.BusinessDay(ctx); err != nil {
+				return nil, fmt.Errorf("could not read the yard's business day for the summary's window: %w", err)
 			}
 		}
+	}
+
+	// Cache Key
+	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
+	if day != "" {
+		key += ":" + day
 	}
 
 	// Read Cache
@@ -120,20 +129,18 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 	}
 	s.cacheMutex.RUnlock()
 
-	// The default window is the yard's business day (the default branch's,
-	// the day the dashboard's card is cut on) and the thirty days before it,
-	// never the server's clock: in the yard's evening west of UTC the server's
-	// date is the yard's tomorrow.
+	// The default window is the yard's business day and the thirty days before
+	// it, whole days (the summary's halves cut on business dates).
 	now := time.Now()
 	start := now.AddDate(0, 0, -30) // Default last 30 days
 	end := now
-	if d, ok := s.repo.(dayReader); ok {
-		if day, derr := d.BusinessDay(ctx); derr == nil {
-			if parsed, perr := time.Parse("2006-01-02", day); perr == nil {
-				start = parsed.AddDate(0, 0, -30)
-				end = parsed.Add(24*time.Hour - time.Nanosecond) // the whole of the yard's day
-			}
+	if day != "" {
+		parsed, perr := time.Parse("2006-01-02", day)
+		if perr != nil {
+			return nil, fmt.Errorf("the yard's business day %q is not a date: %w", day, perr)
 		}
+		start = parsed.AddDate(0, 0, -30)
+		end = parsed.Add(24*time.Hour - time.Nanosecond) // the whole of the yard's day
 	}
 
 	var err error
