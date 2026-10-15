@@ -78,4 +78,15 @@ describe('the product media tab generation words', () => {
     })
     expect(text(refused.querySelector('[data-testid="pim-ai-notice"]'))).toContain('refused the saved key')
   })
+
+  it('orders attempts by the moment, not the text, when one falls on a whole second', async () => {
+    stubSettings('anthropic')
+    const row = (id: string, status: string, created: string) =>
+      ({ id, product_id: 'p1', media_type: 'hero', url: '', alt_text: '', status, is_primary: false, created_at: created, updated_at: created }) as unknown as PIMMedia
+    // The refused attempt is half a second AFTER the ready one, though its text sorts before it.
+    const el = await mountAsync<GableProductMediaTab>('gable-product-media-tab', {
+      productId: 'p1', media: [row('a', 'ready', '2026-02-01T00:00:00Z'), row('b', 'refused', '2026-02-01T00:00:00.500Z')],
+    })
+    expect(text(el.querySelector('[data-testid="pim-ai-notice"]'))).toContain('refused the saved key')
+  })
 })
