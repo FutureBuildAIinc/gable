@@ -1248,3 +1248,28 @@ func TestImportProductNamesAreUnique(t *testing.T) {
 		seen[key] = row.SKU
 	}
 }
+
+// FROM-PRINCIPAL 145 a: every invented company name was searched against real
+// businesses; these matched (or came close enough to be mistaken) and were
+// replaced with plain invented names, so none of them stays in the seed or the
+// import, in any record, address, email domain or key.
+var renamedCompanyNames = []string{
+	"Lake Country Builders", "Predator Ridge Renos", "Big White Cabin Co", "Mission Hill Custom",
+	"Ridgeline Formwork", "Okanagan Hardware Distribution", "Pacific Window & Door", "Valley Ready-Mix Concrete",
+	"Cascade Western Lumber Sales", "Cascadia Paint and Sundries", "ClearVue Window and Door",
+	"Mountain Metal Roofing", "OK Foam and Insulation", "Peak Roofing Supply", "StoneBridge Masonry Supply",
+	"Central Okanagan School District", "Cupola Custom Homes", "Aldridge Landscape and Stone",
+	"Trussway Custom Homes", "Vanderpol Framing and Truss",
+}
+
+func TestRenamedCompanyNamesStayOut(t *testing.T) {
+	sources := designationSources(t)
+	sources["customers"] = string(customersData)
+	for src, text := range sources {
+		for _, name := range renamedCompanyNames {
+			if strings.Contains(text, name) {
+				t.Errorf("%s still names the company %q", src, name)
+			}
+		}
+	}
+}
