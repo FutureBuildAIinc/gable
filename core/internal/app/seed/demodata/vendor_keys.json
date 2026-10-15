@@ -18,7 +18,7 @@
     },
     {
       "key": "OK_HDW",
-      "name": "Okanagan Hardware Distribution",
+      "name": "Fernbank Hardware Distribution",
       "category": "Hardware distribution",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
@@ -48,7 +48,7 @@
     },
     {
       "key": "VAL_RMX",
-      "name": "Valley Ready-Mix Concrete",
+      "name": "Bramblewood Ready-Mix Concrete",
       "category": "Concrete and masonry",
       "payment_terms": "Net 15",
       "average_lead_time_days": 2,
@@ -78,7 +78,7 @@
     },
     {
       "key": "PAC_WD",
-      "name": "Pacific Window & Door",
+      "name": "Tamarack Window & Door",
       "category": "Windows and doors",
       "payment_terms": "2% 10 Net 30",
       "average_lead_time_days": 21,
@@ -218,7 +218,7 @@
     },
     {
       "key": "PEAK_ROOF",
-      "name": "Peak Roofing Supply",
+      "name": "Wrenfield Roofing Supply",
       "category": "Asphalt roofing",
       "payment_terms": "Net 45",
       "average_lead_time_days": 7,
@@ -228,7 +228,7 @@
     },
     {
       "key": "METAL_ROOF_OK",
-      "name": "Mountain Metal Roofing",
+      "name": "Corbinwood Metal Roofing",
       "category": "Metal roofing",
       "payment_terms": "Net 30",
       "average_lead_time_days": 10,
@@ -248,7 +248,7 @@
     },
     {
       "key": "FOAM_OK",
-      "name": "OK Foam and Insulation",
+      "name": "Thistledown Foam and Insulation",
       "category": "Spray and rigid foam",
       "payment_terms": "Net 30",
       "average_lead_time_days": 7,

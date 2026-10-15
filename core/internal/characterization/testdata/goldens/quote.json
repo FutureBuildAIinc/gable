@@ -233,7 +233,7 @@
             "branch_id": "<id-1>",
             "created_at": "<ts+0d>",
             "customer_id": "<id-7>",
-            "customer_name": "Lake Country Builders",
+            "customer_name": "Oakvale Builders",
             "delivery_type": "pickup",
             "expires_at": "<ts+14d>",
             "freight_cents": 0,

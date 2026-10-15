@@ -434,13 +434,13 @@ func Run() {
 	}
 	vendors := []vendor{
 		{"Gable Building Supply", "orders@gablebuildingsupply.example", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
-		{"Okanagan Hardware Distribution", "sales@okhardware.example", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
+		{"Fernbank Hardware Distribution", "sales@fernbankhardware.example", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
 		{"BC Roofing Wholesale", "contact@bcroofing.example", "250-555-1300", "200 Shingle Ln", "Vernon", "BC", "V1T 2L8", "Net 45", 7, 91.0, 95000},
 		{"Interior Millwork Co", "info@interiormillwork.example", "250-555-1400", "75 Cabinet Ct", "Kelowna", "BC", "V1Z 1G2", "Net 30", 14, 88.5, 72000},
-		{"Valley Ready-Mix Concrete", "dispatch@valleyreadymix.example", "250-555-1500", "3200 Aggregate Dr", "Kelowna", "BC", "V1X 4L9", "Net 15", 2, 99.0, 45000},
+		{"Bramblewood Ready-Mix Concrete", "dispatch@bramblewoodreadymix.example", "250-555-1500", "3200 Aggregate Dr", "Kelowna", "BC", "V1X 4L9", "Net 15", 2, 99.0, 45000},
 		{"Mountain Fastener Supply", "orders@mountainfastener.example", "250-555-1600", "900 Bolt Blvd", "Penticton", "BC", "V2A 6J9", "Net 30", 4, 96.8, 67000},
 		{"Cariboo Insulation Ltd", "sales@caribooinsulation.example", "250-555-1700", "400 Thermal Ave", "Vernon", "BC", "V1B 3T6", "Net 30", 6, 93.0, 52000},
-		{"Pacific Window & Door", "orders@pacificwindow.example", "604-555-1800", "1200 Glass Pkwy", "Surrey", "BC", "V3T 5X8", "2% 10 Net 30", 21, 85.0, 110000},
+		{"Tamarack Window & Door", "orders@tamarackwindow.example", "604-555-1800", "1200 Glass Pkwy", "Surrey", "BC", "V3T 5X8", "2% 10 Net 30", 21, 85.0, 110000},
 	}
 	vendorIDs := make(map[string]uuid.UUID)
 	for _, v := range vendors {
@@ -492,11 +492,11 @@ func Run() {
 		{"3-1/4\" Common Nails (25kg)", "NAIL-16D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Common Nails (25kg)", "NAIL-10D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Deck Screws (2.5kg)", "SCR-DECK-3-5", "BOX", "Mountain Fastener Supply", "Hardware", 18.00, 29.99, 5.0, 40, 100},
-		{"Joist Hanger 2x6", "HANGER-26", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.80, 1.45, 0.5, 200, 500},
-		{"Joist Hanger 2x8", "HANGER-28", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.95, 1.65, 0.6, 150, 400},
-		{"Joist Hanger 2x10", "HANGER-210", "PCS", "Okanagan Hardware Distribution", "Hardware", 1.10, 1.85, 0.7, 100, 300},
-		{"Hurricane Tie Light", "TIE-LT", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.65, 1.15, 0.3, 200, 500},
-		{"Face Mount Joist Hanger 2x8", "HANGER-28FM", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.90, 1.50, 0.4, 150, 400},
+		{"Joist Hanger 2x6", "HANGER-26", "PCS", "Fernbank Hardware Distribution", "Hardware", 0.80, 1.45, 0.5, 200, 500},
+		{"Joist Hanger 2x8", "HANGER-28", "PCS", "Fernbank Hardware Distribution", "Hardware", 0.95, 1.65, 0.6, 150, 400},
+		{"Joist Hanger 2x10", "HANGER-210", "PCS", "Fernbank Hardware Distribution", "Hardware", 1.10, 1.85, 0.7, 100, 300},
+		{"Hurricane Tie Light", "TIE-LT", "PCS", "Fernbank Hardware Distribution", "Hardware", 0.65, 1.15, 0.3, 200, 500},
+		{"Face Mount Joist Hanger 2x8", "HANGER-28FM", "PCS", "Fernbank Hardware Distribution", "Hardware", 0.90, 1.50, 0.4, 150, 400},
 		{"Architectural Shingles 30yr", "RF-ARCH-30", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
 		{"Architectural Shingles (Black)", "RF-SH-BLK", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
 		{"Architectural Shingles (Weathered Wood)", "RF-SH-WW", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
@@ -523,17 +523,17 @@ func Run() {
 		// Cornice / Exterior Trim Materials
 		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Gable Building Supply", "Cornice", 15.50, 23.25, 3.0, 20, 50},
 		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Gable Building Supply", "Cornice", 3.50, 5.25, 1.5, 30, 60},
-		{"Silicone Clear Caulk", "CORNCLEAR", "EA", "Okanagan Hardware Distribution", "Cornice", 5.75, 8.65, 0.8, 40, 80},
+		{"Silicone Clear Caulk", "CORNCLEAR", "EA", "Fernbank Hardware Distribution", "Cornice", 5.75, 8.65, 0.8, 40, 80},
 		{"Composite Trim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Building Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
 		{"Composite Trim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Building Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
 		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Gable Building Supply", "Cornice", 4.00, 6.00, 1.0, 30, 60},
-		{"Poly Black 18 X 300", "CORNPOLY18", "RL", "Okanagan Hardware Distribution", "Cornice", 23.12, 34.68, 25.0, 10, 25},
+		{"Poly Black 18 X 300", "CORNPOLY18", "RL", "Fernbank Hardware Distribution", "Cornice", 23.12, 34.68, 25.0, 10, 25},
 		{"Solid Soffit Fibre Cement Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Building Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
 		{"Solid Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Building Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
 		{"Vented Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Building Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
 		{"Vented Soffit Fibre Cement Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Building Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
 		{"Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier", "CORNSHTGR49", "EA", "Gable Building Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
-		{"Window Tape 6\" (100')", "CORNTAPE", "RL", "Okanagan Hardware Distribution", "Cornice", 22.00, 33.00, 3.0, 15, 30},
+		{"Window Tape 6\" (100')", "CORNTAPE", "RL", "Fernbank Hardware Distribution", "Cornice", 22.00, 33.00, 3.0, 15, 30},
 
 		// Random-length / economy grade
 		{"1 X 4 RL #3 SPF", "LUMB14RLN3+", "LF", "Gable Building Supply", "Lumber", 0.34, 0.52, 0.3, 500, 2000},
@@ -664,12 +664,12 @@ func Run() {
 	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
 	customers := []demoCustomer{
-		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
+		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Larchwood Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
 		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
-		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
-		{"Predator Ridge Renos", "PRR-001", "office@predatorrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
-		{"Big White Cabin Co", "BWC-001", "jim@bigwhitecabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
-		{"Mission Hill Custom", "MHC-001", "invoices@missionhillcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
+		{"Oakvale Builders", "OVB-001", "admin@oakvalebuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
+		{"Stonehollow Renos", "SHR-001", "office@stonehollowrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
+		{"Snowfern Cabin Co", "SFC-001", "jim@snowferncabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
+		{"Larchwood Custom", "LWC-001", "invoices@larchwoodcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
 		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.example", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
 		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.example", "250-555-3200", "1800 Rebar Dr, Vernon BC", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
 		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.example", "250-555-2700", "780 Casement Ave, Kelowna BC", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
@@ -741,11 +741,11 @@ func Run() {
 		{"Okanagan Homes Ltd", "PLY-34-CDX", 30.00},
 		{"Okanagan Homes Ltd", "OSB-34-TG", 27.50},
 		{"Okanagan Homes Ltd", "DW-12-REG", 12.80},
-		{"Mission Hill Custom", "LUM-248-PREM", 4.50},
-		{"Mission Hill Custom", "LUM-2612-PREM", 9.50},
-		{"Mission Hill Custom", "DR-INT-3680-6P", 78.00},
-		{"Mission Hill Custom", "DR-EXT-3680-STL", 220.00},
-		{"Mission Hill Custom", "MLD-BASE-MDF", 15.00},
+		{"Larchwood Custom", "LUM-248-PREM", 4.50},
+		{"Larchwood Custom", "LUM-2612-PREM", 9.50},
+		{"Larchwood Custom", "DR-INT-3680-6P", 78.00},
+		{"Larchwood Custom", "DR-EXT-3680-STL", 220.00},
+		{"Larchwood Custom", "MLD-BASE-MDF", 15.00},
 		{"Kelbrook Construction", "LUM-248-PREM", 4.75},
 		{"Kelbrook Construction", "NAIL-16D-50", 55.00},
 		{"Kelbrook Construction", "HANGER-26", 1.10},
@@ -792,16 +792,16 @@ func Run() {
 	custSalesperson := make(map[uuid.UUID]string)
 	spAssignments := map[string]string{
 		"Okanagan Homes Ltd":         "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
-		"Mission Hill Custom":        "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
+		"Larchwood Custom":           "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
 		"Kelbrook Construction":      "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
 		"Peachland Framing Crew":     "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
 		"Glenmore Heritage Reno":     "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
 		"Vernon Valley Construction": "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
-		"Predator Ridge Renos":       "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
-		"Lake Country Builders":      "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
+		"Stonehollow Renos":          "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
+		"Oakvale Builders":           "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
 		"Summerland Roofers":         "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
 		"Westbank Decks & Fence":     "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
-		"Big White Cabin Co":         "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
+		"Snowfern Cabin Co":          "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
 		"Knox Mountain Landscapes":   "a1b2c3d4-0005-4000-8000-000000000005", // Lucas Pelletier
 		"Okanagan DIY Owner":         "a1b2c3d4-0005-4000-8000-000000000005", // Lucas Pelletier
 	}
@@ -960,13 +960,13 @@ func Run() {
 	}
 	quoteSpecs := []quoteSpec{
 		{"Okanagan Homes Ltd", "ACCEPTED", 12}, {"Okanagan Homes Ltd", "SENT", 8}, {"Okanagan Homes Ltd", "DRAFT", 6},
-		{"Mission Hill Custom", "ACCEPTED", 15}, {"Mission Hill Custom", "SENT", 10}, {"Mission Hill Custom", "EXPIRED", 7},
+		{"Larchwood Custom", "ACCEPTED", 15}, {"Larchwood Custom", "SENT", 10}, {"Larchwood Custom", "EXPIRED", 7},
 		{"Kelbrook Construction", "ACCEPTED", 8}, {"Kelbrook Construction", "SENT", 5}, {"Kelbrook Construction", "DRAFT", 4},
-		{"Predator Ridge Renos", "ACCEPTED", 6}, {"Predator Ridge Renos", "SENT", 4},
+		{"Stonehollow Renos", "ACCEPTED", 6}, {"Stonehollow Renos", "SENT", 4},
 		{"Peachland Framing Crew", "ACCEPTED", 10}, {"Peachland Framing Crew", "SENT", 7},
 		{"Glenmore Heritage Reno", "ACCEPTED", 5}, {"Glenmore Heritage Reno", "DRAFT", 3},
 		{"Westbank Decks & Fence", "SENT", 6}, {"Summerland Roofers", "ACCEPTED", 8},
-		{"Big White Cabin Co", "DRAFT", 4}, {"Knox Mountain Landscapes", "SENT", 3},
+		{"Snowfern Cabin Co", "DRAFT", 4}, {"Knox Mountain Landscapes", "SENT", 3},
 		{"Vernon Valley Construction", "ACCEPTED", 5},
 	}
 	for _, qs := range quoteSpecs {
@@ -1221,8 +1221,8 @@ func Run() {
 		{"Kelbrook Construction", "West Kelowna Medical Plaza", "Active"},
 		{"Okanagan Homes Ltd", "Mission Creek Townhomes Bldg A", "Active"},
 		{"Okanagan Homes Ltd", "Mission Creek Townhomes Bldg B", "Active"},
-		{"Mission Hill Custom", "Predator Ridge Estate Lot 12", "Active"},
-		{"Predator Ridge Renos", "Kitchen Remodel - McKenzie", "Completed"},
+		{"Larchwood Custom", "Predator Ridge Estate Lot 12", "Active"},
+		{"Stonehollow Renos", "Kitchen Remodel - McKenzie", "Completed"},
 	}
 
 	for _, p := range projectList {
@@ -1258,7 +1258,7 @@ func Run() {
 		Type   string
 	}{
 		{"Gable Building Supply", "2026 Volume Rebate", "VOLUME"},
-		{"Okanagan Hardware Distribution", "Growth Incentive Q1", "GROWTH"},
+		{"Fernbank Hardware Distribution", "Growth Incentive Q1", "GROWTH"},
 		{"BC Roofing Wholesale", "Product Mix Bonus", "PRODUCT_MIX"},
 	}
 
@@ -1400,7 +1400,7 @@ func Run() {
 		// have refused to set the role back to anything it recognised.
 		{"Kelbrook Construction", "demo@kelbrook.example", "Sam Kelbrook", "Admin"},
 		{"Okanagan Homes Ltd", "okhomes@gablebuildingsupply.example", "Olivia Homes", "Admin"},
-		{"Mission Hill Custom", "missionhill@gablebuildingsupply.example", "Marc Mission", "Buyer"},
+		{"Larchwood Custom", "larchwood@gablebuildingsupply.example", "Marc Mission", "Buyer"},
 	}
 	for _, pu := range portalUsers {
 		cid, ok := customerIDs[pu.Customer]
@@ -1414,7 +1414,7 @@ func Run() {
 			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (email) DO UPDATE SET password_hash=$3, role=$5`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
 	}
-	fmt.Println("Seed: Portal Users (demo@kelbrook.example / okhomes@gablebuildingsupply.example / missionhill@gablebuildingsupply.example, password: 'password')")
+	fmt.Println("Seed: Portal Users (demo@kelbrook.example / okhomes@gablebuildingsupply.example / larchwood@gablebuildingsupply.example, password: 'password')")
 
 	// =========================================================================
 	// 22. POS REGISTERS + OFFLINE POS SYNC LOGS

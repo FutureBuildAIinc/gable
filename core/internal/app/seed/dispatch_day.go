@@ -323,7 +323,7 @@ var dispatchStops = []dispatchStop{
 	// --- West side: Mission Hill -> Westbank -> Peachland (flatbed, 30 000 lb) --
 	// Small finish package: it rides on top and the crated door seals the load.
 	{
-		Customer: "Mission Hill Custom", Lat: 49.8404, Lng: -119.6003,
+		Customer: "Larchwood Custom", Lat: 49.8404, Lng: -119.6003,
 		Instructions: "Finish package — unload in the garage, door stays crated until the painter signs off.",
 		Lines: []dispatchLine{
 			{"DR-EXT-3680-STL", 1}, // non-stackable: seals the top tier
@@ -371,7 +371,7 @@ var dispatchStops = []dispatchStop{
 		},
 	},
 	{
-		Customer: "Big White Cabin Co", Lat: 49.7208, Lng: -118.9403,
+		Customer: "Snowfern Cabin Co", Lat: 49.7208, Lng: -118.9403,
 		Instructions: "Mountain run — chains on above the village turnoff, gate code with the site super.",
 		Lines: []dispatchLine{
 			{"LUM-2410-PREM", 50},
@@ -432,7 +432,7 @@ var dispatchStops = []dispatchStop{
 	// --- North: the boom truck (18 000 lb) takes the two timber/deck stops -----
 	// Small timber drop: it rides on top and the 6x6 course seals the load.
 	{
-		Customer: "Lake Country Builders", Lat: 50.0503, Lng: -119.4098,
+		Customer: "Oakvale Builders", Lat: 50.0503, Lng: -119.4098,
 		Instructions: "Cottage build — timbers off first, keep them off the grass.",
 		Lines: []dispatchLine{
 			{"LUM-6612-PT", 12}, // non-stackable: seals the top tier
@@ -442,7 +442,7 @@ var dispatchStops = []dispatchStop{
 		},
 	},
 	{
-		Customer: "Predator Ridge Renos", Lat: 50.2004, Lng: -119.3702,
+		Customer: "Stonehollow Renos", Lat: 50.2004, Lng: -119.3702,
 		Instructions: "Deck reno — narrow lane, back in from the upper cul-de-sac.",
 		Lines: []dispatchLine{
 			{"LUM-448-PT", 40},

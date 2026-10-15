@@ -142,13 +142,13 @@ type vendorKeyCatalog struct {
 // conflict) is the row the catalogue's vendor_key references.
 var legacyVendorRename = map[string]string{
 	"Gable Lumber & Supply":          "Gable Building Supply",
-	"Okanagan Hardware Distribution": "Okanagan Hardware Distribution",
+	"Fernbank Hardware Distribution": "Fernbank Hardware Distribution",
 	"BC Roofing Wholesale":           "BC Roofing Wholesale",
 	"Interior Millwork Co":           "Interior Millwork Co",
-	"Valley Ready-Mix Concrete":      "Valley Ready-Mix Concrete",
+	"Bramblewood Ready-Mix Concrete": "Bramblewood Ready-Mix Concrete",
 	"Mountain Fastener Supply":       "Mountain Fastener Supply",
 	"Cariboo Insulation Ltd":         "Cariboo Insulation Ltd",
-	"Pacific Window & Door":          "Pacific Window & Door",
+	"Tamarack Window & Door":         "Tamarack Window & Door",
 }
 
 // customerRow is one row of demodata/customers.jsonl.

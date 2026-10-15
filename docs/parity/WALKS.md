@@ -86,12 +86,12 @@ offer and the server enforces no role; a real dealer signs in through its identi
    each line to its product. Mark it sent and Convert to Order: the order opens with the quote's lines and prices,
    ready to confirm.
 4. **A sale at a second yard for a customer of the first (Drew Patel).** Sign in as Drew Patel: the Counter opens on Lake
-   Country Outpost's register, `REG-LK`. Open Till. Find "Big White": Big White Cabin Co, a Kelowna Main Yard account,
+   Country Outpost's register, `REG-LK`. Open Till. Find "Big White": Snowfern Cabin Co, a Kelowna Main Yard account,
    is found here too, with its standing (every customer is a dealer wide account that any yard may sell to). Sell 10 of
    `LUM-248-PREM` on account (the stock shown is Lake Country's own) and Pay. The customer now trades at Lake Country as
    well: its first document here linked it to the yard, and the link is audited.
 5. **Receiving a purchase order (Casey Lin).** Open Purchasing: the list shows each order's number, vendor, yard and
-   total. Open the newest order, at the top of the list: sent to Okanagan Hardware Distribution for Kelowna Main Yard,
+   total. Open the newest order, at the top of the list: sent to Fernbank Hardware Distribution for Kelowna Main Yard,
    with two lines of joist hangers (the seed draws its other orders at random, so the numbers differ from run to run).
    Receive Items: the bins
    offered are Kelowna Main Yard's only (`KEL-A` to `KEL-D`). Confirm Receipt: the order moves to Received and the stock
@@ -101,7 +101,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
    the tab shows each yard's own stock.
 7. **AR and a statement (Robin Diaz).** Open Reporting and AR Aging: each Kelowna Main Yard customer's open balance by
    age, with Kelbrook Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
-   Big White Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
+   Snowfern Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
    invoice and payment in the period with the running balance, and Print for the dealer's statement.
 8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
    counter's account charges included), the revenue trend over the recent days, the top customers, the stock alerts
@@ -173,9 +173,9 @@ Steps:
    must list the nine people above, each with its home yard flagged and the owner, finance and purchasing people on
    all three yards.
 5. The yard's receiving work: purchasing's purchase order list at `KEL-MAIN` must show one `SENT` order to
-   Okanagan Hardware Distribution with two lines and nothing received, ready to receive.
+   Fernbank Hardware Distribution with two lines and nothing received, ready to receive.
 6. Credit: the customer directory shows `Glenmore Heritage Reno` over its credit limit (orders land on hold) and
-   `Ridgeline Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
+   `Quillfield Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
 7. AR: the AR aging and `Kelbrook Construction`'s statement have open invoices at more than one yard.
 
 ### The cross yard sale (M1, ruling A)
@@ -187,7 +187,7 @@ yard `WK`, granted `WK` only), or send `X-Branch-Id` of `WK` through the API.
    search `Big White Cabin`. It must be found, with its home yard shown as Kelowna Main Yard. Through the API:
    `curl -s -H "X-Branch-Id: <WK branch id>" "http://127.0.0.1:8080/api/v1/customers?q=Big%20White"` must return it
    (before ruling A a yard's desk saw only its own customers), and its `branch_ids` must list `KEL-MAIN` only.
-2. Quote it at `KEL-MAIN`: switcher on `KEL-MAIN`, new quote for Big White Cabin Co with one line of any product, send
+2. Quote it at `KEL-MAIN`: switcher on `KEL-MAIN`, new quote for Snowfern Cabin Co with one line of any product, send
    it. API: `curl -s -X POST -H "X-Branch-Id: <KEL-MAIN id>" -H 'Content-Type: application/json'
    -d '{"customer_id":"<customer id>","lines":[{"product_id":"<product id>","quantity":"10","unit_price_ten_thousandths":10000}]}'
    http://127.0.0.1:8080/api/v1/quotes` answers 201. The customer's `branch_ids` must still list `KEL-MAIN` only (it
