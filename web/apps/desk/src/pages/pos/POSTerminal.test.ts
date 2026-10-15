@@ -2563,3 +2563,81 @@ describe('PR 150 round 4: one rule for splits', () => {
     el.remove();
   });
 });
+
+describe('the opening float field', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const openTillDialog = async (el: POSTerminal) => {
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = true;
+    await el.updateComplete;
+  };
+  const openTillButton = (el: POSTerminal) =>
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open Till') as HTMLElement;
+
+  it('reads empty: no figure may look entered, the placeholder is words in the till\'s muted tone', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(field.placeholder.length).toBeGreaterThan(0);
+    expect(field.placeholder, 'a placeholder that is a figure reads as entered').not.toMatch(/\d/);
+    expect(field.className).toContain('placeholder:text-[rgb(var(--gb-till-muted))]');
+    expect(field.className).toContain('placeholder:font-normal');
+    el.remove();
+  });
+
+  it('Open Till with the field empty sends nothing, says what is missing, and focuses the field', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    openTillButton(el).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.openTill).not.toHaveBeenCalled();
+    const note = q(el, 'till-float-error');
+    expect(note.getAttribute('role')).toBe('alert');
+    expect(note.textContent?.toLowerCase()).toContain('opening float');
+    expect(document.activeElement).toBe(q(el, 'till-float-amount'));
+    el.remove();
+  });
+
+  it('a typed float opens the till with that figure, as before', async () => {
+    // The pinned behaviour the money read checks: a typed "200.00" still
+    // opens the till with 200.00. Passes before and after this PR by design.
+    svc.openTill.mockResolvedValue({ id: 't2', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 });
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    field.value = '200.00';
+    field.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    openTillButton(el).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.openTill).toHaveBeenCalledWith('REG-01', 20000);
+    el.remove();
+  });
+});
+
+describe('the blind count fields', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('hint in words in the till\'s muted tone, never a figure that reads as entered', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, CARD: 9000 },
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const fields = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(fields.length).toBe(2);
+    for (const f of fields) {
+      expect(f.placeholder.length).toBeGreaterThan(0);
+      expect(f.placeholder, 'a placeholder that is a figure reads as entered').not.toMatch(/\d/);
+      expect(f.className).toContain('placeholder:text-[rgb(var(--gb-till-muted))]');
+    }
+    el.remove();
+  });
+});
