@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -796,6 +797,21 @@ func demoImportDB(t *testing.T) (*sql.DB, string) {
 	return db, scratch.String()
 }
 
+const demoSeedInstantEnv = "SEED_NOW"
+
+var demoInstant struct {
+	sync.Once
+	at string
+}
+
+// demoSeedInstant is the one instant the package's seed runs read: the first
+// time a test asks.
+func demoSeedInstant(t *testing.T) string {
+	t.Helper()
+	demoInstant.Do(func() { demoInstant.at = time.Now().UTC().Format(time.RFC3339) })
+	return demoInstant.at
+}
+
 // runCommand runs one of the repository's commands (by its package path
 // under core/, where the commands run so migrate finds migrations/) on the
 // scratch database with the demo seed and its import asked for.
@@ -804,6 +820,9 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 	cmd := exec.Command("go", "run", pkg)
 	cmd.Dir = "../../.."
 	cmd.Env = append(os.Environ(),
+		// every seed run of one test reads the same instant, so a boundary
+		// between two runs cannot move the second history
+		demoSeedInstantEnv+"="+demoSeedInstant(t),
 		"DATABASE_URL="+dbURL,
 		demoSeedEnv+"=1",
 		demoImportEnv+"=1",

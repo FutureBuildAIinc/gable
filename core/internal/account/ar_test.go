@@ -247,38 +247,36 @@ func (w *arWorld) netOf(code string, debitMinusCredit bool, upTo *time.Time) int
 // ---------------------------------------------------------------------------
 
 // daysFromNow is the business day n days from today in the default branch's
-// zone, as a UTC midnight date. The AR core refuses money dated after the
-// branch's own day, so a test that dated "today" by the UTC clock would be
-// refused in the hours between UTC's midnight and the branch's.
+// zone, as a UTC midnight date, read from the database as the production code
+// reads it (a POSIX zone name Go cannot load is read the same). The AR core
+// refuses money dated after the branch's own day, so a test that dated "today"
+// by the process clock would be refused in the hours between UTC's midnight
+// and the branch's.
 func daysFromNow(n int) time.Time {
-	now := time.Now().In(testBranchZone())
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)
+	branchDayMu.Lock()
+	db := branchDayDB
+	branchDayMu.Unlock()
+	if db == nil {
+		panic("daysFromNow before a world was made")
+	}
+	var day time.Time
+	if err := db.Pool.QueryRow(context.Background(), `SELECT `+testutil.BranchDaySQL).Scan(&day); err != nil {
+		panic(fmt.Sprintf("the branch's day: %v", err))
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)
 }
 
 var (
-	branchZoneOnce sync.Once
-	branchZone     = time.UTC
+	branchDayMu sync.Mutex
+	branchDayDB *database.DB
 )
 
-// testBranchZone is the default branch's time zone, read once from the test
-// database by the first world.
-func testBranchZone() *time.Location {
-	return branchZone
-}
-
+// loadBranchZone remembers the test database of the world being made: the
+// pool of an earlier world is closed with its test.
 func loadBranchZone(db *database.DB) {
-	branchZoneOnce.Do(func() {
-		var name string
-		err := db.Pool.QueryRow(context.Background(), `
-			SELECT COALESCE((SELECT l.timezone FROM locations l
-			        WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`).Scan(&name)
-		if err != nil {
-			return
-		}
-		if loc, err := time.LoadLocation(name); err == nil {
-			branchZone = loc
-		}
-	})
+	branchDayMu.Lock()
+	branchDayDB = db
+	branchDayMu.Unlock()
 }
 
 func date(t time.Time) string { return t.Format("2006-01-02") }

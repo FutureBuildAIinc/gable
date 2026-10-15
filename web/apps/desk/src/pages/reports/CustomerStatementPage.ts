@@ -388,14 +388,16 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
-                    ${this._scopedToYard() ? html`
+                    ${this._scopedToYard() || this._unappliedElsewhere(cur) > 0 ? html`
                         <div class="mt-4 space-y-1">
                             ${this._unappliedElsewhere(cur) > 0 ? html`
                                 <p class="text-sm text-zinc-400" data-testid="statement-unapplied-elsewhere">
                                     Unapplied cash at other yards: <span class="font-mono">${formatCents(this._unappliedElsewhere(cur))}</span>
                                 </p>
                             ` : nothing}
-                            <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account.</p>
+                            ${this._scopedToYard() ? html`
+                                <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account.</p>
+                            ` : nothing}
                         </div>
                     ` : nothing}
 
