@@ -46,37 +46,35 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 		t.Errorf("no header create naming A's customer: %d %s, want 201", status, buf)
 	}
 
-	// The offline sync: both items sync (ruling A), and B's customer's
-	// invoice posts at the selling yard.
+	// The offline sync: the replay is refused by rule (money never queues)
+	// for a no header user naming B's customer and for one naming A's, and
+	// nothing of either batch is written. The user's reach to name every
+	// customer keeps its own proofs on the create, the completion and the
+	// return below.
 	sync := func(customer uuid.UUID) (string, string) {
-		// B's customer holds a tax exemption, so its sale totals the 100 untaxed
-		cents := 105
-		if customer == f.custB {
-			cents = 100
-		}
 		client := uuid.NewString()
 		return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
-			`"tenders":[{"method":"account","amount_cents":%d}],"client_created_at":%q}]}`,
+			`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
 			uuid.NewString()[:8], regNA, client, uuid.NewString(), customer.String(),
-			f.posProd.String(), cents, time.Now().UTC().Format(time.RFC3339))
+			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	invoicesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custB, f.branchA)
 	client, req := sync(f.custB)
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", req)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("no header sync of B's customer: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("no header sync of B's customer: %d %s, want the rule's 409", status, buf)
 	}
-	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1`, client); n != 1 {
-		t.Errorf("the synced sale was not written")
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
+		t.Errorf("the refused sync wrote its sale")
 	}
-	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custB, f.branchA); after != invoicesBefore+1 {
-		t.Errorf("the synced item posted %d invoices at A for B's customer, want 1", after-invoicesBefore)
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custB, f.branchA); after != invoicesBefore {
+		t.Errorf("the refused sync posted %d invoices at A for B's customer, want none", after-invoicesBefore)
 	}
 	_, req = sync(f.custID)
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", req)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("no header sync of A's customer: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("no header sync of A's customer: %d %s, want the rule's 409", status, buf)
 	}
 
 	// The return names a customer through the same rule (round 22, ruling A

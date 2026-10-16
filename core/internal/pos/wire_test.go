@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
-	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -913,76 +912,38 @@ func withToken(t map[string]any) map[string]any {
 	return t
 }
 
-// flakyTaxProvider answers PreviewTax with an error while its fail flag is
-// set, the configured provider otherwise (the offline sync's pending path).
-type flakyTaxProvider struct {
-	fail bool
-}
-
-func (p *flakyTaxProvider) ProviderConfigured() bool { return true }
-
-func (p *flakyTaxProvider) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
-	if p.fail {
-		return nil, fmt.Errorf("provider outage")
-	}
-	return &tax.TaxResult{TotalTax: 0}, nil
-}
-
-// RULE (ADR 0005 section 14.2 C2-5, and section 3's one exception): an
-// offline sale synced while the tax provider fails is never rejected; it
-// stays pending in the sync log, and the same batch retried once the
-// provider answers completes it through the same path a live sale takes.
-func TestOfflineSyncPendingOnTaxFailureCompletesOnRetry(t *testing.T) {
+// RULE (money never queues): the offline sale replay is refused by rule. A
+// well formed batch past the branch and customer walls answers 409
+// money_never_queues and nothing of it is written: no replayed sale, no
+// invoice, no payment, no sync log row.
+func TestSyncOfflineRefusedByRule(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	provider := &flakyTaxProvider{fail: true}
-	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
-		f.service.WithTaxProvider(provider)
-	})
-	batch := func(clientID string) map[string]any {
-		return map[string]any{
-			"batch_id": "sync-pending-1", "register_id": f.register,
-			"items": []map[string]any{{
-				"client_id": clientID, "cashier_id": mustUUID(t),
-				"items":   []map[string]any{{"product_id": f.productID.String(), "quantity": "1"}},
-				"tenders": []map[string]any{{"method": "cash", "amount_cents": 599}},
-			}},
-		}
+	f := newFixture(t, testutil.RequireDB(t))
+	batch := map[string]any{
+		"batch_id": "sync-refused-1", "register_id": f.register,
+		"items": []map[string]any{{
+			"client_id": "c1c1c1c1-0000-4000-8000-00000000beef", "cashier_id": mustUUID(t),
+			"items":   []map[string]any{{"product_id": f.productID.String(), "quantity": "1"}},
+			"tenders": []map[string]any{{"method": "cash", "amount_cents": 599}},
+		}},
 	}
-	clientID := "c1c1c1c1-0000-4000-8000-00000000beef"
-	// The provider is down: the sale is pending, not an error, and nothing of
-	// it exists yet (no sale row, no invoice, no payment).
-	r := f.do("POST", "/api/v1/pos/sync", batch(clientID), "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if r.status != http.StatusOK {
-		t.Fatalf("sync under a provider outage = %d: %s", r.status, r.raw)
+	r := f.do("POST", "/api/v1/pos/sync", batch, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("sync = %d: %s, want the rule's 409", r.status, r.raw)
 	}
-	if got := num(t, r.body, "pending_count"); got != 1 {
-		t.Fatalf("pending_count = %d, want 1 (the body: %s)", got, r.raw)
+	if code, _, _ := errorOf(t, r); code != "money_never_queues" {
+		t.Errorf("code = %q, want money_never_queues (the body: %s)", code, r.raw)
 	}
-	if got := num(t, r.body, "error_count"); got != 0 {
-		t.Errorf("error_count = %d, want 0: a provider failure is never a rejection", got)
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_transactions`); got != 0 {
+		t.Errorf("%d pos_transactions after the refused sync, want 0", got)
 	}
 	if got := f.counterInvoices(t); got != 0 {
-		t.Errorf("%d invoices after the pending sync, want 0", got)
+		t.Errorf("%d invoices after the refused sync, want 0", got)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM payments`); got != 0 {
-		t.Errorf("%d payments after the pending sync, want 0", got)
+		t.Errorf("%d payments after the refused sync, want 0", got)
 	}
-	// The provider answers: the same batch completes the sale through the
-	// same path a live sale takes, and the replay is a duplicate.
-	provider.fail = false
-	r = f.do("POST", "/api/v1/pos/sync", batch(clientID), "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if r.status != http.StatusOK {
-		t.Fatalf("sync retry = %d: %s", r.status, r.raw)
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log`); got != 0 {
+		t.Errorf("%d pos_sync_log rows after the refused sync, want 0", got)
 	}
-	if got := num(t, r.body, "synced_count"); got != 1 {
-		t.Errorf("synced_count = %d, want 1 (the body: %s)", got, r.raw)
-	}
-	if got := f.counterInvoices(t); got != 1 {
-		t.Errorf("%d invoices after the retry, want 1", got)
-	}
-	r = f.do("POST", "/api/v1/pos/sync", batch(clientID), "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if got := num(t, r.body, "duplicate_count"); got != 1 {
-		t.Errorf("duplicate_count = %d, want 1", got)
-	}
-	f.assertARInvariants(t)
 }
