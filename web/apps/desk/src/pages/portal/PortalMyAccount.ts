@@ -140,7 +140,7 @@ export class PortalMyAccount extends LitElement {
                                 <label class="block text-sm font-medium text-zinc-300 mb-1">Tier / Price Level</label>
                                 <input
                                     type="text"
-                                    .value=${c.price_level ? `(${c.price_level.name})` : ''}
+                                    .value=${c.price_profile_id ? `(program ${c.price_profile_id.slice(0, 8)})` : ''}
                                     readonly
                                     class="w-full px-3 py-2 border border-white/10 bg-white/5 text-zinc-400 rounded cursor-not-allowed"
                                 />
