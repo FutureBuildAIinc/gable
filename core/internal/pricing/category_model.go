@@ -160,14 +160,14 @@ type CategoryRuleFilter struct {
 
 // CategoryPricingAudit represents a row in the audit trail table.
 type CategoryPricingAudit struct {
-	ID          uuid.UUID       `json:"id"`
-	RuleID      uuid.UUID       `json:"rule_id"`
-	Action      string          `json:"action"`
-	OldValues   map[string]any  `json:"old_values,omitempty"`
-	NewValues   map[string]any  `json:"new_values,omitempty"`
-	PerformedBy string          `json:"performed_by"`
-	PerformedAt httpx.Timestamp `json:"performed_at"`
-	CategoryID  *uuid.UUID      `json:"category_id,omitempty"`
+	ID             uuid.UUID       `json:"id"`
+	RuleID         uuid.UUID       `json:"rule_id"`
+	Action         string          `json:"action"`
+	OldValues      map[string]any  `json:"old_values,omitempty"`
+	NewValues      map[string]any  `json:"new_values,omitempty"`
+	PerformedBy    string          `json:"performed_by"`
+	PerformedAt    httpx.Timestamp `json:"performed_at"`
+	CategoryID     *uuid.UUID      `json:"category_id,omitempty"`
 	TargetType     string          `json:"target_type,omitempty"`
 	Tier           string          `json:"tier,omitempty"`
 	PriceProfileID *uuid.UUID      `json:"price_profile_id,omitempty"`

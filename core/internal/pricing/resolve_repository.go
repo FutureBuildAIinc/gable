@@ -93,18 +93,18 @@ type PricingProgram struct {
 
 // VendorCost is one vendor cost row with its level's code.
 type VendorCost struct {
-	ID                uuid.UUID
-	VendorID          uuid.UUID
-	VendorLevelID     uuid.UUID
-	VendorLevelCode   string
-	ProductID         uuid.UUID
-	BranchID          *uuid.UUID
-	PurchaseUOM       string
-	UnitCost          httpx.Price
-	VendorSKU         *string
-	EffectiveFrom     time.Time
-	EffectiveTo       *time.Time
-	Revision          int64
+	ID              uuid.UUID
+	VendorID        uuid.UUID
+	VendorLevelID   uuid.UUID
+	VendorLevelCode string
+	ProductID       uuid.UUID
+	BranchID        *uuid.UUID
+	PurchaseUOM     string
+	UnitCost        httpx.Price
+	VendorSKU       *string
+	EffectiveFrom   time.Time
+	EffectiveTo     *time.Time
+	Revision        int64
 }
 
 // PostgresResolveRepository reads the pricing tables.

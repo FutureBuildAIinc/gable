@@ -414,7 +414,6 @@ func (h *Handler) HandleSetEscalationPolicy(w http.ResponseWriter, r *http.Reque
 
 // ---- price levels ----
 
-
 // ---- child lists ----
 
 // parseChildFilter reads a child list's parameters: the platform three, the

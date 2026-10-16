@@ -47,14 +47,14 @@ type Request struct {
 type Resolved struct {
 	// UOM is the request's effective unit: the one sent, or the product's
 	// default sale unit when the request named none.
-	UOM         string
-	UnitPrice   httpx.Price
-	PriceUOM    string
-	UOMQty      httpx.Quantity
-	PriceUOMQty httpx.Quantity
-	PriceBasis  PricingSource
-	Details     string
-	RuleID      *uuid.UUID
+	UOM               string
+	UnitPrice         httpx.Price
+	PriceUOM          string
+	UOMQty            httpx.Quantity
+	PriceUOMQty       httpx.Quantity
+	PriceBasis        PricingSource
+	Details           string
+	RuleID            *uuid.UUID
 	ReferencePrice    httpx.Price
 	ReferencePriceUOM string
 }

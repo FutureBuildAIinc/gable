@@ -23,12 +23,12 @@ const (
 )
 
 type Service struct {
-	repo       Repository
+	repo        Repository
 	resolveRepo ResolveRepository // the resolve side reads; wire with WithRepository
-	catSvc     *CategoryPricingService
-	events     EventRecorder // optional; nil records nothing (unit tests)
-	tx         TxRunner      // optional; nil runs each write unwrapped (unit tests)
-	audits     AuditLogger   // optional; nil writes no audit rows (unit tests)
+	catSvc      *CategoryPricingService
+	events      EventRecorder // optional; nil records nothing (unit tests)
+	tx          TxRunner      // optional; nil runs each write unwrapped (unit tests)
+	audits      AuditLogger   // optional; nil writes no audit rows (unit tests)
 }
 
 func NewService(repo Repository) *Service {
