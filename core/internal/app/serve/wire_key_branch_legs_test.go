@@ -31,7 +31,7 @@ import (
 )
 
 // walledLegDrivers are the tests whose legs the coverage test needs.
-var walledLegDrivers = []string{"sweep", "pos", "body"}
+var walledLegDrivers = []string{"sweep", "pos", "body", "catalog"}
 
 var walledLegs = struct {
 	sync.Mutex

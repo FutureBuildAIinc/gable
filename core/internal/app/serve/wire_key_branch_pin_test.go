@@ -442,6 +442,10 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
 	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db), customerSvc, productSvc).
 		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+	pricing.NewCatalogHandler(pricing.NewCatalogService(pricing.NewCatalogRepository(db)).WithTxRunner(db)).
+		WithEngine(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db))).
+		WithBranchGuard(wall.guard).
+		RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, db))
 	registerMarketCheck(mux, marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
 		WithTxRunner(db), wall.keyWall, db)
 	pricing.NewCategoryHandler(

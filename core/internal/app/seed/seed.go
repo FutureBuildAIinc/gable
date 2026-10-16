@@ -1472,9 +1472,9 @@ func Run() {
 	// =========================================================================
 	if demoImportRequested() {
 		// The demo import maps its customers' level names to level ids (the import
-			// data file names levels, and its rows write profiles through the
-			// same map the demo customers use).
-			importSKUs, importCust, _ := seedDemoImport(seedCtx, db, branchIDs, profileIDs)
+		// data file names levels, and its rows write profiles through the
+		// same map the demo customers use).
+		importSKUs, importCust, _ := seedDemoImport(seedCtx, db, branchIDs, profileIDs)
 		// Merge the imported SKUs into the SKU map the rest of the seed writes
 		// (seedDispatchDay samples the SKU picker; cross yard quotes sample by
 		// name). Imported customers extend customerIDs for downstream sections.

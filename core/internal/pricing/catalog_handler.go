@@ -534,14 +534,14 @@ func (h *CatalogHandler) HandleListProductPrices(w http.ResponseWriter, r *http.
 func priceViews(items []ProductPrice) []ProductPrice { return items }
 
 type priceRowRequest struct {
-	PriceLevelID            *string         `json:"price_level_id"`
-	BranchID                *string         `json:"branch_id"`
-	PriceUOM                *string         `json:"price_uom"`
+	PriceLevelID            *string          `json:"price_level_id"`
+	BranchID                *string          `json:"branch_id"`
+	PriceUOM                *string          `json:"price_uom"`
 	UnitPriceTenThousandths *json.RawMessage `json:"unit_price_ten_thousandths"`
 }
 
 type priceListPutRequest struct {
-	Revision json.RawMessage  `json:"revision"`
+	Revision json.RawMessage   `json:"revision"`
 	Prices   []priceRowRequest `json:"prices"`
 }
 
@@ -871,16 +871,16 @@ func (h *CatalogHandler) HandleGetVendorCost(w http.ResponseWriter, r *http.Requ
 }
 
 type vendorCostWriteRequest struct {
-	VendorID                *string          `json:"vendor_id"`
-	VendorLevelID           *string          `json:"vendor_price_level_id"`
-	ProductID               *string          `json:"product_id"`
-	BranchID                *string          `json:"branch_id"`
-	PurchaseUOM             *string          `json:"purchase_uom"`
-	UnitCostTenThousandths  *json.RawMessage `json:"unit_cost_ten_thousandths"`
-	VendorSKU               *string          `json:"vendor_sku"`
-	EffectiveFrom           *string          `json:"effective_from"`
-	EffectiveTo             *string          `json:"effective_to"`
-	Revision                *int64           `json:"revision"`
+	VendorID               *string          `json:"vendor_id"`
+	VendorLevelID          *string          `json:"vendor_price_level_id"`
+	ProductID              *string          `json:"product_id"`
+	BranchID               *string          `json:"branch_id"`
+	PurchaseUOM            *string          `json:"purchase_uom"`
+	UnitCostTenThousandths *json.RawMessage `json:"unit_cost_ten_thousandths"`
+	VendorSKU              *string          `json:"vendor_sku"`
+	EffectiveFrom          *string          `json:"effective_from"`
+	EffectiveTo            *string          `json:"effective_to"`
+	Revision               *int64           `json:"revision"`
 }
 
 func (h *CatalogHandler) HandleCreateVendorCost(w http.ResponseWriter, r *http.Request) {
@@ -1108,12 +1108,12 @@ func (h *CatalogHandler) HandleGetContract(w http.ResponseWriter, r *http.Reques
 }
 
 type contractWriteRequest struct {
-	CustomerID              *string          `json:"customer_id"`
-	ProductID               *string          `json:"product_id"`
-	BranchID                *string          `json:"branch_id"`
-	ContractPrice           *json.RawMessage `json:"contract_price_ten_thousandths"`
-	PriceUOM                *string          `json:"price_uom"`
-	Revision                *int64           `json:"revision"`
+	CustomerID    *string          `json:"customer_id"`
+	ProductID     *string          `json:"product_id"`
+	BranchID      *string          `json:"branch_id"`
+	ContractPrice *json.RawMessage `json:"contract_price_ten_thousandths"`
+	PriceUOM      *string          `json:"price_uom"`
+	Revision      *int64           `json:"revision"`
 }
 
 func (h *CatalogHandler) HandleCreateContract(w http.ResponseWriter, r *http.Request) {

@@ -76,19 +76,23 @@ type VendorLevel struct {
 
 // VendorCost is one vendor cost row on the wire.
 type VendorCost struct {
-	ID              uuid.UUID       `json:"id"`
-	VendorID        uuid.UUID       `json:"vendor_id"`
-	VendorLevelID   uuid.UUID       `json:"vendor_price_level_id"`
-	ProductID       uuid.UUID       `json:"product_id"`
-	BranchID        *uuid.UUID      `json:"branch_id"`
-	PurchaseUOM     string          `json:"purchase_uom"`
-	UnitCost        httpx.Price     `json:"unit_cost_ten_thousandths"`
-	VendorSKU       *string         `json:"vendor_sku"`
-	EffectiveFrom   string          `json:"effective_from"`
-	EffectiveTo     *string         `json:"effective_to"`
-	Revision        int64           `json:"revision"`
-	CreatedAt       httpx.Timestamp `json:"created_at"`
-	UpdatedAt       httpx.Timestamp `json:"updated_at"`
+	// costText is the scan buffer the repository reads the scaled column
+	// into before parsing it exactly.
+	costText string
+
+	ID            uuid.UUID       `json:"id"`
+	VendorID      uuid.UUID       `json:"vendor_id"`
+	VendorLevelID uuid.UUID       `json:"vendor_price_level_id"`
+	ProductID     uuid.UUID       `json:"product_id"`
+	BranchID      *uuid.UUID      `json:"branch_id"`
+	PurchaseUOM   string          `json:"purchase_uom"`
+	UnitCost      httpx.Price     `json:"unit_cost_ten_thousandths"`
+	VendorSKU     *string         `json:"vendor_sku"`
+	EffectiveFrom string          `json:"effective_from"`
+	EffectiveTo   *string         `json:"effective_to"`
+	Revision      int64           `json:"revision"`
+	CreatedAt     httpx.Timestamp `json:"created_at"`
+	UpdatedAt     httpx.Timestamp `json:"updated_at"`
 }
 
 // ErrCatalogDuplicate names the catalogue's unique key conflicts.
@@ -737,7 +741,11 @@ func scanVendorCost(row interface{ Scan(dest ...any) error }) (*VendorCost, erro
 	var c VendorCost
 	var created, updated time.Time
 	if err := row.Scan(&c.ID, &c.VendorID, &c.VendorLevelID, &c.ProductID, &c.BranchID, &c.PurchaseUOM,
-		&c.UnitCost, &c.VendorSKU, &c.EffectiveFrom, &c.EffectiveTo, &c.Revision, &created, &updated); err != nil {
+		&c.costText, &c.VendorSKU, &c.EffectiveFrom, &c.EffectiveTo, &c.Revision, &created, &updated); err != nil {
+		return nil, err
+	}
+	var err error
+	if c.UnitCost, err = httpx.ParsePrice(c.costText); err != nil {
 		return nil, err
 	}
 	c.CreatedAt, c.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
