@@ -32,8 +32,9 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export interface ListRulesParams {
   /** Filters, all optional; anything else is a 400. */
-  target_type?: 'account' | 'tier';
-  tier?: string;
+  target_type?: 'account' | 'profile' | 'level';
+  price_profile_id?: string;
+  price_level_id?: string;
   customer_id?: string;
   category_id?: string;
   is_active?: boolean;
@@ -46,7 +47,7 @@ export interface ListRulesParams {
 export function buildRuleQuery(params: ListRulesParams = {}): string {
   const q = new URLSearchParams();
   if (params.target_type) q.set('target_type', params.target_type);
-  if (params.tier) q.set('tier', params.tier);
+  if (params.price_level_id) q.set('price_level_id', params.price_level_id);
   if (params.customer_id) q.set('customer_id', params.customer_id);
   if (params.category_id) q.set('category_id', params.category_id);
   if (params.is_active !== undefined) q.set('is_active', String(params.is_active));
@@ -241,8 +242,8 @@ export const categoryPricingService = {
   // --- Matrix ---
   getMatrix: async (): Promise<MatrixResponse> => {
     const res = await expectOk(await fetchWithAuth(`${API_URL}/api/v1/pricing/matrix`), 'Failed to load matrix');
-    const m: { categories: ProductCategory[] | null; tiers: string[] | null; cells: MatrixResponse['cells'] | null } = await res.json();
-    return { categories: m.categories ?? [], tiers: m.tiers ?? [], cells: m.cells ?? [] };
+    const m: { categories: ProductCategory[] | null; levels: string[] | null; cells: MatrixResponse['cells'] | null } = await res.json();
+    return { categories: m.categories ?? [], levels: m.levels ?? [], cells: m.cells ?? [] };
   },
 
   // --- Resolution Preview ---

@@ -330,7 +330,6 @@ GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleRec
 POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction
 GET	/api/v1/pos/zreports	internal/pos	h.ListZReports
-GET	/api/v1/price_levels	internal/customer	h.HandleListPriceLevels
 GET	/api/v1/pricing/calculate	internal/pricing	h.HandleCalculatePrice
 POST	/api/v1/pricing/calculate-escalation	internal/pricing	h.HandleCalculateEscalation
 GET	/api/v1/pricing/categories	internal/pricing	h.HandleListCategories
@@ -343,8 +342,24 @@ POST	/api/v1/pricing/category-rules/bulk	internal/pricing	h.HandleBulkUpsertRule
 DELETE	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleDeleteCategoryRule
 PUT	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleUpdateCategoryRule
 GET	/api/v1/pricing/category-rules/{id}/audit	internal/pricing	h.HandleGetRuleAudit
+GET	/api/v1/pricing/contracts	internal/pricing	h.HandleListContracts
+POST	/api/v1/pricing/contracts	internal/pricing	h.HandleCreateContract
+DELETE	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleDeleteContract
+GET	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleGetContract
+PUT	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleUpdateContract
+GET	/api/v1/pricing/cost	internal/pricing	h.HandleCost
+GET	/api/v1/pricing/levels	internal/pricing	h.HandleListLevels
+POST	/api/v1/pricing/levels	internal/pricing	h.HandleCreateLevel
+GET	/api/v1/pricing/levels/{id}	internal/pricing	h.HandleGetLevel
+PUT	/api/v1/pricing/levels/{id}	internal/pricing	h.HandleUpdateLevel
 POST	/api/v1/pricing/market-check	internal/marketcheck	wrap(runGuard, h.run)
 GET	/api/v1/pricing/matrix	internal/pricing	h.HandleGetMatrix
+GET	/api/v1/pricing/products/{id}/prices	internal/pricing	h.HandleListProductPrices
+PUT	/api/v1/pricing/products/{id}/prices	internal/pricing	h.HandleReplaceProductPrices
+GET	/api/v1/pricing/profiles	internal/pricing	h.HandleListProfiles
+POST	/api/v1/pricing/profiles	internal/pricing	h.HandleCreateProfile
+GET	/api/v1/pricing/profiles/{id}	internal/pricing	h.HandleGetProfile
+PUT	/api/v1/pricing/profiles/{id}	internal/pricing	h.HandleUpdateProfile
 GET	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleListPrograms
 POST	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleCreateProgram
 GET	/api/v1/pricing/rebates/programs/{id}	internal/pricing	h.HandleGetProgram
@@ -353,6 +368,14 @@ POST	/api/v1/pricing/rebates/programs/{id}/claims/calculate	internal/pricing	h.H
 GET	/api/v1/pricing/resolve	internal/pricing	h.HandleResolvePreview
 GET	/api/v1/pricing/rules	internal/pricing	h.HandleListRules
 POST	/api/v1/pricing/rules	internal/pricing	h.HandleCreateRule
+GET	/api/v1/pricing/vendor-costs	internal/pricing	h.HandleListVendorCosts
+POST	/api/v1/pricing/vendor-costs	internal/pricing	h.HandleCreateVendorCost
+GET	/api/v1/pricing/vendor-costs/{id}	internal/pricing	h.HandleGetVendorCost
+PUT	/api/v1/pricing/vendor-costs/{id}	internal/pricing	h.HandleUpdateVendorCost
+GET	/api/v1/pricing/vendor-levels	internal/pricing	h.HandleListVendorLevels
+POST	/api/v1/pricing/vendor-levels	internal/pricing	h.HandleCreateVendorLevel
+GET	/api/v1/pricing/vendor-levels/{id}	internal/pricing	h.HandleGetVendorLevel
+PUT	/api/v1/pricing/vendor-levels/{id}	internal/pricing	h.HandleUpdateVendorLevel
 GET	/api/v1/products	internal/product	h.HandleListProducts
 POST	/api/v1/products	internal/product	h.HandleCreateProduct
 GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts

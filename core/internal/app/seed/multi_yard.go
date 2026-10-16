@@ -105,7 +105,7 @@ func upsertPersonas(db *sql.DB, yards map[string]uuid.UUID) error {
 
 // seedMultiYard writes the multi yard world on top of the sections above it.
 func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID,
-	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, priceLevelIDs map[string]uuid.UUID) {
+	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, profileIDs map[string]uuid.UUID) {
 
 	// The single branch switch on: the desk's yard switcher shows the yards and
 	// each yard's desk reads its own yard's documents. DEMO_MULTI_YARD=0 leaves
@@ -159,9 +159,9 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 	if ar != nil && yards["WK"] != uuid.Nil {
 		cid, branch, err := seedCustomer(db, demoCustomer{
 			Name: "Quillfield Formwork Ltd", Acct: "QFC-001", Email: "billing@quillfieldformwork.example", Phone: "250-555-3300",
-			Addr: "610 Plywood Ct, West Kelowna BC", Tier: "SILVER", Terms: "NET30", PriceLevel: "Contractor",
+			Addr: "610 Plywood Ct, West Kelowna BC", Terms: "NET30", Profile: "Contractor",
 			CreditLimit: 20000, PrimaryBranch: yards["WK"],
-		}, priceLevelIDs["Contractor"])
+		}, profileIDs["Contractor"])
 		if err != nil {
 			log.Printf("Seed: Quillfield Formwork: %v", err)
 		} else {

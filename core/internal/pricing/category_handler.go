@@ -5,6 +5,7 @@ package pricing
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,11 +20,21 @@ import (
 type CategoryHandler struct {
 	service     *CategoryPricingService
 	customerSvc *customer.Service
+	// program reads one customer's pricing program (the profile and the
+	// level it names) for the resolve preview; nil answers an empty program.
+	program func(ctx context.Context, customerID uuid.UUID) (*PricingProgram, error)
 }
 
 // NewCategoryHandler creates a new CategoryHandler.
 func NewCategoryHandler(svc *CategoryPricingService, custSvc *customer.Service) *CategoryHandler {
 	return &CategoryHandler{service: svc, customerSvc: custSvc}
+}
+
+// WithProgramReader wires the customer's pricing program read the resolve
+// preview runs through.
+func (h *CategoryHandler) WithProgramReader(p func(ctx context.Context, customerID uuid.UUID) (*PricingProgram, error)) *CategoryHandler {
+	h.program = p
+	return h
 }
 
 // RegisterCategoryRoutes registers all category pricing routes.
@@ -192,7 +203,7 @@ const categoryRuleOrdering = "category_pricing_rules.created_at_id_desc"
 
 func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http.Request) {
 	q, err := httpx.StrictQuery(r, "cursor", "limit", "include",
-		"target_type", "tier", "customer_id", "category_id", "is_active")
+		"target_type", "price_profile_id", "price_level_id", "customer_id", "category_id", "is_active")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -223,11 +234,18 @@ func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http
 		if t, ok := ParseTargetType(vals[0]); ok {
 			filter.TargetType = &t
 		} else {
-			v.Check(false, "target_type", "must be one of: account, tier")
+			v.Check(false, "target_type", "must be one of: account, profile, level")
 		}
 	}
-	if vals := q["tier"]; len(vals) > 0 {
-		filter.Tier = vals[0]
+	if vals := q["price_profile_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("price_profile_id", &vals[0], true); ok {
+			filter.PriceProfileID = &id
+		}
+	}
+	if vals := q["price_level_id"]; len(vals) > 0 {
+		if id, ok := v.UUID("price_level_id", &vals[0], true); ok {
+			filter.PriceLevelID = &id
+		}
 	}
 	if vals := q["customer_id"]; len(vals) > 0 {
 		if id, ok := v.UUID("customer_id", &vals[0], true); ok {
@@ -307,11 +325,12 @@ type categoryRuleValues struct {
 // element of the bulk body, which may also carry the id of the rule it
 // replaces).
 type categoryRuleWriteRequest struct {
-	ID         *string `json:"id,omitempty"`
-	TargetType string  `json:"target_type"`
-	CustomerID *string `json:"customer_id"`
-	Tier       *string `json:"tier"`
-	CategoryID string  `json:"category_id"`
+	ID             *string `json:"id,omitempty"`
+	TargetType     string  `json:"target_type"`
+	CustomerID     *string `json:"customer_id"`
+	PriceProfileID *string `json:"price_profile_id"`
+	PriceLevelID   *string `json:"price_level_id"`
+	CategoryID     string  `json:"category_id"`
 	categoryRuleValues
 }
 
@@ -386,15 +405,22 @@ func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRu
 	if t, ok := ParseTargetType(req.TargetType); ok {
 		rule.TargetType = t
 	} else {
-		v.Check(false, "target_type", "must be one of: account, tier")
+		v.Check(false, "target_type", "must be one of: account, profile, level")
 	}
 	if req.CustomerID != nil && *req.CustomerID != "" {
 		if id, ok := v.UUID("customer_id", req.CustomerID, true); ok {
 			rule.CustomerID = &id
 		}
 	}
-	if req.Tier != nil {
-		rule.Tier = *req.Tier
+	if req.PriceProfileID != nil && *req.PriceProfileID != "" {
+		if id, ok := v.UUID("price_profile_id", req.PriceProfileID, true); ok {
+			rule.PriceProfileID = &id
+		}
+	}
+	if req.PriceLevelID != nil && *req.PriceLevelID != "" {
+		if id, ok := v.UUID("price_level_id", req.PriceLevelID, true); ok {
+			rule.PriceLevelID = &id
+		}
 	}
 	if req.CategoryID != "" {
 		if id, ok := v.UUID("category_id", &req.CategoryID, true); ok {
@@ -409,17 +435,22 @@ func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRu
 		}
 	}
 	req.categoryRuleValues.parseValues(v, &rule)
-	// A rule targets exactly one kind of customer scope: an account rule names
-	// a customer and carries no tier, a tier rule names a tier and carries no
-	// customer (the invariant migration 107 puts on the table). A tier rule
-	// that also names a customer would price every branch's customers of that
-	// tier, so the pair is refused here and by the key branch wall.
-	if rule.TargetType == TargetTypeAccount {
+	// A rule targets exactly one kind of customer scope: an account rule
+	// names a customer, a profile rule names a profile, a level rule names a
+	// level, and none of them names another kind's key.
+	switch rule.TargetType {
+	case TargetTypeAccount:
 		v.Check(rule.CustomerID != nil, "customer_id", "is required on an account rule")
-		v.Check(rule.Tier == "", "tier", "an account rule carries no tier")
-	} else {
-		v.Check(rule.Tier != "", "tier", "is required on a tier rule")
-		v.Check(rule.CustomerID == nil, "customer_id", "a tier rule carries no customer")
+		v.Check(rule.PriceProfileID == nil, "price_profile_id", "an account rule carries no profile")
+		v.Check(rule.PriceLevelID == nil, "price_level_id", "an account rule carries no level")
+	case TargetTypeProfile:
+		v.Check(rule.PriceProfileID != nil, "price_profile_id", "is required on a profile rule")
+		v.Check(rule.CustomerID == nil, "customer_id", "a profile rule carries no customer")
+		v.Check(rule.PriceLevelID == nil, "price_level_id", "a profile rule carries no level")
+	case TargetTypeLevel:
+		v.Check(rule.PriceLevelID != nil, "price_level_id", "is required on a level rule")
+		v.Check(rule.CustomerID == nil, "customer_id", "a level rule carries no customer")
+		v.Check(rule.PriceProfileID == nil, "price_profile_id", "a level rule carries no profile")
 	}
 	return rule
 }
@@ -523,7 +554,7 @@ func (h *CategoryHandler) HandleGetMatrix(w http.ResponseWriter, r *http.Request
 // --- Resolution Preview ---
 
 func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Request) {
-	q, err := httpx.StrictQuery(r, "product_id", "customer_id", "tier")
+	q, err := httpx.StrictQuery(r, "product_id", "customer_id")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -548,20 +579,22 @@ func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tier := ""
-	if vals := q["tier"]; len(vals) > 0 {
-		tier = vals[0]
-	}
-	if tier == "" && customerID != uuid.Nil && h.customerSvc != nil {
-		if cust, err := h.customerSvc.GetCustomer(r.Context(), customerID); err == nil && cust != nil {
-			tier = string(cust.Tier)
+	// The preview runs the category rung for the customer's own pricing
+	// program: the profile and the level it names, read from the pricing
+	// tables.
+	var profileID, levelID uuid.UUID
+	if h.program != nil {
+		program, perr := h.program(r.Context(), customerID)
+		if perr != nil {
+			httpx.WriteError(w, r, perr)
+			return
+		}
+		if program != nil {
+			profileID, levelID = program.ProfileID, program.LevelID
 		}
 	}
-	if tier == "" {
-		tier = "RETAIL"
-	}
 
-	resolved, err := h.service.ResolveEffectivePrice(r.Context(), customerID, tier, productID)
+	resolved, err := h.service.ResolveProgramPrice(r.Context(), customerID, profileID, levelID, productID)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

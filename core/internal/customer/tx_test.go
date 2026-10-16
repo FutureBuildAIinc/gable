@@ -64,7 +64,7 @@ func newTxFixture(t *testing.T, db *database.DB) *txFixture {
 func (f *txFixture) draft() *customer.Draft {
 	return &customer.Draft{
 		AccountNumber: fmt.Sprintf("%s%04d", f.prefix, f.n.Add(1)), Name: "Tx Test Co",
-		Tier: customer.TierRetail, IsActive: true,
+		IsActive: true,
 	}
 }
 

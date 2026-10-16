@@ -477,7 +477,7 @@ export class GableAccountDetail extends LitElement {
                                 <div class="flex gap-2"><dt class="text-zinc-500">Terms</dt><dd class="text-white" data-fact="terms">${customer.payment_terms.code} - ${customer.payment_terms.name}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">PO required</dt><dd class="text-white" data-fact="po">${customer.po_required ? 'Yes' : 'No'}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Currency</dt><dd class="font-mono text-white" data-fact="currency">${customer.effective_currency}${customer.currency === null ? ' (dealer default)' : ''}</dd></div>
-                                <div class="flex gap-2"><dt class="text-zinc-500">Tier</dt><dd class="text-white capitalize" data-fact="tier">${customer.tier}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Pricing program</dt><dd class="text-white" data-fact="price_profile_id">${customer.price_profile_id ?? ''}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>
                             </dl>
                         </div>
