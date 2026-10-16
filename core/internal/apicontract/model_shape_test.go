@@ -175,8 +175,6 @@ var modelBoundSchemas = []struct {
 	{"PosZReport", pos.ZReport{}},
 	{"PosReturn", pos.Return{}},
 	{"PosReturnLine", pos.ReturnLine{}},
-	{"PosSyncResponse", pos.OfflineSyncResponse{}},
-	{"PosSyncItemResult", pos.SyncItemResult{}},
 	// portal (R1-7c)
 	// Health schemas (live, ready, metrics) are inline map[string]any in serve.go
 	// with no struct to bind, so they are omitted from this table.

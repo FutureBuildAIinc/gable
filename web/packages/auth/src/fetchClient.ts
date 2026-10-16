@@ -13,8 +13,9 @@
  * what an operator or the identity provider put there out of band.
  */
 
-import { authCustody } from './custody.ts';
-import { BRANCH_STORAGE_KEY } from './branch.ts';
+import { NO_SIGNAL_ERROR } from '@gable/work-offline'
+import { authCustody } from './custody.ts'
+import { BRANCH_STORAGE_KEY } from './branch.ts'
 
 const DEFAULT_TIMEOUT = 10_000; // 10 seconds
 const DEFAULT_RETRIES = 1;
@@ -31,10 +32,21 @@ export interface FetchWithAuthOptions extends Omit<RequestInit, 'signal'> {
   timeout?: number;
   retries?: number;
   signal?: AbortSignal | null;
+  /**
+   * Whether the device has a connection right now, read when a write is
+   * offered. Defaults to the platform's own `navigator.onLine`; tests and a
+   * harness that cuts the network on purpose pass their own.
+   */
+  onlineSignal?: () => boolean;
 }
+
+/** The verbs a read may take: they proceed without a signal, riding the cache. */
+const READ_VERBS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * Fetch wrapper that automatically:
+ * - Refuses a write verb with no signal before anything dials (money never
+ *   queues: the call is not sent, not queued and not retried)
  * - Injects the Bearer token from in-memory custody, falling back to the
  *   legacy out-of-band localStorage token
  * - Applies request timeout via AbortController
@@ -50,8 +62,20 @@ export async function fetchWithAuth(
     retries = DEFAULT_RETRIES,
     headers: customHeaders,
     signal: externalSignal,
+    onlineSignal,
     ...fetchOpts
   } = options;
+
+  // The no signal guard (money never queues): a write with no signal is
+  // refused before the first attempt, so a refused write is never stored,
+  // never queued and never replayed. A read is untouched: cached reads keep
+  // working offline.
+  const method = (fetchOpts.method ?? 'GET').toUpperCase();
+  if (!READ_VERBS.has(method) && !(onlineSignal ?? (() => navigator.onLine !== false))()) {
+    const refusal = new Error(NO_SIGNAL_ERROR);
+    refusal.name = 'NoSignalError';
+    throw refusal;
+  }
 
   const headers = new Headers(customHeaders);
 
