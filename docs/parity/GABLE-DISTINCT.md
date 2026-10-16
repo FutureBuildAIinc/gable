@@ -22,7 +22,7 @@ How to read it:
   only) or prototype.
 - **Verdict** is keep, keep with a change (what and why), or rule (the product owner decides).
 
-Sources: the MVP's master branch and its later lines; the commons at `refactor/v1` 58dde7e8; Gable's design source of
+Sources: the MVP's master branch and its later lines; the commons at `refactor/v1` 695d587c; Gable's design source of
 truth (the design files `Gable: design system` and `Gable: screens`, with their cited token notes). Paths are
 repository relative; MVP paths are marked "MVP".
 
@@ -39,7 +39,8 @@ repository relative; MVP paths are marked "MVP".
   `tauri/gable-desk/` wraps it; the record link is ADR 0007 section 8 with `core/api/links.json`. MVP antecedent:
   `app/src/pages/LocalTestHub.ts`, a surface picker shown only in dev and demo builds.
 - **Origin:** both. The MVP's picker chose between the desk, the portal, the driver and yard apps and the counter;
-  v1 (R1-8) made it the product's front door with sign in and role filtered tiles.
+  v1 (R1-8) made it the product's front door with sign in and role filtered tiles, and pull request 123 added demo
+  persona cards on dev sign in.
 - **Status:** built (sign in and tiles); the `open` handling is designed and waits on C5-2b.
 - **Distinct because:** Gable opens into a catalog of separately enabled apps, not one menu tree.
 - **Verdict:** keep, with a change. The tile audience table (`APP_AUDIENCE`) repeats the server's role guards in the
@@ -92,9 +93,10 @@ repository relative; MVP paths are marked "MVP".
   selected.
 - **Where it lives:** `web/apps/desk/src/components/layout/branch-switcher.ts`,
   `web/apps/desk/src/services/BranchContext.ts`, `core/pkg/branchctx/`, `core/pkg/middleware/branch.go`; the no
-  branch rule is pull request 119 (open).
-- **Origin:** both. The MVP built the switcher and the context; v1 built the walls.
-- **Status:** built; the no branch rule is in an open pull request.
+  branch rule merged in pull request 119.
+- **Origin:** both. The MVP built the switcher and the context; v1 built the walls and closed no-header branch
+  confinement across all core modules in pull request 119.
+- **Status:** built.
 - **Distinct because:** not distinct in capability (the incumbents switch location too, MY-01 and MY-03). Listed
   because the new header must hold it.
 - **Verdict:** keep.
@@ -116,13 +118,14 @@ repository relative; MVP paths are marked "MVP".
 
 #### D7. The quote builder
 
-- **What it is:** One screen prices a job: price level, credit limit, balance and available credit with an over
-  limit warning; pickup or delivery, with truck and freight chosen on the quote; the lines, the AI upload and a
-  running summary.
+- **What it is:** One split pane screen prices a job (pull request 130): price level, credit limit, balance and
+  available credit with an over limit warning; pickup or delivery, with truck and freight chosen on the quote; the
+  lines, the AI material list intake inside the builder (pull request 136) and a running summary.
 - **Where it lives:** `web/apps/desk/src/pages/QuoteBuilder.ts`, `web/apps/desk/src/components/quotes/LineItemEditor.ts`,
   `core/internal/quote/`; MVP `app/src/pages/QuoteBuilder.ts`.
 - **Origin:** both. The MVP built the screen; v1 made quotes the first module on the wire contract (R1-15: integer
-  money, revisions, `Q-` numbers).
+  money, revisions, `Q-` numbers) and rebuilt the builder as a split pane with embedded material list intake and
+  customer pricing on accepted lines (pull requests 130 and 136).
 - **Status:** built.
 - **Distinct because:** the truck is chosen on the quote, and credit is in view while pricing, not only at order
   entry.
@@ -260,36 +263,41 @@ repository relative; MVP paths are marked "MVP".
   Gable's.
 - **Verdict:** keep. It is a desktop surface.
 
-#### D17. Price intelligence (proposed)
+#### D17. Market check (price intelligence)
 
-- **What it is:** A proposed page that compares the dealer's prices on its own catalogue with a big box competitor's
+- **What it is:** A page that compares the dealer's prices on its own catalogue with big box competitors'
   listed prices, normalised to the dealer's unit, with a match confidence and an above, in line or below state per
   item.
-- **Where it lives:** the design files only (`Gable: screens`, the proposed pricing intelligence page and its demo
-  page boards). No code.
-- **Origin:** neither: a proposal in the design source of truth. The comparison it shows runs in an automation
-  outside Gable.
-- **Status:** proposed.
+- **Where it lives:** `web/apps/desk/src/pages/admin/pricing/MarketCheck.ts`,
+  `web/apps/desk/src/pages/admin/tech_admin/MarketCheckSettings.ts`, `core/internal/marketcheck/`; the design
+  files (`Gable: screens`, the pricing intelligence page and its demo page boards).
+- **Origin:** a proposal in the design source of truth, built on `refactor/v1` in pull request 145. The comparison
+  data comes from an automation outside Gable.
+- **Status:** built (pull request 145).
 - **Distinct because:** a competitor price comparison is in no parity row; it is Gable's own idea.
-- **Verdict:** rule: build, defer or drop.
+- **Verdict:** keep.
 
 ### D. The counter
 
 #### D18. The counter till
 
-- **What it is:** Full screen counter, no app chrome: scan or search, split tenders, a till opened with a float and
-  closed with an over or short count and Z report, and returns. The MVP queued cash and check sales offline.
+- **What it is:** Full screen counter built on the Panels board (pull requests 128, 143, 150), no app chrome:
+  product catalogue cards with pictures, scan or search, in place line quantity controls, a pinned hotkey legend,
+  split tenders with explicit tender selection and cash only change calculation, a till opened with an explicit float
+  and closed with a blind count per payment method (refusing account tender, pull request 168) and Z report, and
+  returns. The MVP queued cash and check sales offline.
 - **Where it lives:** `web/apps/desk/src/pages/pos/POSTerminal.ts`, `web/apps/desk/src/pages/DailyTill.ts`,
-  `core/internal/pos/` (till, Z report, returns, offline sync); the till and money rebuild is pull request 72
-  (open). MVP: `app/src/lib/offlineStore.ts`, `app/src/components/pos/OfflineBanner.ts`.
+  `core/internal/pos/` (till, Z report, returns, offline sync; till and money contract alignment merged in pull
+  request 72). MVP: `app/src/lib/offlineStore.ts`, `app/src/components/pos/OfflineBanner.ts`.
 - **Origin:** both. The MVP built the terminal and its offline queue; the commons removed the browser queue as dead
-  code; v1 rebuilds the till and its money on the contract.
-- **Status:** built, with the money rebuild in an open pull request.
+  code; v1 rebuilt the till and its money on the contract (pull request 72) and the counter screen on the Panels
+  board and design tokens (pull requests 128, 138, 143, 148, 150, 168).
+- **Status:** built.
 - **Distinct because:** the counter is parity (the CP rows). Two choices are Gable's: a counter with no app chrome,
   and the MVP's offline sale queue, which none of the three documents (CP-13).
-- **Verdict:** keep the focused counter, with three changes. The server still replays offline sales
-  (`POST /api/v1/pos/sync`, tagged `offline-v1`) for a browser queue that no longer exists; the terminal hard codes
-  register `REG-01`; and its screen is styled with literal colours outside Gable's tokens.
+- **Verdict:** keep the focused counter, with two changes. The server still replays offline sales
+  (`POST /api/v1/pos/sync`, tagged `offline-v1`) for a browser queue that no longer exists, and the terminal hard
+  codes register `REG-01`.
 
 ### E. Delivery and the yard
 
@@ -354,17 +362,21 @@ repository relative; MVP paths are marked "MVP".
 
 - **What it is:** A portal in the dealer's logo and colour, with its own sign in: dashboard, projects grouping
   orders, reorder, invoices, deliveries, the catalogue at the account's prices, a cart with checkout on account, and
-  team invites with roles.
+  team invites with roles. The Pro Portal plan (M35) adds native delivery window and pickup slot scheduling (PE-08),
+  contractor quoting to the contractor's own customer with markups and a contractor branded PDF (PE-09), and a
+  customer selections and approvals link with two price walls so homeowner approvals confirm straight into the
+  contractor's dealer order at dealer prices (PE-10).
 - **Where it lives:** `web/apps/desk/src/pages/portal/`, `web/apps/desk/src/pages/projects/`,
   `web/apps/desk/src/components/layout/portal-layout.ts`, `core/internal/portal/`, `core/internal/project/`. Built in
   the API with no screen yet: quote requests, accept and decline (`/api/portal/v1/quotes`) and delivery reschedule
   requests (`/api/portal/v1/deliveries/{id}/reschedule`).
-- **Origin:** both. The MVP built the portal; the commons made its API a headless core; v1 has not converted it yet
-  (the C5-1 portal item).
-- **Status:** built; not yet on the contract.
-- **Distinct because:** portals are parity (the PE rows). Gable's reschedule is a request the dispatcher decides,
-  because a route's date is shared by every stop on that truck; projects group a contractor's orders.
-- **Verdict:** keep the flows. Its frame and sign in are rulings (Part 2).
+- **Origin:** both. The MVP built the portal; the commons made its API a headless core; v1 rebuilds it as the
+  phone first Pro Portal in M35.
+- **Status:** built in classic desk pages; phone first Pro Portal and PE-08 to PE-10 planned in M35.
+- **Distinct because:** portals are parity (PE-01 to PE-05, PE-08). Gable's reschedule is a request the dispatcher
+  decides, because a route's date is shared by every stop on that truck; projects group a contractor's orders; and
+  PE-09 and PE-10 close the loop between the contractor's customer and the dealer's order without a partner plug in.
+- **Verdict:** keep and expand in M35.
 
 #### D24. AI product content
 
@@ -420,19 +432,21 @@ repository relative; MVP paths are marked "MVP".
 
 ### H. Look and feel
 
-#### D28. Industrial Dark
+#### D28. Industrial Dark and Gable Light
 
-- **What it is:** A dark only theme: Deep Space `#0A0B10` behind, Slate Steel `#161821` and two raised surfaces,
-  Gable Green `#00FFA3` for action, success and focus glow, Safety Red `#F43F5E` for errors and credit hold, Blueprint
-  Blue `#38BDF8` for technical data.
+- **What it is:** A dual theme system: Industrial Dark (`[data-theme="dark"]`, the default) with Deep Space `#0A0B10`
+  behind, Slate Steel `#161821` and two raised surfaces, Gable Green `#00FFA3` for action, success and focus glow,
+  Safety Red `#F43F5E` for errors and credit hold, and Blueprint Blue `#38BDF8` for technical data; plus Gable Light
+  (`[data-theme="light"]`, merged in pull requests 147 and 158) with warm paper `#F7F8FA` and crisp `#FFFFFF` cards,
+  deep forest green `#006B44` primary accents, and accessible contrast across desk and portal surfaces.
 - **Where it lives:** `web/packages/design-system/src/tokens.css`, `web/packages/design-system/tailwind/theme.js`,
   `docs/design-system.md`; the Colors page of `Gable: design system`.
-- **Origin:** both. The MVP set the theme; v1 moved it into one shared package that the door and the desk import.
-- **Status:** built.
-- **Distinct because:** it is Gable's visual identity, which the parity goal keeps.
-- **Verdict:** keep, with changes. No light variant exists (the design files list it as a gap). The POS terminal, the
-  configurators, the blueprint verifier and the phone layouts bypass the tokens with literal colours; move them onto
-  the tokens.
+- **Origin:** both. The MVP set Industrial Dark; v1 moved it into one shared package that the door and the desk
+  import, and added Gable Light in pull requests 147 and 158.
+- **Status:** built (both themes).
+- **Distinct because:** it is Gable's visual identity, which the parity goal keeps across both dark and light modes.
+- **Verdict:** keep, with a change. Move the configurators, the blueprint verifier and the phone layouts onto the
+  tokens where literal colours remain.
 
 #### D29. Two typefaces, one rule for numbers
 
@@ -474,10 +488,9 @@ repository relative; MVP paths are marked "MVP".
 
 ## Part 2: the shell question
 
-### The pattern, as it would apply to Gable
+### The pattern, as it applies to Gable
 
-The new architecture puts role micro apps into desktop and mobile shells per audience, as already proven in an
-internal FutureBuild codebase:
+The new architecture puts role micro apps into desktop and mobile shells per audience:
 
 1. **Three shells:** a work shell for office and counter staff, a field shell for the yard and drivers, a pro shell
    for contractors.
@@ -497,18 +510,18 @@ What Gable has against each today, on `refactor/v1`:
 | Header selector | Desk: brand left, a search field centred (it has no handler), branch switcher and avatar right. Door: brand left, a status word centred, the user right | The centre slot becomes the selector |
 | Hidden rail | None in the desk (tabs and a menu band instead); the portal keeps an always visible sidebar; the design files draw the MVP's sidebar | A rail, its pin modes, and boards for it |
 | Phones | Driver and yard are phone columns with bottom tabs; the desk only squeezes onto a phone (tables overflow) | Native patterns for every phone surface |
-| Front door with role picker | Tiles filtered by the person's roles; no picker | The picker step |
+| Front door with role picker | Tiles filtered by the person's roles; demo persona cards on dev sign in (pull request 123); no role picker after live sign in | The role picker step |
 | Offline store | None: a v1 planning decision deferred offline until after the cutover. An amber "you are offline" banner only. The server's transactional outbox carries server events, a different thing | All of it |
 | Money never queues | The desk no longer queues sales, but the server still accepts replayed offline sales (`POST /api/v1/pos/sync`) | Retire or fence the replay |
-| Sign in per dealer | Staff paste a bearer token (or name themselves in a dev build); contractors use email and password; an HttpOnly cookie through the FutureBuild bridge is planned at the cutover (ADR 0004) | A method choice per dealer |
+| Sign in per dealer | Staff paste a bearer token (or pick a demo persona card in a dev build); contractors use email and password; an HttpOnly cookie through the FutureBuild bridge is planned at the cutover (ADR 0004) | A method choice per dealer |
 
 A placement of Gable's apps in the three shells, for the product owner to confirm or change:
 
 | Shell | Apps (from today's modules) |
 |---|---|
-| Work (desktop and tablet) | Counter (till, daily till); Quotes (builder, AI intake, configurators, exposure); Orders; Dispatch (board, fleet); Buying and stock (purchasing, vendors, inventory); Money (invoices, credit memos, payments and AR, AP, GL); Pricing (matrix, market indices, rebates); Manager home (dashboard, reports, exposure portfolio); Admin (tech admin, apps, branches, staff, governance) |
+| Work (desktop and tablet) | Counter (till, daily till); Quotes (builder, AI intake, configurators, exposure); Orders; Dispatch (board, fleet); Buying and stock (purchasing, vendors, inventory); Money (invoices, credit memos, payments and AR, AP, GL); Pricing (matrix, market indices, market check, rebates); Manager home (dashboard, reports, exposure portfolio); Admin (tech admin, apps, branches, staff, governance) |
 | Field (phone first) | Yard (pick, receive, count, look up); Drive (route, stops, proof of delivery) |
-| Pro (contractors) | The portal: dashboard, projects, quotes, orders, invoices, deliveries and reschedule requests, catalogue and cart, team |
+| Pro (contractors) | The portal: dashboard, projects, quotes and customer quotes with markups, selections and approvals, orders, scheduling (delivery windows and pickup slots), invoices and online bill pay, deliveries and reschedule requests, catalogue and cart, team |
 
 ### Flow by flow
 
@@ -516,12 +529,12 @@ A placement of Gable's apps in the three shells, for the product owner to confir
 |---|---|---|---|
 | D1 Front door | Yes | A role picker follows sign in and routes to the shell serving that role; today's tiles become the picker's second step or the work shell's home; `/?open=` must choose the shell | Picker before the tiles, or the tiles as the picker; whether owners keep a whole desk entry; what the door shows in a browser with no shell installed |
 | D2 Desk home grid | Yes | The header's app selector replaces the grid as the way to switch apps | Keep the grid as the work shell's landing page (its Dashboard tab becoming Manager home) or drop it |
-| D3 Workspace tabs | Yes, most | One selected app with its surfaces in a hidden rail replaces several apps open in tabs; the menu band's items become the rail's surfaces | Adopt the pattern and drop tabs; or keep tabs in the work shell under the header with the rail holding the active app's surfaces; or tabs on wide screens only. Then redraw the design files, which show neither |
+| D3 Workspace tabs | Yes, most | One selected app with its surfaces in a hidden rail replaces several apps open in tabs; the menu band's items become the rail's surfaces | Ruled (Ruling 1): adopt the work shell with header selector and hidden rail, replacing workspace tabs |
 | D4 Omnibar | Partly | The centre slot goes to the selector, so the dead search field leaves; Cmd+K stays as the shell wide search | Keep Cmd+K across every work shell app; whether a search button sits in the header |
 | D5 Branch context | Partly | The header must hold the yard beside the organisation and the user; field devices usually work one yard | Where the switcher sits; whether All branches stays in the work shell; whether a field device is bound to one yard |
 | D6 Installable apps | Partly | Two meanings of "app" meet: registry apps (enabled per installation) and role micro apps (what a role opens) | A micro app shows only when its registry apps are enabled, and the selector lists only enabled apps the role admits, read from the catalog with the roles the server sends |
 | D7 Quote builder | Partly | It becomes the Quotes app's main surface; tablets need a layout (today a two column desktop page) | Whether quotes may be edited offline at all; sending, converting and the credit view stay online |
-| D8 AI material list intake | Little | Parsing needs the network. The field and pro shells' cameras could capture a list to parse later | Whether contractors get list upload as a quote request in the pro shell; whether a captured photo may wait offline for parsing (it is not money) |
+| D8 AI material list intake | Little | Parsing needs the network. The field and pro shells' cameras could capture a list to parse later | Contractors get list and photo upload as a quote request in the pro shell (M35); whether a captured photo may wait offline for parsing (it is not money) |
 | D9 Price protection | Partly | Acknowledging a price move is a price commitment, so online only. The pro shell is the natural place for a contractor to acknowledge (today staff record a "portal" acknowledgement, but contractors have no route or screen to give one) | Confirm acknowledgement never queues; whether the pro shell shows acknowledgement requests |
 | D10 Quote to order | Partly | The pattern separates the counter from the quote desk, sharing one quote to order view; convert and confirm (credit, exposure, allocation) are money acts, online only | Where the shared quote to order view lives; nothing else |
 | D11 Agents propose, people commit | Partly, and it helps | Drafts give the offline store a server partner: capture offline as a draft (never money), commit online by promotion; a stale revision (409) becomes a conflict card, and the draft feed names who made the newer revision | Adopt "offline writes are drafts, commits are online" as Gable's rule; name the browser outbox so it is not confused with the server's events outbox |
@@ -529,20 +542,20 @@ A placement of Gable's apps in the three shells, for the product owner to confir
 | D13, D14 Configurators | Little | They become surfaces of the Quotes app, or of a Millwork app | Which app owns them; build the hand off into quote lines first |
 | D15 Blueprint verifier | No | None | Its future only (D15) |
 | D16 Pricing matrix | Little | A desktop surface of the Pricing app, not offered on phones | None |
-| D17 Price intelligence | Little | It would be a Pricing or Manager home surface | Build or not |
+| D17 Market check | Little | A Pricing surface comparing dealer and big box prices (built in pull request 145) | None |
 | D18 Counter till | Yes | No sale, tender, refund or deposit completes offline: the till shows its offline state and stops tendering, and a cached catalogue may stay for price lookup only. The full screen counter must choose between the shell's header and a focused mode | Retire the offline sale replay (CP-13 then reads "refused by rule"; none of the three documents an offline counter either); full screen or shell chrome at the till; the register chosen per device instead of `REG-01` |
 | D19 Dispatch board | Little | A work shell app on desktop and tablet; a yard manager who dispatches and picks installs both shells | Whether dispatch also appears in the field shell for yard managers |
 | D20 AI load management | Little | The packing manifest already stored on orders could drive a loading view in the field shell | Whether the yard loads trucks from Gable's field shell or from the planner |
 | D21 Delivered means billed | Partly | Proof of delivery captured offline syncs later; on sync the server marks the stop delivered and queues billing. That is not money queuing on the device. Collecting money at the door would stay online | Confirm offline proof of delivery with billing on sync; put the parked request screen in the work shell |
 | D22 Field surfaces | Yes | They become the field shell's Yard and Drive apps: phone first, camera and location permissions, the offline store with conflict cards for picks, counts and receipts | Which yard acts may queue offline (a pick or a count is not money; a receipt posts inventory value to the ledger, so is it?); one accent for the field shell or the yard's amber kept; the field shell's own sign in |
-| D23 Contractor portal | Yes | It becomes the pro shell: its sidebar becomes the hidden rail on desktop and native tabs on phones; checkout and any payment stay online; its API only flows (quote request, accept and decline, reschedule requests) get their first screens | The frame: Gable's tokens with the dealer's logo inside, or the dealer's colour across it (today the dealer's colour replaces Gable Green); contractor sign in methods; whether a cart may be built offline |
+| D23 Contractor portal | Yes | It becomes the phone first pro shell (M35): no desktop rail on phones, native tabs, dealer logo and colour in both Industrial Dark and Gable Light, checkout and bill pay online, offline read cache on the change feed, plus scheduling (PE-08), contractor customer quoting with markups (PE-09) and the homeowner selections and approvals link with two price walls (PE-10) | Ruled in M35: white labeled per dealer in both themes; contractor sign in methods; online checkout and bill pay with offline read cache on the change feed |
 | D24 AI product content | No | None | None |
 | D25 AI never blocks | No | None | None |
 | D26 Governance | Little | An admin surface in the work shell, if it stays | As D26 |
 | D27 Machine and partner doors | No | None | None |
-| D28 to D31 Look and feel | Yes, by addition | The pattern brings chrome Gable has never drawn: the header selector, the rail and its pin states, sync state, conflict cards, offline states, the role picker, three app icons. Each needs a Gable board, in Industrial Dark, before it is built | The design files become the reference for the new chrome (replacing the MVP sidebar boards); dark only, or a light or high contrast mode for field phones in daylight; one accent per shell or per app |
+| D28 to D31 Look and feel | Yes, by addition | Industrial Dark and Gable Light are both built (pull requests 147 and 158). New shell chrome (the header selector, the hidden rail and its pin states, sync state, conflict cards, offline states, the role picker, three app icons) is built straight in code from accepted design boards in Gable's colours and brand, white labeled per dealer | Ruled: build straight in code from accepted boards in Gable's colours and brand (Industrial Dark default, Gable Light alongside), walked in the 12-step walk order |
 
-Sign in methods per dealer cut across every shell: today staff paste a bearer token or name themselves in a dev
+Sign in methods per dealer cut across every shell: today staff paste a bearer token or pick a demo persona card in a dev
 build, contractors use email and password, the driver and yard screens ride the desk's session, and a cookie session
 is planned at the cutover. The product owner rules which methods the open source build offers by default (a self
 hosting dealer needs at least a standard OpenID Connect option and an email link) and where a dealer chooses them
@@ -552,8 +565,10 @@ hosting dealer needs at least a standard OpenID Connect option and an email link
 
 In the order they block the build:
 
-1. **Navigation (D3, D2, D4).** Workspace tabs against the selector and hidden rail: adopt the pattern, keep tabs
-   inside the work shell, or tabs on wide screens only.
+1. **Navigation and design path (D3, D2, D4, D28 to D31): Ruled.** Adopt the three shell architecture (work shell with
+   centred header selector and hidden rail replacing workspace tabs, field shell for yard and drivers, phone first pro
+   shell for contractors), built straight in code in Gable's colours and brand (Industrial Dark default and Gable
+   Light), white labeled per dealer, and verified in the 12-step walk order.
 2. **Money never queues (D18, D11, D21, D22).** Retire the offline sale replay; adopt "offline writes are drafts,
    commits are online"; allow offline proof of delivery with billing on sync; decide whether a yard receipt counts
    as money.
@@ -561,21 +576,19 @@ In the order they block the build:
    entry; one `gable://` scheme or one per shell.
 4. **Placement (D6, D19, D20).** Confirm the three shell placement table; the yard manager who needs both work and
    field; whether loading moves into the field shell.
-5. **The pro shell (D23, sign in).** Gable's frame or the dealer's colour; contractor sign in methods; the default
-   sign in methods for every shell.
-6. **The design files (D28 to D31).** Boards for the new chrome; dark only or a daylight mode for field phones; one
-   accent per shell or per app.
-7. **Single flows (D7, D8, D9, D13 to D17, D26).** Offline quote editing; list upload for contractors;
-   acknowledgement in the pro shell; configurator hand off; the blueprint verifier's future; price intelligence;
-   where governance lives.
+5. **The pro shell (D23, PE-01 to PE-05, PE-08 to PE-10).** Built as a native phone first Pro Portal in M35 with
+   dealer branding in both themes, scheduling (PE-08), contractor customer quoting with markups (PE-09), and the
+   homeowner selections and approvals capability link with two price walls (PE-10).
+6. **Sign in methods per dealer (Ruling 4).** Default sign in methods for every shell and dealer configuration in
+   Admin.
+7. **Single flows (D7, D8, D9, D13 to D16, D26).** Offline quote editing; acknowledgement in the pro shell;
+   configurator hand off; the blueprint verifier's future; where governance lives.
 
 ## What this reading could not do
 
-- It did not run the app or any shell. Screens are judged from the code and from the design files' renders of
-  `refactor/v1`.
-- It did not read the open pull requests' branches (72, the till and money; 119, the no branch rule). The counter
-  entry describes `refactor/v1` and the MVP.
+- It did not run the app or any shell. Screens are judged from the code at `refactor/v1` 695d587c and from the design
+  files' renders.
 - The desk side of ADR 0007 (C5-2b) is not built, so the draft and link screens are judged from the ADR.
 - Comparisons with the three incumbents lean on the parity research rows; the matrix holds their sources.
-- It viewed only some boards of the design files: the proposed pricing intelligence page, its demo page board, two
+- It viewed only some boards of the design files: the pricing intelligence page, its demo page board, two
   real renders of the v1 desk and the token notes.

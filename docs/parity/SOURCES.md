@@ -150,7 +150,7 @@ Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by produ
 | B18 | [Epicor Warehouse Management (WMS)](https://www.epicor.com/en-us/products/enterprise-resource-planning-erp/warehouse-management-wms/) | vendor_site |
 | B19 | [Epicor Tax Connect](https://www.epicor.com/en-us/products/epicor-financials/tax-connect/) | vendor_site |
 | B20 | [BisTrack for Pro Dealers](https://www.epicor.com/en-us/solutions/industries/building-supply/pro-dealers/) | vendor_site |
-| B21 | [BisTrack for Hardscapes](https://www.epicor.com/en-us/solutions/industries/building-supply/hardscapes/) | vendor_site |
+| B21 | [Epicor Building Supply: masonry and bulk stone](https://www.epicor.com/en-us/solutions/industries/building-supply/hardscapes/) | vendor_site |
 | B22 | [BisTrack for Doors and Millwork](https://www.epicor.com/en-us/solutions/industries/building-supply/doors-and-millwork/) | vendor_site |
 | B23 | [Epicor Building Supply industry page](https://www.epicor.com/en-us/solutions/industries/building-supply/) | vendor_site |
 | B24 | [BisTrack customer story](https://www.epicor.com/en-us/resources/success-stories/building-supply/dodson-wholesale-lumber/) | case_study |
