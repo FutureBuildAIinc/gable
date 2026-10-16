@@ -75,6 +75,35 @@ func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID)
 	return nil
 }
 
+// CheckEveryBranch is the every branch admission (ADR 0006 section 5.6): a
+// write that reaches every branch of the dealer (a null branch_id price list
+// slice, contract or vendor cost) calls this instead of checking one payload
+// branch. It admits exactly when the request has no context branch and the
+// caller is one CheckPayloadBranch would admit any branch for: an
+// administrator, an unbound caller (a machine key with no user, AUTH_MODE
+// dev) or a system caller marked with branchctx.WithSystem. An
+// administrator working in a branch context is held to that branch, as
+// CheckPayloadBranch's first rule holds them, so they are refused here; a
+// bound user with no context branch has no every branch reach either. The
+// refusal is ErrPayloadBranchRefused, the verdict a module maps exactly as
+// it maps the payload rule's.
+func (g *BranchGuard) CheckEveryBranch(ctx context.Context) error {
+	bc := BranchFromContext(ctx)
+	if bc == nil {
+		if branchctx.IsSystem(ctx) {
+			return nil
+		}
+		return ErrPayloadBranchRefused
+	}
+	if bc.BranchID != nil {
+		return ErrPayloadBranchRefused
+	}
+	if bc.IsAdmin || bc.UserSub == "" {
+		return nil
+	}
+	return ErrPayloadBranchRefused
+}
+
 // CheckGrantsBranch holds a branch the caller acts on, or a loaded record's
 // own branch, to the caller's grants when the request's branch context
 // carries no branch (SEC-NOHEADER-1, the act side of the same section 2.3
