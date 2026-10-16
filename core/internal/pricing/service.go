@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -22,11 +23,12 @@ const (
 )
 
 type Service struct {
-	repo   Repository
-	catSvc *CategoryPricingService
-	events EventRecorder // optional; nil records nothing (unit tests)
-	tx     TxRunner      // optional; nil runs each write unwrapped (unit tests)
-	audits AuditLogger   // optional; nil writes no audit rows (unit tests)
+	repo       Repository
+	resolveRepo ResolveRepository // the resolve side reads; wire with WithRepository
+	catSvc     *CategoryPricingService
+	events     EventRecorder // optional; nil records nothing (unit tests)
+	tx         TxRunner      // optional; nil runs each write unwrapped (unit tests)
+	audits     AuditLogger   // optional; nil writes no audit rows (unit tests)
 }
 
 func NewService(repo Repository) *Service {
@@ -66,32 +68,24 @@ func (s *Service) WithCategoryPricing(catSvc *CategoryPricingService) {
 	s.catSvc = catSvc
 }
 
-// The tier multipliers today's engine hard codes (ADR 0006 section 10), held
-// exactly so the tier path can round once to scale 4 instead of answering a
-// raw float product.
-var (
-	tierSilverMultiplier   = big.NewRat(90, 100)
-	tierGoldMultiplier     = big.NewRat(85, 100)
-	tierPlatinumMultiplier = big.NewRat(80, 100)
-)
+// The compatibility entry points (ADR 0006 section 9.1): the signatures and
+// result shapes cycle 2 built against, answered over Resolve. The customer
+// argument is read for its id only; the float64 base price argument is
+// ignored (Resolve reads the reference itself, the value callers pass
+// today); the branch comes from the request's branch context. Under the
+// stocking unit hold every answer is per the stocking unit, and an answer
+// in any other unit is the adapters' assertion ErrPriceUnitNotStock,
+// unreachable through the database and proved by a test with a fake
+// repository.
 
-// CalculatePrice implements a 6-level pricing waterfall:
-// 1. Contract Price (SKU + Customer specific)
-// 2. Job-Level Override (project-specific pricing)
-// 3. Promotional/Sale Price (time-bound)
-// 4. Quantity Break (volume discount)
-// 5. Customer Price Level/Tier
-// 6. Base Retail
-//
-// The float64 entry points keep the signatures and result shape their callers
-// built against (ADR 0006 section 9.1); the arithmetic under them is exact,
-// and FinalPrice carries the exact scale 4 value, never a cent rounding.
+// CalculatePrice is the one quantity call.
 func (s *Service) CalculatePrice(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64) (CalculatedPrice, error) {
 	return s.CalculatePriceWithQty(ctx, cust, productID, basePrice, 1, nil)
 }
 
+// CalculatePriceWithQty prices one line of any quantity.
 func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64, quantity float64, jobID *uuid.UUID) (CalculatedPrice, error) {
-	scaled, base, err := s.resolve(ctx, cust, productID, basePrice, quantity, jobID)
+	scaled, err := s.CalculateScaled(ctx, cust, productID, basePrice, quantity, jobID)
 	if err != nil {
 		return CalculatedPrice{}, err
 	}
@@ -99,154 +93,65 @@ func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Cust
 		ProductID:     productID,
 		OriginalPrice: basePrice,
 		FinalPrice:    scaled.Float64(),
-		DiscountPct:   discountPct(base, scaled.Price),
+		DiscountPct:   discountPct(scaled.Reference, scaled.Price),
 		Source:        scaled.Source,
 		Details:       scaled.Details,
 	}, nil
 }
 
-// CalculateScaled is the same waterfall with the same inputs, answering the
-// exact scale 4 price (ADR 0006 section 9.1). Until C3-2A-pricing every
-// price is per the product's stocking unit.
+// CalculateScaled is the same waterfall with the exact scale 4 answer.
 func (s *Service) CalculateScaled(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64, quantity float64, jobID *uuid.UUID) (ScaledPrice, error) {
-	scaled, _, err := s.resolve(ctx, cust, productID, basePrice, quantity, jobID)
-	return scaled, err
-}
-
-// resolve runs the waterfall in exact rational arithmetic (ADR 0006 section
-// 1 R3): the only rounding is the one scale 4 rounding of a derived price at
-// the moment it is returned (R4.2). It answers the scaled price and the base
-// price's rational, which the compatibility entry point reads for its
-// discount percentage.
-func (s *Service) resolve(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64, quantity float64, jobID *uuid.UUID) (ScaledPrice, *big.Rat, error) {
-	base, err := ratOfFloat(basePrice)
-	if err != nil {
-		return ScaledPrice{}, nil, err
+	if s.resolveRepo == nil {
+		return ScaledPrice{}, fmt.Errorf("the pricing engine has no resolve repository wired")
 	}
 	qrat, err := ratOfFloat(quantity)
 	if err != nil {
-		return ScaledPrice{}, nil, fmt.Errorf("the quantity is not a number: %w", err)
+		return ScaledPrice{}, fmt.Errorf("the quantity is not a number: %w", err)
 	}
 	qty, err := quantityOfRat(qrat)
 	if err != nil {
-		return ScaledPrice{}, nil, err
+		return ScaledPrice{}, err
 	}
-
-	// 1. Check Contract Price (highest priority - specific customer+product agreement).
-	// A contract price is a fixed price, returned as stored, never rounded.
-	contract, err := s.repo.GetContract(ctx, cust.ID, productID)
+	req := Request{
+		ProductID: productID,
+		Quantity:  qty,
+		JobID:     jobID,
+		BranchID:  middleware.BranchIDForQuery(ctx),
+	}
+	if cust != nil {
+		req.CustomerID = cust.ID
+	}
+	res, err := s.Resolve(ctx, req)
 	if err != nil {
-		return ScaledPrice{}, nil, err
+		return ScaledPrice{}, err
 	}
-	if contract != nil {
-		return ScaledPrice{
-			Price:   contract.ContractPrice,
-			Source:  SourceContract,
-			Details: "Specific Contract Price",
-		}, base, nil
-	}
-
-	// 2-4. Check pricing rules (job override, promotional, quantity break).
-	custID := &cust.ID
-	rules, err := s.repo.GetMatchingRules(ctx, productID, custID, jobID, qty)
+	// The hold: every price is per the stocking unit until C3-2B, so today's
+	// callers stay right. An answer in another unit never leaves here.
+	facts, err := s.resolveRepo.ProductPricingFacts(ctx, productID)
 	if err != nil {
-		// Rules table may not exist yet - fall through to tier pricing
-		rules = nil
+		return ScaledPrice{}, err
 	}
-
-	if winner, price, details, ok := selectRule(rules, base); ok {
-		source := SourceRetail
-		switch winner.RuleType {
-		case RuleTypeJobOverride:
-			source = SourceJobOverride
-		case RuleTypePromotional:
-			source = SourcePromotional
-		case RuleTypeQuantityBreak:
-			source = SourceQuantityBreak
-		}
-		return scaledResult(price, source, details, base)
+	if res.PriceUOM != facts.StockUOM {
+		return ScaledPrice{}, ErrPriceUnitNotStock
 	}
-
-	// 5a. Check Category-Based Pricing (if enabled)
-	if s.catSvc != nil {
-		resolved, catErr := s.catSvc.ResolveEffectivePrice(ctx, cust.ID, string(cust.Tier), productID)
-		if catErr == nil && resolved != nil && resolved.Rule != nil {
-			final := s.catSvc.ApplyRule(resolved.Rule, base, ratOfPrice(resolved.CostPrice))
-
-			// Margin floor protection, compared exactly.
-			if resolved.Rule.MarginFloorPct != nil && base.Sign() > 0 {
-				minPrice := applyMarkdown(base, ratOfQuantity(*resolved.Rule.MarginFloorPct))
-				if final.Cmp(minPrice) < 0 {
-					final = minPrice
-				}
-			}
-
-			catSource := SourceCategoryTier
-			if resolved.Rule.TargetType == TargetTypeAccount {
-				catSource = SourceCategoryAccount
-			}
-
-			return scaledResult(final, catSource, fmt.Sprintf("%s (%s)", resolved.Rule.CategoryName, resolved.MatchType), base)
-		}
-	}
-
-	// 5b. Check Price Level (Tier) — hardcoded fallback when category pricing is disabled or no rule matches
-	multiplier := big.NewRat(1, 1)
-	details := ""
-	source := SourceRetail
-
-	if cust.PriceLevel != nil {
-		multiplier, err = ratOfFloat(cust.PriceLevel.Multiplier)
-		if err != nil {
-			return ScaledPrice{}, nil, err
-		}
-		details = fmt.Sprintf("%s (Level)", cust.PriceLevel.Name)
-		source = SourceTier
-	} else if cust.Tier != "" && cust.Tier != customer.TierRetail {
-		switch cust.Tier {
-		case customer.TierSilver:
-			multiplier = tierSilverMultiplier
-			details = "Silver Tier (10%)"
-		case customer.TierGold:
-			multiplier = tierGoldMultiplier
-			details = "Gold Tier (15%)"
-		case customer.TierPlatinum:
-			multiplier = tierPlatinumMultiplier
-			details = "Platinum Tier (20%)"
-		}
-		if multiplier.Cmp(big.NewRat(1, 1)) < 0 {
-			source = SourceTier
-		}
-	}
-
-	if source == SourceTier {
-		return scaledResult(new(big.Rat).Mul(base, multiplier), SourceTier, details, base)
-	}
-
-	// 6. Retail
-	return scaledResult(base, SourceRetail, "Base Retail Price", base)
-}
-
-// scaledResult rounds a derived price once to scale 4 and refuses one past
-// what a NUMERIC(12,4) column holds (ADR 0006 R2.4), where a bare conversion
-// would wrap through int64.
-func scaledResult(price *big.Rat, source PricingSource, details string, base *big.Rat) (ScaledPrice, *big.Rat, error) {
-	scaled := roundHalfAway(new(big.Int).Mul(price.Num(), wireScaleFactor), price.Denom())
-	if !scaled.IsInt64() || scaled.Int64() > int64(httpx.QuantityMax) || scaled.Int64() < -int64(httpx.QuantityMax) {
-		return ScaledPrice{}, nil, fmt.Errorf("a price beyond 99999999.9999 cannot be answered")
-	}
-	return ScaledPrice{Price: httpx.Price(scaled.Int64()), Source: source, Details: details}, base, nil
+	return ScaledPrice{
+		Price:     res.UnitPrice,
+		Source:    res.PriceBasis,
+		Details:   res.Details,
+		Reference: res.ReferencePrice,
+	}, nil
 }
 
 // discountPct is the compatibility answer's display percentage: the exact
-// discount as a percentage rounded to two places, half away from zero, the
-// value the base commit's engine wrote.
-func discountPct(base *big.Rat, final httpx.Price) float64 {
-	if base.Sign() <= 0 {
+// discount from the reference price to the answer, as a percentage rounded
+// to two places, half away from zero.
+func discountPct(reference, final httpx.Price) float64 {
+	ref := ratOfPrice(reference)
+	if ref.Sign() <= 0 {
 		return 0
 	}
-	pct := new(big.Rat).Sub(base, ratOfPrice(final))
-	pct.Quo(pct, base)
+	pct := new(big.Rat).Sub(ref, ratOfPrice(final))
+	pct.Quo(pct, ref)
 	pct.Mul(pct, big.NewRat(100, 1))
 	// Round to two places of a percent: pct x 100, rounded, / 100.
 	scaled := roundHalfAway(new(big.Int).Mul(pct.Num(), big.NewInt(100)), pct.Denom())

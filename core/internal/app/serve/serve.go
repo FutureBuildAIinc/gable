@@ -395,7 +395,9 @@ func Run() {
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
+	pricingResolveRepo := pricing.NewResolveRepository(db)
 	pricingSvc := pricing.NewService(pricingRepo).
+		WithRepository(pricingResolveRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
@@ -418,7 +420,8 @@ func Run() {
 			WithAudit(pricingAuditAdapter{l: auditLog})
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
-		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
+		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc).
+			WithProgramReader(pricingResolveRepo.CustomerProgram)
 		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")

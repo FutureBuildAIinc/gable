@@ -79,13 +79,20 @@ func (m *mockCategoryRepo) ListCategoryRules(_ context.Context, _ CategoryRuleFi
 }
 
 func (m *mockCategoryRepo) GetMatrixRules(_ context.Context) ([]CategoryPricingRule, error) {
-	var tier []CategoryPricingRule
+	var level []CategoryPricingRule
 	for _, r := range m.rules {
-		if r.TargetType == TargetTypeTier && r.IsActive {
-			tier = append(tier, r)
+		if r.TargetType == TargetTypeLevel && r.IsActive {
+			level = append(level, r)
 		}
 	}
-	return tier, nil
+	return level, nil
+}
+
+func (m *mockCategoryRepo) GetProductCost(_ context.Context, productID uuid.UUID) (httpx.Price, error) {
+	if entry, ok := m.productCatMap[productID]; ok {
+		return entry.CostPrice, nil
+	}
+	return 0, nil
 }
 
 func (m *mockCategoryRepo) GetProductCategoryPath(_ context.Context, productID uuid.UUID) (uuid.UUID, string, httpx.Price, error) {
@@ -169,24 +176,56 @@ func (m *mockCategoryRepo) ResolveAccountAncestor(_ context.Context, customerID 
 	return best, nil
 }
 
-func (m *mockCategoryRepo) ResolveTierExact(_ context.Context, tier string, categoryID uuid.UUID) (*CategoryPricingRule, error) {
+func (m *mockCategoryRepo) ResolveProfileExact(_ context.Context, profileID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
 	for i := range m.rules {
 		r := &m.rules[i]
-		if r.TargetType == TargetTypeTier && r.IsActive &&
-			r.Tier == tier && r.CategoryID == categoryID {
+		if r.TargetType == TargetTypeProfile && r.IsActive &&
+			r.PriceProfileID != nil && *r.PriceProfileID == profileID &&
+			r.CategoryID == categoryID {
 			return r, nil
 		}
 	}
 	return nil, nil
 }
 
-func (m *mockCategoryRepo) ResolveTierAncestor(_ context.Context, tier string, categoryPath string) (*CategoryPricingRule, error) {
+func (m *mockCategoryRepo) ResolveProfileAncestor(_ context.Context, profileID uuid.UUID, categoryPath string) (*CategoryPricingRule, error) {
 	var best *CategoryPricingRule
 	bestDepth := -1
-
 	for i := range m.rules {
 		r := &m.rules[i]
-		if r.TargetType == TargetTypeTier && r.IsActive && r.Tier == tier {
+		if r.TargetType == TargetTypeProfile && r.IsActive &&
+			r.PriceProfileID != nil && *r.PriceProfileID == profileID {
+			if isAncestorPath(r.CategoryPath, categoryPath) {
+				depth := pathDepth(r.CategoryPath)
+				if depth > bestDepth {
+					best = r
+					bestDepth = depth
+				}
+			}
+		}
+	}
+	return best, nil
+}
+
+func (m *mockCategoryRepo) ResolveLevelExact(_ context.Context, levelID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
+	for i := range m.rules {
+		r := &m.rules[i]
+		if r.TargetType == TargetTypeLevel && r.IsActive &&
+			r.PriceLevelID != nil && *r.PriceLevelID == levelID &&
+			r.CategoryID == categoryID {
+			return r, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockCategoryRepo) ResolveLevelAncestor(_ context.Context, levelID uuid.UUID, categoryPath string) (*CategoryPricingRule, error) {
+	var best *CategoryPricingRule
+	bestDepth := -1
+	for i := range m.rules {
+		r := &m.rules[i]
+		if r.TargetType == TargetTypeLevel && r.IsActive &&
+			r.PriceLevelID != nil && *r.PriceLevelID == levelID {
 			if isAncestorPath(r.CategoryPath, categoryPath) {
 				depth := pathDepth(r.CategoryPath)
 				if depth > bestDepth {
@@ -229,6 +268,9 @@ var (
 
 	customerBigD = uuid.MustParse("20000000-0000-0000-0000-000000000001")
 
+	profileGold = uuid.MustParse("20000000-0000-0000-0000-000000000002")
+	levelGold   = uuid.MustParse("20000000-0000-0000-0000-000000000003")
+
 	product2x4  = uuid.MustParse("30000000-0000-0000-0000-000000000001")
 	productNail = uuid.MustParse("30000000-0000-0000-0000-000000000002")
 )
@@ -254,14 +296,14 @@ func makeTestRepo() *mockCategoryRepo {
 
 // --- Resolution Tests ---
 
-func TestResolveEffectivePrice_TierExact(t *testing.T) {
+func TestResolveProgramPrice_LevelExact(t *testing.T) {
 	repo := makeTestRepo()
 	ruleID := uuid.New()
 	repo.rules = []CategoryPricingRule{
 		{
 			ID:           ruleID,
-			TargetType:   TargetTypeTier,
-			Tier:         "GOLD",
+			TargetType:   TargetTypeLevel,
+			PriceLevelID: &levelGold,
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
@@ -271,13 +313,13 @@ func TestResolveEffectivePrice_TierExact(t *testing.T) {
 	}
 
 	svc := NewCategoryPricingService(repo)
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "GOLD", product2x4)
+	resolved, err := svc.ResolveProgramPrice(context.Background(), customerBigD, profileGold, levelGold, product2x4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resolved.MatchType != "tier_exact" {
-		t.Errorf("expected match_type=tier_exact, got %s", resolved.MatchType)
+	if resolved.MatchType != "level_exact" {
+		t.Errorf("expected match_type=level_exact, got %s", resolved.MatchType)
 	}
 	if resolved.Rule == nil {
 		t.Fatal("expected rule to be non-nil")
@@ -287,13 +329,13 @@ func TestResolveEffectivePrice_TierExact(t *testing.T) {
 	}
 }
 
-func TestResolveEffectivePrice_TierAncestor(t *testing.T) {
+func TestResolveProgramPrice_LevelAncestor(t *testing.T) {
 	repo := makeTestRepo()
 	repo.rules = []CategoryPricingRule{
 		{
 			ID:           uuid.New(),
-			TargetType:   TargetTypeTier,
-			Tier:         "GOLD",
+			TargetType:   TargetTypeLevel,
+			PriceLevelID: &levelGold,
 			CategoryID:   lumberID,
 			CategoryPath: "lumber",
 			RuleType:     CategoryRuleMarkdown,
@@ -304,26 +346,26 @@ func TestResolveEffectivePrice_TierAncestor(t *testing.T) {
 
 	svc := NewCategoryPricingService(repo)
 	// product2x4 is in "lumber.framing", rule is on "lumber" (ancestor)
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "GOLD", product2x4)
+	resolved, err := svc.ResolveProgramPrice(context.Background(), customerBigD, profileGold, levelGold, product2x4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resolved.MatchType != "tier_ancestor" {
-		t.Errorf("expected match_type=tier_ancestor, got %s", resolved.MatchType)
+	if resolved.MatchType != "level_ancestor" {
+		t.Errorf("expected match_type=level_ancestor, got %s", resolved.MatchType)
 	}
 	if resolved.Rule == nil || resolved.Rule.ValuePct == nil || *resolved.Rule.ValuePct != qtyOf(10.0) {
 		t.Error("expected ancestor rule with value 10.0")
 	}
 }
 
-func TestResolveEffectivePrice_AccountOverridesTier(t *testing.T) {
+func TestResolveProgramPrice_ProfileBeatsLevel(t *testing.T) {
 	repo := makeTestRepo()
 	repo.rules = []CategoryPricingRule{
 		{
 			ID:           uuid.New(),
-			TargetType:   TargetTypeTier,
-			Tier:         "GOLD",
+			TargetType:   TargetTypeLevel,
+			PriceLevelID: &levelGold,
 			CategoryID:   framingID,
 			CategoryPath: "lumber.framing",
 			RuleType:     CategoryRuleMarkdown,
@@ -331,28 +373,28 @@ func TestResolveEffectivePrice_AccountOverridesTier(t *testing.T) {
 			IsActive:     true,
 		},
 		{
-			ID:           uuid.New(),
-			TargetType:   TargetTypeAccount,
-			CustomerID:   &customerBigD,
-			CategoryID:   framingID,
-			CategoryPath: "lumber.framing",
-			RuleType:     CategoryRuleMarkdown,
-			ValuePct:     pctQtyPtr(20.0),
-			IsActive:     true,
+			ID:             uuid.New(),
+			TargetType:     TargetTypeProfile,
+			PriceProfileID: &profileGold,
+			CategoryID:     framingID,
+			CategoryPath:   "lumber.framing",
+			RuleType:       CategoryRuleMarkdown,
+			ValuePct:       pctQtyPtr(20.0),
+			IsActive:       true,
 		},
 	}
 
 	svc := NewCategoryPricingService(repo)
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "GOLD", product2x4)
+	resolved, err := svc.ResolveProgramPrice(context.Background(), customerBigD, profileGold, levelGold, product2x4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resolved.MatchType != "account_exact" {
-		t.Errorf("expected match_type=account_exact, got %s", resolved.MatchType)
+	if resolved.MatchType != "profile_exact" {
+		t.Errorf("expected match_type=profile_exact, got %s", resolved.MatchType)
 	}
 	if resolved.Rule.ValuePct == nil || *resolved.Rule.ValuePct != qtyOf(20.0) {
-		t.Errorf("expected account rule with value 20.0, got %v", resolved.Rule.ValuePct)
+		t.Errorf("expected profile rule with value 20.0, got %v", resolved.Rule.ValuePct)
 	}
 }
 
@@ -372,7 +414,7 @@ func TestResolveEffectivePrice_AccountAncestor(t *testing.T) {
 	}
 
 	svc := NewCategoryPricingService(repo)
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "RETAIL", product2x4)
+	resolved, err := svc.ResolveProgramPrice(context.Background(), customerBigD, profileGold, levelGold, product2x4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -387,7 +429,7 @@ func TestResolveEffectivePrice_NoMatch(t *testing.T) {
 	// No rules defined
 
 	svc := NewCategoryPricingService(repo)
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "RETAIL", product2x4)
+	resolved, err := svc.ResolveProgramPrice(context.Background(), customerBigD, profileGold, levelGold, product2x4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -397,33 +439,6 @@ func TestResolveEffectivePrice_NoMatch(t *testing.T) {
 	}
 	if resolved.Rule != nil {
 		t.Error("expected rule to be nil for no match")
-	}
-}
-
-func TestResolveEffectivePrice_RetailTierSkipped(t *testing.T) {
-	repo := makeTestRepo()
-	repo.rules = []CategoryPricingRule{
-		{
-			ID:           uuid.New(),
-			TargetType:   TargetTypeTier,
-			Tier:         "RETAIL",
-			CategoryID:   framingID,
-			CategoryPath: "lumber.framing",
-			RuleType:     CategoryRuleMarkdown,
-			ValuePct:     pctQtyPtr(5.0),
-			IsActive:     true,
-		},
-	}
-
-	svc := NewCategoryPricingService(repo)
-	// RETAIL tier should skip tier resolution entirely
-	resolved, err := svc.ResolveEffectivePrice(context.Background(), customerBigD, "RETAIL", product2x4)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resolved.MatchType != "none" {
-		t.Errorf("expected match_type=none for RETAIL tier, got %s", resolved.MatchType)
 	}
 }
 

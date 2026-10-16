@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
@@ -22,13 +23,35 @@ type sharedCustomerFixture struct {
 	id, shipTo, contact uuid.UUID
 	salesperson         uuid.UUID
 	termsA, termsB      uuid.UUID
-	priceLevel          uuid.UUID
+	db                  *database.DB
+}
+
+// freshProfile inserts a price profile of the fixture's own and answers its
+// id, so a second program exists to change a customer to.
+func (s *sharedCustomerFixture) freshProfile(t *testing.T) uuid.UUID {
+	t.Helper()
+	var levelID string
+	if err := s.db.Pool.QueryRow(context.Background(),
+		`SELECT value::uuid FROM system_settings WHERE key = 'pricing.default_price_level_id'`).Scan(&levelID); err != nil {
+		t.Fatalf("the default level: %v", err)
+	}
+	id := uuid.New()
+	code := "WP" + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	if _, err := s.db.Pool.Exec(context.Background(),
+		`INSERT INTO price_profiles (id, code, name, price_level_id) VALUES ($1, $2, 'shared fixture profile', $3)`,
+		id, code, levelID); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(context.Background(), `DELETE FROM price_profiles WHERE id = $1`, id)
+	})
+	return id
 }
 
 func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *sharedCustomerFixture {
 	t.Helper()
 	ctx := context.Background()
-	s := &sharedCustomerFixture{id: uuid.New(), shipTo: uuid.New(), contact: uuid.New(), salesperson: uuid.New()}
+	s := &sharedCustomerFixture{id: uuid.New(), shipTo: uuid.New(), contact: uuid.New(), salesperson: uuid.New(), db: f.db}
 	exec := func(stmt string, args ...any) {
 		t.Helper()
 		if _, err := f.db.Pool.Exec(ctx, stmt, args...); err != nil {
@@ -69,9 +92,6 @@ func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *
 		t.Fatalf("the migrations seed %d payment terms, want 2", len(terms))
 	}
 	s.termsA, s.termsB = terms[0], terms[1]
-	if err := f.db.Pool.QueryRow(ctx, `SELECT id FROM price_levels ORDER BY id LIMIT 1`).Scan(&s.priceLevel); err != nil {
-		t.Fatalf("a price level: %v", err)
-	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `UPDATE customers SET salesperson_id = NULL WHERE salesperson_id = $1`, s.salesperson)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = $1 AND action LIKE 'customer.%'`, s.id)
@@ -189,8 +209,8 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	put := func(who, path string, change func(cur map[string]any) map[string]any) (int, []byte) {
 		cur := f.readJSON(t, path)
 		body := map[string]any{"revision": cur["revision"]}
-		for _, k := range []string{"account_number", "name", "email", "phone", "address", "tier", "is_active",
-			"price_level_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
+		for _, k := range []string{"account_number", "name", "email", "phone", "address", "is_active",
+			"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
 			body[k] = cur[k]
 		}
 		for k, v := range change(cur) {
@@ -216,14 +236,9 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 			n++
 			return put(who, path, func(map[string]any) map[string]any { return map[string]any{"credit_limit_cents": 100000 + n} })
 		}},
-		{"tier", func(who, path string) (int, []byte) {
+		{"price_profile_id", func(who, path string) (int, []byte) {
 			return put(who, path, func(c map[string]any) map[string]any {
-				return map[string]any{"tier": other(c["tier"], "silver", "gold")}
-			})
-		}},
-		{"price_level_id", func(who, path string) (int, []byte) {
-			return put(who, path, func(c map[string]any) map[string]any {
-				return map[string]any{"price_level_id": other(c["price_level_id"], s.priceLevel.String(), nil)}
+				return map[string]any{"price_profile_id": other(c["price_profile_id"], s.freshProfile(t).String(), c["price_profile_id"])}
 			})
 		}},
 		{"payment_terms_id", func(who, path string) (int, []byte) {
@@ -541,12 +556,9 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	// path come from the mount's RecordRequest (round 10 P3-5).
 	{
 		digest, rows := f.customerDigest(t, s.id), f.auditRows(t)
-		nextTier := "gold"
-		if f.readJSON(t, sh)["tier"] == "gold" {
-			nextTier = "silver"
-		}
-		if status, buf := f.key(t, f.bound, "PUT", sh, f.customerReplace(t, s.id, map[string]any{"tier": nextTier}), nil); status != http.StatusForbidden {
-			t.Fatalf("bound key tier change on the shared customer: %d %s, want 403", status, buf)
+		nextProfile := s.freshProfile(t)
+		if status, buf := f.key(t, f.bound, "PUT", sh, f.customerReplace(t, s.id, map[string]any{"price_profile_id": nextProfile}), nil); status != http.StatusForbidden {
+			t.Fatalf("bound key profile change on the shared customer: %d %s, want 403", status, buf)
 		}
 		if after := f.auditRows(t); after != rows+1 {
 			t.Fatalf("the refusal left no audit row")

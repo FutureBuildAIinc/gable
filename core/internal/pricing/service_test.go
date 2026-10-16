@@ -172,17 +172,14 @@ func (m *MockRepository) CountRules(ctx context.Context) (int64, error) {
 }
 
 func TestCalculatePrice(t *testing.T) {
-	repo := &MockRepository{
-		contracts: make(map[string]CustomerContract),
-	}
-	svc := NewService(repo)
-
-	custID := uuid.New()
 	prodID := uuid.New()
 	basePrice := 10.00
 
-	// Case 1: Retail (No contract, no tier)
-	t.Run("Retail Price", func(t *testing.T) {
+	// Case 1: base (no contract, no program)
+	t.Run("Base Price", func(t *testing.T) {
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		svc := NewService(&MockRepository{}).WithRepository(fake)
 		cust := &customer.Customer{ID: custID}
 		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
 		if err != nil {
@@ -191,15 +188,18 @@ func TestCalculatePrice(t *testing.T) {
 		if res.FinalPrice != basePrice {
 			t.Errorf("expected %.2f, got %.2f", basePrice, res.FinalPrice)
 		}
-		if res.Source != "RETAIL" {
-			t.Errorf("expected RETAIL source, got %s", res.Source)
+		if res.Source != SourceBase {
+			t.Errorf("expected base source, got %s", res.Source)
 		}
 	})
 
-	// Case 2: Silver Tier (10% off)
-	t.Run("Silver Tier", func(t *testing.T) {
-		tier := customer.TierSilver
-		cust := &customer.Customer{ID: custID, Tier: tier}
+	// Case 2: the migrated Silver level (a BASE level at -10)
+	t.Run("Silver Level", func(t *testing.T) {
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelCode: "SILVER", LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
+		svc := NewService(&MockRepository{}).WithRepository(fake)
+		cust := &customer.Customer{ID: custID}
 
 		// Expected: 10 * 0.9 = 9.00
 		expected := 9.00
@@ -211,31 +211,30 @@ func TestCalculatePrice(t *testing.T) {
 		if res.FinalPrice != expected {
 			t.Errorf("expected %.2f, got %.2f", expected, res.FinalPrice)
 		}
-		if res.Source != "TIER" {
-			t.Errorf("expected TIER source, got %s", res.Source)
+		if res.Source != SourceLevel {
+			t.Errorf("expected level source, got %s", res.Source)
 		}
 	})
 
 	// Case 3: Contract Price
 	t.Run("Contract Price", func(t *testing.T) {
-		contractPrice := priceOf(5.00)
-		repo.contracts[custID.String()+":"+prodID.String()] = CustomerContract{
-			CustomerID:    custID,
-			ProductID:     prodID,
-			ContractPrice: contractPrice,
-		}
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		fake.setContract(custID, prodID, nil, 5.00, "EA")
+		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
+		svc := NewService(&MockRepository{}).WithRepository(fake)
 
-		cust := &customer.Customer{ID: custID} // Even if tier exists, contract wins
+		cust := &customer.Customer{ID: custID} // Even with a program, the contract wins
 
 		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != float64(contractPrice)/10_000 {
-			t.Errorf("expected %.2f, got %.2f", float64(contractPrice)/10_000, res.FinalPrice)
+		if res.FinalPrice != 5.00 {
+			t.Errorf("expected 5.00, got %.2f", res.FinalPrice)
 		}
-		if res.Source != "CONTRACT" {
-			t.Errorf("expected CONTRACT source, got %s", res.Source)
+		if res.Source != SourceContract {
+			t.Errorf("expected contract source, got %s", res.Source)
 		}
 	})
 }

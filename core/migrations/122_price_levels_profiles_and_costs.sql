@@ -507,6 +507,9 @@ BEGIN
     IF NEW.product_id IS NULL THEN
         RETURN NULL; -- a rule without a product prices per each product's own unit
     END IF;
+    IF NEW.price_uom IS NULL THEN
+        RETURN NULL; -- a rule with no fixed price names no unit; the CHECK holds the pairing
+    END IF;
     SELECT uom_primary INTO v_stock FROM products WHERE id = NEW.product_id;
     IF NOT FOUND THEN
         RETURN NULL; -- the product is going away; its rows cascade

@@ -6,10 +6,12 @@ package pricing
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -49,6 +51,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 type CalculatedPriceView struct {
 	CustomerID uuid.UUID      `json:"customer_id"`
 	ProductID  uuid.UUID      `json:"product_id"`
+	BranchID   *uuid.UUID     `json:"branch_id"`
 	Quantity   httpx.Quantity `json:"quantity"`
 	UOM        product.UOM    `json:"uom"`
 
@@ -60,6 +63,9 @@ type CalculatedPriceView struct {
 
 	PriceBasis PricingSource `json:"price_basis"`
 	Details    string        `json:"details"`
+
+	ReferencePrice    httpx.Price `json:"reference_price_ten_thousandths"`
+	ReferencePriceUOM string      `json:"reference_price_uom"`
 }
 
 // checkPrice refuses a unit price the NUMERIC(12,4) columns cannot hold or
@@ -86,9 +92,11 @@ func writePricingJSON(w http.ResponseWriter, status int, body any) {
 
 // HandleCalculatePrice answers the engine's price for one line (ADR 0006
 // 7.3): quantity and job_id that do not parse are 400s naming them, where
-// the base commit ignored them (ADR 0006 section 10).
+// the base commit ignored them (ADR 0006 section 10). The branch is the
+// query's branch_id, defaulting to the caller's branch from the branch
+// middleware; the uom defaults to the product's default sale unit.
 func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
-	q, err := httpx.StrictQuery(r, "customer_id", "product_id", "quantity", "job_id")
+	q, err := httpx.StrictQuery(r, "customer_id", "product_id", "quantity", "job_id", "branch_id", "uom")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -126,48 +134,70 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 			jobID = &id
 		}
 	}
+
+	// The branch: the query names one, else the caller's branch context, else
+	// none, which skips the branch rows of rungs 1 to 5.
+	branch := middleware.BranchIDForQuery(r.Context())
+	if vals := q["branch_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "branch_id", "parameter is repeated")
+		} else if id, ok := v.UUID("branch_id", &vals[0], true); ok {
+			branch = &id
+		}
+	}
+
+	uom := ""
+	if vals := q["uom"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "uom", "parameter is repeated")
+		} else {
+			uom = strings.ToUpper(strings.TrimSpace(vals[0]))
+		}
+	}
 	if err := v.Err(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 
-	cust, err := h.customerSvc.GetCustomer(r.Context(), customerID)
-	if err != nil {
-		httpx.WriteError(w, r, httpx.NotFound("no such customer"))
-		return
-	}
-	prod, err := h.productSvc.GetProduct(r.Context(), productID)
-	if err != nil {
-		httpx.WriteError(w, r, httpx.NotFound("no such product"))
-		return
+	if customerID != uuid.Nil {
+		if _, err := h.customerSvc.GetCustomer(r.Context(), customerID); err != nil {
+			httpx.WriteError(w, r, httpx.NotFound("no such customer"))
+			return
+		}
 	}
 
-	scaled, err := h.service.CalculateScaled(r.Context(), cust, productID, prod.BasePrice, qtyFloat(quantity), jobID)
+	resolved, err := h.service.Resolve(r.Context(), Request{
+		CustomerID: customerID,
+		ProductID:  productID,
+		BranchID:   branch,
+		Quantity:   quantity,
+		UOM:        uom,
+		JobID:      jobID,
+	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-
-	// Until the unit sets of C3-2A, every price is in the product's stocking
-	// unit: the pair is 1 and 1 and the extension is the one rounding.
-	pair := httpx.Quantity(10_000)
-	total, err := httpx.Extend(quantity, pair, pair, scaled.Price)
+	total, err := httpx.Extend(quantity, resolved.UOMQty, resolved.PriceUOMQty, resolved.UnitPrice)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	writePricingJSON(w, http.StatusOK, CalculatedPriceView{
-		CustomerID:  customerID,
-		ProductID:   productID,
-		Quantity:    quantity,
-		UOM:         prod.UOMPrimary,
-		UnitPrice:   scaled.Price,
-		PriceUOM:    string(prod.UOMPrimary),
-		UOMQty:      pair,
-		PriceUOMQty: pair,
-		LineTotal:   total,
-		PriceBasis:  scaled.Source,
-		Details:     scaled.Details,
+		CustomerID:        customerID,
+		ProductID:         productID,
+		BranchID:          branch,
+		Quantity:          quantity,
+		UOM:               product.UOM(resolved.UOM),
+		UnitPrice:         resolved.UnitPrice,
+		PriceUOM:          resolved.PriceUOM,
+		UOMQty:            resolved.UOMQty,
+		PriceUOMQty:       resolved.PriceUOMQty,
+		LineTotal:         total,
+		PriceBasis:        resolved.PriceBasis,
+		Details:           resolved.Details,
+		ReferencePrice:    resolved.ReferencePrice,
+		ReferencePriceUOM: resolved.ReferencePriceUOM,
 	})
 }
 

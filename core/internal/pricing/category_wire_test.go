@@ -11,10 +11,12 @@ package pricing_test
 // and unique refusals as 400 and 409 where the base commit answered 500.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -31,6 +33,10 @@ func newCategoryFixture(t *testing.T) (*fixture, string) {
 	t.Helper()
 	f := newFixture(t)
 	f.srv.Close()
+	if err := f.db.Pool.QueryRow(t.Context(),
+		`SELECT value FROM system_settings WHERE key = 'pricing.default_price_level_id'`).Scan(&f.defaultLevelID); err != nil {
+		t.Fatalf("the default price level: %v", err)
+	}
 	customerSvc := customer.NewService(customer.NewRepository(f.db))
 	productSvc := product.NewService(product.NewRepository(f.db))
 	svc := pricing.NewService(pricing.NewRepository(f.db))
@@ -82,9 +88,31 @@ func errCode(res resp) string {
 	return code
 }
 
-func (f *fixture) tierRule(catID, tier string, extra map[string]any) resp {
+// freshLevel inserts a price level of the fixture's own and answers its
+// code, so a test that needs several targets has them.
+func (f *fixture) freshLevel() string {
+	f.t.Helper()
+	ctx := context.Background()
+	code := "WL" + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	var id string
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO price_levels (code, name, basis, adjust_percent, position)
+		VALUES ($1, 'Wire fixture level', 'BASE', 0, 9500)
+		RETURNING id::text`, code).Scan(&id); err != nil {
+		f.t.Fatalf("seed level: %v", err)
+	}
+	f.t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM price_levels WHERE code = $1 AND name = 'Wire fixture level'`, code)
+	})
+	return id
+}
+
+// levelRule plants one LEVEL rule of the fixture on the migration's default
+// level, the level every database carries. The name argument only marks the
+// caller's expectation; the target is the default level's id.
+func (f *fixture) levelRule(catID string, extra map[string]any) resp {
 	body := map[string]any{
-		"target_type": "tier", "tier": tier, "category_id": catID,
+		"target_type": "level", "price_level_id": f.defaultLevelID, "category_id": catID,
 		"rule_type": "markup", "value_pct": "12.5",
 	}
 	for k, v := range extra {
@@ -99,11 +127,11 @@ func (f *fixture) tierRule(catID, tier string, extra map[string]any) resp {
 func TestCategoryRuleCreateShape(t *testing.T) {
 	f, cat := newCategoryFixture(t)
 
-	pct := f.tierRule(cat, "WIRETIER", map[string]any{"margin_floor_pct": "5"})
+	pct := f.levelRule(cat, map[string]any{"margin_floor_pct": "5"})
 	if pct.status != http.StatusCreated {
 		t.Fatalf("create: %d %s", pct.status, pct.raw)
 	}
-	if pct.body["target_type"] != "tier" || pct.body["rule_type"] != "markup" {
+	if pct.body["target_type"] != "level" || pct.body["rule_type"] != "markup" {
 		t.Fatalf("vocabularies = %v/%v, want lowercase", pct.body["target_type"], pct.body["rule_type"])
 	}
 	if pct.body["value_pct"] != "12.5" || pct.body["value_ten_thousandths"] != nil {
@@ -124,7 +152,7 @@ func TestCategoryRuleCreateShape(t *testing.T) {
 		t.Fatalf("the legacy rule_value survives: %s", pct.raw)
 	}
 
-	fixed := f.tierRule(cat, "WIREFIXED", map[string]any{"rule_type": "fixed", "value_pct": nil, "value_ten_thousandths": 99900})
+	fixed := f.levelRule(cat, map[string]any{"rule_type": "fixed", "value_pct": nil, "value_ten_thousandths": 99900, "price_level_id": f.freshLevel()})
 	if fixed.status != http.StatusCreated {
 		t.Fatalf("fixed create: %d %s", fixed.status, fixed.raw)
 	}
@@ -133,7 +161,7 @@ func TestCategoryRuleCreateShape(t *testing.T) {
 	}
 
 	// A second active rule for the same target and category is a 409 duplicate.
-	dup := f.tierRule(cat, "WIRETIER", nil)
+	dup := f.levelRule(cat, nil)
 	if dup.status != http.StatusConflict || errCode(dup) != "duplicate" {
 		t.Fatalf("duplicate: %d %s, want 409 duplicate", dup.status, dup.raw)
 	}
@@ -173,16 +201,16 @@ func TestCategoryRuleValidation(t *testing.T) {
 		"a percent as a number":   {"value_pct": 12.5},
 		"a fixed rule with a pct": {"rule_type": "fixed"},
 	} {
-		if res := f.tierRule(cat, "WIREBAD", extra); res.status != http.StatusBadRequest {
+		if res := f.levelRule(cat, extra); res.status != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400 (%s)", name, res.status, res.raw)
 		}
 	}
-	if res := f.tierRule(cat, "WIREBAD", map[string]any{"rule_value": 5}); res.status != http.StatusBadRequest {
+	if res := f.levelRule(cat, map[string]any{"rule_value": 5}); res.status != http.StatusBadRequest {
 		t.Errorf("the legacy rule_value: status = %d, want 400 (an unknown field)", res.status)
 	}
 
 	ghost := f.do("POST", "/api/v1/pricing/category-rules", map[string]any{
-		"target_type": "tier", "tier": "WIREGHOST", "category_id": uuid.NewString(),
+		"target_type": "level", "price_level_id": f.defaultLevelID, "category_id": uuid.NewString(),
 		"rule_type": "markup", "value_pct": "1",
 	}, "Idempotency-Key", uuid.NewString())
 	if ghost.status != http.StatusBadRequest || !detailFields(ghost)["category_id"] {
@@ -202,7 +230,7 @@ func TestCategoryRuleValidation(t *testing.T) {
 // create, and an update writes its audit entry with the old and new values.
 func TestCategoryRuleRevision(t *testing.T) {
 	f, cat := newCategoryFixture(t)
-	rule := f.tierRule(cat, "WIREREV", nil)
+	rule := f.levelRule(cat, nil)
 	id := rule.body["id"].(string)
 	path := "/api/v1/pricing/category-rules/" + id
 	body := map[string]any{"rule_type": "markup", "value_pct": "15"}
@@ -210,7 +238,7 @@ func TestCategoryRuleRevision(t *testing.T) {
 	if res := f.do("PUT", path, body, "Idempotency-Key", uuid.NewString()); res.status != http.StatusPreconditionRequired {
 		t.Fatalf("no revision: %d, want 428", res.status)
 	}
-	withTarget := map[string]any{"rule_type": "markup", "value_pct": "15", "tier": "OTHER"}
+	withTarget := map[string]any{"rule_type": "markup", "value_pct": "15", "price_level_id": "OTHER"}
 	if res := f.do("PUT", path, withTarget, "If-Match", `"1"`, "Idempotency-Key", uuid.NewString()); res.status != http.StatusBadRequest {
 		t.Fatalf("a target field in the body: %d, want 400", res.status)
 	}
@@ -218,7 +246,7 @@ func TestCategoryRuleRevision(t *testing.T) {
 	if ok.status != http.StatusOK || ok.body["revision"] != json.Number("2") || ok.header.Get("ETag") != `"2"` {
 		t.Fatalf("weak If-Match update: %d %s", ok.status, ok.raw)
 	}
-	if ok.body["value_pct"] != "15" || ok.body["tier"] != "WIREREV" || ok.body["category_id"] != cat {
+	if ok.body["value_pct"] != "15" || ok.body["price_level_id"] != rule.body["price_level_id"] || ok.body["category_id"] != cat {
 		t.Fatalf("the update lost the target or the value: %s", ok.raw)
 	}
 	stale := f.do("PUT", path, body, "If-Match", `"1"`, "Idempotency-Key", uuid.NewString())
@@ -262,12 +290,29 @@ func TestCategoryRuleList(t *testing.T) {
 	if empty.status != http.StatusOK || string(rawField(t, empty.raw, "items")) != "[]" {
 		t.Fatalf("an empty page must carry items as [] in the bytes: %s", empty.raw)
 	}
+	// One rule per level: the table's partial unique index refuses two
+	// active rules for one (level, category), so the page needs a level of
+	// its own per rule.
+	levels := make([]string, 4)
+	for i := range levels {
+		if err := f.db.Pool.QueryRow(t.Context(), `
+			INSERT INTO price_levels (code, name, basis, adjust_percent, position)
+			VALUES ($1, 'Wire list level', 'BASE', 0, 9000 + $2)
+			RETURNING id::text`, "WL"+strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:6], "-", "")), i).Scan(&levels[i]); err != nil {
+			t.Fatalf("seed level %d: %v", i, err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, code := range levels {
+			_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM price_levels WHERE id::text = $1 AND name = 'Wire list level'`, code)
+		}
+	})
 	for i := 0; i < 3; i++ {
-		if res := f.tierRule(cat, "WIRELIST"+strconv.Itoa(i), nil); res.status != http.StatusCreated {
+		if res := f.levelRule(cat, map[string]any{"price_level_id": levels[i]}); res.status != http.StatusCreated {
 			t.Fatalf("create %d: %d %s", i, res.status, res.raw)
 		}
 	}
-	f.tierRule(cat, "WIRELIST3", map[string]any{"is_active": false})
+	f.levelRule(cat, map[string]any{"price_level_id": levels[3], "is_active": false})
 
 	seen := map[string]bool{}
 	cursor := ""
@@ -313,11 +358,11 @@ func TestCategoryRuleList(t *testing.T) {
 // entries or not at all, and the single create refuses an id.
 func TestCategoryRuleBulk(t *testing.T) {
 	f, cat := newCategoryFixture(t)
-	rule := f.tierRule(cat, "WIREBULK", nil)
+	rule := f.levelRule(cat, nil)
 	id := rule.body["id"].(string)
 
 	el := func(extra map[string]any) []map[string]any {
-		e := map[string]any{"id": id, "target_type": "tier", "tier": "WIREBULK", "category_id": cat, "rule_type": "markup", "value_pct": "20"}
+		e := map[string]any{"id": id, "target_type": "level", "price_level_id": f.defaultLevelID, "category_id": cat, "rule_type": "markup", "value_pct": "20"}
 		for k, v := range extra {
 			e[k] = v
 		}
@@ -333,28 +378,29 @@ func TestCategoryRuleBulk(t *testing.T) {
 	if res := bulk(el(map[string]any{"revision": 7})); res.status != http.StatusConflict || errCode(res) != "stale_revision" {
 		t.Fatalf("replace at a stale revision: %d %s, want 409 stale_revision", res.status, res.raw)
 	}
-	if res := bulk(el(map[string]any{"revision": 1, "tier": "SOMEOTHER"})); res.status != http.StatusBadRequest {
+	if res := bulk(el(map[string]any{"revision": 1, "price_level_id": "OTHER"})); res.status != http.StatusBadRequest {
 		t.Fatalf("replace that changes the target: %d %s, want 400", res.status, res.raw)
 	}
 	res := bulk([]map[string]any{
 		el(map[string]any{"revision": 1})[0],
-		{"target_type": "tier", "tier": "WIREBULK2", "category_id": cat, "rule_type": "margin", "value_pct": "22"},
+		{"target_type": "level", "price_level_id": f.freshLevel(), "category_id": cat, "rule_type": "margin", "value_pct": "22"},
 	})
 	if res.status != http.StatusOK || res.body["count"] != json.Number("2") {
 		t.Fatalf("bulk: %d %s", res.status, res.raw)
 	}
-	got := f.do("GET", "/api/v1/pricing/category-rules?category_id="+cat+"&tier=WIREBULK", nil)
+	got := f.do("GET", "/api/v1/pricing/category-rules?category_id="+cat+"&price_level_id="+f.defaultLevelID, nil)
 	items := got.body["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["value_pct"] != "20" || items[0].(map[string]any)["revision"] != json.Number("2") {
 		t.Fatalf("the element with an id did not replace its rule at the next revision: %s", got.raw)
 	}
 	// Two batches naming the same rules in opposite orders lock in one order
 	// and never deadlock.
-	other := f.tierRule(cat, "WIREBULK3", nil).body["id"].(string)
+	otherLevel := f.freshLevel()
+	other := f.levelRule(cat, map[string]any{"price_level_id": otherLevel}).body["id"].(string)
 	pair := func(first, second string, r1, r2 int) []map[string]any {
 		return []map[string]any{
-			{"id": first, "target_type": "tier", "tier": "WIREBULK", "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r1},
-			{"id": second, "target_type": "tier", "tier": "WIREBULK3", "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r2},
+			{"id": first, "target_type": "level", "price_level_id": f.defaultLevelID, "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r1},
+			{"id": second, "target_type": "level", "price_level_id": otherLevel, "category_id": cat, "rule_type": "markup", "value_pct": "21", "revision": r2},
 		}
 	}
 	// (id and tier pairs must agree; build the two orders with matching tiers)
@@ -379,7 +425,7 @@ func TestCategoryRuleBulk(t *testing.T) {
 	if res := f.do("POST", "/api/v1/pricing/category-rules/bulk", []map[string]any{}, "Idempotency-Key", uuid.NewString()); res.status != http.StatusBadRequest {
 		t.Fatalf("empty batch: %d, want 400", res.status)
 	}
-	if res := f.tierRule(cat, "WIREID", map[string]any{"id": uuid.NewString()}); res.status != http.StatusBadRequest {
+	if res := f.levelRule(cat, map[string]any{"id": uuid.NewString()}); res.status != http.StatusBadRequest {
 		t.Fatalf("an id on a single create: %d, want 400", res.status)
 	}
 	del := f.do("DELETE", "/api/v1/pricing/category-rules/bulk", map[string]any{"ids": []string{id}})
@@ -395,10 +441,10 @@ func TestCategoryRuleBulk(t *testing.T) {
 // row's values, revision included, never the element the client sent.
 func TestCategoryRuleBulkRepeatedID(t *testing.T) {
 	f, cat := newCategoryFixture(t)
-	rule := f.tierRule(cat, "WIREREPID", nil)
+	rule := f.levelRule(cat, nil)
 	id := rule.body["id"].(string)
 	el := func(rev int) map[string]any {
-		return map[string]any{"id": id, "target_type": "tier", "tier": "WIREREPID",
+		return map[string]any{"id": id, "target_type": "level", "price_level_id": f.defaultLevelID,
 			"category_id": cat, "rule_type": "markup", "value_pct": "20", "revision": rev}
 	}
 
@@ -411,7 +457,7 @@ func TestCategoryRuleBulkRepeatedID(t *testing.T) {
 		t.Errorf("a repeated id in one batch: details do not name [1].id: %s", repeated.raw)
 	}
 	// The refused batch wrote nothing: the rule stands at revision 1.
-	got := f.do("GET", "/api/v1/pricing/category-rules?category_id="+cat+"&tier=WIREREPID", nil)
+	got := f.do("GET", "/api/v1/pricing/category-rules?category_id="+cat+"&price_level_id="+f.defaultLevelID, nil)
 	items := got.body["items"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["revision"] != json.Number("1") {
 		t.Fatalf("the refused batch moved the rule: %s", got.raw)
