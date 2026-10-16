@@ -237,3 +237,33 @@ func TestFinanceChargeRulesWorkflow(t *testing.T) {
 		t.Fatal("a charge in the future was taken")
 	}
 }
+
+// TestFinanceChargeEntryLinksAndSameDayRerun: the charge invoice names its
+// entry, and a second execution for the same as of charges nobody again.
+func TestFinanceChargeEntryLinksAndSameDayRerun(t *testing.T) {
+	w := newARWorld(t)
+	w.chargeRules(200, 3, 0, 0, false)
+	w.invoice(1_000_000, daysFromNow(-95))
+
+	run := w.runCharges(false, daysFromNow(-35), w.customerID)
+	if len(run.Items) != 1 || run.Items[0].InvoiceID == nil || run.Items[0].JournalEntryID == nil {
+		t.Fatalf("the executed run reads %+v", run.Items)
+	}
+	it := run.Items[0]
+	var entry *uuid.UUID
+	if err := w.db.Pool.QueryRow(context.Background(),
+		`SELECT gl_entry_id FROM invoices WHERE id = $1`, *it.InvoiceID).Scan(&entry); err != nil {
+		t.Fatalf("read the charge invoice: %v", err)
+	}
+	if entry == nil || *entry != *it.JournalEntryID {
+		t.Fatalf("the charge invoice names entry %v, want %s", entry, it.JournalEntryID)
+	}
+	before := w.queryInt(`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE id = $1`, w.customerID)
+	again := w.runCharges(false, daysFromNow(-35), w.customerID)
+	if len(again.Items) != 0 || again.TotalChargedCents != 0 {
+		t.Fatalf("the same day rerun charged %+v, want nothing", again.Items)
+	}
+	if after := w.queryInt(`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE id = $1`, w.customerID); after != before {
+		t.Fatalf("the rerun moved the balance from %d to %d", before, after)
+	}
+}

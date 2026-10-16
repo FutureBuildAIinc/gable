@@ -474,7 +474,7 @@ paths:
       tags: [ar]
       summary: Run the credit hold sweep
       description: >-
-        Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one carrying a manager's override). With dry_run false it places and lifts idempotently and keeps customers.credit_hold true to the books; dry_run defaults to true and writes nothing.
+        Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       requestBody:
@@ -546,7 +546,7 @@ paths:
       tags: [ar]
       summary: Put a time-bounded override on a credit hold
       description: >-
-        Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden; it never releases. A released hold refuses with 409.
+        Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
       parameters:
         - name: id
           in: path
@@ -852,7 +852,7 @@ paths:
       tags: [ar]
       summary: Preview or execute a finance charge run
       description: >-
-        Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+        Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       requestBody:
@@ -17172,7 +17172,7 @@ components:
         approve: {type: boolean, default: false, description: "true applies the limit in the same act."}
     ArWorklistRow:
       type: object
-      required: [customer_id, customer_name, currency, balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, past_due_cents, over_limit_cents, credit_limit_cents, credit_utilization_pct, hold_status, hold_id, override_until, severity_score, recommended_action]
+      required: [customer_id, customer_name, currency, balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, past_due_cents, over_limit_cents, credit_limit_cents, credit_utilization_pct, hold_status, severity_score, recommended_action]
       properties:
         customer_id: {type: string, format: uuid}
         customer_name: {type: string}

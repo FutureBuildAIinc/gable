@@ -26,9 +26,10 @@ import (
 // A dry run is a run: it records the same run row and the same per customer
 // items, marked DRY_RUN with no invoice and no entry, so the preview an
 // operator read is the record of what was previewed. Executed, the act is
-// idempotent in the only sense that matters: the basis excludes this run's
-// own kind of invoice, so running twice on one day does not charge twice on
-// the same money unless compounding is on.
+// idempotent per day: a customer a completed run already charged as of a
+// date is not its basis again, so running twice for one as of charges once.
+// Across days the overdue invoices are the basis each time, which is what a
+// periodic charge is.
 
 // FinanceChargeRules is the tenant's finance charge rules on the wire.
 type FinanceChargeRules struct {
@@ -230,7 +231,8 @@ func scanFinanceChargeItem(row pgx.Row, it *FinanceChargeItem) error {
 // open amount taken as of that date, the aging's arithmetic) and, without
 // compounding, when it is not itself a finance charge invoice. Parameters:
 // $1 the as of date, $2 the grace days, $3 the compound flag, $4 the named
-// customers (null for every eligible one).
+// customers (null for every eligible one). A customer a completed run
+// already charged as of $1 is not charged twice by the same day's runs.
 const financeChargeBasisSQL = `
 SELECT i.customer_id, c.name,
        COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD') AS currency,
@@ -247,6 +249,9 @@ FROM (
 JOIN customers c ON c.id = i.customer_id
 WHERE i.open_cents > 0 AND ($1::date - i.due_date) > $2::int AND ($3::boolean OR i.origin <> 'FINANCE_CHARGE')
   AND ($4::uuid[] IS NULL OR i.customer_id = ANY($4))
+  AND NOT EXISTS (SELECT 1 FROM ar_finance_charge_items fci
+        JOIN ar_finance_charge_runs fcr ON fcr.id = fci.run_id
+        WHERE fcr.status = 'COMPLETED' AND fcr.as_of_date = $1::date AND fci.customer_id = i.customer_id)
 GROUP BY 1, 2, 3, 4
 ORDER BY 1`
 
@@ -357,6 +362,12 @@ func (s *Service) RunFinanceCharges(ctx context.Context, in FinanceChargeRunIn) 
 					return err
 				}
 				fx.entry(entry)
+				if entry != nil {
+					if _, err := s.ex(ctx).Exec(ctx, `UPDATE invoices SET gl_entry_id = $2 WHERE id = $1`,
+						invID, *entry); err != nil {
+						return fmt.Errorf("failed to record the charge entry: %w", err)
+					}
+				}
 				if err := s.subledger(ctx, fx, p.customerID, p.currency, TransactionTypeInvoice, p.charge, invID,
 					sourceInvoice, "Finance charge as of "+date(in.AsOf)); err != nil {
 					return err

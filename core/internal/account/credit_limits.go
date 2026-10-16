@@ -87,7 +87,7 @@ func (s *Service) RequestCreditLimitChange(ctx context.Context, customerID uuid.
 	var out *CreditLimitChange
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		var old int64
-		err := s.ex(ctx).QueryRow(ctx, `SELECT ROUND(credit_limit * 100)::bigint FROM customers WHERE id = $1 FOR UPDATE`,
+		err := s.ex(ctx).QueryRow(ctx, `SELECT COALESCE(ROUND(credit_limit * 100)::bigint, 0) FROM customers WHERE id = $1 FOR UPDATE`,
 			customerID).Scan(&old)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NotFound("account not found")
@@ -131,7 +131,7 @@ func (s *Service) RequestCreditLimitChange(ctx context.Context, customerID uuid.
 // makes a second approval a skip rather than a double write.
 func (s *Service) approveCreditLimitChange(ctx context.Context, id, customerID uuid.UUID, oldLimit, newLimit int64, actor string) error {
 	tag, err := s.ex(ctx).Exec(ctx, `
-		UPDATE credit_limit_changes SET status = 'APPROVED', approved_by = NULLIF($2, ''), decided_at = NOW()
+		UPDATE credit_limit_changes SET status = 'APPROVED', approved_by = COALESCE(NULLIF($2, ''), 'system'), decided_at = NOW()
 		WHERE id = $1 AND status = 'PENDING'`, id, actor)
 	if err != nil {
 		return fmt.Errorf("failed to approve the credit limit change: %w", err)

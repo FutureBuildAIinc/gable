@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/google/uuid"
 )
 
 // TestWorklistRanksBySeverityAndActs posts the ladder of an overdue book and
@@ -34,21 +35,47 @@ func TestWorklistRanksBySeverityAndActs(t *testing.T) {
 	_ = mid
 	_ = shallow
 
+	// The action ladder of the unheld accounts: one bucket each, no hold,
+	// no bump in the score.
+	ladder := map[uuid.UUID]string{
+		w.sideOn(8_000, daysFromNow(-100)): "finance_charge", // 70 days past due
+		w.sideOn(8_000, daysFromNow(-70)):  "call",           // 40 days past due
+		w.sideOn(2_000, daysFromNow(0)):    "send_statement", // not yet due
+	}
 	out, err := w.svc.Worklist(context.Background(), daysFromNow(0), 500)
 	if err != nil {
 		t.Fatalf("worklist: %v", err)
 	}
-	// The world's own rows, in the order the report ranked them.
-	var rows []account.WorklistRow
+	seen := map[uuid.UUID]account.WorklistRow{}
 	for _, r := range out.Rows {
 		if r.CustomerID == w.customerID {
-			rows = append(rows, r)
+			seen[w.customerID] = r
+			continue
+		}
+		if want, ok := ladder[r.CustomerID]; ok {
+			if r.RecommendedAction != want {
+				t.Errorf("the unheld %d days account's action is %q, want %q", r.PastDueCents, r.RecommendedAction, want)
+			}
+			if r.HoldStatus != "none" {
+				t.Errorf("an unheld account reads hold status %q, want none", r.HoldStatus)
+			}
+			if r.SeverityScore >= 1_000_000 {
+				t.Errorf("an unheld account carries the hold bump: %d", r.SeverityScore)
+			}
+			seen[r.CustomerID] = r
 		}
 	}
-	if len(rows) != 1 {
-		t.Fatalf("the worklist answered %d rows for the world's account, want one", len(rows))
+	for id, want := range ladder {
+		if _, ok := seen[id]; !ok {
+			t.Errorf("the ladder's customer %s is missing from the worklist", id)
+		}
+		_ = want
 	}
-	row := rows[0]
+
+	row, ok := seen[w.customerID]
+	if !ok {
+		t.Fatal("the world's account is missing from the worklist")
+	}
 	if row.Currency != "USD" {
 		t.Fatalf("the row's currency is %q", row.Currency)
 	}
@@ -71,14 +98,16 @@ func TestWorklistRanksBySeverityAndActs(t *testing.T) {
 	if row.UtilizationPct == nil || *row.UtilizationPct != 4_000 {
 		t.Fatalf("the utilisation reads %v, want 4000 percent", row.UtilizationPct)
 	}
+	if row.HoldStatus != "none" {
+		t.Fatalf("an unheld account reads hold status %q, want none", row.HoldStatus)
+	}
 	if row.RecommendedAction != "hold" {
 		t.Fatalf("the action is %q, want hold", row.RecommendedAction)
 	}
-	// The score is what orders the rows: the weighted buckets, the
-	// over-limit amount, and the hold's bump (a held account outranks any
-	// plain overdue one).
-	if row.SeverityScore != 4*10_000+2*10_000+10_000+39_000+1_000_000 {
-		t.Fatalf("the score is %d, want the weighted sum", row.SeverityScore)
+	// The score is what orders the rows: the weighted buckets and the
+	// over-limit amount, no hold bump before anything is held.
+	if row.SeverityScore != 4*10_000+2*10_000+10_000+39_000 {
+		t.Fatalf("the score is %d, want the weighted sum without a hold bump", row.SeverityScore)
 	}
 	// The score is what orders the rows: a held account jumps the queue.
 	if _, _, err := w.svc.PlaceHold(context.Background(), account.PlaceHoldIn{CustomerID: w.customerID,
@@ -101,6 +130,9 @@ func TestWorklistRanksBySeverityAndActs(t *testing.T) {
 	}
 	if first != 0 {
 		t.Fatalf("the held account ranks %d, want first", first+1)
+	}
+	if held.Rows[first].SeverityScore != 4*10_000+2*10_000+10_000+39_000+1_000_000 {
+		t.Fatalf("the held account's score is %d, want the weighted sum plus the hold bump", held.Rows[first].SeverityScore)
 	}
 	found := held.Rows[first]
 	if found.HoldStatus != "active" || found.HoldID == "" {

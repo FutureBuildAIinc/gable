@@ -101,7 +101,7 @@ func (s *Service) Worklist(ctx context.Context, asOf time.Time, limit int) (*Wor
 	for _, it := range items {
 		row := byCustomer[it.CustomerID]
 		if row == nil {
-			row = &WorklistRow{CustomerID: it.CustomerID, CustomerName: it.CustomerName}
+			row = &WorklistRow{CustomerID: it.CustomerID, CustomerName: it.CustomerName, HoldStatus: "none"}
 			byCustomer[it.CustomerID] = row
 			order = append(order, it.CustomerID)
 		}

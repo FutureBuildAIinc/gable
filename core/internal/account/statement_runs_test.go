@@ -187,3 +187,46 @@ func TestStatementRunScopeAndQueueing(t *testing.T) {
 		t.Fatal("a sales role generated a run")
 	}
 }
+
+// TestStatementRunSplitsFinanceChargePayments: a payment applied to a
+// finance charge invoice counts as a payment, never as a negative charge, so
+// the period figures reconcile.
+func TestStatementRunSplitsFinanceChargePayments(t *testing.T) {
+	w := newARWorld(t)
+	w.chargeRules(200, 3, 0, 0, false)
+	w.invoice(1_000_000, daysFromNow(-95))
+	chargeRun := w.runCharges(false, daysFromNow(-35), w.customerID) // the charge invoice is due day-5
+	for _, it := range chargeRun.Items {
+		if it.JournalEntryID != nil {
+			w.entries = append(w.entries, *it.JournalEntryID)
+		}
+	}
+
+	var chargeInvoice uuid.UUID
+	if err := w.db.Pool.QueryRow(context.Background(),
+		`SELECT id FROM invoices WHERE customer_id = $1 AND origin = 'FINANCE_CHARGE' LIMIT 1`,
+		w.customerID).Scan(&chargeInvoice); err != nil {
+		t.Fatalf("read the charge invoice: %v", err)
+	}
+	// The customer pays the charge inside the statement period.
+	w.payment(20_000, daysFromNow(-10), "CHECK", account.ApplyLine{InvoiceID: chargeInvoice, AmountCents: 20_000})
+
+	run, err := w.svc.CreateStatementRun(context.Background(), account.StatementRunIn{
+		PeriodStart: daysFromNow(-40), PeriodEnd: daysFromNow(0),
+		CustomerIDs: []uuid.UUID{w.customerID}, Actor: "u-test", Role: "finance"})
+	if err != nil {
+		t.Fatalf("create the run: %v", err)
+	}
+	if len(run.Items) != 1 {
+		t.Fatalf("%d items, want one", len(run.Items))
+	}
+	it := run.Items[0]
+	if it.OpeningBalanceCents != 1_000_000 || it.InvoicesCents != 0 || it.PaymentsCents != 20_000 ||
+		it.FinanceChargesCents != 20_000 || it.ClosingBalanceCents != 1_000_000 {
+		t.Fatalf("the figures read open %d, invoices %d, payments %d, charges %d, closing %d",
+			it.OpeningBalanceCents, it.InvoicesCents, it.PaymentsCents, it.FinanceChargesCents, it.ClosingBalanceCents)
+	}
+	if got := int64(it.OpeningBalanceCents) + int64(it.InvoicesCents) - int64(it.PaymentsCents) + int64(it.FinanceChargesCents); got != int64(it.ClosingBalanceCents) {
+		t.Fatalf("the figures do not reconcile: %d against closing %d", got, it.ClosingBalanceCents)
+	}
+}

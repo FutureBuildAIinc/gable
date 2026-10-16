@@ -11,10 +11,13 @@ package account_test
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -236,8 +239,10 @@ func TestHoldOverrideAndRelease(t *testing.T) {
 		overridden.OverrideReason == nil || overridden.MaxOrderCents == nil || *overridden.MaxOrderCents != 250_000 {
 		t.Fatalf("the overridden hold reads %+v", overridden)
 	}
-	if !w.creditFlag() {
-		t.Fatal("the flag went false behind an overridden hold")
+	// The live window is what the override buys: the counter and the order
+	// paths see the account as open while it stands.
+	if w.creditFlag() {
+		t.Fatal("the flag stayed true behind a live override")
 	}
 	// The release ends it, whatever state it stands in.
 	released, err := w.svc.ReleaseHold(context.Background(), hold.ID,
@@ -367,4 +372,189 @@ func TestReleasedHoldListKeepsHistory(t *testing.T) {
 	if all[0].Status != "released" {
 		t.Fatalf("the hold reads %q, want released", all[0].Status)
 	}
+}
+
+// TestCreditLimitChangeOnAFreshCustomer records and approves a change on a
+// customer that names no limit at all (credit_limit NULL): the old limit
+// reads as zero, never a scan failure.
+func TestCreditLimitChangeOnAFreshCustomer(t *testing.T) {
+	w := newARWorld(t)
+	change, err := w.svc.RequestCreditLimitChange(context.Background(), w.customerID, account.CreditLimitChangeIn{
+		NewLimitCents: 80_000, Reason: "first limit", Approve: true, Actor: "u-finance"})
+	if err != nil {
+		t.Fatalf("approve a change on a customer with no limit: %v", err)
+	}
+	if change.OldLimitCents != 0 || change.Status != "approved" {
+		t.Fatalf("the change reads %+v, want old 0 approved", change)
+	}
+	if got := w.queryInt(`SELECT ROUND(credit_limit * 100)::bigint FROM customers WHERE id = $1`, w.customerID); got != 80_000 {
+		t.Fatalf("the limit did not move: %d", got)
+	}
+}
+
+// TestHoldActsWorkWithoutACallerName: a machine key, the dev mode and the
+// automated sweep carry no user claims, so the acts that must name an actor
+// stamp system (or sweep) instead of failing a check constraint.
+func TestHoldActsWorkWithoutACallerName(t *testing.T) {
+	w := newARWorld(t)
+	hold, placed, err := w.svc.PlaceHold(context.Background(), account.PlaceHoldIn{CustomerID: w.customerID, Reason: "watch"})
+	if err != nil || !placed {
+		t.Fatalf("place with no actor: %v", err)
+	}
+	until := time.Now().Add(48 * time.Hour)
+	overridden, err := w.svc.OverrideHold(context.Background(), hold.ID,
+		account.HoldActIn{Reason: "the window", OverrideUntil: &until})
+	if err != nil {
+		t.Fatalf("override with no actor: %v", err)
+	}
+	if overridden.OverrideBy == nil || *overridden.OverrideBy == "" {
+		t.Fatalf("the override names no actor: %+v", overridden)
+	}
+	released, err := w.svc.ReleaseHold(context.Background(), hold.ID, account.HoldActIn{Reason: "done"})
+	if err != nil {
+		t.Fatalf("release with no actor: %v", err)
+	}
+	if released.ReleasedBy == nil || *released.ReleasedBy == "" {
+		t.Fatalf("the release names no actor: %+v", released)
+	}
+	if _, err := w.svc.RequestCreditLimitChange(context.Background(), w.customerID, account.CreditLimitChangeIn{
+		NewLimitCents: 1_000, Reason: "ok", Approve: true}); err != nil {
+		t.Fatalf("approve a limit change with no actor: %v", err)
+	}
+	// And the sweep itself, which never carries a caller's name.
+	w.setCreditLimit(10_000)
+	w.invoice(50_000, daysFromNow(-40))
+	if ev := sweepC(w, false); ev.Placed != 1 {
+		t.Fatalf("the sweep placed %d, want one", ev.Placed)
+	}
+	h := w.standingHold()
+	if h == nil {
+		t.Fatal("the sweep's hold is missing")
+	}
+	w.setCreditLimit(1_000_000)
+	if ev := sweepC(w, false); ev.Released != 1 {
+		t.Fatalf("the sweep released %d, want one", ev.Released)
+	}
+	all, err := w.svc.ListCreditHolds(context.Background(), account.CreditHoldFilter{
+		CustomerID: &w.customerID, Status: "released", Limit: 10})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, h := range all {
+		if h.ReleasedBy == nil || *h.ReleasedBy == "" || h.ReleaseReason == nil {
+			t.Fatalf("a released hold names no actor or reason: %+v", h)
+		}
+	}
+}
+
+// TestOverrideWindowExpiry: a live override lets orders through (the flag
+// reads false), an elapsed one blocks again, and the sweep expires it back
+// to active and lifts it once its trigger is gone.
+func TestOverrideWindowExpiry(t *testing.T) {
+	w := newARWorld(t)
+	w.setCreditLimit(10_000)
+	w.invoice(50_000, daysFromNow(-40)) // over the limit, and it stays there
+
+	if ev := sweepC(w, false); ev.Placed != 1 {
+		t.Fatalf("the sweep placed %d, want one", ev.Placed)
+	}
+	hold := w.standingHold()
+	if hold == nil || hold.Status != "active" {
+		t.Fatalf("the automatic hold reads %+v", hold)
+	}
+	// The window buys an hour; then the clock moves past it.
+	until := time.Now().Add(time.Hour)
+	overridden, err := w.svc.OverrideHold(context.Background(), hold.ID,
+		account.HoldActIn{Reason: "promised", OverrideUntil: &until, Actor: "u-manager", Role: "finance"})
+	if err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if overridden.Status != "overridden" {
+		t.Fatalf("the overridden hold reads %q", overridden.Status)
+	}
+	if w.creditFlag() {
+		t.Fatal("the flag is true behind a live override: the window lets orders through")
+	}
+	// The sweep does not lift a live override's hold even if the books
+	// cleared (they have not here, but the plan must say nothing to lift).
+	if ev := sweepC(w, true); len(ev.WouldRelease) != 0 {
+		t.Fatalf("the sweep would lift a hold under a live override: %+v", ev.WouldRelease)
+	}
+	// The window elapses. A dry run still plans nothing (it writes
+	// nothing); the live sweep expires the override back to active, and the
+	// account blocks again.
+	w.svc.WithClockForTest(func() time.Time { return time.Now().Add(2 * time.Hour) })
+	if ev := sweepC(w, true); len(ev.WouldRelease) != 0 {
+		t.Fatalf("a breached account is not a lift candidate: %+v", ev.WouldRelease)
+	}
+	if ev := sweepC(w, false); ev.Placed != 0 || ev.Released != 0 {
+		t.Fatalf("the sweep moved nothing: %+v", ev)
+	}
+	expired := w.standingHold()
+	if expired == nil || expired.Status != "active" || expired.OverrideUntil != nil {
+		t.Fatalf("the elapsed override did not expire back to active: %+v", expired)
+	}
+	if !w.creditFlag() {
+		t.Fatal("the flag stayed false after the override window elapsed")
+	}
+	// With the trigger gone the same sweep lifts the hold it placed.
+	w.setCreditLimit(1_000_000)
+	if ev := sweepC(w, false); ev.Released != 1 {
+		t.Fatalf("the sweep released %d, want the expired hold", ev.Released)
+	}
+	if h := w.standingHold(); h != nil {
+		t.Fatalf("the hold outlived the lift: %+v", h)
+	}
+	if w.creditFlag() {
+		t.Fatal("the flag stayed true after the lift")
+	}
+}
+
+// TestHoldRoutesCarryTheCustomerWall: a caller pinned to a branch the
+// customer does not hold finds the hold missing, on the list and on the acts
+// alike, and the wide caller still sees it.
+func TestHoldRoutesCarryTheCustomerWall(t *testing.T) {
+	w := newARWorld(t)
+	hold, placed, err := w.svc.PlaceHold(context.Background(), account.PlaceHoldIn{CustomerID: w.customerID,
+		Reason: "watch", Actor: "u-test", Role: "finance"})
+	if err != nil || !placed {
+		t.Fatalf("place: %v", err)
+	}
+	other := uuid.New()
+	w.exec(`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, other, "wb-"+other.String()[:8])
+	t.Cleanup(func() {
+		_, _ = w.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, other)
+	})
+	pinned := branchctx.With(context.Background(), &branchctx.Context{BranchID: &other})
+
+	holds, err := w.svc.ListCreditHolds(pinned, account.CreditHoldFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list pinned: %v", err)
+	}
+	if len(holds) != 0 {
+		t.Fatalf("a caller pinned elsewhere sees %d holds, want none", len(holds))
+	}
+	if _, err := w.svc.ReleaseHold(pinned, hold.ID, account.HoldActIn{Reason: "x", Actor: "u-test", Role: "finance"}); !notFound(err) {
+		t.Fatalf("a release pinned elsewhere answered %v, want not found", err)
+	}
+	until := time.Now().Add(time.Hour)
+	if _, err := w.svc.OverrideHold(pinned, hold.ID,
+		account.HoldActIn{Reason: "x", OverrideUntil: &until, Actor: "u-test", Role: "finance"}); !notFound(err) {
+		t.Fatalf("an override pinned elsewhere answered %v, want not found", err)
+	}
+	// The wide caller still sees and may lift it.
+	wide, err := w.svc.ListCreditHolds(context.Background(), account.CreditHoldFilter{CustomerID: &w.customerID, Limit: 10})
+	if err != nil || len(wide) != 1 {
+		t.Fatalf("the wide list answered %d holds, %v", len(wide), err)
+	}
+	if _, err := w.svc.ReleaseHold(context.Background(), hold.ID,
+		account.HoldActIn{Reason: "ok now", Actor: "u-test", Role: "finance"}); err != nil {
+		t.Fatalf("the wide release: %v", err)
+	}
+}
+
+// notFound answers whether the error is the wire's not found.
+func notFound(err error) bool {
+	e, ok := err.(*httpx.Error)
+	return ok && e.Status == http.StatusNotFound
 }

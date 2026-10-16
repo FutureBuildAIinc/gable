@@ -352,6 +352,19 @@ func (w *arWorld) invoiceOn(customer uuid.UUID, total int64, on time.Time) uuid.
 	return inv.ID
 }
 
+// sideOn posts an invoice of a fresh side customer and answers that
+// customer's id: a fixture account whose money stays out of the world's own
+// invariants but whose aging the worklist and the sweep must see.
+func (w *arWorld) sideOn(total int64, on time.Time) uuid.UUID {
+	w.t.Helper()
+	customer := uuid.New()
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Side Co', $2, `+arBranch+`)`,
+		customer, "SIDE-"+uuid.NewString()[:8])
+	w.side = append(w.side, customer)
+	w.invoiceOn(customer, total, on)
+	return customer
+}
+
 func (w *arWorld) postInvoiceRow(customer uuid.UUID, inv *arInvoice, on time.Time) {
 	var project, shipTo, discountDue, discountPP any
 	if inv.ProjectID != nil {

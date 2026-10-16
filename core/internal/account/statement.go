@@ -89,8 +89,10 @@ type StatementQuery struct {
 // voided day), an application's applied day (its reversal's reversed day), a
 // refund's refunded day; the row's stamp only for a row with no document. The
 // opening balance, the period and the order all follow that day. The finance
-// charge flag marks a row whose source invoice is one: a statement run counts
-// those apart from the invoices. It takes the customer as $1.
+// charge flag marks a row whose own document is a finance charge invoice: a
+// statement run counts those apart from the invoices. A payment applied to
+// one is a payment, not a charge, so the flag never follows the application's
+// invoice. It takes the customer as $1.
 const statementDayRowsSQL = `
 	SELECT t.id, t.type, COALESCE(t.description, '') AS description, t.amount, t.balance_after, t.currency,
 	       t.source_kind, t.reference_id, t.created_at,
@@ -101,7 +103,7 @@ const statementDayRowsSQL = `
 	           CASE WHEN t.source_kind = 'refund' THEN rf.refunded_on END,
 	           (t.created_at AT TIME ZONE tz.name)::date) AS day,
 	       COALESCE(inv.project_id, cm.project_id, ai.project_id, rcm.project_id, legacy.project_id) AS job,
-	       COALESCE(inv.origin = 'FINANCE_CHARGE', ai.origin = 'FINANCE_CHARGE', FALSE) AS fc
+	       COALESCE(inv.origin = 'FINANCE_CHARGE', legacy.origin = 'FINANCE_CHARGE', FALSE) AS fc
 	FROM customer_transactions t
 	CROSS JOIN (SELECT COALESCE((SELECT l.timezone FROM locations l JOIN customers c ON c.primary_branch_id = l.id WHERE c.id = $1), 'UTC') AS name) tz
 	LEFT JOIN invoices inv ON t.source_kind = 'invoice' AND inv.id = t.reference_id

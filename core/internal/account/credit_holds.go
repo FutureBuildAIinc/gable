@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -143,20 +144,20 @@ func (s *Service) ListCreditHolds(ctx context.Context, f CreditHoldFilter) ([]Cr
 	default:
 		return nil, invalidField("status", "must be one of: standing, released, all")
 	}
-	customerSQL := `TRUE`
 	if f.CustomerID != nil {
 		if err := s.CustomerInWall(ctx, *f.CustomerID); err != nil {
 			return nil, err
 		}
-		customerSQL = `h.customer_id = $4`
 	}
 	rows, err := s.ex(ctx).Query(ctx, `
 		SELECT `+creditHoldColumns+`
-		FROM credit_holds h JOIN customers c ON c.id = h.customer_id
-		WHERE `+statusSQL+` AND `+customerSQL+`
+		FROM credit_holds h
+		JOIN customers c ON c.id = h.customer_id AND `+customerWall(5, 6)+`
+		WHERE `+statusSQL+` AND ($4::uuid IS NULL OR h.customer_id = $4)
 		  AND ($2::timestamptz IS NULL OR (h.placed_at, h.id) < ($2, $3::uuid))
 		ORDER BY h.placed_at DESC, h.id DESC
-		LIMIT $1`, f.Limit+1, f.AfterTime, f.AfterID, f.CustomerID)
+		LIMIT $1`, f.Limit+1, f.AfterTime, f.AfterID, f.CustomerID,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the credit holds: %w", err)
 	}
@@ -190,14 +191,12 @@ func (s *Service) CountCreditHolds(ctx context.Context, f CreditHoldFilter) (int
 	default:
 		return 0, invalidField("status", "must be one of: standing, released, all")
 	}
-	customerSQL := `TRUE`
-	if f.CustomerID != nil {
-		customerSQL = `h.customer_id = $2`
-	}
 	var n int64
 	if err := s.ex(ctx).QueryRow(ctx, `
-		SELECT count(*) FROM credit_holds h WHERE `+statusSQL+` AND `+customerSQL,
-		f.CustomerID).Scan(&n); err != nil {
+		SELECT count(*) FROM credit_holds h
+		JOIN customers c ON c.id = h.customer_id AND `+customerWall(3, 4)+`
+		WHERE `+statusSQL+` AND ($2::uuid IS NULL OR h.customer_id = $2)`,
+		f.CustomerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&n); err != nil {
 		return 0, fmt.Errorf("failed to count the credit holds: %w", err)
 	}
 	return n, nil
@@ -350,13 +349,16 @@ func (s *Service) standingHold(ctx context.Context, customerID uuid.UUID) (*Cred
 	return &h, nil
 }
 
-// syncCreditHoldFlag writes customers.credit_hold from the standing holds.
-// It runs inside the caller's transaction, beside the hold write it follows.
+// syncCreditHoldFlag writes customers.credit_hold from the standing holds: a
+// hold blocks the account unless a manager's override window is live, so the
+// override is what it buys, a way through until it elapses. It runs inside
+// the caller's transaction, beside the hold write it follows.
 func (s *Service) syncCreditHoldFlag(ctx context.Context, customerID uuid.UUID) error {
 	if _, err := s.ex(ctx).Exec(ctx, `
-		UPDATE customers SET credit_hold = EXISTS (SELECT 1 FROM credit_holds WHERE customer_id = $1 AND status IN `+standingHoldStates+`),
+		UPDATE customers SET credit_hold = EXISTS (SELECT 1 FROM credit_holds WHERE customer_id = $1
+				AND (status = 'ACTIVE' OR (status = 'OVERRIDDEN' AND override_until <= $2))),
 			updated_at = NOW()
-		WHERE id = $1`, customerID); err != nil {
+		WHERE id = $1`, customerID, s.now()); err != nil {
 		return fmt.Errorf("failed to sync the credit hold flag: %w", err)
 	}
 	return nil
@@ -389,11 +391,14 @@ func (s *Service) ReleaseHold(ctx context.Context, id uuid.UUID, in HoldActIn) (
 		if err != nil {
 			return err
 		}
+		if err := s.CustomerInWall(ctx, hold.CustomerID); err != nil {
+			return err
+		}
 		if hold.Status == "released" {
 			return httpx.InvalidStateTransition("the credit hold is already released")
 		}
 		if _, err := s.ex(ctx).Exec(ctx, `
-			UPDATE credit_holds SET status = 'RELEASED', released_by = NULLIF($2, ''), released_at = NOW(),
+			UPDATE credit_holds SET status = 'RELEASED', released_by = COALESCE(NULLIF($2, ''), 'system'), released_at = NOW(),
 				release_reason = $3, override_until = NULL, override_by = NULL, override_reason = NULL,
 				max_order_cents = NULL, updated_at = NOW()
 			WHERE id = $1`, id, in.Actor, reason); err != nil {
@@ -447,11 +452,15 @@ func (s *Service) OverrideHold(ctx context.Context, id uuid.UUID, in HoldActIn) 
 		if err != nil {
 			return err
 		}
+		if err := s.CustomerInWall(ctx, hold.CustomerID); err != nil {
+			return err
+		}
 		if hold.Status == "released" {
 			return httpx.InvalidStateTransition("the credit hold is released: nothing to override")
 		}
 		if _, err := s.ex(ctx).Exec(ctx, `
-			UPDATE credit_holds SET status = 'OVERRIDDEN', override_until = $2, override_by = NULLIF($3, ''),
+			UPDATE credit_holds SET status = 'OVERRIDDEN', override_until = $2,
+				override_by = COALESCE(NULLIF($3, ''), 'system'),
 				override_reason = $4, max_order_cents = $5, updated_at = NOW()
 			WHERE id = $1`, id, *in.OverrideUntil, in.Actor, reason, in.MaxOrderCents); err != nil {
 			return fmt.Errorf("failed to override the credit hold: %w", err)
@@ -609,29 +618,28 @@ func (s *Service) EvaluateHolds(ctx context.Context, dryRun bool, only []uuid.UU
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// The standing holds beside their accounts: a standing hold (even one
-	// under a manager's override) keeps its account off the place list, and
-	// only a hold the sweep placed itself, with no override standing, is a
-	// lift candidate.
+	// The standing holds beside their accounts: a standing hold keeps its
+	// account off the place list, and only a hold the sweep placed itself,
+	// carrying no override whose window is still open, is a lift candidate.
 	held, err := s.ex(ctx).Query(ctx, `
-		SELECT h.id, h.customer_id, h.hold_type, h.placed_by IS NULL, h.override_until IS NOT NULL
+		SELECT h.id, h.customer_id, h.hold_type, h.placed_by IS NULL, COALESCE(h.override_until > $1, FALSE)
 		FROM credit_holds h
-		WHERE h.status IN `+standingHoldStates)
+		WHERE h.status IN `+standingHoldStates, s.now())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the standing holds: %w", err)
 	}
 	defer held.Close()
 	type standing struct {
-		id         uuid.UUID
-		cust       uuid.UUID
-		kind       string
-		auto       bool
-		overridden bool
+		id       uuid.UUID
+		cust     uuid.UUID
+		kind     string
+		auto     bool
+		override bool // the override window is still open
 	}
 	holdRows := []standing{}
 	for held.Next() {
 		var r standing
-		if err := held.Scan(&r.id, &r.cust, &r.kind, &r.auto, &r.overridden); err != nil {
+		if err := held.Scan(&r.id, &r.cust, &r.kind, &r.auto, &r.override); err != nil {
 			return nil, fmt.Errorf("failed to scan a standing hold: %w", err)
 		}
 		holdRows = append(holdRows, r)
@@ -673,8 +681,8 @@ func (s *Service) EvaluateHolds(ctx context.Context, dryRun bool, only []uuid.UU
 		if wanted != nil && !wanted[st.cust] {
 			continue
 		}
-		if !st.auto || st.overridden {
-			continue // a person's hold is a person's to lift; an override stands its window
+		if !st.auto || st.override {
+			continue // a person's hold is a person's to lift; a live override stands its window
 		}
 		f := factOf[st.cust]
 		if reason := clearedDecision(f, lower(st.kind)); reason != "" {
@@ -684,14 +692,54 @@ func (s *Service) EvaluateHolds(ctx context.Context, dryRun bool, only []uuid.UU
 	if dryRun {
 		return out, nil
 	}
-	return out, s.applyHoldEvaluation(ctx, out, actor)
+	return out, s.applyHoldEvaluation(ctx, out, only, actor)
 }
 
 // applyHoldEvaluation writes the sweep's plan: each placement and release its
 // own guarded statement, so a run that meets a hold another act just placed
 // skips rather than doubles it.
-func (s *Service) applyHoldEvaluation(ctx context.Context, ev *HoldEvaluation, actor string) error {
+func (s *Service) applyHoldEvaluation(ctx context.Context, ev *HoldEvaluation, only []uuid.UUID, actor string) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
+		// The elapsed overrides go back to active first: the window is over,
+		// the hold stands on its own again, and a lift planned against it is
+		// no longer behind a window.
+		expired, err := s.ex(ctx).Query(ctx, `
+			UPDATE credit_holds SET status = 'ACTIVE', override_until = NULL, override_by = NULL,
+				override_reason = NULL, max_order_cents = NULL, updated_at = NOW()
+			WHERE status = 'OVERRIDDEN' AND override_until <= $1
+			  AND ($2::uuid[] IS NULL OR customer_id = ANY($2))
+			RETURNING id, customer_id`, s.now(), uuidsOrNil(only))
+		if err != nil {
+			return fmt.Errorf("failed to expire the credit hold overrides: %w", err)
+		}
+		type expiredHold struct {
+			id   uuid.UUID
+			cust uuid.UUID
+		}
+		var expiredHolds []expiredHold
+		for expired.Next() {
+			var e expiredHold
+			if err := expired.Scan(&e.id, &e.cust); err != nil {
+				expired.Close()
+				return fmt.Errorf("failed to scan an expired override: %w", err)
+			}
+			expiredHolds = append(expiredHolds, e)
+		}
+		expired.Close()
+		if err := expired.Err(); err != nil {
+			return err
+		}
+		for _, e := range expiredHolds {
+			if err := s.syncCreditHoldFlag(ctx, e.cust); err != nil {
+				return err
+			}
+			if s.auditLog != nil {
+				if err := s.auditLog.Log(ctx, audit.Entry{Action: "credit_hold.override_expired", EntityType: "credit_hold",
+					EntityID: e.id, UserID: actor, Changes: map[string]interface{}{"customer_id": e.cust}}); err != nil {
+					return fmt.Errorf("failed to write the audit row: %w", err)
+				}
+			}
+		}
 		for i := range ev.WouldPlace {
 			p := &ev.WouldPlace[i]
 			id := uuid.New()
@@ -722,7 +770,7 @@ func (s *Service) applyHoldEvaluation(ctx context.Context, ev *HoldEvaluation, a
 		for i := range ev.WouldRelease {
 			r := &ev.WouldRelease[i]
 			tag, err := s.ex(ctx).Exec(ctx, `
-				UPDATE credit_holds SET status = 'RELEASED', released_by = NULLIF($2, ''), released_at = NOW(),
+				UPDATE credit_holds SET status = 'RELEASED', released_by = COALESCE(NULLIF($2, ''), 'sweep'), released_at = NOW(),
 					release_reason = $3, updated_at = NOW()
 				WHERE id = $1 AND status IN `+standingHoldStates+` AND override_until IS NULL`, r.HoldID, actor, r.Reason)
 			if err != nil {
