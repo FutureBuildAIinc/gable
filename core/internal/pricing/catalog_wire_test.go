@@ -15,9 +15,11 @@ package pricing_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/outbox"
 	"net/http/httptest"
@@ -307,6 +309,7 @@ func TestCatalogPayloadBranchRule(t *testing.T) {
 	ctx := context.Background()
 	prod := catalogTestProduct(t, f.db, "10")
 	prodB := catalogTestProduct(t, f.db, "11")
+	cust := catalogTestCustomer(t, f.db)
 	branchA := catalogTestBranch(t, f.db, "ca-")
 	branchB := catalogTestBranch(t, f.db, "cb-")
 
@@ -377,6 +380,21 @@ func TestCatalogPayloadBranchRule(t *testing.T) {
 	// A branch A user's every branch PUT is refused.
 	if status, _, _ := catalogDo(t, "PUT", sliceURL(userSrv, nil, prod), putEveryBranch(prod, levelID)); status != http.StatusForbidden {
 		t.Errorf("branch A user's every branch PUT = %d, want 403", status)
+	}
+	// P2-1 (review r1 argon): the create paths answer the branch refusal with
+	// 403 forbidden, never a 500 internal error - a branch A user's POST
+	// contract naming branch B, and their POST vendor cost naming branch B.
+	if status, _, _ := catalogDo(t, "POST", userSrv.URL+"/api/v1/pricing/contracts",
+		`{"customer_id":"`+cust.String()+`","product_id":"`+prodB.String()+`","branch_id":"`+branchB.String()+`","contract_price_ten_thousandths":1}`); status != http.StatusForbidden {
+		t.Errorf("branch A user's POST contract on branch B = %d, want 403", status)
+	}
+	if status, _, _ := catalogDo(t, "POST", userSrv.URL+"/api/v1/pricing/vendor-costs",
+		`{"vendor_id":"`+uuid.NewString()+`","vendor_price_level_id":"`+uuid.NewString()+`","product_id":"`+prodB.String()+`","branch_id":"`+branchB.String()+`","purchase_uom":"EA","unit_cost_ten_thousandths":1,"effective_from":"2020-01-01"}`); status != http.StatusForbidden {
+		t.Errorf("branch A user's POST vendor cost on branch B = %d, want 403", status)
+	}
+	if status, _, _ := catalogDo(t, "POST", userSrv.URL+"/api/v1/pricing/contracts",
+		`{"customer_id":"`+cust.String()+`","product_id":"`+prodB.String()+`","contract_price_ten_thousandths":1}`); status != http.StatusForbidden {
+		t.Errorf("branch A user's every branch POST contract = %d, want 403", status)
 	}
 	// A branch A PUT on its own branch is admitted and leaves branch B's and
 	// the every branch rows byte for byte.
@@ -513,6 +531,141 @@ func TestCatalogWriteConcurrency(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'contract'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_contracts WHERE customer_id = $1`, cust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_prices WHERE product_id = $1`, prod)
+	})
+}
+
+// failingCatalogAudit is the real repository with an audit write that always
+// fails: the stand-in for a failed audit row inside the service transaction.
+type failingCatalogAudit struct{ db *database.DB }
+
+func (a failingCatalogAudit) Log(ctx context.Context, e pricing.AuditEntry) error {
+	return errors.New("catalog audit write failed")
+}
+
+// TestReplaceProductPrices_FailingAuditRollsTheReplaceBack: the price slice
+// replace, its audit row and its event are one transactional fact. An audit
+// write that fails leaves the old slice and the product's revision exactly as
+// they were (P1-3, review r1 argon): a replacement that committed before the
+// audit ran would survive the rollback.
+func TestReplaceProductPrices_FailingAuditRollsTheReplaceBack(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	prod := catalogTestProduct(t, db, "10")
+	branch := catalogTestBranch(t, db, "cr-")
+
+	repo := pricing.NewCatalogRepository(db)
+	good := pricing.NewCatalogService(repo).WithTxRunner(db).
+		WithOutbox(&recordingOutbox{db: db}).
+		WithAudit(catalogAuditAdapter{db: db})
+	bad := pricing.NewCatalogService(repo).WithTxRunner(db).
+		WithOutbox(&recordingOutbox{db: db}).
+		WithAudit(failingCatalogAudit{db: db})
+
+	rev := func() int64 {
+		t.Helper()
+		var r int64
+		if err := db.Pool.QueryRow(ctx, `SELECT revision FROM products WHERE id = $1`, prod).Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	// The good service seeds the branch A slice at the product's first revision.
+	rows := []pricing.ProductPrice{{PriceUOM: "EA", UnitPrice: 80000}}
+	if err := good.ReplaceProductPrices(ctx, prod, &branch, rev(), rows); err != nil {
+		t.Fatalf("seed replace: %v", err)
+	}
+	var before string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT md5(COALESCE(string_agg(x::text, ',' ORDER BY x::text), ''))
+		 FROM (SELECT * FROM product_prices WHERE product_id = $1 AND branch_id IS NOT DISTINCT FROM $2) x`,
+		prod, branch).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	revisionAfterSeed := rev()
+
+	// The bad service's replace fails on its audit write; nothing may move.
+	rows[0].UnitPrice = 99000
+	if err := bad.ReplaceProductPrices(ctx, prod, &branch, revisionAfterSeed, rows); err == nil {
+		t.Fatal("the replace with a failing audit write succeeded")
+	}
+	var after string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT md5(COALESCE(string_agg(x::text, ',' ORDER BY x::text), ''))
+		 FROM (SELECT * FROM product_prices WHERE product_id = $1 AND branch_id IS NOT DISTINCT FROM $2) x`,
+		prod, branch).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("the failed replace moved the price rows (digest %s against %s)", after, before)
+	}
+	if got := rev(); got != revisionAfterSeed {
+		t.Errorf("the failed replace moved the product revision to %d, want %d", got, revisionAfterSeed)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_prices WHERE product_id = $1`, prod)
+	})
+}
+
+// TestReplaceProductPrices_SaturationNeedsNoSecondConnection: four contenders
+// at pool size 4 each replace the same slice inside the service transaction;
+// a repository that reached for a second pool connection would deadlock the
+// gate (P1-3, review r1 argon).
+func TestReplaceProductPrices_SaturationNeedsNoSecondConnection(t *testing.T) {
+	db := testutil.RequireDBMaxConns(t, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	prod := catalogTestProduct(t, db, "10")
+	branch := catalogTestBranch(t, db, "cs-")
+	cust := catalogTestCustomer(t, db)
+
+	repo := pricing.NewCatalogRepository(db)
+
+	// Three contenders at distinct branches, plus a contract create, all held
+	// at the gate inside their transactions before the first statement.
+	revision, err := repo.ProductRevision(ctx, prod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const contenders = 4
+	svc2 := pricing.NewCatalogService(repo).WithTxRunner(newGatedRunner(db, contenders))
+	branches := []uuid.UUID{branch, catalogTestBranch(t, db, "ct-"), catalogTestBranch(t, db, "cu-")}
+	var wg sync.WaitGroup
+	errs := make(chan error, contenders)
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var err error
+			if i < 3 {
+				err = svc2.ReplaceProductPrices(ctx, prod, &branches[i], revision,
+					[]pricing.ProductPrice{{PriceUOM: "EA", UnitPrice: 80000}})
+			} else {
+				err = svc2.CreateContract(ctx, &pricing.CustomerContract{CustomerID: cust, ProductID: prod,
+					BranchID: &branch, ContractPrice: 90000, PriceUOM: "EA"})
+			}
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		// A contender may lose the revision race or the unique key; what it
+		// must never do is wait on a second pool connection, which shows up
+		// as the context expiring before the gate drains.
+		if ctx.Err() != nil {
+			t.Errorf("contender: %v (after the context expired)", err)
+		}
+	}
+	if ctx.Err() != nil {
+		t.Fatal("four contenders at pool size 4 did not finish: a transaction waited on a second pool connection")
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type IN ('contract', 'product')`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_contracts WHERE customer_id = $1`, cust)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_prices WHERE product_id = $1`, prod)
 	})

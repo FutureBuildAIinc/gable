@@ -195,7 +195,7 @@ func mapCategoryWriteError(what string, err error) error {
 			}
 			return httpx.Duplicate("a category with this slug or path already exists")
 		case "23503":
-			for _, field := range []string{"category_id", "customer_id", "parent_id"} {
+			for _, field := range []string{"category_id", "customer_id", "price_profile_id", "price_level_id", "parent_id"} {
 				if strings.Contains(pgErr.ConstraintName, field) {
 					return httpx.BadRequest(field+" does not name an existing row",
 						httpx.FieldError{Field: field, Message: "no such row"})
@@ -755,14 +755,15 @@ func (r *PostgresCategoryRepository) CreateAuditEntry(ctx context.Context, entry
 	query := `
 		INSERT INTO category_pricing_audit
 			(id, rule_id, action, old_values, new_values, performed_by, performed_at,
-			 category_id, target_type, tier, customer_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			 category_id, target_type, tier, price_profile_id, price_level_id, customer_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		entry.ID, entry.RuleID, entry.Action,
 		oldJSON, newJSON,
 		entry.PerformedBy, entry.PerformedAt.Time,
-		entry.CategoryID, nilIfEmpty(entry.TargetType), nilIfEmpty(entry.Tier), entry.CustomerID,
+		entry.CategoryID, nilIfEmpty(entry.TargetType), nilIfEmpty(entry.Tier),
+		entry.PriceProfileID, entry.PriceLevelID, entry.CustomerID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create audit entry: %w", err)
@@ -773,7 +774,7 @@ func (r *PostgresCategoryRepository) CreateAuditEntry(ctx context.Context, entry
 func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleID uuid.UUID) ([]CategoryPricingAudit, error) {
 	query := `
 		SELECT id, rule_id, action, old_values, new_values, performed_by, performed_at,
-		       category_id, target_type, tier, customer_id
+		       category_id, target_type, tier, price_profile_id, price_level_id, customer_id
 		FROM category_pricing_audit
 		WHERE rule_id = $1
 		ORDER BY performed_at DESC
@@ -794,7 +795,7 @@ func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleI
 		if err := rows.Scan(
 			&e.ID, &e.RuleID, &e.Action, &oldJSON, &newJSON,
 			&e.PerformedBy, &performedAt,
-			&e.CategoryID, &targetType, &tier, &e.CustomerID,
+			&e.CategoryID, &targetType, &tier, &e.PriceProfileID, &e.PriceLevelID, &e.CustomerID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan audit entry: %w", err)
 		}
@@ -867,7 +868,7 @@ func (r *PostgresCategoryRepository) bulkUpsertRulesInTx(ctx context.Context, ru
 			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
 		}
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
-			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
+			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, mapCategoryWriteError("category rule", err))
 		}
 	}
 	return nil

@@ -190,6 +190,17 @@ func TestResolveCostBranchLevelDateRules(t *testing.T) {
 		t.Fatalf("named level out of effect, want the default level's older cost: %+v", cost)
 	}
 
+	// P1-2 (review r1 argon): an all-branch (branch_id IS NULL) vendor cost
+	// answers a branch-scoped read. This leg runs before the branch row is
+	// seeded, so the all-branch row is the only candidate.
+	cost, err = svc.ResolveCost(ctx, vendor, product, &branch, nil, time.Now(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost == nil || cost.UnitCost.DecimalString() != "4.0000" {
+		t.Fatalf("all-branch cost for a branch read: %+v, want 4.0000", cost)
+	}
+
 	// The branch row beats the all branch row.
 	seed(`INSERT INTO vendor_product_costs (vendor_id, vendor_price_level_id, product_id, branch_id, purchase_uom, unit_cost, effective_from)
 		VALUES ($1, (SELECT id FROM vendor_price_levels WHERE vendor_id = $1 AND code = 'LIST'), $2, $3, 'EA', 3.75, $4)`,

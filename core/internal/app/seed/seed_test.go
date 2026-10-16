@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
@@ -82,7 +83,7 @@ func priceWithSeededRule(t *testing.T, r pricingRule, basePrice, quantity float6
 		q := seedQty(t, *r.MarginFloor)
 		rule.MarginFloorPct = &q
 	}
-	svc := pricing.NewService(&oneRuleRepo{rule: rule})
+	svc := pricing.NewService(&oneRuleRepo{rule: rule}).WithRepository(seedResolveRepo{basePrice: basePrice})
 	got, err := svc.CalculatePriceWithQty(context.Background(),
 		&customer.Customer{ID: uuid.New()}, uuid.New(), basePrice, quantity, nil)
 	if err != nil {
@@ -519,9 +520,11 @@ func TestSeedCustomer_MirrorsThePrimaryBranchAndNeverMovesIt(t *testing.T) {
 	sqlDB := stdlib.OpenDBFromPool(pool.Pool)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
+	// P1-6 (review r1 argon): seedCustomer's third parameter is the
+	// customer's pricing program id (price_profiles), not a level id.
 	var priceLevel uuid.UUID
-	if err := pool.Pool.QueryRow(ctx, `SELECT id FROM price_levels LIMIT 1`).Scan(&priceLevel); err != nil {
-		t.Fatalf("a price level for the customer: %v", err)
+	if err := pool.Pool.QueryRow(ctx, `SELECT id FROM price_profiles LIMIT 1`).Scan(&priceLevel); err != nil {
+		t.Fatalf("a price profile for the customer: %v", err)
 	}
 	branchA, branchB := uuid.New(), uuid.New()
 	for _, b := range []uuid.UUID{branchA, branchB} {
@@ -594,4 +597,50 @@ func TestSeedCustomer_MirrorsThePrimaryBranchAndNeverMovesIt(t *testing.T) {
 	if got := rows(id); !got[branchB] {
 		t.Errorf("after the move the customer holds branch rows %v, want a row for its stored primary branch %s", got, branchB)
 	}
+}
+
+// seedResolveRepo is the minimal ResolveRepository the seed's pricing rule
+// tests price through: one product whose stocking and price unit are EA at
+// the base price the test states, its (1, 1) unit set row, and nothing else
+// (no contract, no explicit prices, no program, no vendor costs), so the
+// seeded rule under test is the only rung that can answer.
+type seedResolveRepo struct{ basePrice float64 }
+
+func (r seedResolveRepo) ProductPricingFacts(_ context.Context, _ uuid.UUID) (*pricing.ProductPricingFacts, error) {
+	return &pricing.ProductPricingFacts{
+		BasePrice: priceOfSeed(r.basePrice), PriceUOM: "EA", StockUOM: "EA", SaleUOM: "EA",
+	}, nil
+}
+
+func (r seedResolveRepo) UnitSetRow(_ context.Context, _ uuid.UUID, uom string) (*pricing.UnitSetRowFact, error) {
+	if uom == "EA" {
+		q, err := httpx.ParseQuantity("1")
+		if err != nil {
+			return nil, err
+		}
+		return &pricing.UnitSetRowFact{UOM: uom, UnitQty: q, StockQty: q}, nil
+	}
+	return nil, nil
+}
+
+func (r seedResolveRepo) ContractForBranch(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (*pricing.CustomerContract, error) {
+	return nil, nil
+}
+func (r seedResolveRepo) ProductPrice(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) (*pricing.ProductPrice, error) {
+	return nil, nil
+}
+func (r seedResolveRepo) CustomerProgram(context.Context, uuid.UUID) (*pricing.PricingProgram, error) {
+	return nil, nil
+}
+func (r seedResolveRepo) VendorCost(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID, time.Time) (*pricing.VendorCostRow, error) {
+	return nil, nil
+}
+
+// priceOfSeed parses a float the way the wire would, exact at scale 4.
+func priceOfSeed(f float64) httpx.Price {
+	p, err := httpx.ParsePrice(strconv.FormatFloat(f, 'f', -1, 64))
+	if err != nil {
+		panic(err)
+	}
+	return p
 }

@@ -19,10 +19,18 @@ type Handler struct {
 	service     *Service
 	customerSvc *customer.Service
 	productSvc  *product.Service
+	guard       *middleware.BranchGuard
 }
 
 func NewHandler(s *Service, c *customer.Service, p *product.Service) *Handler {
 	return &Handler{service: s, customerSvc: c, productSvc: p}
+}
+
+// WithBranchGuard wires the payload branch rule the calculate read applies to
+// its query branch_id (ADR 0006 section 5.6).
+func (h *Handler) WithBranchGuard(g *middleware.BranchGuard) *Handler {
+	h.guard = g
+	return h
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -157,6 +165,15 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 	if err := v.Err(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+
+	// The query branch_id passes the payload branch rule (ADR 0006 section
+	// 5.6): a branch outside the caller's grants is a 403 before any lookup.
+	if branch != nil && h.guard != nil {
+		if err := h.guard.CheckPayloadBranch(r.Context(), *branch); err != nil {
+			httpx.WriteError(w, r, httpx.Forbidden("branch is outside the branches this caller may target"))
+			return
+		}
 	}
 
 	if customerID != uuid.Nil {

@@ -441,13 +441,13 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
 		RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
 	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db), customerSvc, productSvc).
-		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, wall.mw, db, "admin", "owner"))
 	pricing.NewCatalogHandler(pricing.NewCatalogService(pricing.NewCatalogRepository(db)).WithTxRunner(db)).
 		WithEngine(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db))).
 		WithBranchGuard(wall.guard).
-		RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, db))
+		RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, wall.mw, db))
 	registerMarketCheck(mux, marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
-		WithTxRunner(db), wall.keyWall, db)
+		WithTxRunner(db), wall.keyWall, wall.mw, db)
 	pricing.NewCategoryHandler(
 		pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db).
 			WithOutbox(outbox.NewWriter(db, "")).

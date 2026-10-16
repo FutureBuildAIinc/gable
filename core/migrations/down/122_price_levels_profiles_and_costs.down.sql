@@ -254,6 +254,10 @@ ALTER TABLE category_pricing_rules
     DROP COLUMN IF EXISTS price_level_id,
     DROP COLUMN IF EXISTS price_profile_id;
 
+ALTER TABLE category_pricing_audit
+    DROP COLUMN IF EXISTS price_level_id,
+    DROP COLUMN IF EXISTS price_profile_id;
+
 DROP TABLE IF EXISTS price_profile_backfill;
 DROP TABLE IF EXISTS price_profiles;
 

@@ -653,16 +653,21 @@ func calculateCustomersOf(db *database.DB) func(ctx context.Context, r *http.Req
 	}
 }
 
-// pricingRulesCustomerWall composes the pricing role guard with the customer
-// branch wall on the rule create (its body names the customer, its job names
-// one, and a body naming neither is dealer wide and refused) and on the
-// calculation (its query names the customer, and its job names one through
-// that job's customer). The unfiltered rule list is REFUSED by the route
-// allowlist gate and never reaches these arms.
-func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
-	role := middleware.RequireRole(roles...)
+// pricingRulesCustomerWall composes the pricing role guard with the branch
+// middleware (P1-1, review r1 argon: without it BranchFromContext is nil on
+// every pricing route, so CheckPayloadBranch refuses every branch-checked
+// write for human users and BranchIDForQuery never answers on reads), the
+// customer branch wall on the rule create (its body names the customer, its
+// job names one, and a body naming neither is dealer wide and refused), and
+// the counter's roles on the calculation (ADR 0006 section 5.6: calculate is
+// open to every role the counter routes admit; the rule create stays
+// admin/owner). The unfiltered rule list is REFUSED by the route allowlist
+// gate and never reaches these arms.
+func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB, roles ...string) func(http.Handler) http.Handler {
+	role := middleware.Compose(middleware.RequireRole(roles...), mw)
+	counterRole := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales", "cashier"), mw)
 	create := middleware.Compose(role, keyWall.CustomerBranchExclusive(pricingRuleCustomersOf(db)))
-	calculate := middleware.Compose(role, keyWall.CustomerBranch(calculateCustomersOf(db)))
+	calculate := middleware.Compose(counterRole, keyWall.CustomerBranch(calculateCustomersOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, calculateHandler, roleHandler := create(next), calculate(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -692,19 +697,15 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // 5.6): the writes are admin, owner and finance; the reads add sales; the
 // calculate read is open to every role the counter routes admit, since the
 // counter prices through it.
-func pricingCatalogWall(keyWall *middleware.KeyBranchWall, db *database.DB) func(http.Handler) http.Handler {
-	read := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales"))
-	write := middleware.Compose(middleware.RequireRole("admin", "owner", "finance"))
-	calc := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales", "cashier"),
-		keyWall.CustomerBranch(calculateCustomersOf(db)))
+func pricingCatalogWall(keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB) func(http.Handler) http.Handler {
+	read := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales"), mw)
+	write := middleware.Compose(middleware.RequireRole("admin", "owner", "finance"), mw)
 	return func(next http.Handler) http.Handler {
-		readHandler, writeHandler, calcHandler := read(next), write(next), calc(next)
+		readHandler, writeHandler := read(next), write(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/v1/pricing/calculate" {
-				calcHandler.ServeHTTP(w, r)
-				return
-			}
-			// The reads add sales; every write is finance's.
+			// The reads add sales; every write is finance's. The calculate
+			// read's 5-role dispatch lives in pricingRulesCustomerWall, which
+			// registers it.
 			if r.Method == http.MethodGet {
 				readHandler.ServeHTTP(w, r)
 				return

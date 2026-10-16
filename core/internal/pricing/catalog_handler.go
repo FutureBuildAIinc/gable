@@ -125,6 +125,24 @@ func (h *CatalogHandler) checkPayloadBranch(ctx interface {
 	return h.guard.CheckPayloadBranch(ctx, *branch)
 }
 
+// checkRowBranch holds a loaded row's branch to the caller's wall: a context
+// branch names it, the row names another, the row reads as missing (404); a
+// user with no context branch holds the row's branch to their grants
+// (CheckGrantsBranch), and an every-branch row is visible to everyone.
+func (h *CatalogHandler) checkRowBranch(ctx context.Context, rowBranch *uuid.UUID) error {
+	if h.guard == nil {
+		return nil
+	}
+	if bc := middleware.BranchFromContext(ctx); bc != nil && bc.BranchID != nil &&
+		rowBranch != nil && *bc.BranchID != *rowBranch {
+		return httpx.NotFound("no such row")
+	}
+	if rowBranch == nil {
+		return nil
+	}
+	return h.guard.CheckGrantsBranch(ctx, rowBranch)
+}
+
 // checkQueryBranch holds the branch a read filters on to the same rule.
 func (h *CatalogHandler) checkQueryBranch(ctx context.Context, branch *uuid.UUID) error {
 	if h.guard == nil || branch == nil {
@@ -867,6 +885,10 @@ func (h *CatalogHandler) HandleGetVendorCost(w http.ResponseWriter, r *http.Requ
 		httpx.WriteError(w, r, httpx.NotFound("no such vendor cost"))
 		return
 	}
+	if err := h.checkRowBranch(r.Context(), c.BranchID); err != nil {
+		writeCatalogError(w, r, err)
+		return
+	}
 	writeCatalogJSON(w, http.StatusOK, c)
 }
 
@@ -895,7 +917,7 @@ func (h *CatalogHandler) HandleCreateVendorCost(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err := h.checkPayloadBranch(r.Context(), c.BranchID); err != nil {
-		httpx.WriteError(w, r, err)
+		writeCatalogError(w, r, err)
 		return
 	}
 	if err := h.service.CreateVendorCost(r.Context(), c); err != nil {
@@ -1104,6 +1126,10 @@ func (h *CatalogHandler) HandleGetContract(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, r, httpx.NotFound("no such contract"))
 		return
 	}
+	if err := h.checkRowBranch(r.Context(), c.BranchID); err != nil {
+		writeCatalogError(w, r, err)
+		return
+	}
 	writeCatalogJSON(w, http.StatusOK, c)
 }
 
@@ -1171,7 +1197,7 @@ func (h *CatalogHandler) HandleCreateContract(w http.ResponseWriter, r *http.Req
 		}
 	}
 	if err := h.checkPayloadBranch(r.Context(), c.BranchID); err != nil {
-		httpx.WriteError(w, r, err)
+		writeCatalogError(w, r, err)
 		return
 	}
 	if err := h.service.CreateContract(r.Context(), c); err != nil {

@@ -474,6 +474,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cpr_unique_profile
 
 ALTER TABLE category_pricing_rules DROP COLUMN tier;
 
+ALTER TABLE category_pricing_audit
+    ADD COLUMN IF NOT EXISTS price_profile_id UUID,
+    ADD COLUMN IF NOT EXISTS price_level_id UUID;
+
 -- P5: product prices, the hold, the contracts and the rules --------------
 
 -- Empty: there is no branch or level price today. One price per level per

@@ -165,11 +165,16 @@ func TestCategoryRuleCreateShape(t *testing.T) {
 	if dup.status != http.StatusConflict || errCode(dup) != "duplicate" {
 		t.Fatalf("duplicate: %d %s, want 409 duplicate", dup.status, dup.raw)
 	}
-	// The audit trail was written with the rule.
+	// The audit trail was written with the rule, carrying the program target
+	// (P2-2, review r1 argon): the audit row names the level the rule targets.
 	audit := f.do("GET", "/api/v1/pricing/category-rules/"+pct.body["id"].(string)+"/audit", nil)
 	items, _ := audit.body["items"].([]any)
 	if audit.status != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["action"] != "CREATE" {
 		t.Fatalf("audit after create: %d %s", audit.status, audit.raw)
+	}
+	// P2-2 (review r1 argon): the audit entry names the program target.
+	if got := items[0].(map[string]any)["price_level_id"]; got != f.defaultLevelID {
+		t.Errorf("audit price_level_id = %v, want %s", got, f.defaultLevelID)
 	}
 }
 
@@ -213,6 +218,15 @@ func TestCategoryRuleValidation(t *testing.T) {
 		"target_type": "level", "price_level_id": f.defaultLevelID, "category_id": uuid.NewString(),
 		"rule_type": "markup", "value_pct": "1",
 	}, "Idempotency-Key", uuid.NewString())
+	// P2-2 (review r1 argon): a level id that does not exist is a 400 naming
+	// price_level_id, never a 500.
+	noLevel := f.do("POST", "/api/v1/pricing/category-rules", map[string]any{
+		"target_type": "level", "price_level_id": uuid.NewString(), "category_id": cat,
+		"rule_type": "markup", "value_pct": "1",
+	}, "Idempotency-Key", uuid.NewString())
+	if noLevel.status != http.StatusBadRequest || !detailFields(noLevel)["price_level_id"] {
+		t.Fatalf("a level that does not exist: %d %s, want 400 naming price_level_id", noLevel.status, noLevel.raw)
+	}
 	if ghost.status != http.StatusBadRequest || !detailFields(ghost)["category_id"] {
 		t.Fatalf("a category that does not exist: %d %s, want 400 naming category_id", ghost.status, ghost.raw)
 	}

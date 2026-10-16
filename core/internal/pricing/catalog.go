@@ -494,16 +494,16 @@ func (r *PostgresCatalogRepository) UpdateLevel(ctx context.Context, l *PriceLev
 	if err != nil {
 		return catalogWriteErr(err, "price level")
 	}
-	return staleOrMissing(tag, l.ID, r.db, "price_levels")
+	return staleOrMissing(ctx, tag, l.ID, r.db, "price_levels")
 }
 
-func staleOrMissing(tag pgconnCommandTag, id uuid.UUID, db *database.DB, table string) error {
+func staleOrMissing(ctx context.Context, tag pgconnCommandTag, id uuid.UUID, db *database.DB, table string) error {
 	if tag.RowsAffected() == 1 {
 		return nil
 	}
 	var exists bool
-	if err := db.GetExecutor(context.Background()).
-		QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id = $1)`, id).Scan(&exists); err != nil {
+	if err := db.GetExecutor(ctx).
+		QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id = $1)`, id).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
@@ -585,7 +585,7 @@ func (r *PostgresCatalogRepository) UpdateProfile(ctx context.Context, p *PriceP
 	if err != nil {
 		return catalogWriteErr(err, "price profile")
 	}
-	return staleOrMissing(tag, p.ID, r.db, "price_profiles")
+	return staleOrMissing(ctx, tag, p.ID, r.db, "price_profiles")
 }
 
 func (r *PostgresCatalogRepository) ProductPrices(ctx context.Context, productID uuid.UUID, branch, wall *uuid.UUID) ([]ProductPrice, error) {
@@ -620,14 +620,13 @@ func (r *PostgresCatalogRepository) ProductPrices(ctx context.Context, productID
 // product's revision check. The rows carry no branch of their own; the slice
 // is the branch the query names.
 func (r *PostgresCatalogRepository) ReplaceProductPrices(ctx context.Context, productID uuid.UUID, branch *uuid.UUID, productRevision int64, rows []ProductPrice) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	// Every statement runs on the context's executor: inside the service's
+	// transaction it joins that transaction (one connection, one commit, the
+	// audit and event rows share its fate); unwrapped it is the pool.
+	exec := r.db.GetExecutor(ctx)
 
 	var revision int64
-	if err := tx.QueryRow(ctx, `SELECT revision FROM products WHERE id = $1 FOR UPDATE`, productID).Scan(&revision); err != nil {
+	if err := exec.QueryRow(ctx, `SELECT revision FROM products WHERE id = $1 FOR UPDATE`, productID).Scan(&revision); err != nil {
 		if err == pgx.ErrNoRows {
 			return httpx.BadRequest("product_id does not name an existing row",
 				httpx.FieldError{Field: "product_id", Message: "no such row"})
@@ -637,7 +636,7 @@ func (r *PostgresCatalogRepository) ReplaceProductPrices(ctx context.Context, pr
 	if revision != productRevision {
 		return ErrStaleRevision
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM product_prices WHERE product_id = $1 AND branch_id IS NOT DISTINCT FROM $2`, productID, branch); err != nil {
+	if _, err := exec.Exec(ctx, `DELETE FROM product_prices WHERE product_id = $1 AND branch_id IS NOT DISTINCT FROM $2`, productID, branch); err != nil {
 		return err
 	}
 	for i := range rows {
@@ -645,17 +644,17 @@ func (r *PostgresCatalogRepository) ReplaceProductPrices(ctx context.Context, pr
 		rows[i].ProductID = productID
 		rows[i].BranchID = branch
 		rows[i].Revision = 1
-		if _, err := tx.Exec(ctx, `
+		if _, err := exec.Exec(ctx, `
 			INSERT INTO product_prices (id, product_id, price_level_id, branch_id, price_uom, unit_price)
 			VALUES ($1, $2, $3, $4, $5, $6)`,
 			rows[i].ID, productID, rows[i].PriceLevelID, branch, rows[i].PriceUOM, rows[i].UnitPrice.DecimalString()); err != nil {
 			return catalogWriteErr(err, "product price")
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE products SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, productID); err != nil {
+	if _, err := exec.Exec(ctx, `UPDATE products SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, productID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 const vendorLevelColumns = `id, vendor_id, code, name, is_default, is_active, revision, created_at, updated_at`
@@ -731,7 +730,7 @@ func (r *PostgresCatalogRepository) UpdateVendorLevel(ctx context.Context, v *Ve
 	if err != nil {
 		return catalogWriteErr(err, "vendor level")
 	}
-	return staleOrMissing(tag, v.ID, r.db, "vendor_price_levels")
+	return staleOrMissing(ctx, tag, v.ID, r.db, "vendor_price_levels")
 }
 
 const vendorCostColumns = `id, vendor_id, vendor_price_level_id, product_id, branch_id, purchase_uom,
@@ -820,7 +819,7 @@ func (r *PostgresCatalogRepository) UpdateVendorCost(ctx context.Context, c *Ven
 	if err != nil {
 		return catalogWriteErr(err, "vendor cost")
 	}
-	return staleOrMissing(tag, c.ID, r.db, "vendor_product_costs")
+	return staleOrMissing(ctx, tag, c.ID, r.db, "vendor_product_costs")
 }
 
 const contractColumns = `id, customer_id, product_id, contract_price::text, price_uom, branch_id, revision, created_at, updated_at`
@@ -916,7 +915,7 @@ func (r *PostgresCatalogRepository) UpdateContract(ctx context.Context, c *Custo
 	if err != nil {
 		return catalogWriteErr(err, "contract")
 	}
-	return staleOrMissing(tag, c.ID, r.db, "customer_contracts")
+	return staleOrMissing(ctx, tag, c.ID, r.db, "customer_contracts")
 }
 
 func (r *PostgresCatalogRepository) DeleteContract(ctx context.Context, id uuid.UUID) error {

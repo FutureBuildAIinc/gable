@@ -266,7 +266,7 @@ func (r *PostgresResolveRepository) VendorCostRow(ctx context.Context, vendorID,
 		WHERE vc.vendor_id = $1 AND vc.product_id = $2
 		  AND vpl.vendor_id = $1
 		  AND (vpl.id = $4 OR ($4 IS NULL AND vpl.is_default))
-		  AND vc.branch_id IS NOT DISTINCT FROM $3
+		  AND (vc.branch_id IS NOT DISTINCT FROM $3 OR ($3::uuid IS NOT NULL AND vc.branch_id IS NULL))
 		  AND vc.effective_from <= $5 AND (vc.effective_to IS NULL OR vc.effective_to >= $5)
 		ORDER BY vc.branch_id NULLS LAST, vc.effective_from DESC
 		LIMIT 1`, vendorID, productID, branch, level, on).
