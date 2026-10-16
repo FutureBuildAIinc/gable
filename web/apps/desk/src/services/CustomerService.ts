@@ -15,11 +15,10 @@ import type {
     CustomerPage,
     CustomerRequest,
     CustomerUpdateRequest,
-    CustomerTier,
     EscalationPolicy,
     EscalationPolicyRequest,
     PaymentTermsRecordPage,
-    PricingLevelPage,
+    PriceProfilePage,
     ShipTo,
     ShipToPage,
     ShipToRequest,
@@ -345,7 +344,7 @@ export const CustomerService = {
     },
 
     /** The pricing catalogue's levels (ADR 0006 section 5.6); the price levels read the customer module served moved here. */
-    async listPriceLevels(limit = 100): Promise<PricingLevelPage> {
+    async listPriceLevels(limit = 100): Promise<PriceProfilePage> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pricing/levels?limit=${limit}`),
             'Failed to fetch price levels',

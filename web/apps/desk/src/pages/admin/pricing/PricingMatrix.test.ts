@@ -15,9 +15,9 @@ import { mount, update, flush, q, text, jsonResponse } from '../../../test/dom'
 
 const RULE = {
   id: 'r-1',
-  target_type: 'tier',
+  target_type: 'level',
   customer_id: null,
-  tier: 'GOLD',
+  price_level_id: 'lvl-gold',
   category_id: 'cat-1',
   rule_type: 'markdown',
   value_ten_thousandths: null,
@@ -40,11 +40,11 @@ const CATEGORIES = [
 ]
 
 function matrix(cells: unknown[]) {
-  return { categories: CATEGORIES, tiers: ['GOLD', 'SILVER'], cells }
+  return { categories: CATEGORIES, levels: ['lvl-gold', 'lvl-silver'], cells }
 }
 
-const DIRECT = { category_id: 'cat-1', category_name: 'Framing', category_path: 'lumber.framing', tier: 'GOLD', rule: RULE, inherited: false }
-const INHERITED = { category_id: 'cat-1', category_name: 'Framing', category_path: 'lumber.framing', tier: 'SILVER', rule: { ...RULE, id: 'r-parent', revision: 2, category_id: 'cat-0' }, inherited: true, source_path: 'lumber' }
+const DIRECT = { category_id: 'cat-1', category_name: 'Framing', category_path: 'lumber.framing', level: 'lvl-gold', rule: RULE, inherited: false }
+const INHERITED = { category_id: 'cat-1', category_name: 'Framing', category_path: 'lumber.framing', level: 'lvl-silver', rule: { ...RULE, id: 'r-parent', revision: 2, category_id: 'cat-0', price_level_id: 'lvl-silver' }, inherited: true, source_path: 'lumber' }
 
 let fetchMock: ReturnType<typeof vi.fn>
 let calls: { method: string; url: URL; ifMatch: string | null; body: unknown }[]
@@ -164,7 +164,7 @@ describe('PricingMatrix', () => {
     if (!post) throw new Error('no POST')
     expect(post.url.pathname).toBe('/api/v1/pricing/category-rules')
     expect(post.ifMatch).toBeNull()
-    expect(post.body).toEqual({ rule_type: 'markdown', value_pct: '10', target_type: 'tier', tier: 'SILVER', category_id: 'cat-1', is_active: true })
+    expect(post.body).toEqual({ rule_type: 'markdown', value_pct: '10', target_type: 'level', price_level_id: 'lvl-silver', category_id: 'cat-1', is_active: true })
   })
 
   it('bulk apply replaces a direct rule by id and creates the others', async () => {
@@ -183,9 +183,9 @@ describe('PricingMatrix', () => {
     if (!post) throw new Error('no bulk POST')
     const items = post.body as Record<string, unknown>[]
     expect(items).toHaveLength(2)
-    expect(items.find((i) => i.tier === 'GOLD')?.id).toBe('r-1')
-    expect(items.find((i) => i.tier === 'SILVER')).not.toHaveProperty('id')
-    expect(items[0]).toMatchObject({ target_type: 'tier', rule_type: 'markdown', value_pct: '5' })
+    expect(items.find((i) => i.price_level_id === 'lvl-gold')?.id).toBe('r-1')
+    expect(items.find((i) => i.price_level_id === 'lvl-silver')).not.toHaveProperty('id')
+    expect(items[0]).toMatchObject({ target_type: 'level', rule_type: 'markdown', value_pct: '5' })
   })
 
   it('deletes with the loaded revision', async () => {
