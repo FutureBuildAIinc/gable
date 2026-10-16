@@ -1311,7 +1311,6 @@ func TestWire_EscalationPolicy(t *testing.T) {
 	}
 }
 
-
 // The branch wall (recipe step 6): a second branch's request for the first
 // branch's customer is a 404 on every route, and its list excludes it.
 func TestWire_BranchWall(t *testing.T) {
