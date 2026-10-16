@@ -4968,8 +4968,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Replay a batch of offline sales
-         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits.
+         * Refuse the offline sale replay by rule (money never queues)
+         * @description Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -7063,7 +7063,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "money_never_queues" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -12737,22 +12737,6 @@ export interface components {
             uom: string;
             /** @description A decimal string of the on hand quantity. */
             in_stock: string;
-        };
-        PosSyncResponse: {
-            batch_id: string;
-            synced_count: number;
-            /** @description Sales already synced, by client_id. */
-            duplicate_count: number;
-            error_count: number;
-            /** @description Sales waiting on the tax provider; the sync retries them. */
-            pending_count: number;
-            errors: components["schemas"]["PosSyncItemResult"][];
-            pending: components["schemas"]["PosSyncItemResult"][];
-        };
-        PosSyncItemResult: {
-            /** Format: uuid */
-            client_id: string;
-            reason: string;
         };
         /**
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
@@ -25439,18 +25423,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The batch's outcome. */
-            200: {
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosSyncResponse"];
+                    "application/json": components["schemas"]["WireError"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
