@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 

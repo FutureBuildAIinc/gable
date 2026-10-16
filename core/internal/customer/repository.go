@@ -67,7 +67,6 @@ type Repository interface {
 	GetEscalationPolicy(ctx context.Context, customerID uuid.UUID) (*EscalationPolicy, error)
 	SetEscalationPolicy(ctx context.Context, p *EscalationPolicy) error
 
-
 	DefaultCurrency(ctx context.Context) (string, error)
 	EnabledCurrencies(ctx context.Context) ([]string, error)
 	// OpenDocuments names the kinds of document that keep a customer's
@@ -114,7 +113,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // field that named the missing record, so a bad reference is a 400 naming it
 // and not a 500 from the database.
 var referenceFields = map[string]string{
-	"customers_price_profile_id_fkey": "price_profile_id",
+	"customers_price_profile_id_fkey":  "price_profile_id",
 	"customers_salesperson_id_fkey":    "salesperson_id",
 	"customers_primary_branch_id_fkey": "primary_branch_id",
 	"customers_payment_terms_id_fkey":  "payment_terms_id",
@@ -440,7 +439,6 @@ func (r *PostgresRepository) SetEscalationPolicy(ctx context.Context, p *Escalat
 }
 
 // ---- price levels ----
-
 
 // ---- currency ----
 

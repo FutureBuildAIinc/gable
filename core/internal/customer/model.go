@@ -21,11 +21,11 @@ type PaymentTermsRef struct {
 // integer cents; optional fields are present as null. The balance is read
 // only on the wire: the AR core is its single writer (ADR 0005 section 9.3).
 type Customer struct {
-	ID              uuid.UUID    `json:"id"`
-	AccountNumber   string       `json:"account_number"`
-	Name            string       `json:"name"`
-	Email           *string      `json:"email"`
-	Phone           *string      `json:"phone"`
+	ID              uuid.UUID `json:"id"`
+	AccountNumber   string    `json:"account_number"`
+	Name            string    `json:"name"`
+	Email           *string   `json:"email"`
+	Phone           *string   `json:"phone"`
 	Address         *string   `json:"address"`
 	IsActive        bool      `json:"is_active"`
 	PrimaryBranchID uuid.UUID `json:"primary_branch_id"`
