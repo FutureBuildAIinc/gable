@@ -622,30 +622,48 @@ func Run() {
 	fmt.Printf("Seed: Product geometry — %d SKUs dimensioned, %d left NULL (no unit geometry)\n", geoWith, geoWithout)
 
 	// =========================================================================
-	// 4. PRICE LEVELS
+	// 4. PRICE LEVELS AND PROFILES
+	//
+	// The levels are written by code (ADR 0006 section 8): code is the unique
+	// key the migration gave the table, and a name is not one. Each dealer
+	// level gets a shareable profile, so a customer's pricing program is a
+	// profile id; the migration's default profile (code DEFAULT_RETAIL on the
+	// fresh RETAIL level) is what a customer without one takes.
 	// =========================================================================
 	type priceLevel struct {
-		Name string
-		Mult float64
+		Code, Name string
+		Adjust     string
 	}
 	priceLevels := []priceLevel{
-		{"Retail", 1.0},
-		{"Contractor", 0.85},
-		{"VIP Builder", 0.75},
+		{"RETAIL", "Retail", "0"},
+		{"CONTRACTOR", "Contractor", "-15"},
+		{"VIP_BUILDER", "VIP Builder", "-25"},
 	}
 	priceLevelIDs := make(map[string]uuid.UUID)
+	profileIDs := make(map[string]uuid.UUID)
 	for _, pl := range priceLevels {
 		var id string
-		db.QueryRow(`INSERT INTO price_levels (name, multiplier) VALUES ($1, $2)
-			ON CONFLICT DO NOTHING RETURNING id`, pl.Name, pl.Mult).Scan(&id)
-		if id == "" {
-			db.QueryRow("SELECT id FROM price_levels WHERE name=$1", pl.Name).Scan(&id)
+		if err := db.QueryRow(`INSERT INTO price_levels (code, name, basis, adjust_percent, position)
+			VALUES ($1, $2, 'BASE', $3,
+				COALESCE((SELECT MAX(position) FROM price_levels), 0) + 1)
+			ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, adjust_percent = EXCLUDED.adjust_percent
+			RETURNING id`, pl.Code, pl.Name, pl.Adjust).Scan(&id); err != nil {
+			log.Printf("Price level %s: %v", pl.Code, err)
+			continue
 		}
-		if id != "" {
-			priceLevelIDs[pl.Name] = uuid.MustParse(id)
+		priceLevelIDs[pl.Name] = uuid.MustParse(id)
+
+		var pid string
+		if err := db.QueryRow(`INSERT INTO price_profiles (code, name, price_level_id)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, price_level_id = EXCLUDED.price_level_id
+			RETURNING id`, "SEED_"+pl.Code, pl.Name, id).Scan(&pid); err != nil {
+			log.Printf("Price profile SEED_%s: %v", pl.Code, err)
+			continue
 		}
+		profileIDs[pl.Name] = uuid.MustParse(pid)
 	}
-	fmt.Println("Seed: Price Levels")
+	fmt.Println("Seed: Price Levels and Profiles")
 
 	// =========================================================================
 	// 5. CUSTOMERS - 13 Okanagan accounts headlined by Tarnwick Construction.
@@ -664,19 +682,19 @@ func Run() {
 	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
 	customers := []demoCustomer{
-		{"Tarnwick Construction", "TARNWICK-001", "billing@tarnwick.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Lakeview Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
-		{"Thornmere Homes Ltd", "THH-001", "ap@thornmerehomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
-		{"Alderfold Builders", "AFB-001", "admin@alderfoldbuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
-		{"Stonehollow Renos", "SHR-001", "office@stonehollowrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
-		{"Snowfern Cabin Co", "SFC-001", "jim@snowferncabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
-		{"Pellmoor Custom", "PLC-001", "invoices@pellmoorcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
-		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.example", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
-		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.example", "250-555-3200", "1800 Rebar Dr, Vernon BC", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
-		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.example", "250-555-2700", "780 Casement Ave, Kelowna BC", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
-		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.example", "250-555-2900", "300 Topsoil Dr, Kelowna BC", "RETAIL", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
-		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.example", "250-555-3000", "5500 Truss Ave, Peachland BC", "GOLD", "NET30", "Contractor", 80000, wkID, []string{"Truss Ave Warehouse Framing", "Highway 97 Strip Mall"}},
-		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.example", "250-555-3100", "200 Ridgecap Rd, Summerland BC", "SILVER", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "Community Chapel Reshingle"}},
-		{"Okanagan DIY Owner", "DIY-OKN", "okanagan.diy@example.com", "250-555-2310", "45 Sawhorse Ln, Lake Country BC", "RETAIL", "COD", "Retail", 5000, lkID, []string{"Backyard Shed"}},
+		{"Tarnwick Construction", "TARNWICK-001", "billing@tarnwick.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "NET30", "Contractor", 50000, kelMainID, []string{"Lakeview Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
+		{"Thornmere Homes Ltd", "THH-001", "ap@thornmerehomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
+		{"Alderfold Builders", "AFB-001", "admin@alderfoldbuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
+		{"Stonehollow Renos", "SHR-001", "office@stonehollowrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
+		{"Snowfern Cabin Co", "SFC-001", "jim@snowferncabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
+		{"Pellmoor Custom", "PLC-001", "invoices@pellmoorcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
+		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.example", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
+		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.example", "250-555-3200", "1800 Rebar Dr, Vernon BC", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
+		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.example", "250-555-2700", "780 Casement Ave, Kelowna BC", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
+		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.example", "250-555-2900", "300 Topsoil Dr, Kelowna BC", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
+		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.example", "250-555-3000", "5500 Truss Ave, Peachland BC", "NET30", "Contractor", 80000, wkID, []string{"Truss Ave Warehouse Framing", "Highway 97 Strip Mall"}},
+		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.example", "250-555-3100", "200 Ridgecap Rd, Summerland BC", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "Community Chapel Reshingle"}},
+		{"Okanagan DIY Owner", "DIY-OKN", "okanagan.diy@example.com", "250-555-2310", "45 Sawhorse Ln, Lake Country BC", "COD", "Retail", 5000, lkID, []string{"Backyard Shed"}},
 	}
 
 	customerIDs := make(map[string]uuid.UUID)
@@ -692,7 +710,11 @@ func Run() {
 	}
 
 	for _, c := range customers {
-		custID, branchID, err := seedCustomer(db, c, priceLevelIDs[c.PriceLevel])
+		profileID, ok := profileIDs[c.Profile]
+		if !ok {
+			log.Printf("Customer %s: no profile for level %q; the default profile answers", c.Name, c.Profile)
+		}
+		custID, branchID, err := seedCustomer(db, c, profileID)
 		if err != nil {
 			log.Printf("Customer %s: %v", c.Name, err)
 			continue
@@ -756,8 +778,10 @@ func Run() {
 		cid, ok1 := customerIDs[ct.Customer]
 		pid, ok2 := skuToID[ct.SKU]
 		if ok1 && ok2 {
-			db.Exec(`INSERT INTO customer_contracts (customer_id, product_id, contract_price)
-				VALUES ($1,$2,$3) ON CONFLICT (customer_id, product_id) DO UPDATE SET contract_price=$3`, cid, pid, ct.Price)
+			db.Exec(`INSERT INTO customer_contracts (customer_id, product_id, contract_price, price_uom)
+				SELECT $1,$2,$3, p.uom_primary FROM products p WHERE p.id = $2
+				ON CONFLICT ON CONSTRAINT customer_contracts_customer_product_branch_key
+				DO UPDATE SET contract_price = EXCLUDED.contract_price`, cid, pid, ct.Price)
 		}
 	}
 	fmt.Printf("Seed: %d Customer Contracts\n", len(contracts))
@@ -1436,7 +1460,7 @@ func Run() {
 
 	// The multi yard world (multi_yard.go): personas, a register and stock per
 	// yard, a purchase order to receive, cross yard quotes.
-	seedMultiYard(seedCtx, db, ar, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch, priceLevelIDs)
+	seedMultiYard(seedCtx, db, ar, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch, profileIDs)
 
 	// =========================================================================
 	// 22b. DEMO DATA IMPORT (opt in: DEMO_SEED_IMPORT=1)
@@ -1447,7 +1471,10 @@ func Run() {
 	//    characterization goldens and CI's local stack keep the smaller seed.
 	// =========================================================================
 	if demoImportRequested() {
-		importSKUs, importCust, _ := seedDemoImport(seedCtx, db, branchIDs, priceLevelIDs)
+		// The demo import maps its customers' level names to level ids (the import
+			// data file names levels, and its rows write profiles through the
+			// same map the demo customers use).
+			importSKUs, importCust, _ := seedDemoImport(seedCtx, db, branchIDs, profileIDs)
 		// Merge the imported SKUs into the SKU map the rest of the seed writes
 		// (seedDispatchDay samples the SKU picker; cross yard quotes sample by
 		// name). Imported customers extend customerIDs for downstream sections.
@@ -1543,12 +1570,13 @@ func preSeedDefaultBranch(db *sql.DB) sql.NullString {
 	return v
 }
 
-// demoCustomer is one seeded customer.
+// demoCustomer is one seeded customer. Profile is the name of the price level
+// whose profile is the customer's pricing program.
 type demoCustomer struct {
-	Name, Acct, Email, Phone, Addr, Tier, Terms, PriceLevel string
-	CreditLimit                                             float64
-	PrimaryBranch                                           uuid.UUID
-	Projects                                                []string
+	Name, Acct, Email, Phone, Addr, Terms, Profile string
+	CreditLimit                                    float64
+	PrimaryBranch                                  uuid.UUID
+	Projects                                       []string
 }
 
 // seedCustomer upserts one demo customer and returns its id and the primary
@@ -1557,14 +1585,14 @@ type demoCustomer struct {
 // rule item 57 set for REG-01), and it writes the customer_branches row the
 // product's own create writes beside every customer, for the stored branch,
 // so the customer wall shows the customer to the callers its branch holds.
-func seedCustomer(db *sql.DB, c demoCustomer, priceLevel uuid.UUID) (uuid.UUID, uuid.UUID, error) {
+func seedCustomer(db *sql.DB, c demoCustomer, profile uuid.UUID) (uuid.UUID, uuid.UUID, error) {
 	var cid, branch string
-	err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms_id, price_level_id, primary_branch_id)
-		VALUES ($1,$2,$3,$4,$5,$6,0,$7,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
-		ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7,
-			payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
-			price_level_id=$9
-		RETURNING id, primary_branch_id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, priceLevel, c.PrimaryBranch).Scan(&cid, &branch)
+	err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, payment_terms_id, price_profile_id, primary_branch_id)
+		VALUES ($1,$2,$3,$4,$5,$6,0,COALESCE((SELECT id FROM payment_terms WHERE code = $7::text), payment_terms_default_id()),$8,$9)
+		ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5,
+			payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $7::text), payment_terms_default_id()),
+			price_profile_id=$8
+		RETURNING id, primary_branch_id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Terms, profile, c.PrimaryBranch).Scan(&cid, &branch)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}

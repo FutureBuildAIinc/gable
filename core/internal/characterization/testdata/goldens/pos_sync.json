@@ -124,7 +124,7 @@
         "errors": [
           {
             "client_id": "<id-4>",
-            "reason": "complete: the sale needs 616 cents and the tenders carry 1"
+            "reason": "complete: the sale needs 586 cents and the tenders carry 1"
           }
         ],
         "pending": [],
@@ -249,7 +249,7 @@
             "register_id": "REG-01",
             "revision": 5,
             "status": "completed",
-            "total_cents": 1403
+            "total_cents": 1568
           },
           {
             "branch_id": "<id-9>",
@@ -265,7 +265,7 @@
             "register_id": "REG-01",
             "revision": 4,
             "status": "voided",
-            "total_cents": 616
+            "total_cents": 586
           },
           {
             "branch_id": "<id-9>",
@@ -281,7 +281,7 @@
             "register_id": "REG-01",
             "revision": 3,
             "status": "completed",
-            "total_cents": 616
+            "total_cents": 586
           },
           {
             "branch_id": "<id-9>",
@@ -313,7 +313,7 @@
             "register_id": "REG-01",
             "revision": 2,
             "status": "open",
-            "total_cents": 4256
+            "total_cents": 4043
           },
           {
             "branch_id": "<id-9>",
@@ -329,7 +329,7 @@
             "register_id": "REG-01",
             "revision": 2,
             "status": "open",
-            "total_cents": 616
+            "total_cents": 586
           }
         ],
         "limit": 50,

@@ -41,7 +41,7 @@ type ResolveRepository interface {
 	// the level named, or the vendor's default level when none is, in effect
 	// on the date, the branch's row before the all branch row, the latest
 	// effective_from first.
-	VendorCost(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCost, error)
+	VendorCost(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCostRow, error)
 }
 
 // ProductPricingFacts is what every rung starts from.
@@ -75,6 +75,10 @@ type ProductPrice struct {
 	PriceUOM     string
 	UnitPrice    httpx.Price
 	Revision     int64
+
+	// priceText is the scan buffer the repository reads the scaled column
+	// into before parsing it exactly.
+	priceText string
 }
 
 // PricingProgram is the customer's pricing program: the profile it is on and
@@ -91,8 +95,8 @@ type PricingProgram struct {
 	LevelActive bool
 }
 
-// VendorCost is one vendor cost row with its level's code.
-type VendorCost struct {
+// VendorCostRow is one vendor cost row the engine reads, with its level's
+type VendorCostRow struct {
 	ID              uuid.UUID
 	VendorID        uuid.UUID
 	VendorLevelID   uuid.UUID
@@ -235,14 +239,14 @@ func (r *PostgresResolveRepository) CustomerProgram(ctx context.Context, custome
 	return &p, nil
 }
 
-func (r *PostgresResolveRepository) VendorCost(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCost, error) {
-	row, err := r.vendorCostRow(ctx, vendorID, productID, branch, level, on)
+func (r *PostgresResolveRepository) VendorCost(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCostRow, error) {
+	row, err := r.VendorCostRow(ctx, vendorID, productID, branch, level, on)
 	if err != nil {
 		return nil, err
 	}
 	if row == nil && level != nil {
 		// When the requested level has none, the default level's.
-		row, err = r.vendorCostRow(ctx, vendorID, productID, branch, nil, on)
+		row, err = r.VendorCostRow(ctx, vendorID, productID, branch, nil, on)
 		if err != nil {
 			return nil, err
 		}
@@ -250,8 +254,8 @@ func (r *PostgresResolveRepository) VendorCost(ctx context.Context, vendorID, pr
 	return row, nil
 }
 
-func (r *PostgresResolveRepository) vendorCostRow(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCost, error) {
-	var c VendorCost
+func (r *PostgresResolveRepository) VendorCostRow(ctx context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, on time.Time) (*VendorCostRow, error) {
+	var c VendorCostRow
 	var cost string
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT vc.id, vc.vendor_id, vpl.id, vpl.code, vc.product_id, vc.branch_id,

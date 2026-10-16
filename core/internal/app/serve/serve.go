@@ -404,6 +404,20 @@ func Run() {
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
+	// The pricing catalogue: levels, profiles, product price lists, vendor
+	// levels and costs, contracts and the cost read (ADR 0006 section 5.6).
+	// Price writes are admin, owner and finance; the reads add sales; the
+	// calculate read is open to every role the counter routes admit, since
+	// the counter prices through it.
+	catalogSvc := pricing.NewCatalogService(pricing.NewCatalogRepository(db)).
+		WithTxRunner(db).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithAudit(pricingAuditAdapter{l: auditLog})
+	catalogHandler := pricing.NewCatalogHandler(catalogSvc).
+		WithEngine(pricingSvc).
+		WithBranchGuard(wall.guard)
+	catalogHandler.RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, db))
+
 	// Market check: our prices against a live store through an FB Connect
 	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
 	// the pricing rules' walls.

@@ -89,12 +89,10 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 	const fixtureCustomer = "11111111-1111-4111-8111-111111111111"
 	mustExec(t, db, `INSERT INTO customers (
 		id, name, account_number, email, phone, address,
-		price_level_id, credit_limit, balance_due, is_active,
-		tier,
+		credit_limit, balance_due, is_active,
 		created_at, updated_at, primary_branch_id
 	) VALUES ($1, 'Golden Window Fixture Co', 'GOLDEN-WIN-001', 'windows@example.com', '+1 250 555 0100', '1 Golden Row, Kelowna, BC',
-		NULL, 0, 0, true,
-		'RETAIL',
+		0, 0, true,
 		$2, $2,
 		COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 		fixtureCustomer, stamp(0))

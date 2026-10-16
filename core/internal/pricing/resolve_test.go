@@ -36,7 +36,7 @@ type fakeResolveRepo struct {
 // fakeVendorCost is one vendor cost row with the default flag the wire type
 // leaves to the vendor_price_levels table.
 type fakeVendorCost struct {
-	row       *VendorCost
+	row       *VendorCostRow
 	isDefault bool
 }
 
@@ -138,8 +138,8 @@ func (f *fakeResolveRepo) CustomerProgram(_ context.Context, customerID uuid.UUI
 	return f.programs[customerID], nil
 }
 
-func (f *fakeResolveRepo) VendorCost(_ context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, _ time.Time) (*VendorCost, error) {
-	defaultRow := func() *VendorCost {
+func (f *fakeResolveRepo) VendorCost(_ context.Context, vendorID, productID uuid.UUID, branch, level *uuid.UUID, _ time.Time) (*VendorCostRow, error) {
+	defaultRow := func() *VendorCostRow {
 		for _, c := range f.costs {
 			if c.row.ProductID == productID && c.row.VendorID == vendorID && c.isDefault {
 				return c.row
@@ -181,7 +181,7 @@ func (f *fakeResolveRepo) setProgram(customerID uuid.UUID, p PricingProgram) *fa
 
 func (f *fakeResolveRepo) setVendorCost(vendorID, productID uuid.UUID, branch *uuid.UUID, cost float64, uom string, isDefault bool, levelID uuid.UUID, levelCode string) *fakeResolveRepo {
 	c := &fakeVendorCost{
-		row: &VendorCost{
+		row: &VendorCostRow{
 			ID: uuid.New(), VendorID: vendorID, VendorLevelID: levelID, VendorLevelCode: levelCode,
 			ProductID: productID, BranchID: branch, PurchaseUOM: uom, UnitCost: priceOf(cost),
 		},
@@ -236,7 +236,7 @@ func (a anyProductResolveRepo) CustomerProgram(context.Context, uuid.UUID) (*Pri
 	return nil, nil
 }
 
-func (a anyProductResolveRepo) VendorCost(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID, time.Time) (*VendorCost, error) {
+func (a anyProductResolveRepo) VendorCost(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID, time.Time) (*VendorCostRow, error) {
 	return nil, nil
 }
 

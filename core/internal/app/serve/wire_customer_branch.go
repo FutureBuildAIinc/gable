@@ -688,6 +688,32 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // belong to theirs, and the resolve preview
 // names a customer when its query carries one. The matrix is REFUSED by the
 // route allowlist gate; the categories routes are stated limits.
+// pricingCatalogWall guards the pricing catalogue routes (ADR 0006 section
+// 5.6): the writes are admin, owner and finance; the reads add sales; the
+// calculate read is open to every role the counter routes admit, since the
+// counter prices through it.
+func pricingCatalogWall(keyWall *middleware.KeyBranchWall, db *database.DB) func(http.Handler) http.Handler {
+	read := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales"))
+	write := middleware.Compose(middleware.RequireRole("admin", "owner", "finance"))
+	calc := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales", "cashier"),
+		keyWall.CustomerBranch(calculateCustomersOf(db)))
+	return func(next http.Handler) http.Handler {
+		readHandler, writeHandler, calcHandler := read(next), write(next), calc(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/pricing/calculate" {
+				calcHandler.ServeHTTP(w, r)
+				return
+			}
+			// The reads add sales; every write is finance's.
+			if r.Method == http.MethodGet {
+				readHandler.ServeHTTP(w, r)
+				return
+			}
+			writeHandler.ServeHTTP(w, r)
+		})
+	}
+}
+
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
 	body := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleBodyCustomers))

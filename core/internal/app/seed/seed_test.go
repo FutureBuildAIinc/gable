@@ -533,7 +533,7 @@ func TestSeedCustomer_MirrorsThePrimaryBranchAndNeverMovesIt(t *testing.T) {
 	}
 	acct := "SEEDC-" + uuid.NewString()[:8]
 	c := demoCustomer{Name: "seed customer test", Acct: acct, Email: "seedc@example.com", Phone: "250-555-0100",
-		Addr: "1 Test Rd", Tier: "GOLD", Terms: "NET30", PriceLevel: "x", CreditLimit: 1000, PrimaryBranch: branchA}
+		Addr: "1 Test Rd", Terms: "NET30", Profile: "x", CreditLimit: 1000, PrimaryBranch: branchA}
 	t.Cleanup(func() {
 		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN (SELECT id FROM customers WHERE account_number = $1)`, acct)
 		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customers WHERE account_number = $1`, acct)
