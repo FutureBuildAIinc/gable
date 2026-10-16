@@ -70,6 +70,94 @@ func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
 	}
 }
 
+// TestUnitsReportNamesNegativeMultipliers extends the pre flight report to
+// the pricing migration (P1 of migration 122): a price level whose
+// multiplier is negative has no meaning as a price and would abort the
+// upgrade, so the report names the level and exits non zero before the
+// dealer runs it.
+func TestUnitsReportNamesNegativeMultipliers(t *testing.T) {
+	scratch := pre122DB(t)
+	ctx := context.Background()
+	if _, err := scratch.ExecContext(ctx, `
+		INSERT INTO price_levels (id, name, multiplier) VALUES
+			('00000000-0e22-4000-8000-000000000001', 'report negative level', -0.5000),
+			('00000000-0e22-4000-8000-000000000002', 'report good level', 0.9500)`); err != nil {
+		t.Fatalf("cannot write the report's fixture levels: %v", err)
+	}
+
+	restore := captureStdout(t)
+	code := unitsReport(scratch)
+	out := restore()
+
+	if code != 1 {
+		t.Errorf("the report exits 1 when a level would abort the pricing migration, got %d", code)
+	}
+	if !strings.Contains(out, "report negative level") || !strings.Contains(out, "negative multiplier") {
+		t.Errorf("the report names the level and its negative multiplier; got:\n%s", out)
+	}
+	if strings.Contains(out, "report good level") {
+		t.Errorf("the report names a level with no negative multiplier; got:\n%s", out)
+	}
+}
+
+// pre122DB builds a scratch database with every migration before 122
+// applied.
+func pre122DB(t *testing.T) *sql.DB {
+	t.Helper()
+	base, err := url.Parse(testutil.RequireDB(t).Pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("pgx", base.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "gv1_unitsreport122_" + hex.EncodeToString(suffix)
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE %q`, name)); err != nil {
+		admin.Close()
+		t.Skipf("cannot create a scratch database: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, name))
+		admin.Close()
+	})
+
+	scratch := *base
+	scratch.Path = "/" + name
+	db, err := sql.Open("pgx", scratch.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	files, err := filepath.Glob("../../../migrations/*.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		if strings.Compare(filepath.Base(f), "122_") >= 0 {
+			break
+		}
+		if strings.HasSuffix(filepath.Base(f), "_down.sql") {
+			continue
+		}
+		sqlText, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(sqlText)); err != nil {
+			t.Fatalf("applying %s: %v", filepath.Base(f), err)
+		}
+	}
+	return db
+}
+
 // pre099DB builds a scratch database with every migration before 099
 // applied and the fixture rows the report reads.
 func pre099DB(t *testing.T) *sql.DB {
