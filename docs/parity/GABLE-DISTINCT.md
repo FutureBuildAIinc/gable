@@ -363,9 +363,12 @@ repository relative; MVP paths are marked "MVP".
 - **What it is:** A portal in the dealer's logo and colour, with its own sign in: dashboard, projects grouping
   orders, reorder, invoices, deliveries, the catalogue at the account's prices, a cart with checkout on account, and
   team invites with roles. The Pro Portal plan (M35) adds native delivery window and pickup slot scheduling (PE-08),
-  contractor quoting to the contractor's own customer with markups and a contractor branded PDF (PE-09), and a
-  customer selections and approvals link with two price walls so homeowner approvals confirm straight into the
-  contractor's dealer order at dealer prices (PE-10).
+  contractor quoting to the contractor's own customer with three tier basis point markups (`line -> category -> quote`),
+  labour/overhead lines, a `hide_line_prices` lump sum toggle, and a contractor branded PDF with the contractor's own
+  terms and tax (PE-09), and a customer selections and approvals capability link (with optional 6-digit verification
+  code on sign off) where project and customer pipeline insights are shared with the dealer by default while Price Wall
+  1 keeps the contractor's markup and customer sell price private from the dealer and Price Wall 2 keeps dealer cost
+  and markup private from the customer (PE-10).
 - **Where it lives:** `web/apps/desk/src/pages/portal/`, `web/apps/desk/src/pages/projects/`,
   `web/apps/desk/src/components/layout/portal-layout.ts`, `core/internal/portal/`, `core/internal/project/`. Built in
   the API with no screen yet: quote requests, accept and decline (`/api/portal/v1/quotes`) and delivery reschedule
@@ -543,12 +546,12 @@ A placement of Gable's apps in the three shells, for the product owner to confir
 | D15 Blueprint verifier | No | None | Its future only (D15) |
 | D16 Pricing matrix | Little | A desktop surface of the Pricing app, not offered on phones | None |
 | D17 Market check | Little | A Pricing surface comparing dealer and big box prices (built in pull request 145) | None |
-| D18 Counter till | Yes | No sale, tender, refund or deposit completes offline: the till shows its offline state and stops tendering, and a cached catalogue may stay for price lookup only. The full screen counter must choose between the shell's header and a focused mode | Retire the offline sale replay (CP-13 then reads "refused by rule"; none of the three documents an offline counter either); full screen or shell chrome at the till; the register chosen per device instead of `REG-01` |
+| D18 Counter till | Yes | No sale, tender, refund or deposit completes offline: the till shows its offline state and stops tendering, and a cached catalogue may stay for price lookup only. The full screen counter must choose between the shell's header and a focused mode | Ruled (Ruling 3): retire the offline sale replay (`S6` in Cut 1; `CP-13` stays LATER); money never queues offline; the register is chosen per yard (`M0b`) |
 | D19 Dispatch board | Little | A work shell app on desktop and tablet; a yard manager who dispatches and picks installs both shells | Whether dispatch also appears in the field shell for yard managers |
 | D20 AI load management | Little | The packing manifest already stored on orders could drive a loading view in the field shell | Whether the yard loads trucks from Gable's field shell or from the planner |
-| D21 Delivered means billed | Partly | Proof of delivery captured offline syncs later; on sync the server marks the stop delivered and queues billing. That is not money queuing on the device. Collecting money at the door would stay online | Confirm offline proof of delivery with billing on sync; put the parked request screen in the work shell |
-| D22 Field surfaces | Yes | They become the field shell's Yard and Drive apps: phone first, camera and location permissions, the offline store with conflict cards for picks, counts and receipts | Which yard acts may queue offline (a pick or a count is not money; a receipt posts inventory value to the ledger, so is it?); one accent for the field shell or the yard's amber kept; the field shell's own sign in |
-| D23 Contractor portal | Yes | It becomes the phone first pro shell (M35): no desktop rail on phones, native tabs, dealer logo and colour in both Industrial Dark and Gable Light, checkout and bill pay online, offline read cache on the change feed, plus scheduling (PE-08), contractor customer quoting with markups (PE-09) and the homeowner selections and approvals link with two price walls (PE-10) | Ruled in M35: white labeled per dealer in both themes; contractor sign in methods; online checkout and bill pay with offline read cache on the change feed |
+| D21 Delivered means billed | Partly | Proof of delivery captured offline syncs later; on sync the server marks the stop delivered and queues billing. That is not money queuing on the device. Collecting money at the door would stay online | Ruled (Ruling 3): offline proof of delivery with billing on sync is pulled into Cut 2 alongside `M21` and `M33`; parked request screen sits in the work shell |
+| D22 Field surfaces | Yes | They become the field shell's Yard and Drive apps: phone first, camera and location permissions, the offline store with conflict cards for picks, counts and proof of delivery | Ruled (Ruling 3): field shell offline store for yard picks, cycle counts, and driver proof of delivery with photos (`28 to 44` re-sized) is pulled into Cut 2 alongside `M21` and `M33` |
+| D23 Contractor portal | Yes | It becomes the phone first pro shell (M35): no desktop rail on phones, native tabs, dealer logo and colour in both Industrial Dark and Gable Light, checkout and bill pay online, offline read cache on the change feed, plus scheduling (PE-08), contractor customer quoting with three tier basis point markups (PE-09) and the homeowner selections and approvals capability link with shared project insights and two price walls (PE-10) | Ruled (Rulings 2, 3, 4, 5a, 5b, 5c): built in Cut 1 (`M35`); shared project and customer visibility with the dealer while Price Wall 1 hides contractor markup and customer sell price from the dealer and Price Wall 2 hides dealer cost and markup from the homeowner; capability link with optional 6-digit code on sign off; three tier basis point markups with contractor terms and tax |
 | D24 AI product content | No | None | None |
 | D25 AI never blocks | No | None | None |
 | D26 Governance | Little | An admin surface in the work shell, if it stays | As D26 |
@@ -557,32 +560,39 @@ A placement of Gable's apps in the three shells, for the product owner to confir
 
 Sign in methods per dealer cut across every shell: today staff paste a bearer token or pick a demo persona card in a dev
 build, contractors use email and password, the driver and yard screens ride the desk's session, and a cookie session
-is planned at the cutover. The product owner rules which methods the open source build offers by default (a self
-hosting dealer needs at least a standard OpenID Connect option and an email link) and where a dealer chooses them
-(Tech Admin is the natural place).
+is planned at the cutover. Under Ruling 4 (`S9`), each dealer configures its sign in method allowlist (`email_password`,
+`passkey`, `magic_link`, `google`, `microsoft`, plus standard OpenID Connect for self hosted dealers), discovered at
+runtime by the front door and shells, with native OS keychain token custody in Tauri.
 
 ## Part 3: the rulings, in one list
 
-In the order they block the build:
+In the order they govern the build:
 
 1. **Navigation and design path (D3, D2, D4, D28 to D31): Ruled.** Adopt the three shell architecture (work shell with
    centred header selector and hidden rail replacing workspace tabs, field shell for yard and drivers, phone first pro
    shell for contractors), built straight in code in Gable's colours and brand (Industrial Dark default and Gable
-   Light), white labeled per dealer, and verified in the 12-step walk order.
-2. **Money never queues (D18, D11, D21, D22).** Retire the offline sale replay; adopt "offline writes are drafts,
-   commits are online"; allow offline proof of delivery with billing on sync; decide whether a yard receipt counts
-   as money.
+   Light), white labeled per dealer, and verified in the 12-step walk order (`Cut 1 -> Cut 2 -> Cut 3`, Ruling 2).
+2. **Money never queues and field offline (D18, D11, D21, D22; Ruling 3): Ruled.** Retire the legacy offline sale replay
+   (`S6` in Cut 1; `CP-13` counter offline stays LATER); no money ever queues offline; build the Pro Portal read only
+   cache on the `since`/ETag change feed (`M35` Part 7); and pull the field shell offline store (yard picks, cycle
+   counts, and driver proof of delivery with photos, `28 to 44` re-sized) into Cut 2 alongside `M21` and `M33`.
 3. **The front door and links (D1, D12).** Role picker before or as the tiles; whether owners keep a whole desk
-   entry; one `gable://` scheme or one per shell.
-4. **Placement (D6, D19, D20).** Confirm the three shell placement table; the yard manager who needs both work and
-   field; whether loading moves into the field shell.
-5. **The pro shell (D23, PE-01 to PE-05, PE-08 to PE-10).** Built as a native phone first Pro Portal in M35 with
-   dealer branding in both themes, scheduling (PE-08), contractor customer quoting with markups (PE-09), and the
-   homeowner selections and approvals capability link with two price walls (PE-10).
-6. **Sign in methods per dealer (Ruling 4).** Default sign in methods for every shell and dealer configuration in
-   Admin.
-7. **Single flows (D7, D8, D9, D13 to D16, D26).** Offline quote editing; acknowledgement in the pro shell;
-   configurator hand off; the blueprint verifier's future; where governance lives.
+   entry; one `gable://` scheme or one per shell (implemented in `S4`, `S7` and `S13`).
+4. **Placement (D6, D19, D20).** Three shell placement table (`S5`, `S10`, `S11`, `S12`); a yard manager who dispatches
+   and picks can install both work and field shells.
+5. **The pro shell and G84 selections loop (D23, PE-01 to PE-05, PE-08 to PE-10; Rulings 5a, 5b, 5c): Ruled.** Built as
+   a native phone first Pro Portal in Cut 1 (`M35`) with dealer branding in both themes, scheduling (PE-08), contractor
+   customer quoting with three tier basis point markups (`line -> category -> quote`), labour/overhead lines,
+   `hide_line_prices` lump sum toggle, and contractor branded PDF with own terms and tax (PE-09, Ruling 5c), and the
+   homeowner selections capability link (256-bit hashed token, optional 6-digit verification code on sign off, Ruling 5b)
+   with shared project and customer visibility for the dealer as the natural quid pro quo while Price Wall 1 hides
+   contractor markup and customer sell price from the dealer and Price Wall 2 hides dealer cost and markup from the
+   homeowner (PE-10, Ruling 5a).
+6. **Sign in methods per dealer (Ruling 4, `S9`): Ruled.** Per dealer sign in method allowlist (`email_password`,
+   `passkey`, `magic_link`, `google`, `microsoft`, plus standard OpenID Connect for self hosted dealers) discovered at
+   runtime by the front door and shells, with native OS keychain token custody in Tauri.
+7. **Single flows (D7, D8, D9, D13 to D16, D26).** Quote sending/converting and price protection acknowledgement stay
+   online; configurators hand off into quote lines (`M16`); governance stays an optional installable admin app.
 
 ## What this reading could not do
 

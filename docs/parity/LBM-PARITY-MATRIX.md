@@ -330,12 +330,13 @@ real end to end come first, with the rest of parity following in staged cuts.
 | 6. The money desk and the Pro Portal | The controller's worklist; a statement run by job with pay links; finance charges; a credit hold at the counter lifted by a payment; job accounts; the contractor in the Pro Portal ordering at own prices, booking a delivery window, paying invoices online, quoting a homeowner with markups, and confirming approved homeowner selections into a dealer order | AR-02 to AR-05, AR-07, AR-09, PE-01 to PE-05, PE-08 to PE-10 | M25, M30, M31, M32, M35 |
 | 7. Manager home | The end of day by yard; P and L by yard and consolidated; tax by jurisdiction and its report; dashboards by yard | CP-08 to CP-10, MY-02, GL-02, GL-03, GL-05, GL-06 | M6, M26, M27, M34 |
 
-- **Cut 1, three yards, the counter, money and the Pro Portal:** scenes 0, 1, 2, 6 and 7's end of day (`M0a`, `M0b`,
-  `M1`, `M3` already merged; `M5`, `M2`, `M6`, `M24`, `M25`, `M26`, `M28`, `M29`, `M30`, `M35`, and the shell track).
-- **Cut 2, selling and delivering across yards:** scenes 3 and 4 (`M0c`, `M4`, `M7`, `M8`, `M9`, `M16` to `M21`,
-  `M23`, `M33`, `M36`).
-- **Cut 3, buying and the books:** scene 5 and the rest of scene 7 (`M10` to `M15`, `M22`, `M27`, `M31`, `M32`,
-  `M34`).
+- **Cut 1, three yards, the counter, money and the Pro Portal (Ruled, Ruling 2):** scenes 0, 1, 2, 6 and 7's end of day
+  (`M0a`, `M0b`, `M1`, `M3` already merged; `M5`, `M2`, `M6`, `M24`, `M25`, `M26`, `M28`, `M29`, `M30`, `M35`, and the
+  shell track).
+- **Cut 2, selling and delivering across yards (Ruled, Rulings 2 and 3):** scenes 3 and 4 (`M0c`, `M4`, `M7`, `M8`, `M9`,
+  `M16` to `M21`, `M23`, `M33`, `M36`, plus the field shell offline store pulled into Cut 2 alongside `M21` and `M33`).
+- **Cut 3, buying and the books (Ruled, Ruling 2):** scene 5 and the rest of scene 7 (`M10` to `M15`, `M22`, `M27`,
+  `M31`, `M32`, `M34`).
 
 ### The items, in build order
 
@@ -409,7 +410,7 @@ identity, run one after another, as ADR 0006 (section 9.1) and ADR 0008 require;
 | # | Item | Closes | Advances | What it delivers | After | Class | Standalone | Re-sized |
 |---|---|---|---|---|---|---|---|---|
 | M34 | Reports by branch, delivered | GL-05 | | A branch field and cut on every canned and builder report; 7 role dashboard profiles and quick actions; scheduled reports emailed as PDF or CSV; margin and GL reports | M3, M6 | none | 24 to 40 | 18 to 30 |
-| M35 | The contractor Pro Portal (native B2B portal, scheduling, customer quoting and selections loop) | PE-01, PE-02, PE-03, PE-04, PE-05, PE-08, PE-09, PE-10 | | Phone first Pro shell in both themes with dealer branding and 5 contractor roles (`PE-01`); quote requests from a list or photo, share links and online accept/decline (`PE-05`); B2B catalog at contractor waterfall prices, per yard stock/lead time, reorder with price diff preview and checkout with yard/PO/ship to (`PE-03`); delivery windows and pickup slots per yard feeding dispatch (`PE-08`); 5-step order/delivery timeline with POD and notices (`PE-04`); statements, aging and invoice PDFs plus online bill pay and saved methods through the gateway seam (`PE-01, PE-02`); offline read cache on the change feed; contractor quoting to the contractor's own customer with markups (`line -> category -> quote`) and contractor branded PDF (`PE-09`); homeowner selections capability link with no account, two price walls, signed approval record, and 1-click confirmation into the dealer order (`PE-10`) | M3, M5, M2, M29 | money, security | 180 to 280 | 116 to 178 |
+| M35 | The contractor Pro Portal (native B2B portal, scheduling, customer quoting and selections loop) | PE-01, PE-02, PE-03, PE-04, PE-05, PE-08, PE-09, PE-10 | | Phone first Pro shell in both themes with dealer branding and 5 contractor roles (`PE-01`); quote requests from a list or photo, share links and online accept/decline (`PE-05`); B2B catalog at contractor waterfall prices, per yard stock/lead time, reorder with price diff preview and checkout with yard/PO/ship to (`PE-03`); delivery windows and pickup slots per yard feeding dispatch (`PE-08`); 5-step order/delivery timeline with POD and notices (`PE-04`); statements, aging and invoice PDFs plus online bill pay and saved methods through the gateway seam (`PE-01, PE-02`); offline read cache on the change feed; contractor quoting to the contractor's own customer with three tier basis point markups (`line -> category -> quote`), labour/overhead lines, `hide_line_prices` toggle, and contractor branded PDF with own terms and tax (`PE-09`, Ruling 5c); homeowner selections capability link with no account and optional 6-digit verification code on sign off (`Ruling 5b`), shared project and customer pipeline visibility for the dealer while Price Wall 1 hides contractor markup/sell price from the dealer and Price Wall 2 hides dealer cost/markup from the customer (`Ruling 5a`), and 1-click confirmation into the dealer order (`PE-10`) | M3, M5, M2, M29 | money, security | 180 to 280 | 116 to 178 |
 | M36 | Scanning and labels | MY-04 | | UPC and bin barcodes matched; labels (bin, bundle, shelf, item) printed | M4 | none | 20 to 32 | 16 to 24 |
 
 Outside Phase 1's serial chain, an item starts when its "After" items have merged; two items that change the same
@@ -431,8 +432,8 @@ statement and invoice PDFs, and PR 158 portal theme tokens:
 | 6 | Online bill pay through the gateway seam: saved methods, single flight retry guard, sandboxed card token handoff | PE-02 | 20 to 32 | 10 to 16 |
 | 7 | Offline reads on the `since`/ETag change feed and 5-step order/delivery status timeline with POD | PE-04 | 12 to 20 | 10 to 16 |
 | 8 | Reviews, visual reviews and the contractor's walk for parts 1 to 7 | PE-01 to PE-05, PE-08 | 12 to 16 | 12 to 16 |
-| 9 | Customer quoting with markups: contractor's customer quote, `line -> category -> quote` markup, labour/overhead, lump sum toggle, contractor PDF | PE-09 | 24 to 40 | 12 to 20 |
-| 10 | Selections loop: capability link with no account, per selection approvals and signed record, 1-click confirm to dealer order, 3-way status, two price walls with wire tests | PE-10 | 32 to 48 | 20 to 30 |
+| 9 | Customer quoting with markups (Ruling 5c): contractor's customer quote, three tier `line -> category -> quote` basis point markup, labour/overhead, `hide_line_prices` lump sum toggle, contractor terms/tax and PDF | PE-09 | 24 to 40 | 12 to 20 |
+| 10 | Selections loop (Rulings 5a, 5b): capability link with no account and optional 6-digit code on sign off, shared project/customer pipeline visibility for the dealer, Price Wall 1 (no markup/sell price to dealer) and Price Wall 2 (no dealer cost/markup to customer) with wire tests, 1-click confirm to dealer order | PE-10 | 32 to 48 | 20 to 30 |
 | 11 | Security and money second reads, and the selections loop in the contractor's walk | PE-09, PE-10 | 8 to 12 | 8 to 12 |
 | | **Pro Portal total (`M35`)** | | **180 to 280** | **116 to 178** |
 
@@ -464,16 +465,17 @@ queues offline; each dealer chooses its sign in methods.
 | S6 | The money never queues guard (the offline sale replay retired or refused by rule) | 6 to 12 | 6 to 12 |
 | S7 | The shell host on the work profile (single header band, chrome action forwarding, nonce sign out) | 16 to 24 | 8 to 12 |
 | S8 | An installed shell reaches the dealer's API (CORS for the branch header, runtime API config) | 8 to 12 | 4 to 6 |
-| S9 | Sign in, and sign in methods per dealer (Ruling 4: allowlist, runtime discovery, session recovery) | 24 to 36 | 16 to 24 |
+| S9 | Sign in, and sign in methods per dealer (Ruling 4: `email_password`, `passkey`, `magic_link`, `google`, `microsoft`, OIDC allowlist, runtime discovery, session recovery) | 24 to 36 | 16 to 24 |
 | S10 | The micro app entries, and the work shell's apps (counter, sales, dispatch, buying and stock, money, pricing, manager home, admin) | 42 to 78 | 24 to 44 |
 | S11 | The field shell (yard and drive), with an Android build | 24 to 36 | 14 to 20 |
 | S12 | The pro shell (the portal frame) | Counted in M35 (Part 1) | Counted in M35 (Part 1) |
 | S13 | Demo people per role, signed in on the two yard demo (front door persona cards landed in PR 123; 13-role catalog remaining) | 8 to 12 (after PR 123) | 4 to 6 |
 | | **Shell track remaining** | **181 to 288** | **104 to 165** |
 
-An offline store for the field shell (`Ruling 3`: `wa-sqlite` over OPFS with IndexedDB fallback, canonical outbox,
-idempotency key ledger, and status guarded sync doors for yard picks, counts and driver proof of delivery with multi
-photo queueing; money never queues) is **64 to 99 standalone**, and **28 to 44 re-sized**.
+An offline store for the field shell (`Ruling 3`, pulled into Cut 2 alongside `M21` and `M33`: `wa-sqlite` over OPFS
+with IndexedDB fallback, canonical outbox, idempotency key ledger, and status guarded sync doors for yard picks, counts
+and driver proof of delivery with multi photo queueing; money never queues) is **64 to 99 standalone**, and **28 to 44
+re-sized**.
 
 ### The design track
 
@@ -503,7 +505,8 @@ photo queueing; money never queues) is **64 to 99 standalone**, and **28 to 44 r
 | The shell track (`S1` to `S13`; `S12` in `M35`) | 185 to 294 | 4 to 6 (`S13` PR 123) | 181 to 288 | 77 to 123 | **104 to 165** |
 | The design track (`G1` to `G4`) | 136 to 204 | 120 to 180 (`G3, G4` PRs 147/158; `G2` ruled) | 16 to 24 | 6 to 10 | **10 to 14** |
 | **The MUST plan** | **1,835 to 3,046** | **230 to 386** | **1,605 to 2,660** | **440 to 793** | **1,165 to 1,867** |
-| Field offline store (`Ruling 3`, SHOULD) | 64 to 99 | 0 | 64 to 99 | 36 to 55 | **28 to 44** |
+| Field offline store (`Ruling 3`, pulled into Cut 2) | 64 to 99 | 0 | 64 to 99 | 36 to 55 | **28 to 44** |
+| **The MUST plan + Field offline store (`Cuts 1 to 3`)** | **1,899 to 3,145** | **230 to 386** | **1,669 to 2,759** | **476 to 848** | **1,193 to 1,911** |
 | Other SHOULD rows (when briefed) | 600 to 1,000 | 0 | 600 to 1,000 | 110 to 200 | **490 to 800** |
 
 ### Rulings
@@ -517,33 +520,40 @@ photo queueing; money never queues) is **64 to 99 standalone**, and **28 to 44 r
   phone first pro shell for contractors), built straight in code from accepted boards in Gable's colours and brand
   (Industrial Dark default and Gable Light, white labeled per dealer), and walked in the 12-step walk order. See
   [GABLE-DISTINCT.md](GABLE-DISTINCT.md).
-- **2. The build order and demo cut (`Cuts 1, 2, 3`).** Led by the Gable Building Supply three yard demo cut (Cut 1:
-  three yards, counter, money and Pro Portal; Cut 2: selling and delivering across yards; Cut 3: buying and the books).
-  To confirm.
-- **3. Offline (`S6` and Field offline store).** The counter stays online (`CP-13` is LATER, and `S6` retires the
-  legacy offline sale replay route); no money ever queues offline; the Pro Portal caches recent reads on the `since`
-  and ETag change feed (`M35` Part 7, `10 to 16` re-sized); the field shell offline store (yard picks, cycle counts,
-  and driver proof of delivery with multi photo queueing) is `28 to 44` re-sized (down from `64 to 99` standalone) so
-  it can be pulled into Cut 2 alongside `M21` and `M33` if the product owner chooses. To confirm.
-- **4. Sign in methods per dealer (`S9`).** Per dealer sign in method allowlist (`email_password`, `google`,
-  `microsoft`, `magic_link`, plus standard OpenID Connect for self hosted dealers), runtime auth config discovery at
-  boot, token free role identity retention across reloads, and native keychain custody (`16 to 24` re-sized, down from
-  `24 to 36` standalone). To confirm.
-- **5. Contractor Pro Portal rulings (`M35`, `G83` and `G84`, `PE-08` to `PE-10`).** Three product owner calls on the
-  Pro Portal:
-  - **5a. Customers' data owner (`G84`, `PE-09`, `PE-10`):** The contractor is the data owner of their own customer,
-    quote, and job records (`contractor_customers`, `contractor_quotes`, `contractor_quote_lines`, `contractor_jobs`),
-    walled by `contractor_account_id` (`Price Wall 1`: dealer staff, APIs and reports never see a contractor's
-    end-customer PII, markups or sell prices, and only material SKUs and quantities cross into a dealer order), with
-    full CSV/JSON export for the contractor. To confirm.
-  - **5b. Customer identity on an approval and link lifetime (`G84`, `PE-10`):** Capability link with no homeowner
-    login required (256-bit random token stored as SHA-256 hash, lifetime bounded by the quote's `valid_until` or a
-    configurable cap, revocable and rotatable by the contractor), with identity captured at sign-off (typed full name,
-    email or phone, signature, timestamp, IP/user-agent, and immutable SHA-256 snapshot of the approved option selections
-    and total). To confirm.
-  - **5c. The contractor's mark, terms and tax on the customer quote (`G84`, `PE-09`):** Precedence `line override ->
-    category rule -> quote default` in basis points (`markup_bps` or margin target), separate flat/hourly labour and
-    flat/percent overhead lines, a `hide_line_prices` lump-sum toggle, the contractor's own payment terms, deposit
-    percent and customer-site tax rate (`Price Wall 2`: dealer cost and contractor markup never reach the homeowner),
-    and `valid_until` bounded by the dealer's source quote price protection horizon. To confirm.
+- **2. The build order and demo cut (`Cuts 1, 2, 3`): Ruled.** Stage the build in three demo cuts (`Cut 1 -> Cut 2 ->
+  Cut 3`) walked in the 12-step design walk order (`0` brand and tokens through `11` admin and multi yard settings),
+  with a US county/state seed profile added for county tax, 1099 and lien walks. Cut 1 delivers the shells (`S1` to
+  `S12`), counter completion (`M24, M28, M29`), pricing/units foundation (`M5, M2`), money desk (`M25, M30`), manager
+  end of day (`M6, M26`), and the Contractor Pro Portal (`M35`), while Cut 2 (`M0c, M4, M7, M8, M9, M16..M21, M23, M33,
+  M36` plus the field offline store) and Cut 3 (`M10..M15, M22, M27, M31, M32, M34`) backend packages run ahead in
+  parallel once their ADR prerequisites (`M5 -> M2 -> M4`) merge.
+- **3. Offline (`S6` and Field offline store): Ruled.** Enforce "money never queues offline" everywhere (`S6` retires
+  the legacy offline sale replay route in Cut 1; `CP-13` counter offline stays LATER); build the Pro Portal read only
+  cache on the `since` and ETag change feed in `M35` Part 7 (`10 to 16` re-sized); and pull the `28 to 44` re-sized
+  field shell offline store (yard picks, cycle counts, and driver proof of delivery with multi photo queueing) into Cut
+  2 alongside `M21` and `M33`.
+- **4. Sign in methods per dealer (`S9`): Ruled.** Per dealer sign in method allowlist (`email_password`, `passkey`,
+  `magic_link`, `google`, `microsoft`, plus standard OpenID Connect for self hosted dealers) discovered at runtime by
+  the front door and shells, with token free role identity retention across reloads and native OS keychain token custody
+  in Tauri (`16 to 24` re-sized, down from `24 to 36` standalone).
+- **5. Contractor Pro Portal rulings (`M35`, `PE-08` to `PE-10`): Ruled.**
+  - **5a. Shared project and customer visibility vs markup privacy (`PE-09`, `PE-10`): Ruled.** Shared project and
+    customer visibility by default between the contractor and the dealer (so the dealer gets project level insights: job
+    site address, project/selection status, customer/site contact, and material pipeline as the natural quid pro quo for
+    providing the contractor a free business tool), while keeping the contractor's markup and customer sell price
+    strictly private (`Price Wall 1`: the dealer never sees the contractor's markup rules, basis points, labour/overhead
+    lines, or customer sell price; `Price Wall 2`: the customer never sees the dealer's price or the markup), plus
+    1-click CSV/JSON export for the contractor.
+  - **5b. Customer identity on an approval and link lifetime (`PE-10`): Ruled.** Capability link with no homeowner
+    account required, plus an optional email/SMS 6-digit verification code on final acceptance (256-bit random token
+    stored as a SHA-256 hash in `pro_portal_share_tokens`, lifetime defaulting to the quote's `valid_until` timestamp
+    bounded by a configurable maximum TTL, revocable and rotatable by the contractor), with identity captured at sign off
+    (typed full name, email or phone, drawn or typed signature, timestamp, IP/user-agent, and an immutable SHA-256
+    snapshot of the approved option selections and total).
+  - **5c. The contractor's mark, terms and tax on the customer quote (`PE-09`): Ruled.** Three tier markup precedence
+    (`line override -> category rule -> quote default` in basis points, supporting both markup on cost and target gross
+    margin), separate flat/hourly labour and flat/percent overhead lines, a `hide_line_prices` lump sum toggle, the
+    contractor's own logo, payment terms, deposit percent and customer site tax rate (or tax included display) under
+    `Price Wall 2` (dealer cost and contractor markup never enter the homeowner's JSON response or PDF, wire tested),
+    and `valid_until` bounded by the dealer's source quote price protection horizon.
 
