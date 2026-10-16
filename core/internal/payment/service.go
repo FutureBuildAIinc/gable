@@ -60,8 +60,13 @@ type Service struct {
 	auditLog      AuditSink
 	events        EventRecorder
 	branches      BranchGuard
-	logger        *slog.Logger
-	now           func() time.Time
+	// tenderCreditGuard, when wired, answers whether the payment's
+	// unapplied cash is a counter tender's held credit (the counter wires
+	// it; C2-5, FROM-PRINCIPAL 60): this route's online gateway is then
+	// never the way back for it.
+	tenderCreditGuard account.TenderCreditGuard
+	logger            *slog.Logger
+	now               func() time.Time
 }
 
 func NewService(db *database.DB, repo *Repository, accountService *account.Service) *Service {
@@ -72,6 +77,15 @@ func NewService(db *database.DB, repo *Repository, accountService *account.Servi
 func (s *Service) WithGateway(gw PaymentGateway, publicKey string) *Service {
 	s.gateway = gw
 	s.publicKey = publicKey
+	return s
+}
+
+// WithTenderCreditGuard sets the held credit guard. The counter's service
+// satisfies it (C2-5, FROM-PRINCIPAL 60); serve wires the two, so a
+// payment whose unapplied cash is a counter tender's credit is refused
+// here before the online gateway is ever asked.
+func (s *Service) WithTenderCreditGuard(g account.TenderCreditGuard) *Service {
+	s.tenderCreditGuard = g
 	return s
 }
 
@@ -491,6 +505,20 @@ func (s *Service) Refund(ctx context.Context, id uuid.UUID, in *RefundInput, pre
 		return nil, conflictBlocker("payment_voided", "the payment is voided: it refunds nothing")
 	case in.AmountCents > facts.Unapplied:
 		return nil, conflictBlocker("exceeds_unapplied", fmt.Sprintf("the payment has %d cents unapplied: %d cents were asked", facts.Unapplied, in.AmountCents))
+	}
+	// A counter tender's credit rides the terminal rail it was charged on
+	// (C2-5, FROM-PRINCIPAL 60b): this route's gateway is the online rail,
+	// never the way back for it, so the refund is refused before the
+	// gateway is asked and the credit stays payable at the counter, to the
+	// card that paid it.
+	if s.tenderCreditGuard != nil {
+		if held, ok, err := s.tenderCreditGuard.HeldTenderCredit(ctx, id); err != nil {
+			return nil, err
+		} else if ok {
+			return nil, conflictBlocker("tender_credit_held",
+				fmt.Sprintf("the payment's unapplied cash is the credit of the card tender the void of sale %s holds (claim %s): pay it back at POST /api/v1/pos/refund-intents/{id}/payback, through the counter terminal the charge came from",
+					held.SaleNumber, held.IntentID))
+		}
 	}
 	gatewayID := ""
 	if facts.Method == PaymentMethodCard {

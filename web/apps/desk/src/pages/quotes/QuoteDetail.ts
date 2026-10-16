@@ -6,12 +6,17 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
+import { fetchAuthedBlobUrl } from '../../lib/authedPdf.ts';
+import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
-import { extensionCents, dollarsToCents } from '../../lib/money.ts';
+import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
+import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
+
+/** How much of a text list the Original Upload tab shows. */
+const ORIGINAL_TEXT_LINES = 200;
 
 type Tab = 'details' | 'original' | 'mapping';
 
@@ -27,9 +32,13 @@ export class GableQuoteDetail extends LitElement {
     @state() private activeTab: Tab = 'details';
     /** Lumber-index margin erosion, reported by <gable-exposure-banner>. */
     @state() private exposureDollars = 0;
+    /** The original upload of a text list, read once per quote: null until it answers. */
+    @state() private originalText: { quoteId: string; text: string | null } | null = null;
+    /** The stored original of an image or pdf as a blob url, fetched with the token. */
+    @state() private originalFile: { quoteId: string; url: string | null } | null = null;
 
     private stateColors: Record<string, string> = {
-        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        draft: 'bg-voice-fill/20 text-voice-text border-voice-fill/30',
         sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
         accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -38,6 +47,7 @@ export class GableQuoteDetail extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        this.gone = false;
         if (this.routeId) this.loadQuote(this.routeId);
     }
 
@@ -49,15 +59,111 @@ export class GableQuoteDetail extends LitElement {
     }
 
     private async loadQuote(quoteId: string) {
+        // another quote's original is let go as soon as this one is asked for
+        this.releaseOriginal(quoteId);
         try {
             const data = await QuoteService.get(quoteId);
             this.quote = data;
+            // The Original Upload tab can already be open (a route change): load this quote's text now.
+            if (this.activeTab === 'original') void this.loadOriginalText(data);
         } catch (error) {
             console.error(error);
             ToastService.show(`Failed to load quote: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
         } finally {
             this.loading = false;
         }
+    }
+
+    /** The fetch of an original in flight: one per quote, aborted when another quote is asked for. */
+    private originalInFlight: { quoteId: string; promise: Promise<string | null>; abort: AbortController } | null = null;
+    private gone = false;
+
+    /** Lets go of the blob url held for a quote and of any fetch in flight for another. */
+    private releaseOriginal(except?: string) {
+        if (this.originalInFlight && this.originalInFlight.quoteId !== except) {
+            this.originalInFlight.abort.abort();
+            this.originalInFlight = null;
+        }
+        if (this.originalFile && this.originalFile.quoteId !== except) {
+            if (this.originalFile.url) URL.revokeObjectURL(this.originalFile.url);
+            this.originalFile = null;
+        }
+    }
+
+    /**
+     * The original is fetched with the token once per quote. An overlapping ask
+     * awaits the fetch in flight; a url that answers after the page has gone or
+     * the quote has moved on is revoked at once; a url in use is never revoked
+     * by a later fetch.
+     */
+    private originalFileUrl(quote: Quote): Promise<string | null> {
+        if (this.originalFile?.quoteId === quote.id) return Promise.resolve(this.originalFile.url);
+        if (this.originalInFlight?.quoteId === quote.id) return this.originalInFlight.promise;
+        this.releaseOriginal(quote.id);
+        const abort = new AbortController();
+        const run = async (): Promise<string | null> => {
+            let url: string | null = null;
+            try {
+                url = await fetchAuthedBlobUrl(QuoteService.originalFilePath(quote.id), 'Failed to fetch the original list', abort.signal);
+            } catch (error) {
+                if (!abort.signal.aborted) {
+                    console.error(error);
+                    ToastService.show(quoteErrorMessage(error, 'Failed to fetch the original list'), 'error');
+                }
+            }
+            if (this.originalInFlight?.abort !== abort) {
+                // the quote moved on, or the page went: nobody shows this url
+                if (url) URL.revokeObjectURL(url);
+                return null;
+            }
+            this.originalInFlight = null;
+            if (this.gone) {
+                if (url) URL.revokeObjectURL(url);
+                return null;
+            }
+            this.originalFile = { quoteId: quote.id, url };
+            return url;
+        };
+        const flight = { quoteId: quote.id, abort, promise: Promise.resolve(null) as Promise<string | null> };
+        this.originalInFlight = flight;
+        flight.promise = run();
+        return flight.promise;
+    }
+
+    private async downloadOriginal(quote: Quote) {
+        const url = await this.originalFileUrl(quote);
+        if (url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = quote.original_filename || 'original-upload';
+            a.click();
+        }
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this.gone = true;
+        this.releaseOriginal();
+    }
+
+    /** A pasted or csv list is shown as its own text; any other type keeps the download link. */
+    private async loadOriginalText(quote: Quote) {
+        const type = quote.original_content_type ?? '';
+        if (type.startsWith('image/') || type === 'application/pdf') {
+            void this.originalFileUrl(quote);
+            return;
+        }
+        if (!type.startsWith('text/plain') && !type.startsWith('text/csv')) return;
+        if (this.originalText?.quoteId === quote.id) return;
+        let text: string | null = null;
+        try {
+            text = await QuoteService.getOriginalText(quote.id);
+        } catch (error) {
+            console.error(error);
+        }
+        // The route moved on while this answered: the quote now shown loads its own text.
+        if (this.quote?.id !== quote.id) return;
+        this.originalText = { quoteId: quote.id, text };
     }
 
     /** A 409 stale_revision means another session moved the quote: say so and reload it. */
@@ -114,9 +220,14 @@ export class GableQuoteDetail extends LitElement {
             <div class="flex items-center gap-3">
                 <div class="w-2 h-2 rounded-full bg-gable-green/60"></div>
                 <span class="text-zinc-400 w-20">${label}</span>
-                <span class="text-white font-mono text-xs">${new Date(date).toLocaleString()}</span>
+                <span class="text-white font-mono text-xs">${formatDateTime(date)}</span>
             </div>
         `;
+    }
+
+    /** The catalogue price of a mapped product (float dollars on the wire), two to four decimals. */
+    private catalogPrice(baseDollars: number): string {
+        return formatPrice4(floatDollarsToTenThousandths(baseDollars));
     }
 
     private renderConfidenceBadge(confidence: number, isSpecialOrder: boolean) {
@@ -218,7 +329,7 @@ export class GableQuoteDetail extends LitElement {
                     ${this.renderSummaryCard('Total Amount', formatCents(quote.total_cents), 'text-gable-green')}
                     ${this.renderSummaryCard('Lines', String(lines.length))}
                     ${this.renderSummaryCard('Fulfillment', quote.delivery_type === 'delivery' ? 'Delivery' : 'Pickup', quote.delivery_type === 'delivery' ? 'text-blue-400' : undefined)}
-                    ${this.renderSummaryCard('Source', quote.source === 'ai' ? 'AI Parsed' : 'Manual')}
+                    ${this.renderSummaryCard('Source', quote.source === 'ai' ? 'Material list' : 'Manual')}
                 </div>
 
                 <!-- Delivery Info -->
@@ -331,32 +442,43 @@ export class GableQuoteDetail extends LitElement {
     }
 
     private renderOriginalUploadTab(quote: Quote) {
-        const fileUrl = QuoteService.getOriginalFileUrl(quote.id);
+        const fileUrl = this.originalFile?.quoteId === quote.id ? this.originalFile.url : null;
         const isImage = quote.original_content_type?.startsWith('image/');
         const isPdf = quote.original_content_type === 'application/pdf';
+        const isText = !!quote.original_content_type
+            && (quote.original_content_type.startsWith('text/plain') || quote.original_content_type.startsWith('text/csv'));
+        const original = this.originalText?.quoteId === quote.id ? this.originalText.text : null;
+        const originalLines = original === null ? [] : original.replace(/\r?\n$/, '').split(/\r?\n/);
+        const cut = originalLines.length > ORIGINAL_TEXT_LINES;
 
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider">Original Material List Upload</h3>
-                    <a href="${fileUrl}" download="${quote.original_filename || 'original-upload'}"
+                    <a href="#" download="${quote.original_filename || 'original-upload'}"
+                        @click=${(e: Event) => { e.preventDefault(); void this.downloadOriginal(quote); }}
                         class="text-gable-green hover:text-gable-green/80 text-sm flex items-center gap-2 transition-colors">
                         ${icon(Download, 14)} Download Original
                     </a>
                 </div>
 
                 <div class="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
-                    ${isImage ? html`
+                    ${isImage && fileUrl ? html`
                         <img src="${fileUrl}" alt="Original material list" class="w-full max-h-[70vh] object-contain bg-black/30 p-4" />
                     ` : nothing}
-                    ${isPdf ? html`
+                    ${isPdf && fileUrl ? html`
                         <iframe src="${fileUrl}" class="w-full h-[70vh]" title="Original PDF"></iframe>
                     ` : nothing}
-                    ${!isImage && !isPdf ? html`
+                    ${isText && original !== null ? html`
+                        <pre data-testid="original-text" class="p-4 max-h-[70vh] overflow-auto font-mono text-xs text-zinc-300 whitespace-pre-wrap">${originalLines.slice(0, ORIGINAL_TEXT_LINES).join('\n')}</pre>
+                        ${cut ? html`<div class="px-4 py-2 border-t border-white/10 text-xs text-zinc-500">Showing the first ${ORIGINAL_TEXT_LINES} lines. Download the original for the rest.</div>` : nothing}
+                    ` : nothing}
+                    ${!(isImage && fileUrl) && !(isPdf && fileUrl) && !(isText && original !== null) ? html`
                         <div class="p-12 text-center text-zinc-500">
                             ${icon(FileText, 48, 'w-12 h-12 mx-auto mb-4 opacity-50')}
-                            <p>Preview not available for ${quote.original_content_type}</p>
-                            <a href="${fileUrl}" download class="text-gable-green hover:underline text-sm mt-2 inline-block">
+                            <p>${isText && this.originalText?.quoteId !== quote.id ? 'Loading the list...' : 'The original is available to download.'}</p>
+                            <a href="#" download @click=${(e: Event) => { e.preventDefault(); void this.downloadOriginal(quote); }}
+                                class="text-gable-green hover:underline text-sm mt-2 inline-block">
                                 Download to view
                             </a>
                         </div>
@@ -370,7 +492,7 @@ export class GableQuoteDetail extends LitElement {
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider">AI Extraction Mapping</h3>
+                    <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider">List mapping</h3>
                     <div class="text-xs text-zinc-500">
                         ${parseMap.length} items extracted &middot;
                         ${parseMap.filter(i => i.confidence >= 0.9 && !i.is_special_order).length} high confidence &middot;
@@ -404,7 +526,7 @@ export class GableQuoteDetail extends LitElement {
                                                 <div class="font-mono text-sm text-white">
                                                     ${item.quantity} <span class="text-zinc-500 text-xs">${item.uom}</span>
                                                 </div>
-                                                <div class="font-mono text-xs text-emerald-400">$${item.matched_product.base_price.toFixed(2)}/ea</div>
+                                                <div class="font-mono text-xs text-emerald-400">Catalogue ${this.catalogPrice(item.matched_product.base_price)} / ${item.matched_product.uom}</div>
                                             </div>
                                         </div>
                                     ` : html`
@@ -432,7 +554,7 @@ export class GableQuoteDetail extends LitElement {
                                         ${item.alternatives.map(alt => html`
                                             <div class="flex items-center justify-between text-xs text-zinc-500">
                                                 <span><span class="font-mono text-zinc-400">${alt.sku}</span> \u2014 ${alt.description}</span>
-                                                <span class="font-mono text-zinc-400">$${alt.base_price.toFixed(2)}</span>
+                                                <span class="font-mono text-zinc-400">Catalogue ${this.catalogPrice(alt.base_price)} / ${alt.uom}</span>
                                             </div>
                                         `)}
                                     </div>
@@ -455,7 +577,7 @@ export class GableQuoteDetail extends LitElement {
         const tabs: { id: Tab; label: string; iconData: typeof FileText; show: boolean }[] = [
             { id: 'details', label: 'Details', iconData: FileText, show: true },
             { id: 'original', label: 'Original Upload', iconData: Eye, show: quote.source === 'ai' && !!quote.original_filename },
-            { id: 'mapping', label: 'AI Mapping', iconData: Map, show: quote.source === 'ai' && !!(quote.parse_map?.length) },
+            { id: 'mapping', label: 'List mapping', iconData: Map, show: quote.source === 'ai' && !!(quote.parse_map?.length) },
         ];
 
         return html`
@@ -472,25 +594,25 @@ export class GableQuoteDetail extends LitElement {
                                 ${quote.status}
                             </span>
                             ${quote.source === 'ai' ? html`
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-violet-500/15 text-violet-400 border border-violet-500/20">
-                                    ${icon(Sparkles, 12, 'w-3 h-3')} AI Parsed
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-voice/5 text-voice-soft border border-voice/10">
+                                    ${icon(ListChecks, 12, 'w-3 h-3')} Material list
                                 </span>
                             ` : nothing}
                         </div>
                         <p class="text-muted-foreground">
-                            ${quote.customer_name || quote.customer_id.slice(0, 8)} &middot; Created ${new Date(quote.created_at).toLocaleDateString()}
+                            ${quote.customer_name || quote.customer_id.slice(0, 8)} &middot; Created ${formatDate(quote.created_at)}
                         </p>
                     </div>
                     <div class="flex gap-2">
                         ${quote.status === 'draft' ? html`
                             <button @click=${() => this.handleStateChange('sent')} ?disabled=${this.processing}
-                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-blue-600 text-plate px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Send, 14)} Mark Sent
                             </button>
                         ` : nothing}
                         ${(quote.status === 'draft' || quote.status === 'sent') ? html`
                             <button @click=${() => this.handleStateChange('accepted')} ?disabled=${this.processing}
-                                class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-emerald-600 text-plate px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Check, 14)} Accept
                             </button>
                             <button @click=${() => this.handleStateChange('rejected')} ?disabled=${this.processing}
@@ -518,7 +640,7 @@ export class GableQuoteDetail extends LitElement {
                 <div class="flex gap-1 border-b border-white/10">
                     ${tabs.filter(t => t.show).map(tab => html`
                         <button
-                            @click=${() => { this.activeTab = tab.id; }}
+                            @click=${() => { this.activeTab = tab.id; if (tab.id === 'original') void this.loadOriginalText(quote); }}
                             class="flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
                                 this.activeTab === tab.id
                                     ? 'text-gable-green border-gable-green'

@@ -75,6 +75,89 @@ func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID)
 	return nil
 }
 
+// CheckGrantsBranch holds a branch the caller acts on, or a loaded record's
+// own branch, to the caller's grants when the request's branch context
+// carries no branch (SEC-NOHEADER-1, the act side of the same section 2.3
+// rule): it returns nil unless the context is a user context with no branch,
+// and then ErrPayloadBranchRefused unless the branch is among the user's
+// user_locations grants. A nil branch refuses, because no grant decides it,
+// so a user with no grants at all is refused everywhere; an administrator, an
+// owner, a caller with no user sub and a caller with no branch Context at
+// all (a route without the middleware, a context free test or job caller,
+// which every HTTP route's middleware makes impossible) keep the reach the
+// X-Branch-Id header rule already gives them, the same third arm Wall's
+// predicate carries. A context branch is not this helper's case: the caller's
+// own equality check governs it, so the answer for a caller that sends the
+// header is unchanged.
+func (g *BranchGuard) CheckGrantsBranch(ctx context.Context, branch *uuid.UUID) error {
+	bc := BranchFromContext(ctx)
+	if bc == nil {
+		return nil
+	}
+	if bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil
+	}
+	if branch == nil {
+		return ErrPayloadBranchRefused
+	}
+	ok, err := g.m.userHasBranch(ctx, bc.UserSub, *branch)
+	if err != nil {
+		return fmt.Errorf("branch grant lookup: %w", err)
+	}
+	if !ok {
+		return ErrPayloadBranchRefused
+	}
+	return nil
+}
+
+// ErrCreateBranchChoice is the verdict GrantsForCreate returns when a user
+// context with no branch holds more than one granted branch: no grant alone
+// decides the branch a create would write at, so the request must name one
+// (the module maps this to its 400 naming branch_id).
+var ErrCreateBranchChoice = errors.New("the caller holds more than one branch grant; the request must name branch_id")
+
+// GrantsForCreate settles the branch a create writes at for a caller whose
+// context carries no branch (SEC-NOHEADER-1): a user's create takes its
+// branch from the user's user_locations grants, never the deployment
+// default, so the record is one its own grants let the creator read back.
+// Exactly one granted branch answers it; several answer
+// ErrCreateBranchChoice (the request must name one); none answer
+// ErrPayloadBranchRefused (fail closed, the same refusal CheckGrantsBranch
+// serves). A caller the grants never hold (a context branch, an
+// administrator, an owner, the single branch switch, an unbound key, a
+// system caller) answers (nil, nil) and keeps its own default resolution.
+func (g *BranchGuard) GrantsForCreate(ctx context.Context) (*uuid.UUID, error) {
+	bc := BranchFromContext(ctx)
+	if bc == nil || bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil, nil
+	}
+	rows, err := g.m.db.GetExecutor(ctx).Query(ctx,
+		`SELECT branch_id FROM user_locations WHERE user_sub = $1`, bc.UserSub)
+	if err != nil {
+		return nil, fmt.Errorf("branch grant lookup: %w", err)
+	}
+	defer rows.Close()
+	var branches []uuid.UUID
+	for rows.Next() {
+		var b uuid.UUID
+		if err := rows.Scan(&b); err != nil {
+			return nil, fmt.Errorf("branch grant lookup: %w", err)
+		}
+		branches = append(branches, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("branch grant lookup: %w", err)
+	}
+	switch len(branches) {
+	case 0:
+		return nil, ErrPayloadBranchRefused
+	case 1:
+		return &branches[0], nil
+	default:
+		return nil, ErrCreateBranchChoice
+	}
+}
+
 // CheckPayloadLocation applies the same rule to a location id a body names
 // where the location stands for a branch (stock moves, receiving): the
 // location's own branch (its branch_id, or itself when it is a branch) must be

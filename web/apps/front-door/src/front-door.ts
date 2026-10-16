@@ -33,9 +33,10 @@ import {
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
-import { icon, cn } from '@gable/design-system';
+import { icon, cn, useThemeSubject } from '@gable/design-system';
 import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
+import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
 
 type DoorState =
   | { kind: 'signed-out' }
@@ -129,13 +130,40 @@ export class GableFrontDoor extends LitElement {
       }
       return;
     }
+    useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.roles;
     void this._loadCatalog();
   }
 
+  /**
+   * Sign in via a persona card: pass the persona's role and home yard code
+   * into custody, so the door filters tiles with the role and the desk opens
+   * on the persona's yard.
+   *
+   * `signInDev` with a persona drops the previously stored yard: an earlier
+   * persona's home would otherwise win on the next desk boot, because every
+   * dev persona sees every yard in its grants list and a stored id is
+   * restored before the persona is consulted. A reload within the same
+   * persona keeps the stored choice: the desk re-inits on its own.
+   */
+  private _signInAsPersona(persona: DemoPersona) {
+    this._signInError = null;
+    try {
+      authCustody.signInDev(persona.name, { role: persona.role, homeYardCode: persona.homeYardCode });
+    } catch (err) {
+      this._signInError = err instanceof Error ? err.message : String(err);
+      return;
+    }
+    useThemeSubject(authCustody.subject);
+    this._userName = authCustody.displayName;
+    this._roles = authCustody.personaRole !== null ? [authCustody.personaRole] : [];
+    void this._loadCatalog();
+  }
+
   private _signOut() {
     authCustody.signOut();
+    useThemeSubject(null);
     this._signInError = null;
     this._userName = null;
     this._roles = [];
@@ -162,7 +190,7 @@ export class GableFrontDoor extends LitElement {
           ${this._renderBody()}
         </main>
         <footer class="px-6 md:px-8 py-4 text-center text-xs text-muted-foreground border-t border-white/5">
-          GableLBM · the front door
+          Powered by Gable
         </footer>
       </div>
     `;
@@ -170,6 +198,10 @@ export class GableFrontDoor extends LitElement {
 
   private _renderHeader() {
     const signedIn = this._state.kind !== 'signed-out';
+    const personaRole = authCustody.personaRole;
+    const headerRoleWords = personaRole !== null
+      ? ROLE_WORDS[personaRole as keyof typeof ROLE_WORDS] ?? personaRole
+      : null;
     return html`
       <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
         <div class="flex items-center gap-3 justify-self-start">
@@ -180,6 +212,7 @@ export class GableFrontDoor extends LitElement {
           ${this._headerWord}
         </div>
         <div class="flex items-center gap-3 justify-self-end">
+          <gable-theme-toggle></gable-theme-toggle>
           ${signedIn ? html`
             ${this._userName && this._userName !== '' ? html`
               <div class="hidden sm:flex items-center gap-2">
@@ -188,11 +221,13 @@ export class GableFrontDoor extends LitElement {
                 </div>
                 <div class="hidden lg:block leading-tight">
                   <div class="text-sm font-medium text-white">${this._userName}</div>
-                  ${this._roles.length > 0
-                    ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${this._roles.join(' · ')}</div>`
-                    : this._state.kind === 'ready' || this._state.kind === 'loading' || this._state.kind === 'error'
-                      ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">local development</div>`
-                      : nothing}
+                  ${headerRoleWords !== null
+                    ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${headerRoleWords}</div>`
+                    : this._roles.length > 0
+                      ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${this._roles.join(' · ')}</div>`
+                      : this._state.kind === 'ready' || this._state.kind === 'loading' || this._state.kind === 'error'
+                        ? html`<div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">local development</div>`
+                        : nothing}
                 </div>
               </div>
             ` : nothing}
@@ -242,29 +277,31 @@ export class GableFrontDoor extends LitElement {
   }
 
   private _renderSignIn() {
+    // The heading and the card width differ between dev (the wide card and
+    // the tenant's name) and a production build (the base wrapper on
+    // refactor/v1, the plain product name). Every dealer's real door carries
+    // their own tenant name, so the production door must not render "Gable
+    // Building Supply".
+    const dev = authConfig.devMode;
+    const headingText = dev ? 'Sign in to Gable Building Supply' : 'Sign in to Gable';
+    const outerClasses = dev
+      ? 'flex items-start justify-center py-12'
+      : 'flex items-center justify-center py-16';
+    const innerClasses = dev
+      ? 'glass-card rounded-2xl p-8 w-full max-w-4xl space-y-6 animate-fade-in'
+      : 'glass-card rounded-2xl p-8 w-full max-w-md space-y-5 animate-fade-in';
     return html`
-      <div class="flex items-center justify-center py-16">
-        <div class="glass-card rounded-2xl p-8 w-full max-w-md space-y-5 animate-fade-in">
+      <div class="${outerClasses}">
+        <div class="${innerClasses}">
           <div class="space-y-1">
-            <h1 class="text-xl font-semibold text-white">Sign in to Gable</h1>
+            <h1 class="text-xl font-semibold text-white">${headingText}</h1>
             <p class="text-sm text-zinc-400">
-              ${authConfig.devMode
-                ? 'This build runs against a core in dev mode: no credential is needed, pick a name for the session.'
+              ${dev
+                ? 'This is the local demo. Each card signs in as that person, shaping what the screens offer.'
                 : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
             </p>
           </div>
-          ${authConfig.devMode ? html`
-            <label class="block space-y-1.5">
-              <span class="text-xs uppercase tracking-wider text-muted-foreground">Display name</span>
-              <input
-                .value=${this._devName}
-                @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
-                @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this._signIn(); }}
-                aria-label="Display name"
-                class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
-              />
-            </label>
-          ` : html`
+          ${dev ? this._renderPersonaCards() : html`
             <label class="block space-y-1.5">
               <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
               <textarea
@@ -276,24 +313,95 @@ export class GableFrontDoor extends LitElement {
                 class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
               ></textarea>
             </label>
+            ${this._signInError ? html`
+              <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+            ` : nothing}
+            <button
+              @click=${() => this._signIn()}
+              class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+            >
+              Sign in
+            </button>
           `}
-          ${this._signInError ? html`
-            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
-          ` : nothing}
-          <button
-            @click=${() => this._signIn()}
-            class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
-          >
-            Sign in
-          </button>
         </div>
       </div>
     `;
   }
 
+  /** The persona card grid for the dev sign in (one card per persona). */
+  private _renderPersonaCards() {
+    return html`
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" role="list">
+        ${DEMO_PERSONAS.map((persona) => this._renderPersonaCard(persona))}
+      </div>
+      <div class="border-t border-white/10 pt-5 space-y-3">
+        <label class="block space-y-1.5">
+          <span class="text-xs uppercase tracking-wider text-muted-foreground">Sign in with another name</span>
+          <input
+            .value=${this._devName}
+            @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this._signIn(); }}
+            aria-label="Display name"
+            class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+          />
+        </label>
+        ${this._signInError ? html`
+          <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+        ` : nothing}
+        <button
+          @click=${() => this._signIn()}
+          class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+        >
+          Sign in
+        </button>
+      </div>
+    `;
+  }
+
+  /** One persona card: the name, the role in words, the home yard name; the yard code in mono. */
+  private _renderPersonaCard(persona: DemoPersona) {
+    const roleWords = ROLE_WORDS[persona.role];
+    return html`
+      <div role="listitem">
+        <button
+          type="button"
+          @click=${() => this._signInAsPersona(persona)}
+          aria-label="Sign in as ${persona.name}, ${roleWords}, at ${persona.homeYardName}"
+          class="group w-full text-left rounded-xl bg-slate-steel border border-white/5 p-4 transition-all hover:border-gable-green/40 hover:shadow-glow hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
+        >
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow shrink-0">
+              ${initialsFor(persona.name)}
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-white truncate">${persona.name}</div>
+              <div class="text-[11px] uppercase tracking-wider text-muted-foreground">${roleWords}</div>
+            </div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
+            <span class="text-xs text-zinc-400 truncate">${persona.homeYardName}</span>
+            <span class="text-[10px] font-mono text-muted-foreground tracking-wider shrink-0">${persona.homeYardCode}</span>
+          </div>
+        </button>
+      </div>
+    `;
+  }
+
   private _renderTiles(apps: AppInfo[]) {
-    // A dev session holds no roles and the core passes it through every guard.
-    const tiles = tilesFor(apps, authCustody.session?.kind === 'dev' ? null : this._roles);
+    // Tile filter: token session -> its roles; dev session with a role -> the
+    // persona's role (the cashier sees the counter, not purchasing); dev
+    // session without a persona -> null, i.e. every enabled tile (the core
+    // passes dev callers through every guard).
+    const session = authCustody.session;
+    let rolesForTiles: string[] | null;
+    if (session?.kind === 'token') {
+      rolesForTiles = this._roles;
+    } else if (session?.kind === 'dev' && authCustody.personaRole !== null) {
+      rolesForTiles = [authCustody.personaRole];
+    } else {
+      rolesForTiles = null;
+    }
+    const tiles = tilesFor(apps, rolesForTiles);
     return html`
       <div class="space-y-4 mb-8">
         <h1 class="text-2xl font-semibold text-white">Good to see you${this._userName ? html`, <span class="text-gable-green">${this._userName}</span>` : nothing}</h1>

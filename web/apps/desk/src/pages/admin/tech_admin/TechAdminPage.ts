@@ -2,14 +2,19 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
+import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
+import { confirmDialog } from '../../../components/ui/app-dialog.ts';
+import { aiHeadline, aiIsOn, aiLeadLine, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
-    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users
+    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users, Radar
 } from 'lucide';
 
 const AI_LM_MODULE_ID = 'ai_lm';
@@ -18,7 +23,7 @@ const AI_LM_MODULE_ID = 'ai_lm';
 export class TechAdminPage extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private activeTab: 'keys' | 'ai' | 'routing' | 'staff' | 'integrations' | 'health' = 'keys';
+    @state() private activeTab: 'keys' | 'ai' | 'market-check' | 'routing' | 'staff' | 'integrations' | 'health' = 'keys';
 
     // API Key Manager state
     @state() private keys: APIKey[] = [];
@@ -39,6 +44,11 @@ export class TechAdminPage extends LitElement {
     @state() private aiShowInput = false;
     @state() private aiError: string | null = null;
     @state() private aiSuccess: string | null = null;
+    @state() private aiProvider: 'openrouter' | 'anthropic' = 'openrouter';
+    @state() private aiModel = 'claude-sonnet-5-5';
+    @state() private aiAnthropicKey = '';
+    @state() private aiTesting = false;
+    @state() private aiTestResult: { ok: boolean; message: string } | null = null;
 
     // Routing (OpenRouteService) Settings state
     @state() private routingSettings: RoutingSettings | null = null;
@@ -69,6 +79,9 @@ export class TechAdminPage extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A link may name the tab to open (the Market check page links to its own card).
+        const named = new URLSearchParams(window.location.search).get('tab');
+        if (named === 'market-check') this.activeTab = named;
         this._loadKeys();
         this._loadAISettings();
         this._loadRoutingSettings();
@@ -111,7 +124,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleRevokeKey(id: string) {
-        if (!confirm('Are you sure you want to revoke this key? integrations using it will break immediately.')) return;
+        if (!await confirmDialog({
+            title: 'Revoke this API key?',
+            body: 'Integrations using it will break immediately. This cannot be undone.',
+            confirmLabel: 'Revoke key',
+            tone: 'danger',
+        })) return;
         try {
             this.keyError = null;
             await techAdminService.revokeKey(id);
@@ -133,6 +151,8 @@ export class TechAdminPage extends LitElement {
         try {
             const data = await techAdminService.getAISettings();
             this.aiSettings = data;
+            this.aiProvider = data.provider;
+            this.aiModel = data.model;
         } catch (err) {
             console.error(err);
         } finally {
@@ -156,8 +176,8 @@ export class TechAdminPage extends LitElement {
             this.aiNewKey = '';
             this.aiNewBaseUrl = '';
             this.aiShowInput = false;
-            this.aiSuccess = 'API key saved. All AI features are now active.';
             await this._loadAISettings();
+            this._noteSavedKey('API key saved');
         } catch (err) {
             this.aiError = err instanceof Error ? err.message : 'Failed to save';
         } finally {
@@ -165,8 +185,112 @@ export class TechAdminPage extends LitElement {
         }
     }
 
+    private async _handleSaveProvider() {
+        this.aiSaving = true;
+        this.aiError = null;
+        this.aiSuccess = null;
+        try {
+            await techAdminService.saveAIProvider(this.aiProvider, this.aiModel, this.aiAnthropicKey.trim() || undefined);
+            this.aiAnthropicKey = '';
+            await this._loadAISettings();
+            this._noteSavedKey('AI provider saved');
+        } catch (err) {
+            this.aiError = err instanceof Error ? err.message : 'Failed to save';
+        } finally {
+            this.aiSaving = false;
+        }
+    }
+
+    /** The saved key was tested by the save: say what that test found. */
+    private _noteSavedKey(saved: string) {
+        const s = this.aiSettings;
+        if (s?.test_status === 'passed') {
+            this.aiSuccess = `${saved} and tested. AI is on.`;
+        } else if (s?.test_status === 'refused' || s?.test_status === 'failed') {
+            // The card the save reloaded already says the refusal; no banner
+            // repeats the sentence.
+            this.aiSuccess = null;
+            this.aiError = null;
+        } else {
+            this.aiSuccess = `${saved}.`;
+        }
+    }
+
+    private async _handleTestAI() {
+        this.aiTesting = true;
+        this.aiTestResult = null;
+        try {
+            this.aiTestResult = await techAdminService.testAIConnection();
+            await this._loadAISettings();
+        } catch (err) {
+            this.aiTestResult = { ok: false, message: err instanceof Error ? err.message : 'Test failed' };
+        } finally {
+            this.aiTesting = false;
+        }
+    }
+
+    private _renderProviderCard() {
+        const s = this.aiSettings;
+        const vaultMissing = s !== null && !s.vault_present;
+        return html`
+            <div class="border border-white/10 rounded-lg p-6 space-y-3" data-testid="ai-provider-card">
+                <h3 class="text-white font-medium">Provider</h3>
+                <p class="text-sm text-slate-400">Choose OpenRouter or the native Anthropic provider (Sonnet 5.5 or better). When no key is set for the chosen provider, AI is off and no feature fakes a result.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <gable-select
+                        label="AI provider"
+                        .value=${this.aiProvider}
+                        .options=${[
+                            { value: 'openrouter', label: 'OpenRouter' },
+                            { value: 'anthropic', label: 'Anthropic (native)' },
+                        ]}
+                        @change=${(e: Event) => this.aiProvider = (e.target as HTMLSelectElement).value as 'openrouter' | 'anthropic'}
+                    ></gable-select>
+                    <gable-select
+                        label="Anthropic model"
+                        .value=${this.aiModel}
+                        ?disabled=${this.aiProvider !== 'anthropic'}
+                        .options=${[
+                            { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+                            { value: 'claude-opus-5-5', label: 'Opus 5.5' },
+                        ]}
+                        @change=${(e: Event) => this.aiModel = (e.target as HTMLSelectElement).value}
+                    ></gable-select>
+                </div>
+                ${this.aiProvider === 'anthropic' ? html`
+                    <input
+                        type="password"
+                        autocomplete="off"
+                        aria-label="Anthropic API key"
+                        .value=${this.aiAnthropicKey}
+                        @input=${(e: Event) => this.aiAnthropicKey = (e.target as HTMLInputElement).value}
+                        ?disabled=${vaultMissing}
+                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500"
+                        placeholder=${s?.anthropic_configured ? `Stored (${s.anthropic_key_hint ?? '****'}); type to replace` : 'Anthropic API key'}
+                    />
+                    ${vaultMissing ? html`<p class="text-xs text-amber-400">This server has no vault key, so an Anthropic key cannot be stored. Set PAYMENT_VAULT_KEY and restart.</p>` : nothing}
+                ` : nothing}
+                <div class="flex gap-2 justify-end items-center">
+                    ${this.aiTestResult && (this.aiTestResult.ok || !this._testFailureOnCard()) ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
+                    <button @click=${this._handleTestAI} ?disabled=${this.aiTesting} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 disabled:opacity-50">Test connection</button>
+                    <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
+                </div>
+            </div>
+        `;
+    }
+
+    /** A failed test whose refusal the reloaded card already says: no red line repeats it. */
+    private _testFailureOnCard(): boolean {
+        return this.aiSettings?.test_status === 'refused' || this.aiSettings?.test_status === 'failed';
+    }
+
     private async _handleDeleteAIKey() {
-        if (!confirm('Remove the admin-configured API key? If an environment variable is set, it will be used as fallback.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured API key?',
+            body: 'If an environment variable is set, it will be used as fallback.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteAIKey();
             this.aiSuccess = 'Admin API key removed.';
@@ -207,7 +331,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteORSKey() {
-        if (!confirm('Remove the admin-configured OpenRouteService key? If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured OpenRouteService key?',
+            body: 'If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteORSKey();
             this.routingSuccess = 'Admin routing key removed.';
@@ -228,7 +357,7 @@ export class TechAdminPage extends LitElement {
             this.readiness = null;
             this.readinessError = err instanceof Error ? err.message : 'Readiness probe unreachable';
         } finally {
-            this.readinessCheckedAt = new Date().toLocaleTimeString();
+            this.readinessCheckedAt = formatTime(new Date());
             this.readinessLoading = false;
         }
     };
@@ -260,7 +389,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeletePartner(id: string) {
-        if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
+        if (!await confirmDialog({
+            title: 'Remove this EDI partner?',
+            body: 'This disconnects their catalog sync and cannot be undone.',
+            confirmLabel: 'Remove partner',
+            tone: 'danger',
+        })) return;
         try {
             this.ediError = null;
             await ediService.deletePartner(id);
@@ -341,6 +475,7 @@ export class TechAdminPage extends LitElement {
         const tabs = [
             { id: 'keys' as const, label: 'API Keys', iconData: Key },
             { id: 'ai' as const, label: 'AI Settings', iconData: Sparkles },
+            { id: 'market-check' as const, label: 'Market check', iconData: Radar },
             { id: 'routing' as const, label: 'Routing', iconData: Navigation },
             { id: 'staff' as const, label: 'Staff', iconData: Users },
             { id: 'integrations' as const, label: 'Integrations', iconData: Globe },
@@ -379,7 +514,7 @@ export class TechAdminPage extends LitElement {
                     <button
                         @click=${() => this.isCreating = true}
                         ?disabled=${this.isCreating || !!this.generatedKey}
-                        class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all disabled:opacity-50"
+                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                     >
                         ${icon(Plus, 16)} New API Key
                     </button>
@@ -401,7 +536,7 @@ export class TechAdminPage extends LitElement {
                                 </div>
                                 <div class="flex gap-2">
                                     <button @click=${() => this.isCreating = false} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 transition-colors">Cancel</button>
-                                    <button @click=${this._handleCreateKey} ?disabled=${!this.newKeyName} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Generate</button>
+                                    <button @click=${this._handleCreateKey} ?disabled=${!this.newKeyName} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Generate</button>
                                 </div>
                             </div>
                         ` : html`
@@ -419,7 +554,7 @@ export class TechAdminPage extends LitElement {
                                     </button>
                                 </div>
                                 <div class="flex justify-end">
-                                    <button @click=${() => { this.generatedKey = null; this.isCreating = false; }} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded">Done</button>
+                                    <button @click=${() => { this.generatedKey = null; this.isCreating = false; }} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded">Done</button>
                                 </div>
                             </div>
                         `}
@@ -445,9 +580,9 @@ export class TechAdminPage extends LitElement {
                                 <tr class="hover:bg-white/5 transition-colors group">
                                     <td class="px-4 py-3 font-medium text-white">${key.name}</td>
                                     <td class="px-4 py-3 font-mono text-slate-400">${key.prefix}...</td>
-                                    <td class="px-4 py-3 text-slate-400">${new Date(key.created_at).toLocaleDateString()}</td>
+                                    <td class="px-4 py-3 text-slate-400">${formatDate(key.created_at)}</td>
                                     <td class="px-4 py-3 text-slate-400">
-                                        ${key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}
+                                        ${key.last_used_at ? formatDate(key.last_used_at) : 'Never'}
                                     </td>
                                     <td class="px-4 py-3">
                                         ${key.revoked_at
@@ -485,11 +620,14 @@ export class TechAdminPage extends LitElement {
     private _renderAISettingsPanel() {
         if (this.aiLoading) return html`<div class="text-slate-400 p-8">Loading AI settings...</div>`;
 
+        const imageGen = imageWords(this.aiSettings?.provider);
+        const savedProvider = this.aiSettings?.provider ?? 'openrouter';
+        const isAnthropic = savedProvider === 'anthropic';
         const features = [
             { name: 'Material List Parsing', description: 'Upload photos/PDFs/spreadsheets of material lists and auto-build quotes', iconData: Sparkles },
             { name: 'Freight Invoice OCR', description: 'Extract carrier, total, and invoice number from uploaded freight invoices', iconData: Sparkles },
             { name: 'PIM Content Generation', description: 'AI-generated product descriptions, SEO, and marketing copy', iconData: Sparkles },
-            { name: 'Product Image Generation', description: 'Generate professional product images for your catalog', iconData: ImageIcon },
+            { name: imageGen.feature, description: imageGen.featureDescription, iconData: ImageIcon },
         ];
 
         return html`
@@ -499,41 +637,46 @@ export class TechAdminPage extends LitElement {
                         ${icon(Sparkles, 20, 'w-5 h-5 text-violet-400')}
                         AI Provider
                     </h2>
-                    <p class="text-slate-400 text-sm mt-1">Configure your OpenRouter API key — one key powers all AI features across the ERP. Optionally point at a self-hosted, OpenAI-compatible endpoint.</p>
+                    <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; the chosen provider's key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
+                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiLeadLine(this.aiSettings)}</p>
                 </div>
 
-                <div class="${cn('border rounded-lg p-6', this.aiSettings?.configured ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
+                ${this._renderProviderCard()}
+
+                <div class="${cn('border rounded-lg p-6', aiIsOn(this.aiSettings) ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
                     <div class="flex items-start justify-between">
                         <div class="flex items-start gap-4">
-                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', this.aiSettings?.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
-                                ${this.aiSettings?.configured ? icon(Check, 20) : icon(AlertCircle, 20)}
+                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', aiIsOn(this.aiSettings) ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
+                                ${aiIsOn(this.aiSettings) ? icon(Check, 20) : icon(AlertCircle, 20)}
                             </div>
                             <div>
                                 <h3 class="text-white font-medium">
-                                    ${this.aiSettings?.configured ? 'AI Features Active' : 'AI Features Inactive'}
+                                    ${aiHeadline(this.aiSettings)}
                                 </h3>
                                 ${this.aiSettings?.configured ? html`
                                     <div class="text-sm text-slate-400 mt-1 space-y-1">
-                                        <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.key_hint}</code></p>
+                                        <p>Provider: <span class="text-white">${providerLabel(savedProvider)}</span>${isAnthropic ? html`, model <span class="text-white">${modelLabel(this.aiSettings.model)}</span>` : nothing}</p>
+                                        <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${isAnthropic ? this.aiSettings.anthropic_key_hint : this.aiSettings.key_hint}</code></p>
                                         <p>Source: <span class="${cn('text-xs font-medium px-2 py-0.5 rounded', this.aiSettings.source === 'admin' ? 'bg-violet-500/15 text-violet-400' : 'bg-zinc-500/15 text-zinc-400')}">${this.aiSettings.source === 'admin' ? 'Admin configured' : 'Environment variable'}</span></p>
-                                        ${this.aiSettings.base_url ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
+                                        ${this.aiSettings.test_status === 'refused' || this.aiSettings.test_status === 'failed' ? html`<p class="text-amber-400" data-testid="ai-test-message">${this.aiSettings.test_message}</p>` : nothing}
+                                        ${this.aiSettings.base_url && !isAnthropic ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
                                     </div>
-                                ` : html`<p class="text-sm text-slate-400 mt-1">Enter your OpenRouter API key to enable AI-powered features.</p>`}
+                                ` : html`<p class="text-sm text-slate-400 mt-1">${aiStatusLine(this.aiSettings)}</p>`}
                             </div>
                         </div>
                         <div class="flex gap-2">
-                            ${this.aiSettings?.source === 'admin' ? html`
+                            ${isAnthropic ? nothing : html`${this.aiSettings?.source === 'admin' ? html`
                                 <button @click=${this._handleDeleteAIKey} class="px-4 py-2 border border-red-500/30 text-red-400 rounded hover:bg-red-500/10 transition-colors inline-flex items-center gap-2">
                                     ${icon(Trash2, 14)} Remove
                                 </button>
                             ` : nothing}
-                            <button @click=${() => { this.aiShowInput = true; this.aiNewBaseUrl = this.aiSettings?.base_url ?? ''; }} ?disabled=${this.aiShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                            <button @click=${() => { this.aiShowInput = true; this.aiNewBaseUrl = this.aiSettings?.base_url ?? ''; }} ?disabled=${this.aiShowInput} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                 ${this.aiSettings?.configured ? 'Update Key' : 'Add Key'}
-                            </button>
+                            </button>`}
                         </div>
                     </div>
 
-                    ${this.aiShowInput ? html`
+                    ${this.aiShowInput && !isAnthropic ? html`
                         <div class="mt-6 pt-6 border-t border-white/5 overflow-hidden space-y-3">
                             <div class="relative">
                                 ${icon(Shield, 16, 'absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500')}
@@ -557,7 +700,7 @@ export class TechAdminPage extends LitElement {
                             </div>
                             <div class="flex gap-2 justify-end">
                                 <button @click=${() => { this.aiShowInput = false; this.aiNewKey = ''; this.aiNewBaseUrl = ''; }} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5">Cancel</button>
-                                <button @click=${this._handleSaveAIKey} ?disabled=${!this.aiNewKey.trim() || this.aiSaving} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                <button @click=${this._handleSaveAIKey} ?disabled=${!this.aiNewKey.trim() || this.aiSaving} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                     Save Key
                                 </button>
                             </div>
@@ -575,9 +718,9 @@ export class TechAdminPage extends LitElement {
                     <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Features Powered by AI</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         ${features.map((f) => html`
-                            <div class="${cn('border rounded-lg p-4 transition-colors', this.aiSettings?.configured ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
+                            <div class="${cn('border rounded-lg p-4 transition-colors', aiIsOn(this.aiSettings) ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
                                 <div class="flex items-center gap-2 mb-2">
-                                    ${icon(f.iconData, 16, cn('w-4 h-4', this.aiSettings?.configured ? 'text-violet-400' : 'text-slate-600'))}
+                                    ${icon(f.iconData, 16, cn('w-4 h-4', aiIsOn(this.aiSettings) ? 'text-violet-400' : 'text-slate-600'))}
                                     <span class="text-white text-sm font-medium">${f.name}</span>
                                 </div>
                                 <p class="text-xs text-slate-500">${f.description}</p>
@@ -631,7 +774,7 @@ export class TechAdminPage extends LitElement {
                                     ${icon(Trash2, 14)} Remove
                                 </button>
                             ` : nothing}
-                            <button @click=${() => { this.routingShowInput = true; }} ?disabled=${this.routingShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                            <button @click=${() => { this.routingShowInput = true; }} ?disabled=${this.routingShowInput} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                 ${this.routingSettings?.configured ? 'Update Key' : 'Add Key'}
                             </button>
                         </div>
@@ -651,7 +794,7 @@ export class TechAdminPage extends LitElement {
                             </div>
                             <div class="flex gap-2 justify-end">
                                 <button @click=${() => { this.routingShowInput = false; this.routingNewKey = ''; }} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5">Cancel</button>
-                                <button @click=${this._handleSaveORSKey} ?disabled=${!this.routingNewKey.trim() || this.routingSaving} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                <button @click=${this._handleSaveORSKey} ?disabled=${!this.routingNewKey.trim() || this.routingSaving} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                     Save Key
                                 </button>
                             </div>
@@ -724,7 +867,7 @@ export class TechAdminPage extends LitElement {
                             )}"
                             title=${enabled ? 'Disable AI_LM module' : 'Enable AI_LM module'}
                         >
-                            <span class="${cn('inline-block h-4 w-4 transform rounded-full bg-white transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')}"></span>
+                            <span class="${cn('inline-block h-4 w-4 transform rounded-full bg-plate transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')}"></span>
                         </button>
                     </div>
                 </div>
@@ -1006,6 +1149,7 @@ export class TechAdminPage extends LitElement {
                 <div class="max-w-5xl">
                     ${this.activeTab === 'keys' ? this._renderAPIKeyManager() : nothing}
                     ${this.activeTab === 'ai' ? this._renderAISettingsPanel() : nothing}
+                    ${this.activeTab === 'market-check' ? html`<gable-market-check-settings></gable-market-check-settings>` : nothing}
                     ${this.activeTab === 'routing' ? this._renderRoutingSettingsPanel() : nothing}
                     ${this.activeTab === 'staff' ? this._renderStaff() : nothing}
                     ${this.activeTab === 'integrations' ? this._renderIntegrations() : nothing}

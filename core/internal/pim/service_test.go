@@ -145,8 +145,8 @@ func TestPIMGenerateDescriptions_NilAIHardError(t *testing.T) {
 func TestPIMGenerateImage_NilAIHardError(t *testing.T) {
 	s := newPIMTestService(&stubPIMRepo{}, nil)
 	_, err := s.GenerateImage(context.Background(), uuid.New(), "", "")
-	if err == nil || !strings.Contains(err.Error(), "no AI configured") {
-		t.Fatalf("want hard 'no AI configured' error, got %v", err)
+	if !errors.Is(err, ai.ErrAIOff) {
+		t.Fatalf("want the AI off error, got %v", err)
 	}
 }
 
@@ -179,7 +179,7 @@ func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model": "text-svg-sentinel",
 			"choices": []any{map[string]any{"message": map[string]any{
-				"content": `<svg viewBox="0 0 400 400" width="400" height="400"></svg>`,
+				"content": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect x="20" y="20" width="100" height="40" fill="#c9a36b"/></svg>`,
 			}}},
 		})
 	}))
@@ -187,7 +187,7 @@ func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 
 	repo := &stubPIMRepo{}
 	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
-	s.generateImageAsync(uuid.New(), testProduct, "photographic", "")
+	s.generateImageAsync(uuid.New(), testProduct, "photographic", "", ai.ImageKindPhoto)
 
 	if len(repo.updates) != 1 {
 		t.Fatalf("expected exactly 1 media finalize, got %d", len(repo.updates))
@@ -220,7 +220,7 @@ func TestPIMGenerateImage_FinalizesWithReturnedModelSlug(t *testing.T) {
 
 	repo := &stubPIMRepo{}
 	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
-	s.generateImageAsync(uuid.New(), testProduct, "", "")
+	s.generateImageAsync(uuid.New(), testProduct, "", "", ai.ImageKindPhoto)
 
 	if len(repo.updates) != 1 {
 		t.Fatalf("expected exactly 1 media finalize, got %d", len(repo.updates))

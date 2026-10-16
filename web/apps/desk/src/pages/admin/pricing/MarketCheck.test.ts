@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+/**
+ * The Market check screen: not configured, running, done, partial and all failed, the summary line, the
+ * table's words, the link attributes and the chips, against a stubbed fetch.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import './MarketCheck'
+import { summarize } from './MarketCheck'
+import type { GableMarketCheck } from './MarketCheck'
+import { mount, update, flush, q, text, jsonResponse } from '../../../test/dom'
+
+const SETTINGS = {
+  connect_url: 'https://connect.example.test',
+  webhook_id_saved: true,
+  flow_name: 'Pricing flow',
+  store_label: 'Home Depot, Spokane WA: nearest store with live prices',
+  store_id: '',
+  store_zip: '',
+  band_pct: '5',
+  margin_floor_pct: '15',
+  configured: true,
+  notice: '',
+}
+
+function product(n: number, sku = `DL_SPF_${n}`) {
+  return { id: `p-${n}`, sku, description: `Stud ${n}`, stock_uom: 'PCS' }
+}
+
+function row(n: number, over: Record<string, unknown> = {}) {
+  return {
+    product_id: `p-${n}`, sku: `DL_SPF_${n}`, description: `Stud ${n}`, uom: 'PCS', our_price_cents: 542, cost_known: true,
+    status: 'matched',
+    competitor: { title: `HD stud ${n}`, price_cents: 400, listed_price_cents: 4000, link: 'https://www.homedepot.com/p/1', confidence: 88, unit_note: 'Sold as a pack of 10; price divided by 10' },
+    diff_pct: 35.5, position: 'above', suggested_price_cents: 420, reason: 'lower_to_band', note: '', ...over,
+  }
+}
+
+function result(rows: unknown[]) {
+  return { flow_name: 'Pricing flow', store_label: SETTINGS.store_label, store_seen: 'Spokane', band_pct: '5', margin_floor_pct: '15', rows }
+}
+
+let calls: { method: string; path: string; body: unknown }[]
+let settings: Record<string, unknown>
+let runAnswer: () => Response
+/** The counter's tiles answer; null stands for a server without the route (404). */
+let tiles: unknown[] | null
+
+beforeEach(() => {
+  localStorage.setItem('token', 'test-token')
+  calls = []
+  settings = SETTINGS
+  tiles = null
+  runAnswer = () => jsonResponse(result([row(1)]))
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://localhost')
+    const method = init?.method ?? 'GET'
+    calls.push({ method, path: url.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(settings)
+    if (url.pathname === '/api/v1/pos/tiles') {
+      calls.push({ method: 'TILES', path: url.search, body: undefined })
+      return tiles === null
+        ? new Response('404 page not found', { status: 404 })
+        : jsonResponse({ categories: [], items: tiles, images: false })
+    }
+    if (url.pathname === '/api/v1/products') {
+      return jsonResponse({ items: [1, 2, 3, 4, 5, 6, 7].map((n) => product(n)).concat([product(99, 'HW_NAILS')]), next_cursor: null, limit: 200 })
+    }
+    if (url.pathname === '/api/v1/pricing/market-check') return runAnswer()
+    return jsonResponse({})
+  }))
+})
+
+afterEach(() => {
+  document.body.innerHTML = ''
+  vi.unstubAllGlobals()
+})
+
+async function open(): Promise<GableMarketCheck> {
+  const el = await mount<GableMarketCheck>('gable-market-check')
+  await flush()
+  await update(el, {})
+  return el
+}
+
+async function run(el: GableMarketCheck) {
+  q<HTMLButtonElement>(el, '[data-testid="run"]').click()
+  await flush()
+  await update(el, {})
+  await flush()
+  await update(el, {})
+}
+
+describe('Market check screen', () => {
+  it('says it is off, with a link to Tech Admin, when not configured', async () => {
+    settings = { ...SETTINGS, configured: false, webhook_id_saved: false }
+    const el = await open()
+    expect(text(q(el, '[data-testid="not-configured"]'))).toContain(
+      "Market check is off. An admin enters the FB Connect address and the flow's webhook id in Tech Admin.",
+    )
+    expect(q<HTMLAnchorElement>(el, '[data-testid="not-configured"] a').getAttribute('href')).toBe('/admin?tab=market-check')
+    expect(el.querySelector('[data-testid="run"]')).toBeNull()
+  })
+
+  it('says why it is off when the server has a notice (an id that cannot be read)', async () => {
+    settings = { ...SETTINGS, configured: false, notice: 'The saved webhook id cannot be read; enter it again' }
+    const el = await open()
+    expect(text(q(el, '[data-testid="not-configured"]'))).toContain('The saved webhook id cannot be read; enter it again')
+  })
+
+  it('shows the header, the store label, the badge and the first pick', async () => {
+    const el = await open()
+    expect(text(el)).toContain('Market check')
+    expect(text(q(el, '[data-testid="store-label"]'))).toBe(SETTINGS.store_label)
+    expect(text(q(el, '[data-testid="powered-by"]'))).toBe('Powered by FB Connect: Pricing flow')
+    const chips = text(q(el, '[data-testid="chips"]'))
+    expect(chips).toContain('DL_SPF_1')
+    expect(chips).toContain('DL_SPF_6')
+    expect(chips).not.toContain('DL_SPF_7')
+    expect(chips).not.toContain('HW_NAILS')
+  })
+
+  it('prefers the yard top sellers in Lumber from the counter tiles, and says so', async () => {
+    tiles = [3, 1, 5].map((n) => ({ product_id: `p-${n}`, sku: `TOP_${n}`, description: `Top ${n}` }))
+    const el = await open()
+    expect(calls.find((c) => c.method === 'TILES')!.path).toBe('?category=Lumber&limit=6')
+    const chips = text(q(el, '[data-testid="chips"]'))
+    expect(chips).toContain('TOP_3')
+    expect(chips).toContain('TOP_5')
+    expect(chips).not.toContain('DL_SPF_1')
+    expect(text(el)).toContain('the yard top sellers in Lumber')
+  })
+
+  it('falls back to the first catalogue products, never by a SKU prefix, when the tiles are absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
+      if (url.pathname === '/api/v1/products') {
+        return jsonResponse({ items: [1, 2, 3, 4, 5, 6, 7].map((n) => product(n, `HW_${n}`)), next_cursor: null, limit: 200 })
+      }
+      return new Response('404 page not found', { status: 404 })
+    }))
+    const el = await open()
+    const chips = text(q(el, '[data-testid="chips"]'))
+    expect(chips).toContain('HW_1')
+    expect(chips).toContain('HW_6')
+    expect(chips).not.toContain('HW_7')
+    expect(text(el)).toContain('the first products in the catalogue')
+  })
+
+  it('falls back to dimensional lumber (2x4 to 2x12, 8 to 16 feet) with the most on hand, then to the first products', async () => {
+    const board = (n: number, avail: string, over: Record<string, unknown> = {}) => ({
+      ...product(n, `BRD_${n}`), board_thickness_in: '2', board_width_in: '4', board_length_ft: '8',
+      random_length: false, available: avail, ...over,
+    })
+    const items = [
+      { ...product(1, 'TW_WIPE'), available: '900.0000' },
+      // engineered wood: fixed length, thousands on hand, but not 2x stock
+      { ...product(30, 'EW_LVL_W18000_L32'), board_thickness_in: '1.75', board_width_in: '18', board_length_ft: '32', random_length: false, available: '5000.0000' },
+      board(2, '10.0000'), board(3, '500.0000', { board_width_in: '12', board_length_ft: '16' }),
+      board(4, '40.0000', { random_length: true }),
+      board(5, '300.0000', { board_width_in: '6.0000', board_length_ft: '10.0000', board_thickness_in: '2.0000' }),
+      board(6, '20.0000', { board_width_in: null }), board(7, '75.5000'), board(8, '60.0000'),
+      board(9, '5.0000'), board(10, '200.0000'), board(11, '9.0000'),
+      board(12, '4000.0000', { board_thickness_in: '4' }), board(13, '4000.0000', { board_width_in: '14' }),
+      board(14, '4000.0000', { board_length_ft: '20' }), board(15, '4000.0000', { board_length_ft: '6' }),
+      board(16, '4000.0000', { board_width_in: '2' }),
+    ]
+    let listing = items
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
+      if (url.pathname === '/api/v1/products') return jsonResponse({ items: listing, next_cursor: null, limit: 200 })
+      return new Response('404 page not found', { status: 404 })
+    }))
+    let el = await open()
+    const chips = text(q(el, '[data-testid="chips"]'))
+    for (const sku of ['BRD_3', 'BRD_5', 'BRD_10', 'BRD_7', 'BRD_8', 'BRD_2']) expect(chips).toContain(sku)
+    for (const sku of ['TW_WIPE', 'EW_LVL', 'BRD_4', 'BRD_6', 'BRD_9', 'BRD_11', 'BRD_12', 'BRD_13', 'BRD_14', 'BRD_15', 'BRD_16']) {
+      expect(chips).not.toContain(sku)
+    }
+    expect(text(el)).toContain('the dimensional lumber (2x4 to 2x12, 8 to 16 feet) with the most on hand')
+    // the chips are in order of most available
+    expect(chips.indexOf('BRD_3')).toBeLessThan(chips.indexOf('BRD_5'))
+    el.remove()
+    // none of it: the first products
+    listing = [{ ...product(1, 'TW_WIPE'), board_length_ft: null, random_length: false, available: '1.0000' }, product(2, 'TW_RAG')] as never
+    el = await open()
+    expect(text(q(el, '[data-testid="chips"]'))).toContain('TW_WIPE')
+    expect(text(el)).toContain('the first products in the catalogue')
+  })
+
+  it('removes a chip, adds from the search, and runs with the picked ids', async () => {
+    const el = await open()
+    q<HTMLButtonElement>(el, '[aria-label="Remove DL_SPF_1"]').click()
+    await update(el, {})
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'HW_NAILS'
+    input.dispatchEvent(new Event('input'))
+    await update(el, {})
+    q<HTMLButtonElement>(el, '[data-testid="matches"] button').click()
+    await update(el, {})
+    await run(el)
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(post.body).toEqual({ product_ids: ['p-2', 'p-3', 'p-4', 'p-5', 'p-6', 'p-99'] })
+  })
+
+  it('shows the placeholders and the reading words while it runs', async () => {
+    let release: (r: Response) => void = () => {}
+    runAnswer = () => { throw new Error('unused') }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
+      if (url.pathname === '/api/v1/products') return jsonResponse({ items: [product(1)], next_cursor: null, limit: 200 })
+      if (url.pathname === '/api/v1/pos/tiles') return new Response('404 page not found', { status: 404 })
+      return new Promise<Response>((resolve) => { release = resolve })
+    }))
+    const el = await open()
+    q<HTMLButtonElement>(el, '[data-testid="run"]').click()
+    await flush()
+    await update(el, {})
+    expect(text(q(el, '[data-testid="running"]'))).toContain('Reading live prices through FB Connect')
+    release(jsonResponse(result([row(1)])))
+    await flush()
+    await update(el, {})
+    expect(el.querySelector('[data-testid="running"]')).toBeNull()
+  })
+
+  it('renders the done table: words, link attributes, difference, position and the suggestion', async () => {
+    runAnswer = () => jsonResponse(result([
+      row(1),
+      row(2, { position: 'below', diff_pct: -12.5, our_price_cents: 350, suggested_price_cents: 380, reason: 'raise_to_band' }),
+      row(3, { position: 'in_line', diff_pct: 0, our_price_cents: 400, suggested_price_cents: 400, reason: 'keep' }),
+      row(4, { suggested_price_cents: 589, reason: 'held_at_floor' }),
+      row(5, { status: 'unmatched', competitor: null, diff_pct: null, position: '', suggested_price_cents: null, reason: '', note: 'No equivalent found' }),
+    ]))
+    const el = await open()
+    await run(el)
+    expect(text(q(el, '[data-testid="summary"]'))).toBe(
+      '2 of 5 are above Home Depot by more than 5 percent, 1 is below, 1 is in line; 1 could not be matched',
+    )
+    const body = text(q(el, 'tbody'))
+    expect(body).toContain('$5.42')
+    expect(body).toContain('HD stud 1')
+    expect(body).toContain('88%')
+    expect(body).toContain('Sold as a pack of 10; price divided by 10')
+    expect(body).toContain('+35.5%')
+    expect(body).toContain('+$1.42')
+    expect(body).toContain('Above')
+    expect(body).toContain('Below')
+    expect(body).toContain('In line')
+    expect(body).toContain('Within 5 percent of Home Depot')
+    expect(body).toContain('Raise to within 5 percent')
+    expect(body).toContain('Keep')
+    expect(body).toContain('Held at the 15 percent margin floor')
+    expect(body).toContain('No match: No equivalent found')
+    expect(text(q(el, '[data-testid="result"]'))).toContain('Home Depot prices are US list prices; no exchange is applied.')
+    const a = q<HTMLAnchorElement>(el, 'tbody a')
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(a.getAttribute('href')).toBe('https://www.homedepot.com/p/1')
+  })
+
+  it('shows a title with no link as plain text', async () => {
+    runAnswer = () => jsonResponse(result([row(1, { competitor: { ...row(1).competitor, link: '' } })]))
+    const el = await open()
+    await run(el)
+    expect(el.querySelector('tbody a')).toBeNull()
+    expect(text(q(el, 'tbody'))).toContain('HD stud 1')
+  })
+
+  it('says some rows could not be read and keeps the rest (partial)', async () => {
+    runAnswer = () => jsonResponse(result([row(1), row(2, { status: 'error', competitor: null, diff_pct: null, position: '', suggested_price_cents: null, reason: '', note: 'FB Connect did not answer' })]))
+    const el = await open()
+    await run(el)
+    expect(text(q(el, '[data-testid="partial"]'))).toContain('Some products could not be read')
+    expect(text(q(el, 'tbody'))).toContain('FB Connect did not answer')
+    expect(el.querySelector('[data-testid="all-failed"]')).toBeNull()
+    expect(el.querySelector('[data-testid="summary"]')).not.toBeNull()
+  })
+
+  it('says none could be read when every row failed', async () => {
+    const bad = { status: 'error', competitor: null, diff_pct: null, position: '', suggested_price_cents: null, reason: '', note: 'FB Connect did not answer' }
+    runAnswer = () => jsonResponse(result([row(1, bad), row(2, bad)]))
+    const el = await open()
+    await run(el)
+    expect(text(q(el, '[data-testid="all-failed"]'))).toContain('None of the picked products could be read')
+    expect(el.querySelector('[data-testid="summary"]')).toBeNull()
+  })
+
+  it('shows the server words when the run itself is refused', async () => {
+    runAnswer = () => jsonResponse({ error: { code: 'validation_failed', message: 'pick between 1 and 12 products' } }, 400)
+    const el = await open()
+    await run(el)
+    expect(text(q(el, '[data-testid="run-error"]'))).toContain('pick between 1 and 12 products')
+  })
+
+  it('summarize counts singular and plural', () => {
+    expect(summarize(result([row(1)]) as never)).toBe('1 of 1 is above Home Depot by more than 5 percent, 0 are below, 0 are in line; 0 could not be matched')
+  })
+})

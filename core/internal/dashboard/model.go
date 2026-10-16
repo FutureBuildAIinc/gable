@@ -11,8 +11,8 @@ type DashboardSummary struct {
 	TodayRevenueChange float64 `json:"today_revenue_change"` // Percentage change vs yesterday
 	ActiveOrders       int     `json:"active_orders"`        // Orders in processing states
 	PendingDispatch    int     `json:"pending_dispatch"`     // Deliveries not yet dispatched
-	OutstandingAR      int64   `json:"outstanding_ar"`       // Cents - total unpaid invoices
-	OutstandingARCount int     `json:"outstanding_ar_count"` // Number of unpaid invoices
+	OutstandingAR      int64   `json:"outstanding_ar"`       // Cents - net open receivable, as AR aging reads it
+	OutstandingARCount int     `json:"outstanding_ar_count"` // Number of open invoices
 }
 
 // InventoryAlert represents a product with low or zero stock.
@@ -24,6 +24,7 @@ type InventoryAlert struct {
 	ReorderQty int    `json:"reorder_qty"`
 	AlertType  string `json:"alert_type"` // "LOW_STOCK" or "OUT_OF_STOCK"
 	LocationID string `json:"location_id,omitempty"`
+	YardName   string `json:"yard_name,omitempty"` // the yard's name, so two rows for one SKU can be told apart
 }
 
 // TopCustomer represents a customer ranked by revenue.

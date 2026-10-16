@@ -2,12 +2,16 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Save, Loader2 } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
+import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
+import { aiRefusalWords, renderAiNotice } from '../../../components/inventory/PimAiNotice.ts';
 
 const TONES = ['professional', 'casual', 'technical', 'persuasive'];
 const AUDIENCES = ['contractors and builders', 'DIY homeowners', 'architects and designers', 'wholesale buyers'];
@@ -22,6 +26,7 @@ export class GableProductContentTab extends LitElement {
     @state() private tone = 'professional';
     @state() private audience = 'contractors and builders';
     @state() private generating = false;
+    @state() private aiNotice: string | null = null;
     @state() private saving = false;
     @state() private shortDesc = '';
     @state() private longDesc = '';
@@ -42,12 +47,14 @@ export class GableProductContentTab extends LitElement {
 
     private async _handleGenerate() {
         this.generating = true;
+        this.aiNotice = null;
         try {
             const result = await PIMService.generateDescriptions(this.productId, { tone: this.tone, audience: this.audience });
             this.dispatchEvent(new CustomEvent('content-update', { detail: result, bubbles: true, composed: true }));
         } catch (err) {
             console.error('Generate failed:', err);
-            ToastService.show('Failed to generate content', 'error');
+            this.aiNotice = aiRefusalWords(err);
+            if (!this.aiNotice) ToastService.show(apiErrorMessage(err, 'Failed to generate content'), 'error');
         } finally {
             this.generating = false;
         }
@@ -96,6 +103,7 @@ export class GableProductContentTab extends LitElement {
     render() {
         return html`
             <div class="space-y-6">
+                ${renderAiNotice(this.aiNotice)}
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <div class="flex items-center justify-between mb-4">
@@ -105,30 +113,26 @@ export class GableProductContentTab extends LitElement {
                         </h3>
                         ${this.content?.last_gen_at ? html`
                             <span class="text-xs text-zinc-500">
-                                Last generated: ${new Date(this.content.last_gen_at).toLocaleString()}
+                                Last generated: ${formatDateTime(this.content.last_gen_at)}
                             </span>
                         ` : nothing}
                     </div>
                     <div class="flex flex-wrap items-end gap-4">
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Tone</label>
-                            <select
+                            <gable-select
                                 .value=${this.tone}
+                                .options=${TONES.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))}
                                 @change=${(e: Event) => this.tone = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${TONES.map(t => html`<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Audience</label>
-                            <select
+                            <gable-select
                                 .value=${this.audience}
+                                .options=${AUDIENCES.map(a => ({ value: a, label: a.charAt(0).toUpperCase() + a.slice(1) }))}
                                 @change=${(e: Event) => this.audience = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${AUDIENCES.map(a => html`<option value="${a}">${a.charAt(0).toUpperCase() + a.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <button
                             @click=${this._handleGenerate}

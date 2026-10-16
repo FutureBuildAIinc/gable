@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X } from 'lucide';
@@ -24,6 +25,7 @@ export class GableInventoryTransferModal extends LitElement {
   @state() private _quantity = '';
   @state() private _reason = '';
   @state() private _isSubmitting = false;
+  @state() private _formError = '';
   @state() private _inventory: Inventory[] = [];
   @state() private _locations: Location[] = [];
 
@@ -33,6 +35,7 @@ export class GableInventoryTransferModal extends LitElement {
       this._quantity = '';
       this._reason = '';
       this._toLoc = '';
+      this._formError = '';
     }
   }
 
@@ -60,7 +63,12 @@ export class GableInventoryTransferModal extends LitElement {
 
   private async _handleSubmit(e: Event) {
     e.preventDefault();
-    if (!this.product || !this._fromLoc || !this._toLoc || !this._quantity) return;
+    if (!this.product) return;
+    if (!this._fromLoc || !this._toLoc || !this._quantity) {
+      this._formError = 'Choose a source and a destination, and enter a quantity.';
+      return;
+    }
+    this._formError = '';
 
     this._isSubmitting = true;
     try {
@@ -94,8 +102,8 @@ export class GableInventoryTransferModal extends LitElement {
     if (!this.isOpen || !this.product) return nothing;
 
     return html`
-      <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-stock-modal-title">
-        <div class="bg-[#161821] w-full max-w-lg rounded-xl border border-white/10 shadow-2xl">
+      <div class="fixed inset-0 bg-backdrop/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-stock-modal-title">
+        <div class="bg-slate-steel w-full max-w-lg rounded-xl border border-white/10 shadow-2xl">
           <div class="flex justify-between items-center p-6 border-b border-white/10">
             <h2 id="transfer-stock-modal-title" class="text-xl font-bold">Transfer Stock</h2>
             <button @click=${this._close} class="text-gray-400 hover:text-white" aria-label="Close transfer dialog">
@@ -111,36 +119,24 @@ export class GableInventoryTransferModal extends LitElement {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="block text-sm text-gray-400 mb-2">From Location</label>
-                <select
-                  .value=${this._fromLoc}
-                  @change=${(e: Event) => this._fromLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
+                <gable-select
                   required
-                >
-                  <option value="">Select Source...</option>
-                  ${this._inventory.filter(i => i.location_id).map(i => html`
-                    <option value=${i.location_id}>
-                      ${i.location_name} (${formatQuantity(i.quantity)})
-                    </option>
-                  `)}
-                </select>
+                  ?invalid=${this._formError !== '' && !this._fromLoc}
+                  .value=${this._fromLoc}
+                  .options=${[{ value: '', label: 'Select Source...' }, ...this._inventory.filter(i => i.location_id).map(i => ({ value: String(i.location_id), label: `${i.location_name} (${formatQuantity(i.quantity)})` }))]}
+                  @change=${(e: Event) => { this._fromLoc = (e.target as HTMLSelectElement).value; this._formError = ''; }}
+                ></gable-select>
               </div>
 
               <div>
                 <label class="block text-sm text-gray-400 mb-2">To Location</label>
-                <select
-                  .value=${this._toLoc}
-                  @change=${(e: Event) => this._toLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
+                <gable-select
                   required
-                >
-                  <option value="">Select Dest...</option>
-                  ${this._locations
-                    .filter(l => l.id !== this._fromLoc)
-                    .map(l => html`
-                      <option value=${l.id}>${l.path || l.code}</option>
-                    `)}
-                </select>
+                  ?invalid=${this._formError !== '' && !this._toLoc}
+                  .value=${this._toLoc}
+                  .options=${[{ value: '', label: 'Select Dest...' }, ...this._locations.filter(l => l.id !== this._fromLoc).map(l => ({ value: l.id, label: l.path || l.code }))]}
+                  @change=${(e: Event) => { this._toLoc = (e.target as HTMLSelectElement).value; this._formError = ''; }}
+                ></gable-select>
               </div>
             </div>
 
@@ -153,7 +149,7 @@ export class GableInventoryTransferModal extends LitElement {
                 max=${this._maxQty}
                 .value=${this._quantity}
                 @input=${(e: InputEvent) => this._quantity = (e.target as HTMLInputElement).value}
-                class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white font-mono"
+                class="w-full bg-deep-space border border-white/20 rounded p-3 text-white font-mono"
                 required
               />
             </div>
@@ -165,10 +161,13 @@ export class GableInventoryTransferModal extends LitElement {
                 .value=${this._reason}
                 @input=${(e: InputEvent) => this._reason = (e.target as HTMLInputElement).value}
                 placeholder="Why move?"
-                class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
+                class="w-full bg-deep-space border border-white/20 rounded p-3 text-white"
               />
             </div>
 
+            ${this._formError ? html`
+              <p class="text-sm text-safety-red" role="alert" data-testid="transfer-form-error">${this._formError}</p>
+            ` : nothing}
             <div class="flex gap-4 pt-4">
               <button
                 type="button"
@@ -180,7 +179,7 @@ export class GableInventoryTransferModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting || Number(this._quantity) > this._maxQty}
-                class="flex-1 py-3 bg-[#00FFA3] text-black rounded font-bold hover:bg-[#00FFA3]/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex-1 py-3 bg-gable-green text-black rounded font-bold hover:bg-gable-green/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ${this._isSubmitting ? 'MOVING...' : 'CONFIRM TRANSFER'}
               </button>

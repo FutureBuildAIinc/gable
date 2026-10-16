@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Save, Loader2, Box, Eraser } from 'lucide';
@@ -205,12 +206,11 @@ export class GableProductGeometryTab extends LitElement {
                         width=${boxW}
                         height=${boxH}
                         rx="2"
-                        fill="rgb(132 204 22 / 0.15)"
-                        stroke="rgb(132 204 22 / 0.7)"
+                        class="fill-lime-500/15 stroke-lime-500/70"
                         stroke-width="1.5"
                     />
-                    <text x="130" y="248" text-anchor="middle" fill="#a1a1aa" font-size="11">${l}" long</text>
-                    <text x="8" y="130" fill="#a1a1aa" font-size="11">${h}" high</text>
+                    <text x="130" y="248" text-anchor="middle" class="fill-zinc-400" font-size="11">${l}" long</text>
+                    <text x="8" y="130" class="fill-zinc-400" font-size="11">${h}" high</text>
                 </svg>
             </div>
         `;
@@ -246,20 +246,19 @@ export class GableProductGeometryTab extends LitElement {
 
                         <div class="mt-5">
                             <label class="block text-xs text-zinc-500 mb-1" for="geometry-stackable">Stackable in a load</label>
-                            <select
+                            <gable-select
                                 id="geometry-stackable"
-                                aria-label="Stackable in a load"
                                 .value=${this.stackable === null ? '' : String(this.stackable)}
+                                .options=${[
+                                    { value: '', label: 'Unknown — not recorded' },
+                                    { value: 'true', label: 'Yes, other cargo may stack on it' },
+                                    { value: 'false', label: 'No, keep the top clear' },
+                                ]}
                                 @change=${(e: Event) => {
                                     const v = (e.target as HTMLSelectElement).value;
                                     this.stackable = v === '' ? null : v === 'true';
                                 }}
-                                class="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gable-green/50"
-                            >
-                                <option value="">Unknown — not recorded</option>
-                                <option value="true">Yes, other cargo may stack on it</option>
-                                <option value="false">No, keep the top clear</option>
-                            </select>
+                            ></gable-select>
                         </div>
 
                         <p class="text-[11px] text-zinc-600 mt-4">

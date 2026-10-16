@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { router } from '../lib/router.ts';
@@ -9,14 +10,21 @@ import { ToastService } from '../lib/toast-service.ts';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../services/QuoteService.ts';
 import { ProductService } from '../services/product.service.ts';
 import { CustomerService } from '../services/CustomerService.ts';
+import { LocationService } from '../services/LocationService.ts';
 import { deliveryService } from '../services/deliveryService.ts';
 import type { Customer } from '../types/customer.ts';
 import type { Product } from '../types/product.ts';
 import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
+import { resolveLinePrice } from '../lib/line-price.ts';
+import { formatTime, todayDay, addDays } from '../lib/dates.ts';
+import '../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../components/ui/gable-date-field.ts';
 import {
     dollarsToCents,
+    dollarsToTenThousandths,
+    tenThousandthsToInput,
     extensionCents,
     floatDollarsToTenThousandths,
     normalizeQuantity,
@@ -27,15 +35,15 @@ import {
 import type { QuoteLineEscalator } from '../types/pricing.ts';
 import type { ParseResponse, ParsedItem } from '../types/parsing.ts';
 import type { Vehicle } from '../types/delivery.ts';
-import { Save, FileText, Calculator, CreditCard, AlertCircle, TrendingUp, Truck, Package } from 'lucide';
+import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Package, Minus, Plus, Trash2, Loader2 } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './quotes/QuoteList.ts';
+import { isDrawablePath } from '../components/ProductThumb.ts';
 import '../components/customers/CustomerSelect.ts';
-import '../components/quotes/MaterialListUpload.ts';
+import '../components/quotes/MaterialIntake.ts';
 import '../components/quotes/LineItemEditor.ts';
 import '../components/quotes/EscalatorToggle.ts';
-import '../components/quotes/ParsedResultsPanel.ts';
 
 /**
  * One editor line. Quantity is a decimal string and the unit price an integer in
@@ -58,12 +66,20 @@ interface LineWithEscalator {
     escalator: QuoteLineEscalator;
 }
 
+/** The local calendar day of a stored instant, so a Valid until set to a day shows that day west of UTC. */
+function localDay(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const defaultEscalator = (): QuoteLineEscalator => ({
     enabled: false,
     escalation_type: 'PERCENTAGE',
     escalation_rate: 5,
-    effective_date: new Date().toISOString().split('T')[0],
-    target_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    effective_date: todayDay(),
+    target_date: addDays(todayDay(), 90),
 });
 
 @customElement('gable-quote-builder')
@@ -86,10 +102,14 @@ export class GableQuoteBuilder extends LitElement {
     @state() private vehicles: Vehicle[] = [];
 
     // AI Parsing state
-    @state() private parseResult: ParseResponse | null = null;
-    @state() private showParsePanel = false;
     @state() private aiSource = false;
     @state() private lastParseResult: ParseResponse | null = null;
+
+    // Header and terms
+    @state() private quoteNumber: string | null = null;
+    @state() private quoteStatus = 'draft';
+    @state() private validUntil = '';
+    @state() private yardName: string | null = null;
 
     // Save state: the loaded quote's revision (If-Match) and server side problems.
     @state() private revision: number | null = null;
@@ -141,6 +161,9 @@ export class GableQuoteBuilder extends LitElement {
             } catch { /* customer might not load, that's ok */ }
 
             this.revision = quote.revision;
+            this.quoteNumber = quote.number;
+            this.quoteStatus = quote.status;
+            this.validUntil = quote.expires_at ? localDay(quote.expires_at) : '';
             this.jobId = quote.job_id;
             this.expiresAt = quote.expires_at;
             this.formError = null;
@@ -164,6 +187,9 @@ export class GableQuoteBuilder extends LitElement {
             this.freightCents = quote.freight_cents;
             this.freightText = quote.freight_cents > 0 ? centsToInput(quote.freight_cents) : '';
             this.selectedVehicleId = quote.vehicle_id ?? undefined;
+            LocationService.getBranch(quote.branch_id)
+                .then(b => { this.yardName = b.name; })
+                .catch(() => { this.yardName = null; });
         } catch (err) {
             console.error('Failed to load quote for editing', err);
             ToastService.show(`Failed to load quote: ${quoteErrorMessage(err, 'Unknown error')}`, 'error');
@@ -198,27 +224,98 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private handleParseComplete(result: ParseResponse) {
-        this.parseResult = result;
-        this.showParsePanel = true;
+        this.lastParseResult = result;
     }
 
-    private handleAcceptParsed(parsedItems: ParsedItem[]) {
+    private handleQuantity(idx: number, value: string) {
+        const q = normalizeQuantity(value);
+        const updated = [...this.lines];
+        updated[idx] = { ...updated[idx], quantity: q ?? value };
+        this.lines = updated;
+    }
+
+    private stepQuantity(idx: number, delta: number) {
+        const current = Number(this.lines[idx].quantity);
+        const next = numberToQuantity(Math.max(1, (Number.isFinite(current) ? current : 0) + delta));
+        if (next !== null) this.handleQuantity(idx, next);
+    }
+
+    private handlePrice(idx: number, value: string) {
+        const tt = dollarsToTenThousandths(value);
+        if (tt === null) return;
+        const updated = [...this.lines];
+        updated[idx] = { ...updated[idx], unit_price_ten_thousandths: tt };
+        this.lines = updated;
+    }
+
+    private removeLine(idx: number) {
+        this.lines = this.lines.filter((_, i) => i !== idx);
+        const errs: Record<number, string> = {};
+        for (const [k, v] of Object.entries(this.lineErrors)) {
+            const i = Number(k);
+            if (i < idx) errs[i] = v; else if (i > idx) errs[i - 1] = v;
+        }
+        this.lineErrors = errs;
+    }
+
+    /**
+     * Every Accept joins this chain, so a batch accepted while an earlier one is still
+     * pricing waits its turn: each batch is priced, then joined, in the order accepted.
+     * The intake removes a line the moment it emits it; that is safe because the chain
+     * holds the batch until it joins and a pricing failure falls back, never throws.
+     */
+    private acceptQueue: Promise<void> = Promise.resolve();
+
+    /** Batches accepted and not yet joined: saving waits for this to reach zero, so no accepted line is lost. */
+    @state() private pendingAccepts = 0;
+
+    private handleAcceptParsed(parsedItems: ParsedItem[]): Promise<void> {
+        // A sample list is not the user's file: it never joins a quote, by any path.
+        if (this.lastParseResult?.synthetic) return Promise.resolve();
+        this.pendingAccepts += 1;
+        this.acceptQueue = this.acceptQueue.then(() => this.priceAndJoin(parsedItems)).catch((err) => {
+            console.error('Failed to add accepted lines', err);
+            ToastService.show('Some accepted lines could not be added; read the material list again to add them', 'error');
+        }).finally(() => { this.pendingAccepts -= 1; });
+        return this.acceptQueue;
+    }
+
+    /** Price a batch for one customer: the price a hand added line takes (the customer's, else the base price). */
+    private priceBatch(parsedItems: ParsedItem[], customerId: string | undefined) {
         // The parsing API still answers in float dollars and a float quantity;
         // both are converted here, once, through the integer helpers.
-        const newLines: LineWithEscalator[] = parsedItems.map(item => ({
+        return Promise.all(parsedItems.map(item => {
+            const uom = (item.matched_product?.uom || item.uom || '').toUpperCase();
+            const base = floatDollarsToTenThousandths(item.matched_product?.base_price || 0);
+            return item.matched_product
+                ? resolveLinePrice(customerId, item.matched_product.product_id, uom, base)
+                : Promise.resolve({ unitPriceTenThousandths: base, details: null, failed: false });
+        }));
+    }
+
+    private async priceAndJoin(parsedItems: ParsedItem[]) {
+        let customerId = this.customer?.id;
+        let priced = await this.priceBatch(parsedItems, customerId);
+        // The customer changed while pricing ran: price again for the one the quote has now.
+        while (this.customer?.id !== customerId) {
+            customerId = this.customer?.id;
+            priced = await this.priceBatch(parsedItems, customerId);
+        }
+        const newLines: LineWithEscalator[] = parsedItems.map((item, i) => ({
             product_id: item.matched_product?.product_id || null,
             sku: item.matched_product?.sku || 'SPECIAL-ORDER',
             description: item.matched_product?.description || item.raw_text,
             quantity: numberToQuantity(item.quantity) ?? '1',
             uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
-            unit_price_ten_thousandths: floatDollarsToTenThousandths(item.matched_product?.base_price || 0),
+            unit_price_ten_thousandths: priced[i].unitPriceTenThousandths,
             escalator: defaultEscalator(),
         }));
         this.lines = [...this.lines, ...newLines];
         this.aiSource = true;
-        this.lastParseResult = this.parseResult;
-        this.showParsePanel = false;
-        this.parseResult = null;
+        const failed = priced.filter(p => p.failed).length;
+        if (failed > 0) {
+            ToastService.show(`Customer prices could not be read for ${failed} ${failed === 1 ? 'line' : 'lines'}; the base price is on them`, 'error');
+        }
         ToastService.show(`${parsedItems.length} items added from material list`, 'success');
     }
 
@@ -283,8 +380,9 @@ export class GableQuoteBuilder extends LitElement {
         ToastService.show(this.formError, 'error');
     }
 
-    private async handleSave() {
-        if (!this.customer) return;
+    /** Saves the draft; with `send` it then marks the quote sent at the revision the save returned. */
+    private async handleSave(send = false) {
+        if (!this.customer || this.pendingAccepts > 0) return;
         if (this.saveBlockedReason) {
             this.formError = this.saveBlockedReason;
             return;
@@ -304,15 +402,18 @@ export class GableQuoteBuilder extends LitElement {
                 lines: this.lines.map(l => this.buildLine(l)),
             };
             if (delivery && this.selectedVehicleId) payload.vehicle_id = this.selectedVehicleId;
-            if (this.isEditing) {
-                payload.job_id = this.jobId;
+            if (this.isEditing) payload.job_id = this.jobId;
+            if (this.validUntil !== (this.expiresAt ? localDay(this.expiresAt) : '')) {
+                // A changed date is valid through the end of that day.
+                payload.expires_at = this.validUntil ? new Date(`${this.validUntil}T23:59:59`).toISOString() : null;
+            } else if (this.isEditing) {
                 payload.expires_at = this.expiresAt;
             }
 
             if (!this.isEditing) payload.source = this.aiSource ? 'ai' : 'manual';
 
             // Attach AI parse data if available (a create only)
-            if (!this.isEditing && this.aiSource && this.lastParseResult) {
+            if (!this.isEditing && this.aiSource && this.lastParseResult && !this.lastParseResult.synthetic) {
                 payload.parse_map = this.lastParseResult.items as unknown as QuoteRequest['parse_map'];
                 if (this.lastParseResult.source_image) {
                     const [header, data] = this.lastParseResult.source_image.split(',');
@@ -331,6 +432,14 @@ export class GableQuoteBuilder extends LitElement {
             } else {
                 quote = await QuoteService.create(payload);
                 ToastService.show('Draft quote created', 'success');
+            }
+            if (send) {
+                try {
+                    await QuoteService.transition(quote.id, 'sent', quote.revision);
+                    ToastService.show('Quote sent', 'success');
+                } catch (sendErr) {
+                    ToastService.show(`Saved as a draft, but not sent: ${quoteErrorMessage(sendErr, 'Failed to send quote')}`, 'error');
+                }
             }
             router.navigate(`/quotes/${quote.id}`);
         } catch (err) {
@@ -388,6 +497,129 @@ export class GableQuoteBuilder extends LitElement {
         return this.customer && limit !== null && limit !== undefined ? this.customer.balance_cents + this.totalCents > limit : false;
     }
 
+    private renderCustomerCard() {
+        const c = this.customer;
+        if (!c) {
+            return html`
+                <gable-customer-select
+                    @customer-select=${(e: CustomEvent) => { this.customer = e.detail; }}
+                    .selectedCustomerId=${undefined}
+                ></gable-customer-select>
+            `;
+        }
+        const limit = c.credit_limit_cents;
+        const available = limit === null || limit === undefined ? null : limit - c.balance_cents;
+        return html`
+            <div data-testid="customer-card" class="rounded-lg border border-white/10 bg-black/20 p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-white font-medium truncate">${c.name}</div>
+                        <div class="font-mono text-xs text-zinc-500">${c.account_number}</div>
+                    </div>
+                    <button type="button" data-testid="change-customer" @click=${() => { this.customer = null; }}
+                        class="text-xs text-blueprint-blue hover:text-sky-300 shrink-0">Change</button>
+                </div>
+                <dl class="mt-4 grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                        <dt class="text-zinc-500">Terms</dt>
+                        <dd class="mt-0.5 text-zinc-200">${c.payment_terms?.name ?? 'Not set'}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-zinc-500">Open balance</dt>
+                        <dd class="mt-0.5 font-mono ${limit !== null && limit !== undefined && c.balance_cents > limit ? 'text-rose-400 font-bold' : 'text-zinc-200'}">${formatCents(c.balance_cents)}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-zinc-500">Credit available</dt>
+                        <dd class="mt-0.5 font-mono ${available !== null && available < 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'}">${available === null ? 'No limit' : formatCents(available)}</dd>
+                    </div>
+                </dl>
+                <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
+                    <span>Price level <span class="text-gable-green">${c.price_level?.name || 'Retail'}</span></span>
+                    ${c.salesperson_name ? html`<span>Salesperson <span class="text-zinc-200">${c.salesperson_name}</span></span>` : nothing}
+                    ${c.po_required ? html`<span class="text-amber-400">Customer PO required</span>` : nothing}
+                </div>
+                ${this.isOverLimit ? html`
+                    <div class="mt-3 flex items-start gap-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-lg">
+                        ${icon(AlertCircle, 16, 'w-4 h-4 shrink-0 mt-0.5')}
+                        <p>This quote exceeds the customer's credit limit. Approval will be required.</p>
+                    </div>
+                ` : nothing}
+            </div>
+        `;
+    }
+
+    private pictureByProduct = new Map<string, string>();
+
+    /** The picture path of a line's product, from the catalogue the builder loaded (null when it has none). */
+    private pictureOf(line: LineWithEscalator): string | null {
+        return line.product_id ? this.pictureByProduct.get(line.product_id) ?? null : null;
+    }
+
+    private renderLineRow(line: LineWithEscalator, idx: number, pictures: boolean) {
+        const err = this.lineErrors[idx];
+        return html`
+            <tr data-testid="quote-line" class="group hover:bg-white/5 transition-colors align-top">
+                <td class="px-4 py-3">
+                    <div class="flex items-start gap-3">
+                        ${pictures ? html`<gable-product-thumb .src=${this.pictureOf(line)} .size=${40} reserve></gable-product-thumb>` : nothing}
+                        <div class="min-w-0 flex-1">
+                            <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
+                            <div class="text-zinc-400 text-xs">${line.description}</div>
+                            ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
+                            <gable-escalator-toggle
+                                .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
+                                .escalator=${line.escalator}
+                                @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
+                            ></gable-escalator-toggle>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-2 py-3">
+                    <div class="inline-flex items-center rounded-md border border-white/10 bg-deep-space">
+                        <button type="button" data-testid="line-qty-down" aria-label="Decrease quantity" @click=${() => this.stepQuantity(idx, -1)}
+                            class="px-2 py-1.5 text-zinc-400 hover:text-white">${icon(Minus, 12)}</button>
+                        <input data-testid="line-qty" aria-label="Quantity" type="text" inputmode="decimal"
+                            class="w-16 bg-transparent text-center text-white font-mono text-sm outline-none"
+                            .value=${line.quantity}
+                            @change=${(e: Event) => this.handleQuantity(idx, (e.target as HTMLInputElement).value)} />
+                        <button type="button" data-testid="line-qty-up" aria-label="Increase quantity" @click=${() => this.stepQuantity(idx, 1)}
+                            class="px-2 py-1.5 text-zinc-400 hover:text-white">${icon(Plus, 12)}</button>
+                    </div>
+                </td>
+                <td class="px-2 py-3">
+                    ${line.uom === '' || err ? html`
+                        <div class="w-20">
+                            <gable-select label="Unit of measure"
+                                .value=${line.uom}
+                                .options=${[{ value: '', label: 'Unit...' }, ...QUOTE_UOM_CODES.map(code => ({ value: code, label: code }))]}
+                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}></gable-select>
+                        </div>
+                        ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
+                    ` : html`<span class="font-mono text-xs text-zinc-400">${line.uom}</span>`}
+                </td>
+                <td class="px-2 py-3 text-right">
+                    <input aria-label="Unit price" type="text" inputmode="decimal"
+                        class="w-24 bg-deep-space border border-white/10 rounded px-2 py-1.5 text-right text-zinc-200 font-mono text-sm outline-none focus:border-gable-green"
+                        .value=${tenThousandthsToInput(line.unit_price_ten_thousandths)}
+                        @change=${(e: Event) => this.handlePrice(idx, (e.target as HTMLInputElement).value)} />
+                    ${line.escalator.result ? html`
+                        <div class="text-xs text-emerald-400 mt-1 font-mono">→ ${formatPrice4(floatDollarsToTenThousandths(line.escalator.result.future_price))}</div>
+                    ` : nothing}
+                </td>
+                <td class="px-3 py-3 text-right font-mono font-bold text-emerald-400">
+                    ${formatCents(this.lineTotalCents(line))}
+                    ${line.escalator.result ? html`
+                        <div class="text-xs text-emerald-300/70 mt-1">→ ${formatCents(extensionCents(line.quantity, floatDollarsToTenThousandths(line.escalator.result.future_price), line.uom_qty, line.price_uom_qty))}</div>
+                    ` : nothing}
+                </td>
+                <td class="px-2 py-3 text-right">
+                    <button type="button" data-testid="line-remove" aria-label="Remove line" @click=${() => this.removeLine(idx)}
+                        class="p-1.5 rounded text-zinc-500 hover:text-rose-400 hover:bg-white/5">${icon(Trash2, 14)}</button>
+                </td>
+            </tr>
+        `;
+    }
+
     render() {
         if (this.initialLoading) {
             return html`
@@ -398,29 +630,39 @@ export class GableQuoteBuilder extends LitElement {
             `;
         }
 
+        const adding = this.pendingAccepts > 0;
+        const blocked = !this.customer || this.lines.length === 0 || this.loading || adding || this.saveBlockedReason !== null;
+        const secondary = 'inline-flex items-center justify-center rounded-lg text-sm font-medium border border-white/10 text-zinc-200 hover:bg-white/5 px-3 py-2 disabled:opacity-50';
+        const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
+        // The picture of each line's product, built once per render; room for a thumb only while some line has one.
+        this.pictureByProduct = new Map(this.products.filter(p => isDrawablePath(p.image_url)).map(p => [p.id, p.image_url as string]));
+        const linePictures = this.lines.some(l => this.pictureOf(l) !== null);
+
         return html`
             <div>
                 ${!this.isEditing ? html`<gable-quote-view-tabs active="new"></gable-quote-view-tabs>` : nothing}
 
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-                    <div>
-                        <h1 class="text-display-large text-white flex items-center gap-3">
-                            ${icon(FileText, 40, 'w-10 h-10 text-gable-green')}
-                            ${this.isEditing ? 'Edit Quote' : 'New Quote'}
-                        </h1>
-                        <p class="text-zinc-500 mt-1 max-w-2xl text-lg">
-                            ${this.isEditing ? 'Update this draft quote.' : 'Draft a new pricing proposal.'}
-                        </p>
+                <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <h1 class="text-2xl font-semibold text-white">${this.isEditing ? 'Edit quote' : 'New quote'}</h1>
+                        <span data-testid="quote-number" class="font-mono text-sm text-zinc-300">${this.quoteNumber ?? 'Number assigned on save'}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">${this.quoteStatus}</span>
+                        ${this.yardName ? html`<span data-testid="quote-yard" class="text-xs text-zinc-300">${this.yardName}</span>` : nothing}
+                        <span class="font-mono text-xs text-zinc-500">${formatTime(new Date())}</span>
                     </div>
-                    <button
-                        @click=${() => this.handleSave()}
-                        ?disabled=${!this.customer || this.lines.length === 0 || this.loading || this.saveBlockedReason !== null}
-                        class="inline-flex items-center justify-center rounded-lg text-sm font-medium transition-colors bg-gable-green text-deep-space hover:bg-gable-green/90 px-4 py-2 shadow-glow disabled:opacity-50"
-                    >
-                        ${this.loading ? html`<span class="animate-spin mr-2">...</span>` : icon(Save, 16, 'w-4 h-4 mr-2')}
-                        ${this.isEditing ? 'Save Changes' : 'Create Quote'}
-                    </button>
-                </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" class=${secondary} @click=${() => window.print()}>${icon(Printer, 16, 'mr-2')} Print</button>
+                        <button type="button" data-testid="save-draft" class=${secondary} ?disabled=${blocked}
+                            @click=${() => this.handleSave(false)}>
+                            ${icon(Save, 16, 'mr-2')} ${adding ? 'Adding lines...' : this.isEditing ? 'Save changes' : 'Save draft'}
+                        </button>
+                        <button type="button" data-primary="true" ?disabled=${blocked} @click=${() => this.handleSave(true)}
+                            class="inline-flex items-center justify-center rounded-lg text-sm font-bold bg-gable-green text-deep-space hover:bg-gable-green/90 px-5 py-2 shadow-glow disabled:opacity-50">
+                            ${this.loading ? html`<span class="animate-spin mr-2 inline-flex">${icon(Loader2, 16)}</span>` : icon(Send, 16, 'mr-2')}
+                            Send quote
+                        </button>
+                    </div>
+                </header>
 
                 ${this.saveBlockedReason || this.formError ? html`
                     <div role="alert" class="flex items-start gap-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm p-3 rounded-lg mb-6">
@@ -429,315 +671,119 @@ export class GableQuoteBuilder extends LitElement {
                     </div>
                 ` : nothing}
 
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                    <!-- Left Column: Customer & Details -->
-                    <div class="lg:col-span-4 space-y-6">
-                        <div class="bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-                            <div class="p-6">
-                                <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
-                                    ${icon(CreditCard, 20, 'w-5 h-5 text-zinc-400')}
-                                    Customer Details
-                                </h2>
-                                <gable-customer-select
-                                    @customer-select=${(e: CustomEvent) => { this.customer = e.detail; }}
-                                    .selectedCustomerId=${this.customer?.id}
-                                ></gable-customer-select>
+                <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                    <!-- Products -->
+                    <section data-pane="products" aria-label="Products" class="xl:col-span-8 space-y-4">
+                        <div class="${card} p-5">
+                            <h2 class="text-lg font-medium text-white mb-4">Products</h2>
+                            <gable-line-item-editor
+                                .products=${this.products}
+                                .customerId=${this.customer?.id}
+                                @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.uom, e.detail.unitPriceTenThousandths)}
+                            ></gable-line-item-editor>
 
-                                ${this.customer ? html`
-                                    <div class="mt-6 space-y-4 text-sm border-t border-white/5 pt-6">
-                                        <div class="flex justify-between items-center bg-white/5 p-3 rounded-lg">
-                                            <span class="text-zinc-400">Account #</span>
-                                            <span class="font-mono text-white font-bold">${this.customer.account_number}</span>
-                                        </div>
-                                        <div class="flex justify-between items-center">
-                                            <span class="text-zinc-400">Price Level</span>
-                                            <span class="text-gable-green font-medium px-2 py-0.5 rounded bg-gable-green/10 border border-gable-green/20">
-                                                ${this.customer.price_level?.name || 'Retail'}
-                                            </span>
-                                        </div>
-                                        <div class="space-y-2 pt-2">
-                                            <div class="flex justify-between">
-                                                <span class="text-zinc-400">Credit Limit</span>
-                                                <span class="font-mono text-zinc-200">${this.customer.credit_limit_cents === null ? 'No limit' : formatCents(this.customer.credit_limit_cents)}</span>
-                                            </div>
-                                            <div class="flex justify-between">
-                                                <span class="text-zinc-400">Balance Due</span>
-                                                <span class="font-mono ${this.customer.credit_limit_cents !== null && this.customer.balance_cents > this.customer.credit_limit_cents ? 'text-rose-500 font-bold' : 'text-zinc-200'}">
-                                                    ${formatCents(this.customer.balance_cents)}
-                                                </span>
-                                            </div>
-                                            <div class="flex justify-between border-t border-white/5 pt-2">
-                                                <span class="text-zinc-400">Available</span>
-                                                <span class="font-mono font-bold ${this.customer.credit_limit_cents !== null && this.customer.credit_limit_cents - this.customer.balance_cents < 0 ? 'text-rose-500' : 'text-emerald-400'}">
-                                                    ${this.customer.credit_limit_cents === null ? 'No limit' : formatCents(this.customer.credit_limit_cents - this.customer.balance_cents)}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        ${this.isOverLimit ? html`
-                                            <div class="flex items-start gap-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-lg">
-                                                ${icon(AlertCircle, 16, 'w-4 h-4 shrink-0 mt-0.5')}
-                                                <p>This quote exceeds the customer's credit limit. Approval will be required.</p>
-                                            </div>
+                            <div class="rounded-lg overflow-x-auto border border-white/5 bg-black/20">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
+                                        <tr>
+                                            <th class="px-4 py-3">Item</th>
+                                            <th class="px-2 py-3">Qty</th>
+                                            <th class="px-2 py-3">Unit</th>
+                                            <th class="px-2 py-3 text-right">Unit price</th>
+                                            <th class="px-3 py-3 text-right">Line total</th>
+                                            <th class="px-2 py-3"><span class="sr-only">Remove</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-white/5">
+                                        ${this.lines.length === 0 ? html`
+                                            <tr><td colspan="6" class="px-6 py-10 text-center text-zinc-500 italic">No items yet. Search a product above or read a material list.</td></tr>
                                         ` : nothing}
-                                    </div>
-                                ` : nothing}
+                                        ${this.lines.map((line, idx) => this.renderLineRow(line, idx, linePictures))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="mt-5">
+                            <gable-material-intake
+                                ?disabled=${this.loading}
+                                @parse-complete=${(e: CustomEvent) => this.handleParseComplete(e.detail)}
+                                @accept-lines=${(e: CustomEvent) => this.handleAcceptParsed(e.detail)}
+                            ></gable-material-intake>
                             </div>
                         </div>
+                    </section>
 
-                        <div class="bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-                            <div class="p-6">
-                                <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
-                                    ${icon(Truck, 20, 'w-5 h-5 text-zinc-400')}
-                                    Fulfillment
-                                </h2>
-
-                                <!-- Delivery Type Toggle -->
-                                <div class="flex gap-1 bg-white/5 rounded-lg p-1 border border-white/10 mb-4">
-                                    <button
-                                        @click=${() => { this.deliveryType = 'pickup'; this.freightCents = 0; this.freightText = ''; this.selectedVehicleId = undefined; }}
-                                        class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                                            this.deliveryType === 'pickup'
-                                                ? 'bg-gable-green/10 text-gable-green border border-gable-green/20'
-                                                : 'text-zinc-400 hover:text-white'
-                                        }"
-                                    >
-                                        ${icon(Package, 14)} Pickup
-                                    </button>
-                                    <button
-                                        @click=${() => { this.deliveryType = 'delivery'; }}
-                                        class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                                            this.deliveryType === 'delivery'
-                                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                                : 'text-zinc-400 hover:text-white'
-                                        }"
-                                    >
-                                        ${icon(Truck, 14)} Delivery
-                                    </button>
-                                </div>
-
-                                ${this.deliveryType === 'delivery' ? html`
-                                    <div class="space-y-4">
-                                        <div>
-                                            <label class="block text-xs text-zinc-500 mb-1.5">Assign Truck</label>
-                                            <select
-                                                .value=${this.selectedVehicleId || ''}
-                                                @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}
-                                                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                                            >
-                                                <option value="">Select a truck...</option>
-                                                ${this.vehicles.map(v => html`
-                                                    <option value="${v.id}">
-                                                        ${v.name} \u2014 ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})
-                                                    </option>
-                                                `)}
-                                            </select>
-                                            ${this.vehicles.length === 0 ? html`
-                                                <p class="text-xs text-zinc-500 mt-1">No vehicles in fleet. Add vehicles in Fleet Management.</p>
-                                            ` : nothing}
-                                        </div>
-                                        <div>
-                                            <label class="block text-xs text-zinc-500 mb-1.5">Freight Charge ($)</label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                .value=${this.freightText}
-                                                @input=${(e: Event) => {
-                                                    this.freightText = (e.target as HTMLInputElement).value;
-                                                    this.freightCents = dollarsToCents(this.freightText) ?? 0;
-                                                }}
-                                                placeholder="0.00"
-                                                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                                            />
-                                        </div>
-                                    </div>
-                                ` : nothing}
-                            </div>
+                    <!-- Customer and terms -->
+                    <section data-pane="customer" aria-label="Customer and terms" class="xl:col-span-4 space-y-4">
+                        <div class="${card} p-5">
+                            <h2 class="text-lg font-medium text-white mb-4">Customer</h2>
+                            ${this.renderCustomerCard()}
                         </div>
 
-                        <div class="bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden bg-gradient-to-br from-gable-green/5 to-emerald-900/5 border-gable-green/20">
-                            <div class="p-6">
-                                <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
-                                    ${icon(Calculator, 20, 'w-5 h-5 text-gable-green')}
-                                    Quote Summary
-                                </h2>
-                                <div class="flex items-baseline justify-between">
-                                    <span class="text-zinc-400">Subtotal</span>
-                                    <span class="font-mono font-bold ${this.effectiveFreightCents > 0 ? 'text-lg text-zinc-300' : 'text-2xl text-white'}">${formatCents(this.subtotalCents)}</span>
-                                </div>
+                        <div class="${card} p-5">
+                            <h2 class="text-lg font-medium text-white mb-4">Terms</h2>
+                            <label class="block text-xs text-zinc-500 mb-1.5" for="quote-valid-until">Valid until</label>
+                            <gable-date-field id="quote-valid-until" label="Valid until" .value=${this.validUntil}
+                                @change=${(e: Event) => { this.validUntil = (e.target as GableDateField).value; }}></gable-date-field>
 
+                            <div class="flex gap-1 bg-white/5 rounded-lg p-1 border border-white/10 mt-5 mb-4">
+                                <button type="button"
+                                    @click=${() => { this.deliveryType = 'pickup'; this.freightCents = 0; this.freightText = ''; this.selectedVehicleId = undefined; }}
+                                    class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${this.deliveryType === 'pickup' ? 'bg-gable-green/10 text-gable-green border border-gable-green/20' : 'text-zinc-400 hover:text-white'}">
+                                    ${icon(Package, 14)} Pickup
+                                </button>
+                                <button type="button" @click=${() => { this.deliveryType = 'delivery'; }}
+                                    class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${this.deliveryType === 'delivery' ? 'bg-blueprint-blue/10 text-blueprint-blue border border-blueprint-blue/20' : 'text-zinc-400 hover:text-white'}">
+                                    ${icon(Truck, 14)} Delivery
+                                </button>
+                            </div>
+
+                            ${this.deliveryType === 'delivery' ? html`
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-xs text-zinc-500 mb-1.5">Assign truck</label>
+                                        <gable-select .value=${this.selectedVehicleId || ''}
+                                            .options=${[{ value: '', label: 'Select a truck...' }, ...this.vehicles.map(v => ({ value: v.id, label: `${v.name} — ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})` }))]}
+                                            @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}></gable-select>
+                                        ${this.vehicles.length === 0 ? html`<p class="text-xs text-zinc-500 mt-1">No vehicles in fleet. Add vehicles in Fleet Management.</p>` : nothing}
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-zinc-500 mb-1.5">Freight charge ($)</label>
+                                        <input type="number" min="0" step="0.01" placeholder="0.00" .value=${this.freightText}
+                                            @input=${(e: Event) => {
+                                                this.freightText = (e.target as HTMLInputElement).value;
+                                                this.freightCents = dollarsToCents(this.freightText) ?? 0;
+                                            }}
+                                            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-blueprint-blue/50" />
+                                    </div>
+                                </div>
+                            ` : nothing}
+                        </div>
+
+                        <div class="${card} p-5 border-gable-green/20">
+                            <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">${icon(Calculator, 20, 'w-5 h-5 text-gable-green')} Totals</h2>
+                            <dl class="space-y-2 text-sm">
+                                <div class="flex justify-between"><dt class="text-zinc-400">Products</dt><dd class="font-mono text-zinc-200">${formatCents(this.subtotalCents)}</dd></div>
                                 ${this.effectiveFreightCents > 0 ? html`
-                                    <div class="flex items-baseline justify-between mt-2">
-                                        <span class="text-zinc-400 flex items-center gap-1.5 text-sm">
-                                            ${icon(Truck, 14, 'w-3.5 h-3.5 text-blue-400')}
-                                            Freight
-                                        </span>
-                                        <span class="font-mono font-bold text-lg text-blue-400">${formatCents(this.effectiveFreightCents)}</span>
-                                    </div>
+                                    <div class="flex justify-between"><dt class="text-zinc-400 flex items-center gap-1.5">${icon(Truck, 14, 'w-3.5 h-3.5 text-blueprint-blue')} Freight</dt><dd class="font-mono text-blueprint-blue">${formatCents(this.effectiveFreightCents)}</dd></div>
                                 ` : nothing}
-
-                                ${this.effectiveFreightCents > 0 ? html`
-                                    <div class="flex items-baseline justify-between mt-2 pt-2 border-t border-white/5">
-                                        <span class="text-zinc-400 font-medium">Total</span>
-                                        <span class="text-2xl font-mono font-bold text-white">${formatCents(this.totalCents)}</span>
-                                    </div>
-                                ` : nothing}
-
-                                ${this.hasEscalators ? html`
-                                    <div class="mt-3 pt-3 border-t border-white/5">
-                                        <div class="flex items-baseline justify-between">
-                                            <span class="text-zinc-400 flex items-center gap-1.5 text-sm">
-                                                ${icon(TrendingUp, 14, 'w-3.5 h-3.5 text-gable-green')}
-                                                Escalated Total
-                                            </span>
-                                            <span class="text-xl font-mono font-bold text-emerald-400">
-                                                ${formatCents(this.escalatedTotalCents)}
-                                            </span>
-                                        </div>
-                                        <div class="text-[10px] text-zinc-500 text-right mt-1">
-                                            +${formatCents(this.escalatedTotalCents - this.subtotalCents)} from escalators
-                                        </div>
-                                    </div>
-                                ` : nothing}
-
-                                ${this.hasStaleLines ? html`
-                                    <div class="mt-3 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs p-2.5 rounded-lg">
-                                        ${icon(AlertCircle, 14, 'w-3.5 h-3.5 shrink-0')}
-                                        Some lines have stale pricing
-                                    </div>
-                                ` : nothing}
-
-                                <div class="text-xs text-zinc-500 text-right mt-1">Tax calculated at invoicing</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Right Column: Lines -->
-                    <div class="lg:col-span-8 space-y-6">
-                        <div class="bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl overflow-hidden h-full">
-                            <div class="p-6">
-                                <div class="flex items-center justify-between mb-6">
-                                    <h2 class="text-lg font-medium text-white">Line Items</h2>
-                                    <gable-material-list-upload
-                                        @parse-complete=${(e: CustomEvent) => this.handleParseComplete(e.detail)}
-                                        ?disabled=${this.loading}
-                                    ></gable-material-list-upload>
+                                <div class="flex justify-between"><dt class="text-zinc-400">Tax</dt><dd class="text-xs text-zinc-500">Calculated at invoicing</dd></div>
+                                <div class="flex justify-between items-baseline border-t border-white/10 pt-3"><dt class="text-zinc-200 font-medium">Quote total</dt><dd data-testid="quote-total" class="font-mono text-2xl font-bold text-white">${formatCents(this.totalCents)}</dd></div>
+                            </dl>
+                            ${this.hasEscalators ? html`
+                                <div class="mt-3 pt-3 border-t border-white/5 flex items-baseline justify-between">
+                                    <span class="text-zinc-400 flex items-center gap-1.5 text-sm">${icon(TrendingUp, 14, 'w-3.5 h-3.5 text-gable-green')} Escalated total</span>
+                                    <span class="text-xl font-mono font-bold text-emerald-400">${formatCents(this.escalatedTotalCents)}</span>
                                 </div>
-
-                                <gable-line-item-editor
-                                    .products=${this.products}
-                                    .customerId=${this.customer?.id}
-                                    @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.uom, e.detail.unitPriceTenThousandths)}
-                                ></gable-line-item-editor>
-
-                                <!-- Lines Table -->
-                                <div class="mt-8 rounded-lg overflow-hidden border border-white/5 bg-black/20">
-                                    <table class="w-full text-sm text-left">
-                                        <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
-                                            <tr>
-                                                <th class="px-6 py-4">SKU / Description</th>
-                                                <th class="px-6 py-4 text-right">Qty</th>
-                                                <th class="px-6 py-4 text-right">Unit Price</th>
-                                                <th class="px-6 py-4 text-right">Total</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-white/5">
-                                            ${this.lines.length === 0 ? html`
-                                                <tr>
-                                                    <td colspan="4" class="px-6 py-12 text-center text-zinc-500 italic">
-                                                        No items added yet. Start building the quote above.
-                                                    </td>
-                                                </tr>
-                                            ` : nothing}
-                                            ${this.lines.map((line, idx) => html`
-                                                <tr class="group hover:bg-white/5 transition-colors">
-                                                    <td class="px-6 py-4">
-                                                        <div class="font-mono text-white mb-0.5 group-hover:text-gable-green transition-colors">${line.sku}</div>
-                                                        <div class="text-zinc-400 text-xs">${line.description}</div>
-
-                                                        <gable-escalator-toggle
-                                                            .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
-                                                            .escalator=${line.escalator}
-                                                            @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
-                                                        ></gable-escalator-toggle>
-                                                    </td>
-                                                    <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
-                                                        ${line.quantity} <span class="text-zinc-600 text-[10px] ml-1">${line.uom}</span>
-                                                        ${line.uom === '' || this.lineErrors[idx] ? html`
-                                                            <select
-                                                                aria-label="Unit of measure"
-                                                                class="mt-1 w-24 bg-[#0A0B10] border border-rose-500/40 rounded px-2 py-1 text-white text-right font-mono text-xs outline-none"
-                                                                .value=${line.uom}
-                                                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}
-                                                            >
-                                                                <option value="" ?selected=${line.uom === ''}>Unit...</option>
-                                                                ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
-                                                            </select>
-                                                            ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
-                                                        ` : nothing}
-                                                        ${this.lineErrors[idx] ? html`<div class="text-[10px] text-rose-400 mt-1">${this.lineErrors[idx]}</div>` : nothing}
-                                                    </td>
-                                                    <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
-                                                        ${formatPrice4(line.unit_price_ten_thousandths)}
-                                                        ${line.escalator.result ? html`
-                                                            <div class="text-xs text-emerald-400 mt-1">
-                                                                \u2192 ${formatPrice4(floatDollarsToTenThousandths(line.escalator.result.future_price))}
-                                                            </div>
-                                                        ` : nothing}
-                                                    </td>
-                                                    <td class="px-6 py-4 text-right font-mono font-bold text-emerald-400 align-top">
-                                                        ${formatCents(this.lineTotalCents(line))}
-                                                        ${line.escalator.result ? html`
-                                                            <div class="text-xs text-emerald-300/70 mt-1">
-                                                                \u2192 ${formatCents(extensionCents(line.quantity, floatDollarsToTenThousandths(line.escalator.result.future_price), line.uom_qty, line.price_uom_qty))}
-                                                            </div>
-                                                        ` : nothing}
-                                                    </td>
-                                                </tr>
-                                            `)}
-                                        </tbody>
-                                        ${this.lines.length > 0 ? html`
-                                            <tfoot class="bg-white/5 border-t border-white/10">
-                                                <tr>
-                                                    <td colspan="3" class="px-6 py-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">
-                                                        ${this.effectiveFreightCents > 0 ? 'Lines Subtotal' : 'Total Amount'}
-                                                    </td>
-                                                    <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">${formatCents(this.subtotalCents)}</td>
-                                                </tr>
-                                                ${this.effectiveFreightCents > 0 ? html`
-                                                    <tr class="border-t border-white/5">
-                                                        <td colspan="3" class="px-6 py-2 text-right text-zinc-400 text-xs">
-                                                            <span class="flex items-center justify-end gap-1.5">
-                                                                ${icon(Truck, 12, 'w-3 h-3 text-blue-400')} Freight
-                                                            </span>
-                                                        </td>
-                                                        <td class="px-6 py-2 text-right font-mono text-sm text-blue-400">${formatCents(this.effectiveFreightCents)}</td>
-                                                    </tr>
-                                                    <tr class="border-t border-white/5">
-                                                        <td colspan="3" class="px-6 py-4 text-right font-medium text-zinc-400 uppercase tracking-wider text-xs">Total Amount</td>
-                                                        <td class="px-6 py-4 text-right font-mono text-xl font-bold text-gable-green">${formatCents(this.totalCents)}</td>
-                                                    </tr>
-                                                ` : nothing}
-                                            </tfoot>
-                                        ` : nothing}
-                                    </table>
+                            ` : nothing}
+                            ${this.hasStaleLines ? html`
+                                <div class="mt-3 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs p-2.5 rounded-lg">
+                                    ${icon(AlertCircle, 14, 'w-3.5 h-3.5 shrink-0')} Some lines have stale pricing
                                 </div>
-                            </div>
+                            ` : nothing}
                         </div>
-                    </div>
+                    </section>
                 </div>
-
-                <!-- AI Parse Results Overlay -->
-                ${this.showParsePanel && this.parseResult ? html`
-                    <gable-parsed-results-panel
-                        .result=${this.parseResult}
-                        @accept=${(e: CustomEvent) => this.handleAcceptParsed(e.detail)}
-                        @close=${() => {
-                            this.showParsePanel = false;
-                            this.parseResult = null;
-                        }}
-                    ></gable-parsed-results-panel>
-                ` : nothing}
             </div>
         `;
     }

@@ -163,11 +163,19 @@ func newAccessFixture(t *testing.T, db *database.DB) *accessFixture {
 // test when the mint refuses.
 func (f *accessFixture) mint(name string, scopes []string, branch *uuid.UUID) string {
 	f.t.Helper()
-	raw, _, err := f.keys.GenerateKey(context.Background(), name, scopes, branch)
+	raw, _ := f.mintWithID(name, scopes, branch)
+	return raw
+}
+
+// mintWithID is mint that also returns the new key's id, the entity of the
+// audit rows the key's own refusals write.
+func (f *accessFixture) mintWithID(name string, scopes []string, branch *uuid.UUID) (string, uuid.UUID) {
+	f.t.Helper()
+	raw, key, err := f.keys.GenerateKey(context.Background(), name, scopes, branch)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return raw
+	return raw, key.ID
 }
 
 // doKey runs one request through the machine key core.
@@ -597,7 +605,7 @@ func TestBoundKeyPinnedToItsBranch(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, other)
 	})
-	bound := f.mint("bound", []string{"quotes:propose", "quotes:write"}, &other)
+	bound, boundID := f.mintWithID("bound", []string{"quotes:propose", "quotes:write"}, &other)
 	unbound := f.mint("unbound", []string{"quotes:propose"}, nil)
 
 	// A draft in the default branch (a person's) and one the bound key
@@ -639,10 +647,10 @@ func TestBoundKeyPinnedToItsBranch(t *testing.T) {
 		http.StatusForbidden, "branch_id")
 
 	// X-Branch-Id naming another branch: refused, with the audit row.
-	before := auditCount(t, f.db, "key.branch_refused")
+	before := keyAuditCount(t, f.db, "key.branch_refused", boundID)
 	refuse(t, f.doKey(bound, "GET", "/api/v1/drafts/quotes", nil, "X-Branch-Id", f.branchID.String()),
 		http.StatusForbidden, "")
-	if after := auditCount(t, f.db, "key.branch_refused"); after <= before {
+	if after := keyAuditCount(t, f.db, "key.branch_refused", boundID); after <= before {
 		t.Errorf("key.branch_refused rows: %d then %d, want the refusal audited", before, after)
 	}
 	// Naming its own branch in the header is fine.
@@ -710,6 +718,20 @@ func TestAKeyCannotRouteAroundTheGateOnTheSeam(t *testing.T) {
 			t.Errorf("the keyed seam request (scopes held) = %d (%s), want the seam's own 401", r.status, pickCode(r))
 		}
 	}
+}
+
+// keyAuditCount counts the audit rows of one action that name one key as their
+// entity: the key is this test's own, so no other test's rows (the database is
+// shared) and no row leaving a time window can change the count.
+func keyAuditCount(t *testing.T, db *database.DB, action string, keyID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_log WHERE action = $1 AND entity_type = 'api_key' AND entity_id = $2`,
+		action, keyID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // auditCount counts the audit rows of one action written in this test run.

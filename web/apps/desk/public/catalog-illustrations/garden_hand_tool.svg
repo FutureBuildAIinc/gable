@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Round point shovel with wood handle</title>
+  <defs>
+    <style>
+      .handleMain{fill:#a05a2c}
+      .handleHi{fill:#c4784c}
+      .handleShade{fill:#7a3c1c}
+      .gripMain{fill:#3a3d44}
+      .gripHi{fill:#5a5d66}
+      .gripShade{fill:#1a1a1a}
+      .headMain{fill:#5a5d66}
+      .headHi{fill:#8a8f98}
+      .headShade{fill:#2a2d33}
+      .headDark{fill:#1a1d24}
+      .ferrule{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="84" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g transform="rotate(-25 128 128)">
+    <ellipse class="gripMain" cx="128" cy="40" rx="20" ry="14"/>
+    <ellipse class="gripHi" cx="128" cy="36" rx="16" ry="6" opacity="0.6"/>
+    <ellipse class="gripShade" cx="128" cy="44" rx="16" ry="6" opacity="0.7"/>
+    <rect class="gripMain" x="118" y="36" width="20" height="14" rx="3"/>
+    <line x1="124" y1="40" x2="124" y2="50" stroke="#5a5d66" stroke-width="0.5" opacity="0.7"/>
+    <line x1="130" y1="40" x2="130" y2="50" stroke="#5a5d66" stroke-width="0.5" opacity="0.7"/>
+  </g>
+  <g transform="rotate(-25 128 128)">
+    <rect class="handleMain" x="118" y="48" width="20" height="160" rx="3"/>
+    <rect class="handleHi" x="118" y="48" width="4" height="160" opacity="0.6"/>
+    <rect class="handleShade" x="134" y="48" width="4" height="160" opacity="0.7"/>
+    <rect class="ferrule" x="114" y="206" width="28" height="10" rx="2"/>
+    <rect class="ferrule" x="114" y="216" width="28" height="6" rx="1"/>
+  </g>
+  <g transform="rotate(-25 128 128)">
+    <path class="headMain" d="M 88 220 L 168 220 L 158 250 L 98 250 Z"/>
+    <path class="headHi" d="M 88 220 L 168 220 L 166 224 L 90 224 Z" opacity="0.6"/>
+    <path class="headShade" d="M 98 246 L 158 246 L 158 250 L 98 250 Z" opacity="0.7"/>
+    <path class="headMain" d="M 116 218 L 140 218 L 134 220 L 124 220 Z"/>
+    <line x1="104" y1="232" x2="152" y2="232" stroke="#3a3d44" stroke-width="0.5" opacity="0.6"/>
+    <line x1="106" y1="240" x2="150" y2="240" stroke="#3a3d44" stroke-width="0.5" opacity="0.6"/>
+    <path class="headDark" d="M 94 250 L 162 250 L 158 256 L 98 256 Z"/>
+  </g>
+</svg>

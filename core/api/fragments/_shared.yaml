@@ -225,6 +225,39 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    UnsupportedType:
+      description: >-
+        The file is of a type the chosen AI provider cannot read (code
+        unsupported_type). The message names what it reads, for example
+        JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic
+        provider. Nothing answers a canned result for it. ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    AIRefused:
+      description: >-
+        The AI provider refused the saved key (code ai_refused; a 401 or 403
+        from the provider). It is not AI off: a key is saved and was not
+        accepted. The message names the provider and says an administrator
+        can enter the key again in Tech Admin, AI Settings. Nothing answers a
+        canned result for it. ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    AIOffEither:
+      description: >-
+        AI is off (code ai_off): no key for the chosen provider, a stored key
+        the vault cannot open, or a feature the chosen provider does not
+        offer. The message
+        says that an administrator turns it on in Tech Admin, AI. Or the
+        idempotency layer reports the Idempotency-Key in progress (code
+        idempotency_in_progress). Both are the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     ConflictEither:
       description: >-
         Either the handler reports a conflict with the resource's current state
@@ -422,6 +455,7 @@ components:
                 - conflict
                 - payment_required
                 - charge_not_reversed
+                - ai_off
                 - precondition_failed
                 - payload_too_large
                 - unsupported_media_type

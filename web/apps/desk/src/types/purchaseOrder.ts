@@ -9,6 +9,10 @@ export type POSource = 'MANUAL' | 'REORDER' | 'SPECIAL_ORDER' | 'A2A';
 
 export interface PurchaseOrder {
     id: string;
+    /** The PO's yard (the branch the wire stamped on create). The list and detail
+     * pages resolve this to a branch name through `BranchContext.branches`. */
+    branch_id?: string;
+    number?: string;
     vendor_id?: string;
     vendor_name?: string;
     status: POStatus;
@@ -28,6 +32,10 @@ export interface PurchaseOrderLine {
     id: string;
     po_id: string;
     product_id?: string;
+    /** The product's SKU, resolved client-side from `product_id`. The wire
+     *  carries the description and the product id; the SKU is filled in by the
+     *  page when it loads. Absent on lines that do not reference a product. */
+    sku?: string;
     description: string;
     quantity: number;
     qty_received: number;
@@ -37,6 +45,8 @@ export interface PurchaseOrderLine {
 
 export interface CreatePORequest {
     vendor_id: string;
+    /** The yard the order is bought for; with none the server settles it from the caller's grants. */
+    branch_id?: string;
     lines: CreatePOLine[];
 }
 
@@ -90,9 +100,14 @@ export interface FreightUploadResponse {
 export type UrgencyLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface PurchaseRecommendation {
+    /** The yard this row is for: stock and sales are that yard's. */
+    branch_id: string;
+    branch_name: string;
     product_id: string;
     product_sku: string;
     product_name: string;
+    /** The product's vendor, by id; absent when the product has none. */
+    vendor_id?: string;
     vendor_name?: string;
     current_stock: number;
     avg_daily_sales: number;
@@ -114,5 +129,6 @@ export interface RecommendationSummary {
     medium_count: number;
     low_count: number;
     total_estimated_cost: number;
-    items: PurchaseRecommendation[];
+    /** null when nothing needs reordering (the route answers `items: null`). */
+    items: PurchaseRecommendation[] | null;
 }

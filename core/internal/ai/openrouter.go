@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,6 +40,17 @@ type Client struct {
 	models       *ModelRouter
 	httpClient   *http.Client
 	maestro      *MaestroClient // optional: routes text AI through Brain (dead code today)
+
+	// The native Anthropic provider (see anthropic.go). The provider is chosen
+	// in settings; the key lives sealed in system_settings and has no
+	// environment fallback.
+	provider            string
+	providerStore       *KeyStore
+	anthropicKey        string
+	anthropicKeyStore   *KeyStore
+	anthropicModel      string
+	anthropicModelStore *KeyStore
+	anthropicBaseURL    string // tests only
 }
 
 const (
@@ -136,9 +148,102 @@ func (c *Client) getBaseURL(ctx context.Context) string {
 	return strings.TrimRight(candidate, "/")
 }
 
-// IsConfigured returns true if an API key is available (from DB or env/static).
+// IsConfigured returns true if the active provider has its key (from DB or
+// env/static for OpenRouter; the sealed admin key for Anthropic).
 func (c *Client) IsConfigured(ctx context.Context) bool {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicKeyValue(ctx) != ""
+	}
 	return c.getKey(ctx) != ""
+}
+
+// PhotoOffMessage is what a person sees when a photo is asked of the
+// Anthropic provider, which makes no photos (it draws illustrations; see
+// ImageKind). Nothing falls back to another provider.
+const PhotoOffMessage = "Photo generation needs the OpenRouter provider, which an administrator chooses in Tech Admin, AI. With Anthropic chosen, Gable draws an illustration instead."
+
+// The two things PIM's image generation can make, by provider.
+const (
+	ImageKindPhoto        = "image"        // OpenRouter: a photo model
+	ImageKindIllustration = "illustration" // Anthropic: an SVG drawing
+)
+
+// ImageKind names what image generation makes with the chosen provider: a
+// photo with OpenRouter, an illustration with Anthropic.
+func (c *Client) ImageKind(ctx context.Context) string {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return ImageKindIllustration
+	}
+	return ImageKindPhoto
+}
+
+// ProviderName is the chosen provider ("openrouter" or "anthropic").
+func (c *Client) ProviderName(ctx context.Context) string { return c.activeProvider(ctx) }
+
+// CheckImage reports whether image generation can run with the chosen
+// provider: no key for it is ErrAIOff. With Anthropic the generation is an
+// illustration drawn by the text model; with OpenRouter, the photo model.
+// No call goes to the other provider.
+func (c *Client) CheckImage(ctx context.Context) error {
+	if !c.IsConfigured(ctx) {
+		return ErrAIOff
+	}
+	return nil
+}
+
+// WithProvider fixes the provider (tests, static configs).
+func (c *Client) WithProvider(p string) *Client { c.provider = p; return c }
+
+// WithProviderStore attaches the admin-editable provider choice.
+func (c *Client) WithProviderStore(ks *KeyStore) *Client { c.providerStore = ks; return c }
+
+// WithAnthropicKey fixes the Anthropic key (tests only; serve uses the store).
+func (c *Client) WithAnthropicKey(k string) *Client { c.anthropicKey = k; return c }
+
+// WithAnthropicKeyStore attaches the store the sealed Anthropic key is read from.
+func (c *Client) WithAnthropicKeyStore(ks *KeyStore) *Client { c.anthropicKeyStore = ks; return c }
+
+// WithAnthropicModel fixes the Anthropic model (tests).
+func (c *Client) WithAnthropicModel(m string) *Client { c.anthropicModel = m; return c }
+
+// WithAnthropicModelStore attaches the admin-editable Anthropic model.
+func (c *Client) WithAnthropicModelStore(ks *KeyStore) *Client { c.anthropicModelStore = ks; return c }
+
+// WithAnthropicBaseURL points the Anthropic provider at a test server.
+func (c *Client) WithAnthropicBaseURL(u string) *Client { c.anthropicBaseURL = u; return c }
+
+func (c *Client) activeProvider(ctx context.Context) string {
+	if c.providerStore != nil {
+		if p := c.providerStore.Get(ctx); p == ProviderAnthropic || p == ProviderOpenRouter {
+			return p
+		}
+	}
+	if c.provider == ProviderAnthropic {
+		return ProviderAnthropic
+	}
+	return ProviderOpenRouter
+}
+
+// Invalidate drops every cached setting the client reads (keys, base URL,
+// provider, models), so the next call uses what an admin just saved.
+func (c *Client) Invalidate() {
+	for _, ks := range []*KeyStore{c.keyStore, c.baseURLStore, c.providerStore, c.anthropicKeyStore, c.anthropicModelStore} {
+		if ks != nil {
+			ks.Invalidate()
+		}
+	}
+	if c.models != nil {
+		for _, ks := range []*KeyStore{c.models.text, c.models.vision, c.models.cheap, c.models.image} {
+			ks.Invalidate()
+		}
+	}
+}
+
+func (c *Client) anthropicKeyValue(ctx context.Context) string {
+	if c.anthropicKeyStore != nil {
+		return c.anthropicKeyStore.Get(ctx)
+	}
+	return c.anthropicKey
 }
 
 // --- JWT context propagation for Maestro (dead code path, preserved) ---
@@ -383,7 +488,7 @@ func stripJSONFence(s string) string {
 func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResponse, error) {
 	apiKey := c.getKey(ctx)
 	if apiKey == "" {
-		return nil, fmt.Errorf("no OpenRouter API key configured")
+		return nil, ErrAIOff
 	}
 
 	body, err := json.Marshal(req)
@@ -403,7 +508,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("AI request failed: %w", err)
+		return nil, &UnreachableError{Provider: "OpenRouter", Detail: "AI request failed: " + providerWords(err.Error(), apiKey)}
 	}
 	defer resp.Body.Close()
 
@@ -413,11 +518,15 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		msg := string(respBody)
 		var errResp chatResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, errResp.Error.Message)
+			msg = errResp.Error.Message
 		}
-		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, string(respBody))
+		if refused := refusedIfAuth("OpenRouter", resp.StatusCode, providerWords(msg, apiKey)); refused != nil {
+			return nil, refused
+		}
+		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, providerWords(msg, apiKey))
 	}
 
 	var cr chatResponse
@@ -425,7 +534,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	if cr.Error != nil {
-		return nil, fmt.Errorf("OpenRouter error: %s", cr.Error.Message)
+		return nil, fmt.Errorf("OpenRouter error: %s", providerWords(cr.Error.Message, apiKey))
 	}
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from AI (no choices)")
@@ -442,6 +551,9 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, maxTokens int) (string, string, error) {
 	if maxTokens == 0 {
 		maxTokens = 2048
+	}
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicGenerate(ctx, systemPrompt, userPrompt, maxTokens)
 	}
 
 	msgs := make([]chatMessage, 0, 2)
@@ -472,6 +584,12 @@ func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, 
 // (base64 data-URI, resolved model, error). The data URI is exactly the
 // "data:image/...;base64,..." shape callers persist directly.
 func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (string, string, error) {
+	if err := c.CheckImage(ctx); err != nil {
+		return "", "", err
+	}
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return "", "", NewOff(PhotoOffMessage)
+	}
 	fullPrompt := prompt
 	if style != "" {
 		fullPrompt = fmt.Sprintf("%s. Style: %s", prompt, style)
@@ -495,12 +613,16 @@ func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (strin
 		model = wantModel
 	}
 	for _, img := range resp.Choices[0].Message.Images {
-		if strings.HasPrefix(img.ImageURL.URL, "data:image/") {
+		if photoDataURIRE.MatchString(img.ImageURL.URL) {
 			return img.ImageURL.URL, model, nil
 		}
 	}
 	return "", "", fmt.Errorf("image model %q returned no image data", model)
 }
+
+// photoDataURIRE is what the photo model may answer with: a raster image, or
+// an SVG (which the caller must sanitise before storing it).
+var photoDataURIRE = regexp.MustCompile(`^data:image/(png|jpeg|webp|gif|svg\+xml);base64,`)
 
 // FreightInvoiceResult holds the extracted freight invoice data.
 type FreightInvoiceResult struct {
@@ -530,7 +652,21 @@ Rules:
 // 400); the no-key guard here is a backstop that preserves the helpful message.
 func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, contentType string) (*FreightInvoiceResult, string, error) {
 	if !c.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("no AI key configured — please enter the freight total manually")
+		return nil, "", ErrAIOff
+	}
+
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		raw, err := c.anthropicFileCall(ctx, freightSystemPrompt,
+			"Extract the freight charge details from this invoice. Return JSON with total_amount, carrier_name, and invoice_number.",
+			fileBytes, contentType, 1024)
+		if err != nil {
+			return nil, "", err
+		}
+		var result FreightInvoiceResult
+		if err := json.Unmarshal([]byte(stripJSONFence(raw)), &result); err != nil {
+			return nil, raw, fmt.Errorf("failed to parse AI response as JSON: %w", err)
+		}
+		return &result, raw, nil
 	}
 
 	content, plugins, err := buildFileContent(fileBytes, contentType,
@@ -584,7 +720,7 @@ Example output:
 50 pcs - 2x4x8 SPF Stud
 25 pcs - 2x6x12 Doug Fir #2
 30 sheets - OSB 7/16 4x8
-20 bags - Quikrete 80lb`
+20 bags - Concrete mix 80lb`
 
 // ExtractMaterialList sends a file to the vision model for material list
 // extraction. Supports images, PDFs, and pre-processed text/csv. Returns the raw
@@ -605,7 +741,13 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 	}
 
 	if !c.IsConfigured(ctx) {
-		return "", fmt.Errorf("no AI key configured")
+		return "", ErrAIOff
+	}
+
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicFileCall(ctx, systemPrompt,
+			"Extract all material list items from this document. Output each item as: QUANTITY UOM - DESCRIPTION",
+			fileBytes, contentType, 4096)
 	}
 
 	content, plugins, err := buildFileContent(fileBytes, contentType,
@@ -636,6 +778,8 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 // plugin; text/plain & text/csv → a single text block with the content inlined.
 // The "unsupported content type" errors mirror the original Anthropic paths.
 func buildFileContent(fileBytes []byte, contentType, instruction string) ([]contentPart, []plugin, error) {
+	rawType := contentType
+	contentType = mediaType(contentType)
 	switch {
 	case strings.HasPrefix(contentType, "image/"):
 		return []contentPart{
@@ -660,12 +804,12 @@ func buildFileContent(fileBytes []byte, contentType, instruction string) ([]cont
 			[]plugin{{ID: "file-parser", PDF: &pdfPlugin{Engine: defaultPDFEngine}}},
 			nil
 
-	case contentType == "text/plain" || contentType == "text/csv":
+	case isTextMediaType(contentType):
 		return []contentPart{
 			{Type: "text", Text: instruction + "\n\n" + string(fileBytes)},
 		}, nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
+		return nil, nil, &UnsupportedTypeError{Message: fmt.Sprintf("This file type (%s) cannot be read. Use a picture, a PDF or a plain text or CSV file.", rawType)}
 	}
 }

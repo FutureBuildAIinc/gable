@@ -48,7 +48,7 @@
         "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-4>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "pickup",
         "expires_at": null,
         "exposure_cents": 0,
@@ -80,7 +80,7 @@
           }
         ],
         "margin_total_cents": 0,
-        "number": "Q-000021",
+        "number": "Q-000024",
         "original_content_type": null,
         "original_filename": null,
         "parse_map": null,
@@ -356,11 +356,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": false,
         "key_hint": null,
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 1,
-        "source": "none"
+        "source": "none",
+        "test_status": "none",
+        "vault_present": false
       }
     }
   },

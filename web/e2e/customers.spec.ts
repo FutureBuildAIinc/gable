@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { answerAppDialog, pickOption, pickOptionByValue } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -61,8 +62,8 @@ test.describe('Customer flow on the new contract', () => {
     await page.getByLabel('Email').fill('buyer@example.test');
     await page.getByLabel('Phone').fill('555-0142');
     await page.getByLabel('Billing address').fill('12 Mill Road');
-    await page.getByLabel('Tier').last().selectOption('gold');
-    await page.getByLabel('Payment terms').selectOption(net45.id);
+    await pickOption(page.getByLabel('Tier').last(), 'Gold');
+    await pickOptionByValue(page.getByLabel('Payment terms'), net45.id);
     await page.getByLabel('Credit limit (dollars)').fill('2,500.50');
     await page.getByLabel('Purchase order required').check();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'customer-create-form.png') });
@@ -310,9 +311,9 @@ test.describe('Customer flow on the new contract', () => {
     expect((await putRes.json()).revision).toBe(2);
     await expect(page.getByText('Cannot place orders')).toBeVisible();
 
-    page.once('dialog', (d) => void d.accept());
     const del = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/v1/contacts/${contact.id}` && r.request().method() === 'DELETE');
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await answerAppDialog(page, 'Delete');
     const delRes = await del;
     expect(delRes.status()).toBe(204);
     expect(delRes.request().headers()['if-match']).toBe('"2"');

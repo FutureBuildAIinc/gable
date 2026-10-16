@@ -6,11 +6,12 @@ import { customElement, state, property } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
+import { ArrowRight, ShoppingCart, BarChart3, ListChecks, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -58,7 +59,7 @@ export class GableQuoteList extends LitElement {
     @state() private updatingState: string | null = null;
 
     private stateColors: Record<string, string> = {
-        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        draft: 'bg-voice-fill/20 text-voice-text border-voice-fill/30',
         sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
         accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -179,7 +180,7 @@ export class GableQuoteList extends LitElement {
                         <p class="text-gray-400 text-sm mb-4">${this.error}</p>
                         <button
                             @click=${() => { this.error = null; this.loadQuotes(); }}
-                            class="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                            class="px-4 py-2 bg-gable-green text-deep-space rounded font-medium hover:opacity-90"
                         >
                             Retry
                         </button>
@@ -237,12 +238,12 @@ export class GableQuoteList extends LitElement {
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
                                         <td class="p-4 font-mono text-white/80">${quote.number}</td>
-                                        <td class="p-4 text-white/80">${new Date(quote.created_at).toLocaleDateString()}</td>
+                                        <td class="p-4 text-white/80">${formatDate(quote.created_at)}</td>
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
                                             ${quote.source === 'ai' ? html`
-                                                <span class="inline-flex items-center gap-1 text-xs text-violet-400">
-                                                    ${icon(Sparkles, 12)} AI
+                                                <span class="inline-flex items-center gap-1 text-xs text-zinc-300">
+                                                    ${icon(ListChecks, 12)} Material list
                                                 </span>
                                             ` : html`
                                                 <span class="text-xs text-zinc-500">Manual</span>

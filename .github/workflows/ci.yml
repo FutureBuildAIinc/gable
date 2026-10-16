@@ -93,10 +93,13 @@ jobs:
         run: go run ./cmd/migrate
 
       # Coverage is collected here rather than in a separate run so the suite is
-      # only executed once. `-covermode=atomic` is required by `-race`.
+      # only executed once. `-covermode=atomic` is required by `-race`. The seed
+      # package seeds whole scratch databases (the demo data import twice) and
+      # runs past go test's default ten minutes per package under race and
+      # coverage, so the limit is twenty.
       - name: Test (with coverage)
         working-directory: core
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
 
       # REPORTING ONLY — there is deliberately NO coverage threshold, here or
       # anywhere else in this workflow. Baseline coverage is low; a failing gate
@@ -412,6 +415,9 @@ jobs:
         working-directory: core
         env:
           DEMO_SEED: "1"
+          # The seed turns the multi yard switch on for the demo; the browser
+          # specs read the whole seed through one desk, so they run with it off.
+          DEMO_MULTI_YARD: "0"
         run: |
           go run ./cmd/migrate
           go run ./cmd/seed

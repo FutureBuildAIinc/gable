@@ -5,15 +5,19 @@ package seed
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // The seeder writes prices. A number in demoPricingRules that the pricing
@@ -418,5 +422,176 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 	}
 	if bName != "operator counter" {
 		t.Errorf("a re-seed renamed the branch only re-pointed register to %q, want the operator's name kept", bName)
+	}
+}
+
+// The demo seed sets an invented dealer profile and logo, once: a profile the
+// operator has filled in is not overwritten by a re-seed. The locale is
+// en-CA (the demo dealer is in British Columbia): set on the blank write, and
+// lifted from the migration's en-US default on a profile the demo already
+// seeded; an operator's own tag is kept.
+//
+// DB-gated: it runs the seeder's actual statement against the single row.
+func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	type snap struct {
+		legal, trading, phone, email, website, remit string
+		locale                                       string
+		logo                                         []byte
+		ctype                                        *string
+		revision                                     int64
+	}
+	var orig snap
+	if err := db.Pool.QueryRow(ctx, `SELECT legal_name, trading_name, phone, email, website, remit_to, locale, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
+		Scan(&orig.legal, &orig.trading, &orig.phone, &orig.email, &orig.website, &orig.remit, &orig.locale, &orig.logo, &orig.ctype, &orig.revision); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, locale=$7, logo=$8, logo_content_type=$9, revision=$10 WHERE id = 1`,
+			orig.legal, orig.trading, orig.phone, orig.email, orig.website, orig.remit, orig.locale, orig.logo, orig.ctype, orig.revision)
+	})
+	blank := func() {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='', trading_name='', phone='', email='', website='', remit_to='', locale='en-US', logo=NULL, logo_content_type=NULL WHERE id = 1`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() (legal, remit, locale string, hasLogo bool) {
+		t.Helper()
+		if err := db.Pool.QueryRow(ctx, `SELECT legal_name, remit_to, locale, logo IS NOT NULL FROM dealer_profile WHERE id = 1`).Scan(&legal, &remit, &locale, &hasLogo); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+
+	blank()
+	seedDealerProfile(sqlDB)
+	legal, remit, locale, hasLogo := read()
+	if legal != "Gable Building Supply Ltd" || !strings.Contains(remit, "Accounts Receivable") || !hasLogo {
+		t.Fatalf("a blank profile was not seeded: %q %q logo=%v", legal, remit, hasLogo)
+	}
+	if locale != "en-CA" {
+		t.Errorf("the seeded locale = %q, want en-CA", locale)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name = 'Edited By The Operator Ltd', locale = 'fr-CA' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	seedDealerProfile(sqlDB)
+	if legal, _, locale, _ := read(); legal != "Edited By The Operator Ltd" {
+		t.Errorf("a re-seed overwrote the operator's profile: %q", legal)
+	} else if locale != "fr-CA" {
+		t.Errorf("a re-seed overwrote the operator's locale: %q", locale)
+	}
+
+	// A profile the demo already seeded that still sits on the migration's
+	// en-US default is lifted to en-CA.
+	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='Gable Building Supply Ltd', trading_name='Gable Building Supply', locale='en-US' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	seedDealerProfile(sqlDB)
+	if _, _, locale, _ := read(); locale != "en-CA" {
+		t.Errorf("the demo default was not lifted to en-CA: %q", locale)
+	}
+}
+
+// CORRECTNESS: the seed mirrors each customer's primary branch into
+// customer_branches, the row the product's own create writes beside it, and
+// a re-seed never moves a customer's stored primary branch (r5 P2-1 and P3-9,
+// r6 section 2). Without the row the customer wall hides the customer from
+// every header and grants caller; moving the branch would strand the row.
+// The seed owns only the rows it creates: a customer an operator moved by
+// hand is not moved back.
+//
+// DB-gated. It runs the seeder's own customer step twice per leg.
+func TestSeedCustomer_MirrorsThePrimaryBranchAndNeverMovesIt(t *testing.T) {
+	pool := testutil.RequireDB(t)
+	ctx := context.Background()
+	sqlDB := stdlib.OpenDBFromPool(pool.Pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	var priceLevel uuid.UUID
+	if err := pool.Pool.QueryRow(ctx, `SELECT id FROM price_levels LIMIT 1`).Scan(&priceLevel); err != nil {
+		t.Fatalf("a price level for the customer: %v", err)
+	}
+	branchA, branchB := uuid.New(), uuid.New()
+	for _, b := range []uuid.UUID{branchA, branchB} {
+		if _, err := pool.Pool.Exec(ctx,
+			`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'seed customer test branch')`,
+			b, "SEEDC-"+b.String()[:8]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acct := "SEEDC-" + uuid.NewString()[:8]
+	c := demoCustomer{Name: "seed customer test", Acct: acct, Email: "seedc@example.com", Phone: "250-555-0100",
+		Addr: "1 Test Rd", Tier: "GOLD", Terms: "NET30", PriceLevel: "x", CreditLimit: 1000, PrimaryBranch: branchA}
+	t.Cleanup(func() {
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN (SELECT id FROM customers WHERE account_number = $1)`, acct)
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customers WHERE account_number = $1`, acct)
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, branchA, branchB)
+	})
+
+	rows := func(id uuid.UUID) map[uuid.UUID]bool {
+		t.Helper()
+		out := map[uuid.UUID]bool{}
+		r, err := pool.Pool.Query(ctx, `SELECT branch_id FROM customer_branches WHERE customer_id = $1`, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		for r.Next() {
+			var b uuid.UUID
+			if err := r.Scan(&b); err != nil {
+				t.Fatal(err)
+			}
+			out[b] = true
+		}
+		return out
+	}
+	primary := func(id uuid.UUID) uuid.UUID {
+		t.Helper()
+		var b uuid.UUID
+		if err := pool.Pool.QueryRow(ctx, `SELECT primary_branch_id FROM customers WHERE id = $1`, id).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	id, branch, err := seedCustomer(sqlDB, c, priceLevel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seedCustomer(sqlDB, c, priceLevel); err != nil {
+		t.Fatal(err)
+	}
+	if branch != branchA {
+		t.Errorf("seedCustomer returned branch %s, want %s", branch, branchA)
+	}
+	if got := rows(id); len(got) != 1 || !got[branchA] {
+		t.Errorf("after two seeds the customer holds branch rows %v, want exactly its primary branch %s", got, branchA)
+	}
+
+	// A customer an operator moved by hand is not moved back, and the row
+	// follows the stored branch only by adding it, never by deleting.
+	if _, err := pool.Pool.Exec(ctx, `UPDATE customers SET primary_branch_id = $1 WHERE id = $2`, branchB, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seedCustomer(sqlDB, c, priceLevel); err != nil {
+		t.Fatal(err)
+	}
+	if got := primary(id); got != branchB {
+		t.Errorf("a re-seed moved the customer's primary branch to %s, want it left at %s", got, branchB)
+	}
+	if got := rows(id); !got[branchB] {
+		t.Errorf("after the move the customer holds branch rows %v, want a row for its stored primary branch %s", got, branchB)
 	}
 }

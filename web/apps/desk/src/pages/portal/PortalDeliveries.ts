@@ -6,7 +6,9 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { Truck, Camera, RefreshCw, AlertTriangle, X, User, Clock, Phone, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide';
 import { PortalService } from '../../services/PortalService';
+import { formatDay, formatDate, formatDateTime, formatTime } from '../../lib/dates.ts';
 import type { PortalDelivery } from '../../types/portal';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 type FilterTab = 'all' | 'active' | 'upcoming' | 'completed';
 
@@ -20,16 +22,16 @@ function etaLabel(eta: string | null): string | null {
     if (diffMs <= 0) return 'Arriving now';
     const diffMin = Math.round(diffMs / 60000);
     if (diffMin < 120) return `Arriving in ${diffMin} min`;
-    return `ETA ${arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return `ETA ${formatTime(arrival)}`;
 }
 
 const deliveryStatusColor = (status: string): { fg: string; bg: string } => {
     const map: Record<string, { fg: string; bg: string }> = {
-        PENDING: { fg: '#F59E0B', bg: 'rgba(245,158,11,0.1)' },
-        OUT_FOR_DELIVERY: { fg: '#38BDF8', bg: 'rgba(56,189,248,0.1)' },
-        DELIVERED: { fg: '#00FFA3', bg: 'rgba(0,255,163,0.1)' },
-        FAILED: { fg: '#F43F5E', bg: 'rgba(244,63,94,0.1)' },
-        PARTIAL: { fg: '#A78BFA', bg: 'rgba(167,139,250,0.1)' },
+        PENDING: { fg: cssVarColor('amber-500'), bg: cssVarColor('amber-500', 0.1) },
+        OUT_FOR_DELIVERY: { fg: cssVarColor('blueprint-blue'), bg: cssVarColor('blueprint-blue', 0.1) },
+        DELIVERED: { fg: cssVarColor('gable-green'), bg: cssVarColor('gable-green', 0.1) },
+        FAILED: { fg: cssVarColor('safety-red'), bg: cssVarColor('safety-red', 0.1) },
+        PARTIAL: { fg: cssVarColor('violet-400'), bg: cssVarColor('violet-400', 0.1) },
     };
     return map[status] || map.PENDING;
 };
@@ -133,9 +135,9 @@ export class PortalDeliveries extends LitElement {
         const expanded = this.expandedId === del.id;
 
         return html`
-            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                 <!-- Header row -->
-                <button @click=${() => { this.expandedId = expanded ? null : del.id; }} class="w-full text-left p-4 hover:bg-white/5 transition-colors">
+                <button @click=${() => { this.expandedId = expanded ? null : del.id; }} class="w-full text-left p-4 hover:bg-hover-row transition-colors">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-4">
                             <div
@@ -159,8 +161,8 @@ export class PortalDeliveries extends LitElement {
                                         Order ${(del.order_number ?? del.order_id).substring(0, 8).toUpperCase()}
                                     </span>
                                     ${del.scheduled_date
-                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${new Date(del.scheduled_date).toLocaleDateString()}</span>`
-                                        : html`<span>${new Date(del.created_at).toLocaleDateString()}</span>`
+                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${formatDay(del.scheduled_date)}</span>`
+                                        : html`<span>${formatDate(del.created_at)}</span>`
                                     }
                                 </div>
                             </div>
@@ -238,7 +240,7 @@ export class PortalDeliveries extends LitElement {
                                 ${del.pod_timestamp ? html`
                                     <div class="flex items-center gap-1 text-xs text-zinc-500">
                                         ${icon(Clock, 12)}
-                                        <span>${new Date(del.pod_timestamp).toLocaleString()}</span>
+                                        <span>${formatDateTime(del.pod_timestamp)}</span>
                                     </div>
                                 ` : nothing}
                                 ${del.pod_proof_url ? html`
@@ -247,8 +249,8 @@ export class PortalDeliveries extends LitElement {
                                         class="w-10 h-10 rounded-lg overflow-hidden border border-white/10 hover:border-gable-green/50 transition-colors relative group"
                                     >
                                         <img src="${del.pod_proof_url}" alt="POD" class="w-full h-full object-cover" />
-                                        <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            ${icon(Camera, 12, 'text-white')}
+                                        <div class="absolute inset-0 bg-backdrop/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            ${icon(Camera, 12, 'text-plate')}
                                         </div>
                                     </button>
                                 ` : nothing}
@@ -314,7 +316,7 @@ export class PortalDeliveries extends LitElement {
 
                 ${this.deliveries.length === 0
                     ? html`
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-12 text-center">
                                 ${icon(Truck, 48, 'text-zinc-600 mx-auto mb-4')}
                                 <p class="text-zinc-400">No deliveries yet.</p>
@@ -323,7 +325,7 @@ export class PortalDeliveries extends LitElement {
                     `
                     : filtered.length === 0
                         ? html`
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                                 <div class="p-8 text-center">
                                     <p class="text-zinc-500 text-sm">No deliveries match this filter.</p>
                                 </div>
@@ -339,7 +341,7 @@ export class PortalDeliveries extends LitElement {
                 <!-- Lightbox -->
                 ${this.lightboxUrl ? html`
                     <div
-                        class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8"
+                        class="fixed inset-0 z-[100] bg-backdrop/80 backdrop-blur-md flex items-center justify-center p-8"
                         @click=${() => { this.lightboxUrl = null; }}
                     >
                         <div class="relative max-w-3xl w-full">

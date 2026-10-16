@@ -12,6 +12,7 @@ import type { GableOrderDetail } from './OrderDetail'
 import type { Order } from '../../types/order'
 import { mountAsync, text, jsonResponse } from '../../test/dom'
 import { ToastService } from '../../lib/toast-service.ts'
+import { readFileSync } from 'node:fs'
 
 // the header's Fulfil Order button
 function fulfilButton(el: Element): HTMLButtonElement {
@@ -109,6 +110,35 @@ describe('gable-order-detail - the order contract', () => {
     expect(text(el)).toContain('Confirmed')
   })
 
+  it('prints the pick ticket through the token, in a tab opened empty', async () => {
+    localStorage.setItem('token', 'test-token')
+    const tab = { location: { href: '' }, close: vi.fn() }
+    const open = vi.fn(() => tab)
+    vi.stubGlobal('open', open)
+    URL.createObjectURL = vi.fn(() => 'blob:pickticket')
+    URL.revokeObjectURL = vi.fn()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/pickticket/')) return new Response('%PDF', { status: 200 })
+      return jsonResponse(order())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+      const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Pick Ticket')) as HTMLButtonElement
+      expect(button).toBeDefined()
+      button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
+      expect(open.mock.calls[0]).toEqual(['', '_blank'])
+      const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/documents/print/pickticket/'))
+      expect(call, 'expected the pick ticket to be fetched').toBeDefined()
+      const init = (call as unknown as [string, RequestInit])[1]
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
+      expect(tab.location.href).toBe('blob:pickticket')
+    } finally {
+      localStorage.removeItem('token')
+    }
+  })
+
   it('renders cents money in dollars: the line and the totals', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     const body = text(el)
@@ -124,6 +154,14 @@ describe('gable-order-detail - the order contract', () => {
     expect(body).toContain('$32.40')
     expect(body).toContain('24')
     expect(body).toContain('PCS')
+  })
+
+  it('links the customer by name to its account page and shows no id fragment', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const link = el.querySelector<HTMLAnchorElement>(`a[href="/accounts/${order().customer_id}"]`)
+    expect(link).not.toBeNull()
+    expect(link?.textContent).toContain('Ridgeview Framing')
+    expect(text(el)).not.toContain('Account: 00000000')
   })
 
   it('renders the hold banner a confirm can land on, never an error page', async () => {
@@ -289,5 +327,15 @@ describe('gable-order-detail - the order contract', () => {
     expect(JSON.parse(String(call!.init!.body))).toEqual({ revision: 2, picked_up_by: 'Counter customer' })
     expect(new Headers(call!.init!.headers).get('If-Match')).toBe('"2"')
     expect(text(el)).toContain('Fulfilled')
+  })
+})
+
+describe('the order page source', () => {
+  it('keeps the credit hold comment on handleConfirm, which it describes', () => {
+    const src = readFileSync('src/pages/orders/OrderDetail.ts', 'utf8')
+    const at = src.indexOf('The confirm is the transition')
+    expect(at).toBeGreaterThan(-1)
+    const after = src.slice(at).split('private async ')[1]
+    expect(after.startsWith('handleConfirm(')).toBe(true)
   })
 })

@@ -73,7 +73,14 @@ paths:
       tags:
       - inventory
       summary: Adjust inventory (cycle count)
-      description: A result that would leave negative stock answers 500.
+      description: >-
+        A result that would leave negative stock answers 422 insufficient_stock.
+        An adjustment that names no location (a count or a delta) answers 422
+        location_required where the caller has no branch context; an absolute
+        count (is_delta false) that names none answers it too where the
+        product is held in more than one location in the caller's reach: a
+        count is for one location. An absolute count below the figure already
+        allocated to orders at that location answers 422 below_allocated.
       parameters:
       - $ref: '#/components/parameters/XBranchId'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -205,6 +212,7 @@ components:
       - sku
       - description
       - stock_uom
+      - image_url
       properties:
         id:
           type: string
@@ -215,6 +223,11 @@ components:
           type: string
         stock_uom:
           $ref: '#/components/schemas/UOM'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images
+            setting is on; null while it is off or the product has none.
     InventoryLevelPage:
       type: object
       required: [items, next_cursor, limit]

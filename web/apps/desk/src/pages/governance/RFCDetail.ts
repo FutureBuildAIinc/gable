@@ -6,6 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { GovernanceService } from '../../services/governance.service';
 import type { RFC } from '../../types/governance';
 import { ArrowLeft, Edit2, FileText, Calendar, User, Clock, CheckCircle, AlertCircle } from 'lucide';
@@ -104,14 +105,14 @@ export class GableRFCDetail extends LitElement {
                     ${icon(Calendar, 20, 'w-5 h-5 text-zinc-500 mt-0.5')}
                     <div>
                       <h3 class="text-xs uppercase text-zinc-500 font-bold mb-0.5">Created</h3>
-                      <p class="text-zinc-300 text-sm font-mono">${new Date(rfc.created_at).toLocaleDateString()}</p>
+                      <p class="text-zinc-300 text-sm font-mono">${formatDate(rfc.created_at)}</p>
                     </div>
                   </div>
                   <div class="flex items-start gap-3">
                     ${icon(Clock, 20, 'w-5 h-5 text-zinc-500 mt-0.5')}
                     <div>
                       <h3 class="text-xs uppercase text-zinc-500 font-bold mb-0.5">Last Updated</h3>
-                      <p class="text-zinc-300 text-sm font-mono">${new Date(rfc.updated_at).toLocaleDateString()}</p>
+                      <p class="text-zinc-300 text-sm font-mono">${formatDate(rfc.updated_at)}</p>
                     </div>
                   </div>
                 </div>
@@ -145,7 +146,7 @@ export class GableRFCDetail extends LitElement {
           </div>
 
           <!-- Main Content (Document) -->
-          <div class="flex-1 overflow-auto rounded-xl border border-white/10 bg-[#0A0B10] shadow-2xl relative">
+          <div class="flex-1 overflow-auto rounded-xl border border-white/10 bg-deep-space shadow-2xl relative">
             <div class="max-w-4xl mx-auto p-12 min-h-full">
               <div class="prose prose-invert max-w-none">
                 <pre class="font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed text-sm">${rfc.content ?? ""}</pre>

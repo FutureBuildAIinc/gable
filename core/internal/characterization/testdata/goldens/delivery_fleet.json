@@ -709,12 +709,27 @@
             "updated_at": "<ts+0d>"
           },
           {
+            "cdl_class": "1",
+            "cdl_expiry": "<date>",
+            "created_at": "<ts+0d>",
+            "email": "demo-driver-kel@gablebuildingsupply.example",
+            "hire_date": "<date>",
+            "id": "<id-23>",
+            "license_number": "BC-CDL-99001",
+            "name": "Alex Moreno",
+            "phone_number": "250-555-4010",
+            "photo_url": null,
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
             "cdl_class": "5",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "tyler.b@gablelumber.ca",
+            "email": "tyler.b@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-23>",
+            "id": "<id-24>",
             "license_number": "BC-CDL-33976",
             "name": "Tyler Beaudry",
             "phone_number": "250-555-4006",
@@ -727,9 +742,9 @@
             "cdl_class": "1",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "brendan.l@gablelumber.ca",
+            "email": "brendan.l@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-24>",
+            "id": "<id-25>",
             "license_number": "BC-CDL-44065",
             "name": "Brendan Lee",
             "phone_number": "250-555-4005",
@@ -742,9 +757,9 @@
             "cdl_class": "3",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "marc.c@gablelumber.ca",
+            "email": "marc.c@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-25>",
+            "id": "<id-26>",
             "license_number": "BC-CDL-55154",
             "name": "Marc Cardinal",
             "phone_number": "250-555-4004",
@@ -757,9 +772,9 @@
             "cdl_class": "1",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "connor.t@gablelumber.ca",
+            "email": "connor.t@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-26>",
+            "id": "<id-27>",
             "license_number": "BC-CDL-66243",
             "name": "Connor Tremblay",
             "phone_number": "250-555-4003",
@@ -772,9 +787,9 @@
             "cdl_class": "3",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "daniel.s@gablelumber.ca",
+            "email": "daniel.s@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-27>",
+            "id": "<id-28>",
             "license_number": "BC-CDL-77332",
             "name": "Daniel Sandhu",
             "phone_number": "250-555-4002",
@@ -787,9 +802,9 @@
             "cdl_class": "1",
             "cdl_expiry": "<date>",
             "created_at": "<ts+0d>",
-            "email": "ryan.m@gablelumber.ca",
+            "email": "ryan.m@gablebuildingsupply.example",
             "hire_date": "<date>",
-            "id": "<id-28>",
+            "id": "<id-29>",
             "license_number": "BC-CDL-88421",
             "name": "Ryan MacKenzie",
             "phone_number": "250-555-4001",
@@ -819,7 +834,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-29>"
+          "request_id": "<id-30>"
         }
       }
     }
@@ -845,7 +860,7 @@
           "message": "invalid driver id"
         },
         "meta": {
-          "request_id": "<id-30>"
+          "request_id": "<id-31>"
         }
       }
     }
@@ -869,7 +884,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-31>"
+          "request_id": "<id-32>"
         }
       }
     }
@@ -938,7 +953,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -970,7 +985,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-33>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -1003,7 +1018,7 @@
           "message": "invalid driver id"
         },
         "meta": {
-          "request_id": "<id-34>"
+          "request_id": "<id-35>"
         }
       }
     }
@@ -1024,7 +1039,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-35>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -1051,7 +1066,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-36>"
+          "request_id": "<id-37>"
         }
       }
     }
@@ -1081,7 +1096,7 @@
         "license_number": "R1C-DL-1",
         "name": "R1C Driver Renamed",
         "phone_number": "250-555-0102",
-        "photo_url": "/uploads/drivers/<id-37>.jpg",
+        "photo_url": "/uploads/drivers/<id-38>.jpg",
         "revision": 3,
         "status": "active",
         "updated_at": "<ts+0d>"
@@ -1115,7 +1130,7 @@
           "message": "unsupported file type"
         },
         "meta": {
-          "request_id": "<id-38>"
+          "request_id": "<id-39>"
         }
       }
     }
@@ -1147,7 +1162,7 @@
           "message": "invalid driver id"
         },
         "meta": {
-          "request_id": "<id-39>"
+          "request_id": "<id-40>"
         }
       }
     }
@@ -1173,7 +1188,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-40>"
+          "request_id": "<id-41>"
         }
       }
     }
@@ -1227,7 +1242,7 @@
         "license_number": "R1C-DL-1",
         "name": "R1C Driver Renamed",
         "phone_number": "250-555-0102",
-        "photo_url": "/uploads/drivers/<id-37>.jpg",
+        "photo_url": "/uploads/drivers/<id-38>.jpg",
         "revision": 3,
         "status": "active",
         "updated_at": "<ts+0d>"
@@ -1287,7 +1302,7 @@
           {
             "capacity_weight_lbs": 5000,
             "created_at": "<ts+0d>",
-            "id": "<id-41>",
+            "id": "<id-42>",
             "insurance_expiry": null,
             "license_plate": "GLD0001",
             "make": null,
@@ -1306,7 +1321,7 @@
           {
             "capacity_weight_lbs": 30000,
             "created_at": "<ts+0d>",
-            "id": "<id-42>",
+            "id": "<id-43>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-FLT-103",
             "make": "Peterbilt",
@@ -1325,7 +1340,7 @@
           {
             "capacity_weight_lbs": 5000,
             "created_at": "<ts+0d>",
-            "id": "<id-43>",
+            "id": "<id-44>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-VAN-501",
             "make": "Chevrolet",
@@ -1344,7 +1359,7 @@
           {
             "capacity_weight_lbs": 14000,
             "created_at": "<ts+0d>",
-            "id": "<id-44>",
+            "id": "<id-45>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-BOX-202",
             "make": "Isuzu",
@@ -1363,7 +1378,7 @@
           {
             "capacity_weight_lbs": 3000,
             "created_at": "<ts+0d>",
-            "id": "<id-45>",
+            "id": "<id-46>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-PKP-401",
             "make": "Ford",
@@ -1382,7 +1397,7 @@
           {
             "capacity_weight_lbs": 18000,
             "created_at": "<ts+0d>",
-            "id": "<id-46>",
+            "id": "<id-47>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-BOM-301",
             "make": "Mack",
@@ -1401,7 +1416,7 @@
           {
             "capacity_weight_lbs": 16000,
             "created_at": "<ts+0d>",
-            "id": "<id-47>",
+            "id": "<id-48>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-BOX-201",
             "make": "Freightliner",
@@ -1420,7 +1435,7 @@
           {
             "capacity_weight_lbs": 24000,
             "created_at": "<ts+0d>",
-            "id": "<id-48>",
+            "id": "<id-49>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-FLT-102",
             "make": "International",
@@ -1439,7 +1454,7 @@
           {
             "capacity_weight_lbs": 24000,
             "created_at": "<ts+0d>",
-            "id": "<id-49>",
+            "id": "<id-50>",
             "insurance_expiry": "<date>",
             "license_plate": "BC-FLT-101",
             "make": "International",
@@ -1482,7 +1497,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-50>"
+          "request_id": "<id-51>"
         }
       }
     }
@@ -1508,7 +1523,7 @@
           "message": "limit is out of range"
         },
         "meta": {
-          "request_id": "<id-51>"
+          "request_id": "<id-52>"
         }
       }
     }
@@ -1528,7 +1543,7 @@
           "message": "this write needs If-Match"
         },
         "meta": {
-          "request_id": "<id-52>"
+          "request_id": "<id-53>"
         }
       }
     }
@@ -1565,7 +1580,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-53>"
+          "request_id": "<id-54>"
         }
       }
     }
@@ -1594,7 +1609,7 @@
           "message": "invalid vehicle id"
         },
         "meta": {
-          "request_id": "<id-54>"
+          "request_id": "<id-55>"
         }
       }
     }
@@ -1617,7 +1632,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-55>"
+          "request_id": "<id-56>"
         }
       }
     }
@@ -1637,7 +1652,7 @@
           "message": "this write needs If-Match"
         },
         "meta": {
-          "request_id": "<id-56>"
+          "request_id": "<id-57>"
         }
       }
     }
@@ -1674,7 +1689,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-57>"
+          "request_id": "<id-58>"
         }
       }
     }
@@ -1703,7 +1718,7 @@
           "message": "invalid driver id"
         },
         "meta": {
-          "request_id": "<id-58>"
+          "request_id": "<id-59>"
         }
       }
     }
@@ -1726,7 +1741,7 @@
           "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-59>"
+          "request_id": "<id-60>"
         }
       }
     }

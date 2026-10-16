@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -19,18 +19,31 @@ type cache[T any] struct {
 	valid     bool
 }
 
-// branchCache is a per-branch keyed cache. The zero uuid.UUID key is used for
-// the admin "all branches" variant.
-type branchCache[T any] struct {
+// reachKey is a caller's reach (SEC-NOHEADER-1, the principal's ruling on
+// the reporting surface): the branch a header names, and the user sub whose
+// user_locations grants scope a no header caller. Two callers share an entry
+// only when both are nil (the every branch view an administrator or owner
+// keeps), so a primed administrator entry never serves a finance caller.
+type reachKey struct {
+	branch uuid.UUID
+	sub    string
+	// day is the branch's business date for the figures that are a day's
+	// (the summary and the trend), so a cached answer is never served across
+	// the branch's midnight. Empty for the rest.
+	day string
+}
+
+// reachCache is a per-reach keyed cache.
+type reachCache[T any] struct {
 	mu      sync.RWMutex
-	entries map[uuid.UUID]*cache[T]
+	entries map[reachKey]*cache[T]
 }
 
-func newBranchCache[T any]() *branchCache[T] {
-	return &branchCache[T]{entries: make(map[uuid.UUID]*cache[T])}
+func newReachCache[T any]() *reachCache[T] {
+	return &reachCache[T]{entries: make(map[reachKey]*cache[T])}
 }
 
-func (b *branchCache[T]) get(key uuid.UUID, ttl time.Duration) (T, bool) {
+func (b *reachCache[T]) get(key reachKey, ttl time.Duration) (T, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if e, ok := b.entries[key]; ok && e.valid && time.Since(e.timestamp) < ttl {
@@ -40,34 +53,34 @@ func (b *branchCache[T]) get(key uuid.UUID, ttl time.Duration) (T, bool) {
 	return zero, false
 }
 
-func (b *branchCache[T]) set(key uuid.UUID, data T) {
+func (b *reachCache[T]) set(key reachKey, data T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.entries[key] = &cache[T]{data: data, timestamp: time.Now(), valid: true}
 }
 
-// cacheStore holds all dashboard caches, keyed by branch.
+// cacheStore holds all dashboard caches, keyed by the caller's reach.
 type cacheStore struct {
 	ttl             time.Duration
-	summary         *branchCache[*DashboardSummary]
-	inventoryAlerts *branchCache[[]InventoryAlert]
-	topCustomers    *branchCache[[]TopCustomer]
-	orderActivity   *branchCache[*OrderActivity]
-	revenueTrend    *branchCache[[]RevenueTrendPoint]
+	summary         *reachCache[*DashboardSummary]
+	inventoryAlerts *reachCache[[]InventoryAlert]
+	topCustomers    *reachCache[[]TopCustomer]
+	orderActivity   *reachCache[*OrderActivity]
+	revenueTrend    *reachCache[[]RevenueTrendPoint]
 }
 
 func newCacheStore(ttl time.Duration) *cacheStore {
 	return &cacheStore{
 		ttl:             ttl,
-		summary:         newBranchCache[*DashboardSummary](),
-		inventoryAlerts: newBranchCache[[]InventoryAlert](),
-		topCustomers:    newBranchCache[[]TopCustomer](),
-		orderActivity:   newBranchCache[*OrderActivity](),
-		revenueTrend:    newBranchCache[[]RevenueTrendPoint](),
+		summary:         newReachCache[*DashboardSummary](),
+		inventoryAlerts: newReachCache[[]InventoryAlert](),
+		topCustomers:    newReachCache[[]TopCustomer](),
+		orderActivity:   newReachCache[*OrderActivity](),
+		revenueTrend:    newReachCache[[]RevenueTrendPoint](),
 	}
 }
 
-// Service provides dashboard business logic with type-safe per-branch caching.
+// Service provides dashboard business logic with type-safe per-reach caching.
 type Service struct {
 	repo  Repository
 	store *cacheStore
@@ -81,24 +94,45 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// branchKey returns the cache key for the request's branch context. A nil
-// branch (admin "all branches") is keyed as uuid.Nil.
-func branchKey(ctx context.Context) (uuid.UUID, *uuid.UUID) {
-	id := branchctx.IDForQuery(ctx)
-	if id == nil {
-		return uuid.Nil, nil
+// reach reads the caller's reach from the request's branch context: the
+// branch a header names and the grants sub of a no header user, either of
+// which keys the cache apart from every other reach.
+func reach(ctx context.Context) (reachKey, *uuid.UUID, *string) {
+	key := reachKey{branch: uuid.Nil}
+	if id := middleware.BranchIDForQuery(ctx); id != nil {
+		key.branch = *id
 	}
-	return *id, id
+	if sub := middleware.GrantsSubForQuery(ctx); sub != nil {
+		key.sub = *sub
+	}
+	return key, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+}
+
+// dayReader is the repository's optional read of the branch's business day.
+type dayReader interface {
+	BusinessDay(ctx context.Context) (string, error)
+}
+
+// withDay keys a reach by the branch's business day; a repository that cannot
+// read it (a test double) keeps the reach alone.
+func (s *Service) withDay(ctx context.Context, key reachKey) reachKey {
+	if d, ok := s.repo.(dayReader); ok {
+		if day, err := d.BusinessDay(ctx); err == nil {
+			key.day = day
+		}
+	}
+	return key
 }
 
 // GetSummary returns the dashboard summary with caching.
 func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
-	key, branchID := branchKey(ctx)
+	key, branchID, grantsSub := reach(ctx)
+	key = s.withDay(ctx, key)
 	if cached, ok := s.store.summary.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetDashboardSummary(ctx, branchID)
+	data, err := s.repo.GetDashboardSummary(ctx, branchID, grantsSub)
 	if err != nil {
 		return nil, err
 	}
@@ -109,12 +143,12 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 
 // GetInventoryAlerts returns inventory alerts with caching.
 func (s *Service) GetInventoryAlerts(ctx context.Context) ([]InventoryAlert, error) {
-	key, branchID := branchKey(ctx)
+	key, branchID, grantsSub := reach(ctx)
 	if cached, ok := s.store.inventoryAlerts.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetInventoryAlerts(ctx, branchID, 10)
+	data, err := s.repo.GetInventoryAlerts(ctx, branchID, grantsSub, 10)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +159,12 @@ func (s *Service) GetInventoryAlerts(ctx context.Context) ([]InventoryAlert, err
 
 // GetTopCustomers returns top customers with caching.
 func (s *Service) GetTopCustomers(ctx context.Context) ([]TopCustomer, error) {
-	key, branchID := branchKey(ctx)
+	key, branchID, grantsSub := reach(ctx)
 	if cached, ok := s.store.topCustomers.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetTopCustomers(ctx, branchID, 5, 30)
+	data, err := s.repo.GetTopCustomers(ctx, branchID, grantsSub, 5, 30)
 	if err != nil {
 		return nil, err
 	}
@@ -141,12 +175,12 @@ func (s *Service) GetTopCustomers(ctx context.Context) ([]TopCustomer, error) {
 
 // GetOrderActivity returns order activity with caching.
 func (s *Service) GetOrderActivity(ctx context.Context) (*OrderActivity, error) {
-	key, branchID := branchKey(ctx)
+	key, branchID, grantsSub := reach(ctx)
 	if cached, ok := s.store.orderActivity.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetOrderActivity(ctx, branchID, 10)
+	data, err := s.repo.GetOrderActivity(ctx, branchID, grantsSub, 10)
 	if err != nil {
 		return nil, err
 	}
@@ -157,12 +191,13 @@ func (s *Service) GetOrderActivity(ctx context.Context) (*OrderActivity, error) 
 
 // GetRevenueTrend returns revenue trend for chart.
 func (s *Service) GetRevenueTrend(ctx context.Context) ([]RevenueTrendPoint, error) {
-	key, branchID := branchKey(ctx)
+	key, branchID, grantsSub := reach(ctx)
+	key = s.withDay(ctx, key)
 	if cached, ok := s.store.revenueTrend.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetRevenueTrend(ctx, branchID, 7)
+	data, err := s.repo.GetRevenueTrend(ctx, branchID, grantsSub, 7)
 	if err != nil {
 		return nil, err
 	}

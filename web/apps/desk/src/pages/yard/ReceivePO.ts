@@ -9,6 +9,8 @@ import { ScanBarcode, ChevronRight, ArrowLeft, Check, Package, Loader2, ScanLine
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder } from '../../types/purchaseOrder';
 import '../../components/BarcodeScanner.ts';
+import { poLabel } from '../../lib/utils';
+import { formatDate } from '../../lib/dates.ts';
 
 @customElement('gable-receive-po')
 export class ReceivePO extends LitElement {
@@ -127,7 +129,7 @@ export class ReceivePO extends LitElement {
                     <div class="space-y-2">
                         ${this.pos.map(po => html`
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                                class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                                 @click=${() => this._selectPO(po)}
                             >
                                 <div class="p-4">
@@ -137,7 +139,7 @@ export class ReceivePO extends LitElement {
                                                 ${po.vendor_name || 'Vendor'}
                                             </div>
                                             <div class="text-xs text-zinc-500 font-mono mt-0.5">
-                                                PO #${po.id.slice(-6).toUpperCase()}
+                                                ${poLabel(po)}
                                             </div>
                                         </div>
                                         <div class="flex items-center gap-2">
@@ -148,7 +150,7 @@ export class ReceivePO extends LitElement {
                                         </div>
                                     </div>
                                     <div class="text-xs text-zinc-500">
-                                        ${po.lines?.length || '?'} line items &middot; ${new Date(po.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                        ${po.lines?.length || '?'} line items &middot; ${formatDate(po.created_at)}
                                     </div>
                                 </div>
                             </div>
@@ -160,7 +162,7 @@ export class ReceivePO extends LitElement {
                             ${icon(Check, 32, 'text-emerald-400')}
                         </div>
                         <p class="text-white font-medium text-lg">Receiving Complete</p>
-                        <p class="text-zinc-500 text-sm">PO #${this.selectedPO.id.slice(-6).toUpperCase()} updated</p>
+                        <p class="text-zinc-500 text-sm">${poLabel(this.selectedPO)} updated</p>
                         <button
                             @click=${() => { this.selectedPO = null; this.submitted = false; }}
                             class="mt-4 px-6 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm hover:bg-white/10 transition-colors"
@@ -182,7 +184,7 @@ export class ReceivePO extends LitElement {
                             <div>
                                 <div class="font-bold text-lg text-white">${this.selectedPO.vendor_name || 'Vendor'}</div>
                                 <div class="text-xs text-zinc-500 font-mono">
-                                    PO #${this.selectedPO.id.slice(-6).toUpperCase()}
+                                    ${poLabel(this.selectedPO)}
                                 </div>
                             </div>
                         </div>
@@ -206,7 +208,7 @@ export class ReceivePO extends LitElement {
                         ${(this.selectedPO.lines || []).map(line => {
                             const remaining = line.quantity - (line.qty_received || 0);
                             return html`
-                                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl border-white/5">
+                                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl border-white/5">
                                     <div class="p-4">
                                         <div class="flex items-center gap-3">
                                             <div class="flex-1 min-w-0">

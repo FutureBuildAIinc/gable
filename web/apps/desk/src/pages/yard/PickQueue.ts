@@ -10,6 +10,7 @@ import { ClipboardList, ChevronRight, Package, Clock, User } from 'lucide';
 import { OrderService } from '../../services/OrderService';
 import type { OrderSummary } from '../../types/order';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 @customElement('gable-pick-queue')
 export class PickQueue extends LitElement {
@@ -62,7 +63,7 @@ export class PickQueue extends LitElement {
                 <div class="space-y-3">
                     ${this.orders.map((order, idx) => html`
                         <div
-                            class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                            class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                             @click=${() => router.navigate(`/yard/pick/${order.id}`)}
                         >
                             <div class="p-4">
@@ -99,7 +100,7 @@ export class PickQueue extends LitElement {
                                     </div>
                                     <div class="flex items-center gap-1 text-[10px] text-zinc-500">
                                         ${icon(Clock, 12)}
-                                        ${new Date(order.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                        ${formatDate(order.created_at)}
                                     </div>
                                 </div>
                             </div>

@@ -104,9 +104,10 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		fixtureCustomer)
 
 	// AR invoices, one per aging edge. Dollars, like every repository write;
-	// statuses from the invoices CHECK constraint. Due date and created_at both
-	// on the offset day, so AR aging (aged by due date) and the sales summary
-	// (windowed by created_at) see the same edge. Each carries the one line the
+	// statuses from the invoices CHECK constraint. Due date, invoice_date and
+	// created_at all on the offset day, so AR aging (aged by due date) and the
+	// sales summary (windowed by business dates) see the same edge. Each
+	// carries the one line the
 	// invoice repository would write, against a seeded product.
 	var productID string
 	if err := db.QueryRow(`SELECT id FROM products WHERE sku = 'LUM-248-PREM'`).Scan(&productID); err != nil {
@@ -127,9 +128,9 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		at := stamp(inv.days)
 		mustExec(t, db, `INSERT INTO invoices (
 			id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount,
-			due_date, paid_at, created_at, updated_at, branch_id
+			due_date, invoice_date, paid_at, created_at, updated_at, branch_id
 		) VALUES ($1, NULL, $2, 'UNPAID', $3, $3, 0, 0,
-			$4, NULL, $5, $5,
+			$4, ($4)::date, NULL, $5, $5,
 			COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 			inv.id, fixtureCustomer, inv.total, at, at)
 		// The shared line shape (ADR 0005 2.2): the fixture writes what the
@@ -213,16 +214,16 @@ func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {
 var dispatchRecencyOrder = []string{
 	"Peachland Framing Crew",
 	"Summerland Roofers",
-	"Big White Cabin Co",
-	"Kelbrook Construction",
-	"Mission Hill Custom",
+	"Snowfern Cabin Co",
+	"Tarnwick Construction",
+	"Pellmoor Custom",
 	"Westbank Decks & Fence",
 	"Glenmore Heritage Reno",
 	"Vernon Valley Construction",
 	"Okanagan DIY Owner",
-	"Lake Country Builders",
-	"Predator Ridge Renos",
-	"Okanagan Homes Ltd",
+	"Alderfold Builders",
+	"Stonehollow Renos",
+	"Thornmere Homes Ltd",
 	"Knox Mountain Landscapes",
 }
 

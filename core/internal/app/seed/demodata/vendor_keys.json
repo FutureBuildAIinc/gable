@@ -1,0 +1,350 @@
+{
+  "_doc": "Vendor keys for the Gable Building Supply demo. The key is a stable short identifier the catalogue file uses to refer to the vendor; the loader resolves it to the vendor's name. All entries are invented.",
+  "_rules": [
+    "All names, emails and phones are invented; no real company, brand or trademark.",
+    "A key is never changed or removed once the catalogue uses it.",
+    "Phones are on 250-555-01xx; emails are on the reserved .example domain or an invented one."
+  ],
+  "vendors": [
+    {
+      "key": "GABLE_INTERNAL",
+      "name": "Larkmere Building Products",
+      "category": "Lumber and sheet goods",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 3,
+      "fill_rate": 97.5,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Dimension lumber, sheet goods and cornice trim."
+    },
+    {
+      "key": "OK_HDW",
+      "name": "Fernbank Hardware Distribution",
+      "category": "Hardware distribution",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 94.2,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "BC_ROOF",
+      "name": "BC Roofing Wholesale",
+      "category": "Roofing wholesale",
+      "payment_terms": "Net 45",
+      "average_lead_time_days": 7,
+      "fill_rate": 91.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "INT_MILL",
+      "name": "Interior Millwork Co",
+      "category": "Millwork and doors",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 14,
+      "fill_rate": 88.5,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "VAL_RMX",
+      "name": "Bramblewood Ready-Mix Concrete",
+      "category": "Concrete and masonry",
+      "payment_terms": "Net 15",
+      "average_lead_time_days": 2,
+      "fill_rate": 99.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "MTN_FAST",
+      "name": "Mountain Fastener Supply",
+      "category": "Fasteners",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 4,
+      "fill_rate": 96.8,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "CAR_INS",
+      "name": "Cariboo Insulation Ltd",
+      "category": "Insulation",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 6,
+      "fill_rate": 93.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "PAC_WD",
+      "name": "Tamarack Window & Door",
+      "category": "Windows and doors",
+      "payment_terms": "2% 10 Net 30",
+      "average_lead_time_days": 21,
+      "fill_rate": 85.0,
+      "ship_to": ["KEL-MAIN"],
+      "notes": "Core demo vendor."
+    },
+    {
+      "key": "OKN_LBR_MILL",
+      "name": "Okanagan Lumber Mills",
+      "category": "Dimensional lumber mill",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Invented BC interior mill. Species SPF, hem fir, Douglas fir."
+    },
+    {
+      "key": "RIDGE_FRAM",
+      "name": "Cedarflat Frame and Truss",
+      "category": "Engineered roof trusses",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 10,
+      "fill_rate": 92.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Engineered roof trusses, prefabricated wall panels."
+    },
+    {
+      "key": "VAL_ENG",
+      "name": "Valley Engineered Wood",
+      "category": "Engineered wood",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 7,
+      "fill_rate": 93.5,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. LVL beams, I joists, rim board."
+    },
+    {
+      "key": "GLULAM_PAC",
+      "name": "Pacific Glulam Co",
+      "category": "Glulam beams",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 14,
+      "fill_rate": 90.0,
+      "ship_to": ["KEL-MAIN"],
+      "notes": "Invented. Glulam beams and posts."
+    },
+    {
+      "key": "CDA_DECK",
+      "name": "Cascade Decking Co",
+      "category": "Composite decking",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 8,
+      "fill_rate": 94.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Composite decking."
+    },
+    {
+      "key": "FAST_GR",
+      "name": "Granby Fastener Co",
+      "category": "Fasteners",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 4,
+      "fill_rate": 96.5,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented fastener vendor, the invented brand Granby Fasteners."
+    },
+    {
+      "key": "KEL_CONN",
+      "name": "Kelowna Framing Connectors Ltd",
+      "category": "Framing connectors",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented connector brand. Joist hangers, hurricane ties, hold downs."
+    },
+    {
+      "key": "FIBRETRIM_OK",
+      "name": "Okanagan Fibre Trim Ltd",
+      "category": "Fibre cement siding and trim",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 10,
+      "fill_rate": 91.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Fibre cement panels, soffit, trim."
+    },
+    {
+      "key": "CORNICE_VLY",
+      "name": "Valley Cornice and Trim",
+      "category": "Exterior trim",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 7,
+      "fill_rate": 93.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Exterior trim, soffit, fascia, cornice flashing."
+    },
+    {
+      "key": "STONE_CTR",
+      "name": "Stone Country Masonry",
+      "category": "Concrete and masonry",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Invented. Concrete block, mortar mix, rebar, masonry accessories."
+    },
+    {
+      "key": "DOOR_OKN",
+      "name": "Okanagan Door and Frame",
+      "category": "Doors",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 14,
+      "fill_rate": 88.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Interior and exterior doors, prehung units."
+    },
+    {
+      "key": "MILL_OKN",
+      "name": "Okanagan Millworks",
+      "category": "Custom millwork",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 21,
+      "fill_rate": 85.0,
+      "ship_to": ["KEL-MAIN"],
+      "notes": "Invented. Custom moulding, built up columns, stair parts."
+    },
+    {
+      "key": "WIN_GR",
+      "name": "Granite Window Co",
+      "category": "Windows",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 21,
+      "fill_rate": 87.0,
+      "ship_to": ["KEL-MAIN"],
+      "notes": "Invented. Vinyl and wood windows, sliding doors."
+    },
+    {
+      "key": "PEAK_ROOF",
+      "name": "Wrenfield Roofing Supply",
+      "category": "Asphalt roofing",
+      "payment_terms": "Net 45",
+      "average_lead_time_days": 7,
+      "fill_rate": 92.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Invented. Asphalt shingle bundles, underlayment, starter strip."
+    },
+    {
+      "key": "METAL_ROOF_OK",
+      "name": "Corbinwood Metal Roofing",
+      "category": "Metal roofing",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 10,
+      "fill_rate": 90.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Metal roofing panels, ridge cap, trim coil."
+    },
+    {
+      "key": "GYP_OKN",
+      "name": "Okanagan Gypsum",
+      "category": "Drywall",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Drywall sheets, joint compound, tape, bead."
+    },
+    {
+      "key": "FOAM_OK",
+      "name": "Thistledown Foam and Insulation",
+      "category": "Spray and rigid foam",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 7,
+      "fill_rate": 91.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Spray foam kits, rigid foam boards, foam sealant."
+    },
+    {
+      "key": "HOUSE_WRAP_PAC",
+      "name": "Pacific House Wrap",
+      "category": "House wrap and tape",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 6,
+      "fill_rate": 94.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. House wrap rolls, window tape, seam tape."
+    },
+    {
+      "key": "OK_PAINT",
+      "name": "Okanagan Paint Co",
+      "category": "Paint and sundries",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Interior and exterior paint, stain, brushes, rollers, sundries."
+    },
+    {
+      "key": "OK_TOOLS",
+      "name": "Sagebrush Power Tool Supply",
+      "category": "Power tools",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 7,
+      "fill_rate": 92.0,
+      "ship_to": ["KEL-MAIN"],
+      "notes": "Invented power tools brand. Drills, saws, sanders."
+    },
+    {
+      "key": "HARD_WON",
+      "name": "Anvilgrove Hand Tools",
+      "category": "Hand tools",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented hand tools vendor. Hammers, saws, levels, tape measures."
+    },
+    {
+      "key": "OK_PLUMB",
+      "name": "Okanagan Plumbing Supply",
+      "category": "Plumbing",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 6,
+      "fill_rate": 93.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Pipe, fittings, valves, plumbing tools, bath fixtures."
+    },
+    {
+      "key": "OK_ELEC",
+      "name": "Okanagan Electric Supply",
+      "category": "Electrical",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 6,
+      "fill_rate": 93.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Wire, boxes, conduit, devices, lighting."
+    },
+    {
+      "key": "GARDEN_SUPPLY",
+      "name": "Marrowfield Garden Supply",
+      "category": "Lawn and garden",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Soil, mulch, fertilizer, garden tools, outdoor storage."
+    },
+    {
+      "key": "WINTER_OK",
+      "name": "Okanagan Winter Supply",
+      "category": "Seasonal winter",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK", "LK"],
+      "notes": "Invented. Ice melt, snow shovels, winter accessories."
+    },
+    {
+      "key": "CLEAN_OK",
+      "name": "Okanagan Cleaning Supply",
+      "category": "Cleaning and storage",
+      "payment_terms": "Net 30",
+      "average_lead_time_days": 5,
+      "fill_rate": 95.0,
+      "ship_to": ["KEL-MAIN", "WK"],
+      "notes": "Invented. Cleaning supplies, totes, garbage and recycling bins."
+    }
+  ]
+}

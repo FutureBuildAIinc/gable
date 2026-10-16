@@ -30,7 +30,7 @@
         "branch_id": "<id-1>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "pickup",
         "expires_at": null,
         "exposure_cents": 0,
@@ -62,7 +62,7 @@
           }
         ],
         "margin_total_cents": 0,
-        "number": "Q-000030",
+        "number": "Q-000033",
         "original_content_type": null,
         "original_filename": "golden-quote.txt",
         "parse_map": null,

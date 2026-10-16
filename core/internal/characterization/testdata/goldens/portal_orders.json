@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.ca",
+        "email": "demo@tarnwick.example",
         "password": "password"
       }
     },
@@ -15,20 +15,21 @@
       "body": {
         "config": {
           "created_at": "<ts+0d>",
-          "dealer_name": "Gable Lumber & Supply",
+          "dealer_name": "Gable Building Supply",
           "id": "<id-1>",
+          "locale": "en-CA",
           "logo_url": "",
           "primary_color": "#00FFA3",
-          "support_email": "support@gablelumber.ca",
+          "support_email": "support@gablebuildingsupply.example",
           "support_phone": "250-555-1000",
           "updated_at": "<ts+0d>"
         },
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@tarnwick.example",
           "id": "<id-3>",
-          "name": "Sam Kelbrook",
+          "name": "Sam Tarnwick",
           "role": "Admin",
           "status": "Active",
           "updated_at": "<ts+0d>"

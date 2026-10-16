@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/gl"
@@ -35,13 +36,15 @@ import (
 
 // Service is the AR core and the reads of the account module.
 type Service struct {
-	db       *database.DB
-	gl       *gl.Service
-	logger   *slog.Logger
-	now      func() time.Time
-	auditLog *audit.Logger
-	events   EventRecorder
-	tx       TxRunner
+	db                *database.DB
+	gl                *gl.Service
+	logger            *slog.Logger
+	now               func() time.Time
+	auditLog          *audit.Logger
+	events            EventRecorder
+	tx                TxRunner
+	applyGuard        InvoiceApplyGuard
+	tenderCreditGuard TenderCreditGuard
 }
 
 // NewService builds the AR core. glSvc may be nil in a unit test that posts no
@@ -53,6 +56,11 @@ func NewService(db *database.DB, glSvc *gl.Service, logger *slog.Logger) *Servic
 	return &Service{db: db, gl: glSvc, logger: logger, now: time.Now}
 }
 
+// WithClockForTest sets the clock the business day of the acts is read on (the
+// service reads time.Now otherwise); a test that moves the time of a whole
+// flow sets the same clock on every service of the flow.
+func (s *Service) WithClockForTest(now func() time.Time) *Service { s.now = now; return s }
+
 // conflict is a 409 with a blocker, the shape the refusals of section 9 take.
 func conflict(code, message string) *httpx.Error {
 	return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: message,
@@ -62,6 +70,38 @@ func conflict(code, message string) *httpx.Error {
 func invalidField(field, message string) *httpx.Error {
 	return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Message: "the request is not valid",
 		Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
+
+// refuseDayToCome refuses a money day after the business day of the branch
+// the act belongs to, in the branch's time zone (the aging's own rule for today):
+// cash is never received, applied or refunded on a day that has not come.
+func (s *Service) refuseDayToCome(ctx context.Context, branchID uuid.UUID, on time.Time, field string) error {
+	if on.IsZero() {
+		return nil
+	}
+	today, err := s.LocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return err
+	}
+	if date(on) > date(today) {
+		return invalidField(field, fmt.Sprintf("%s has not come yet: money is dated no later than today, %s", date(on), date(today)))
+	}
+	return nil
+}
+
+// refuseDayToComeOf is refuseDayToCome for an act that names a document, not
+// a branch: the day is the document's own branch's. A document that is not
+// there is left to the act's own refusal.
+func (s *Service) refuseDayToComeOf(ctx context.Context, table string, id uuid.UUID, on time.Time, field string) error {
+	var branch uuid.UUID
+	err := s.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM `+table+` WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the document's branch: %w", err)
+	}
+	return s.refuseDayToCome(ctx, branch, on, field)
 }
 
 // ErrNoTransaction is the refusal to run an act with no transaction open.
@@ -380,6 +420,55 @@ func (s *Service) setPaymentUnapplied(ctx context.Context, p *paymentRow, newUna
 	return nil
 }
 
+// refuseHeldInvoice refuses an application to an invoice another module
+// holds mid act: the counter wires the guard (C2-5, the fourteenth review's
+// P2-1) so that while a sale's void has standing refund claims, the sale's
+// invoice takes no application: its open cents are the void's interim, and a
+// live application would strand the void's completion. The refusal names the
+// standing claims and comes before the amount checks, so the operator is
+// told the invoice is held whatever they asked for. Without a guard nothing
+// changes.
+func (s *Service) refuseHeldInvoice(ctx context.Context, invoiceID uuid.UUID) error {
+	if s.applyGuard == nil {
+		return nil
+	}
+	claims, err := s.applyGuard.PendingVoidClaimsOfInvoice(ctx, invoiceID)
+	if err != nil {
+		return err
+	}
+	if len(claims) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(claims))
+	for _, id := range claims {
+		ids = append(ids, id.String())
+	}
+	return conflict("void_claim_pending",
+		fmt.Sprintf("this invoice's sale has a void whose refund claims still stand (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before applying anything to the invoice",
+			strings.Join(ids, ", ")))
+}
+
+// refuseHeldTenderCredit refuses an application of a payment's unapplied
+// cash another module holds to one of its own tenders (C2-5,
+// FROM-PRINCIPAL 60): a completed void leaves a declined card tender's
+// charge as credit on the tender's payment, and that credit is payable
+// back only to its card, never spent on another invoice. The refusal names
+// the credit's origin, the void and the claim it released, and comes
+// before anything of the application is written. Without a guard nothing
+// changes.
+func (s *Service) refuseHeldTenderCredit(ctx context.Context, paymentID uuid.UUID) error {
+	if s.tenderCreditGuard == nil {
+		return nil
+	}
+	held, ok, err := s.tenderCreditGuard.HeldTenderCredit(ctx, paymentID)
+	if err != nil || !ok {
+		return err
+	}
+	return conflict("tender_credit_held",
+		fmt.Sprintf("the payment's unapplied cash is the credit of the card tender the void of sale %s holds (claim %s): a declined void tender's credit is held to its own tender and applies to no invoice, payable back only to its card",
+			held.SaleNumber, held.IntentID))
+}
+
 // insertApplication writes one application row.
 func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
 	_, err := s.ex(ctx).Exec(ctx, `
@@ -390,6 +479,122 @@ func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time
 		date(on), actor, a.ActID, glEntry)
 	if err != nil {
 		return fmt.Errorf("failed to write the application: %w", err)
+	}
+	return nil
+}
+
+// RestampHistory puts a trading day on the rows an invoice's posting and its
+// payment's act stamped with the present. Only the demo seed calls it: its
+// history posts each invoice and the payment that settles it through the acts
+// above, so the ledger, the subledger and the application are this core's own,
+// then moves their stamps to the history's day (the revenue trend, the
+// statements and the ledger's created dates would otherwise collapse onto the
+// day of the seed) and links the payment to the invoice it paid, as the order
+// and invoice walks follow it. It writes stamps and that link in the caller's
+// transaction, never an amount, a status or a balance. It is not an act: no
+// route or worker calls it. It refuses a call with no transaction, a zero day,
+// an invoice that is not paid, a payment with no live application to that
+// invoice, and a payment day before the invoice's or after the present. It
+// moves only the named payment's live applications, never another payment's.
+func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	if err := s.requireTx(ctx); err != nil {
+		return err
+	}
+	if invoicedAt.IsZero() || paidAt.IsZero() {
+		return invalidField("paid_at", "a history day is given for the invoice and the payment")
+	}
+	if paidAt.Before(invoicedAt) {
+		return invalidField("paid_at", "a history payment is not made before its invoice")
+	}
+	if paidAt.After(s.now()) {
+		return invalidField("paid_at", "a history day is not in the future")
+	}
+	var settled bool
+	if err := s.ex(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM invoices WHERE id = $1 AND status = 'PAID')
+			AND EXISTS (SELECT 1 FROM ar_applications
+				WHERE invoice_id = $1 AND payment_id = $2 AND reversed_at IS NULL)`,
+		invoiceID, paymentID).Scan(&settled); err != nil {
+		return fmt.Errorf("the history's invoice was not read: %w", err)
+	}
+	if !settled {
+		return conflict("not_settled", "only a paid invoice and a payment applied to it take a history day")
+	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// RestampDay is RestampHistory for the base seed, whose invoices are unpaid or
+// part paid as often as paid: it puts the documents' days on the rows an
+// invoice's posting and, when a payment is named, that payment's act stamped
+// with the present. The same writes and the same limits (a transaction, a
+// payment day not before the invoice's or after the present, a payment with a
+// live application to the invoice), without the settled invoice guard.
+// uuid.Nil names no payment.
+func (s *Service) RestampDay(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	if err := s.requireTx(ctx); err != nil {
+		return err
+	}
+	if invoicedAt.IsZero() {
+		return invalidField("invoiced_at", "a day is given for the invoice")
+	}
+	if paymentID == uuid.Nil {
+		paidAt = invoicedAt
+	}
+	if paidAt.Before(invoicedAt) {
+		return invalidField("paid_at", "a payment is not made before its invoice")
+	}
+	if invoicedAt.After(s.now()) {
+		return invalidField("invoiced_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil && !paidAt.After(invoicedAt) {
+		// a payment received the invoice's own day follows it by a second, so
+		// a statement orders the application behind its invoice
+		paidAt = invoicedAt.Add(time.Second)
+	}
+	if paidAt.After(s.now()) {
+		return invalidField("paid_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil {
+		var applied bool
+		if err := s.ex(ctx).QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM ar_applications WHERE invoice_id = $1 AND payment_id = $2 AND reversed_at IS NULL)`,
+			invoiceID, paymentID).Scan(&applied); err != nil {
+			return fmt.Errorf("the invoice's payment was not read: %w", err)
+		}
+		if !applied {
+			return conflict("not_settled", "only a payment applied to the invoice takes its day")
+		}
+	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// restampRows writes the stamps and the payment's link in the caller's
+// transaction.
+func (s *Service) restampRows(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	// One statement: each update is a CTE over the rows the acts just wrote, so
+	// a history invoice costs one more round trip, not seven. Each is scoped to
+	// what the payment settled, so the guard above and the writes agree.
+	_, err := s.ex(ctx).Exec(ctx, `
+		WITH apps AS (
+			UPDATE ar_applications SET created_at = $2
+			WHERE invoice_id = $1 AND payment_id = $4 AND reversed_at IS NULL RETURNING id
+		), ct_inv AS (
+			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
+		), ct_pay AS (
+			UPDATE customer_transactions SET created_at = $2 WHERE source_kind = 'application'
+				AND reference_id IN (SELECT id FROM apps)
+		), pay AS (
+			UPDATE payments SET invoice_id = $1, created_at = $2, updated_at = $2 WHERE id = $4
+		), inv AS (
+			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1 AND status = 'PAID'
+		), gl_inv AS (
+			UPDATE gl_journal_entries SET created_at = $3, updated_at = $3 WHERE source_ref_id = $1
+		)
+		UPDATE gl_journal_entries SET created_at = $2, updated_at = $2
+		WHERE source_ref_id = $4 OR source_ref_id IN (SELECT id FROM apps)`,
+		invoiceID, paidAt, invoicedAt, paymentID)
+	if err != nil {
+		return fmt.Errorf("the history's day was not stamped: %w", err)
 	}
 	return nil
 }

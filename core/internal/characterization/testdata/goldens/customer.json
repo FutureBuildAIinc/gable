@@ -22,6 +22,9 @@
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -62,6 +65,9 @@
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -108,6 +114,9 @@
             "account_number": "GOLD-001",
             "address": "1 Golden Way, Kelowna BC",
             "balance_cents": 999999,
+            "branch_ids": [
+              "<id-1>"
+            ],
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
@@ -134,73 +143,79 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "account_number": "DIY-OKN",
-            "address": "45 Sawhorse Ln, Lake Country BC",
+            "account_number": "QFC-001",
+            "address": "610 Plywood Ct, West Kelowna BC",
             "balance_cents": 999999,
+            "branch_ids": [
+              "<id-4>"
+            ],
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
-            "email": "okanagan.diy@example.com",
-            "id": "<id-4>",
+            "email": "billing@quillfieldformwork.example",
+            "id": "<id-5>",
             "is_active": true,
-            "name": "Okanagan DIY Owner",
-            "payment_terms": {
-              "code": "COD",
-              "id": "<id-5>",
-              "name": "Cash on delivery"
-            },
-            "payment_terms_id": "<id-5>",
-            "phone": "250-555-2310",
-            "po_required": false,
-            "price_level": {
-              "created_at": "<ts+0d>",
-              "id": "<id-6>",
-              "multiplier": 1,
-              "name": "Retail",
-              "updated_at": "<ts+0d>"
-            },
-            "price_level_id": "<id-6>",
-            "primary_branch_id": "<id-7>",
-            "revision": 1,
-            "salesperson_id": "<id-8>",
-            "salesperson_name": "Lucas Pelletier",
-            "tier": "retail",
-            "updated_at": "<ts+0d>"
-          },
-          {
-            "account_number": "SRR-001",
-            "address": "200 Ridgecap Rd, Summerland BC",
-            "balance_cents": 999999,
-            "created_at": "<ts+0d>",
-            "credit_limit_cents": 999999,
-            "currency": null,
-            "effective_currency": "USD",
-            "email": "admin@summerlandroofers.ca",
-            "id": "<id-9>",
-            "is_active": true,
-            "name": "Summerland Roofers",
+            "name": "Quillfield Formwork Ltd",
             "payment_terms": {
               "code": "NET30",
               "id": "<id-3>",
               "name": "Net 30"
             },
             "payment_terms_id": "<id-3>",
-            "phone": "250-555-3100",
+            "phone": "250-555-3300",
             "po_required": false,
             "price_level": {
               "created_at": "<ts+0d>",
-              "id": "<id-10>",
+              "id": "<id-6>",
               "multiplier": 0.85,
               "name": "Contractor",
               "updated_at": "<ts+0d>"
             },
+            "price_level_id": "<id-6>",
+            "primary_branch_id": "<id-4>",
+            "revision": 1,
+            "salesperson_id": null,
+            "salesperson_name": null,
+            "tier": "silver",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "account_number": "DIY-OKN",
+            "address": "45 Sawhorse Ln, Lake Country BC",
+            "balance_cents": 999999,
+            "branch_ids": [
+              "<id-7>"
+            ],
+            "created_at": "<ts+0d>",
+            "credit_limit_cents": 999999,
+            "currency": null,
+            "effective_currency": "USD",
+            "email": "okanagan.diy@example.com",
+            "id": "<id-8>",
+            "is_active": true,
+            "name": "Okanagan DIY Owner",
+            "payment_terms": {
+              "code": "COD",
+              "id": "<id-9>",
+              "name": "Cash on delivery"
+            },
+            "payment_terms_id": "<id-9>",
+            "phone": "250-555-2310",
+            "po_required": false,
+            "price_level": {
+              "created_at": "<ts+0d>",
+              "id": "<id-10>",
+              "multiplier": 1,
+              "name": "Retail",
+              "updated_at": "<ts+0d>"
+            },
             "price_level_id": "<id-10>",
-            "primary_branch_id": "<id-1>",
+            "primary_branch_id": "<id-7>",
             "revision": 1,
             "salesperson_id": "<id-11>",
-            "salesperson_name": "Cameron Fraser",
-            "tier": "silver",
+            "salesperson_name": "Lucas Pelletier",
+            "tier": "retail",
             "updated_at": "<ts+0d>"
           }
         ],
@@ -224,6 +239,9 @@
             "account_number": "GOLD-001",
             "address": "1 Golden Way, Kelowna BC",
             "balance_cents": 0,
+            "branch_ids": [
+              "<id-1>"
+            ],
             "created_at": "<ts+0d>",
             "credit_limit_cents": 10000000,
             "currency": null,
@@ -354,7 +372,7 @@
           },
           {
             "created_at": "<ts+0d>",
-            "id": "<id-10>",
+            "id": "<id-6>",
             "multiplier": 0.85,
             "name": "Contractor",
             "updated_at": "<ts+0d>"
@@ -615,6 +633,9 @@
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -809,6 +830,9 @@
         "account_number": "GOLD-001",
         "address": "1 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,

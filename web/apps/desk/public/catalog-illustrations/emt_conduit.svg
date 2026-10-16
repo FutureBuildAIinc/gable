@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>EMT conduit 10 ft 1/2 inch</title>
+  <defs>
+    <style>
+      .pipeMain{fill:#a8a8a8}
+      .pipeHi{fill:#cdcdcd}
+      .pipeShade{fill:#5a5a5a}
+      .couplerMain{fill:#7a7a7a}
+      .couplerHi{fill:#9a9a9a}
+      .couplerShade{fill:#3a3a3a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="106" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="pipeMain" x="20" y="100" width="216" height="40" rx="3"/>
+    <rect class="pipeHi" x="20" y="100" width="216" height="4" opacity="0.6"/>
+    <rect class="pipeShade" x="20" y="134" width="216" height="6" opacity="0.6"/>
+    <ellipse cx="22" cy="116" rx="4" ry="20" fill="#5a5a5a"/>
+    <ellipse cx="234" cy="116" rx="4" ry="20" fill="#cdcdcd"/>
+    <ellipse cx="234" cy="116" rx="2" ry="16" fill="#9a9a9a"/>
+  </g>
+  <g>
+    <rect class="couplerMain" x="118" y="94" width="22" height="52" rx="1"/>
+    <rect class="couplerHi" x="118" y="94" width="22" height="3" opacity="0.6"/>
+    <rect class="couplerShade" x="118" y="142" width="22" height="4" opacity="0.6"/>
+    <rect class="couplerShade" x="136" y="94" width="4" height="52" opacity="0.7"/>
+    <line x1="124" y1="94" x2="124" y2="146" stroke="#3a3a3a" stroke-width="0.4" opacity="0.5"/>
+    <line x1="130" y1="94" x2="130" y2="146" stroke="#3a3a3a" stroke-width="0.4" opacity="0.5"/>
+    <line x1="134" y1="94" x2="134" y2="146" stroke="#3a3a3a" stroke-width="0.4" opacity="0.5"/>
+  </g>
+</svg>

@@ -54,6 +54,15 @@
             "total": 21202.12
           },
           {
+            "current": 18816,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 18816
+          },
+          {
             "current": 12109.05,
             "customer_id": "<customer>",
             "customer_name": "<customer>",
@@ -117,10 +126,10 @@
             "total": 31.42
           }
         ],
-        "grand_total": 99842.76999999999,
+        "grand_total": 118658.76999999999,
         "total_31_60": 8994.43,
         "total_61_90": 12373.56,
-        "total_current": 58866.92,
+        "total_current": 77682.92,
         "total_over_90": 19607.86
       }
     }
@@ -136,11 +145,11 @@
       "content_type": "application/json",
       "body": {
         "end_date": "<day+0>",
-        "invoice_count": 11,
-        "outstanding_ar": 23324.76,
+        "invoice_count": 12,
+        "outstanding_ar": 42140.76,
         "start_date": "<day-30>",
-        "total_collected": 315919.09,
-        "total_invoiced": 76391.14
+        "total_collected": 77305.25,
+        "total_invoiced": 95207.14
       }
     }
   },
@@ -155,11 +164,11 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 21,
-        "outstanding_ar": 9984277,
-        "outstanding_ar_count": 15,
+        "outstanding_ar": 10860244,
+        "outstanding_ar_count": 16,
         "pending_dispatch": 28,
-        "today_revenue": 31349485,
-        "today_revenue_change": 310260.21186021186
+        "today_revenue": 198603,
+        "today_revenue_change": -56.255423937128576
       }
     }
   },
@@ -179,15 +188,15 @@
         },
         {
           "date": "<day-2>",
-          "revenue": 20202
+          "revenue": 1259336
         },
         {
           "date": "<day-1>",
-          "revenue": 10101
+          "revenue": 454006
         },
         {
           "date": "<day+0>",
-          "revenue": 31349485
+          "revenue": 198603
         }
       ]
     }
@@ -214,6 +223,12 @@
           "customer_id": "<customer>",
           "customer_name": "<customer>",
           "order_count": "<orders>",
+          "total_revenue": 1881600
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
           "total_revenue": 1443590
         },
         {
@@ -227,12 +242,6 @@
           "customer_name": "<customer>",
           "order_count": "<orders>",
           "total_revenue": 906156
-        },
-        {
-          "customer_id": "<customer>",
-          "customer_name": "<customer>",
-          "order_count": "<orders>",
-          "total_revenue": 476177
         }
       ]
     }
@@ -324,7 +333,7 @@
           "CANCELLED": 3,
           "CONFIRMED": 15,
           "DRAFT": 5,
-          "FULFILLED": 9
+          "FULFILLED": 10
         }
       }
     }
@@ -346,16 +355,16 @@
           "account_type": "ASSET",
           "credit": 5000,
           "currency": "USD",
-          "debit": 31163382
+          "debit": 31359485
         },
         {
           "account_code": "1020",
           "account_id": "<id-13>",
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
-          "credit": 31190099,
+          "credit": 31386202,
           "currency": "USD",
-          "debit": 38489558
+          "debit": 40371158
         },
         {
           "account_code": "1030",
@@ -371,7 +380,7 @@
           "account_id": "<id-15>",
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
-          "credit": 4123534,
+          "credit": 4325134,
           "currency": "USD",
           "debit": 0
         },
@@ -380,16 +389,16 @@
           "account_id": "<id-16>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
-          "credit": 31156524,
+          "credit": 31352627,
           "currency": "USD",
-          "debit": 31154024
+          "debit": 31350127
         },
         {
           "account_code": "4010",
           "account_id": "<id-17>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 34372882,
+          "credit": 36052882,
           "currency": "USD",
           "debit": 41075
         },
@@ -426,20 +435,20 @@
         "currency": "USD",
         "end_date": "<day+0>",
         "expenses": [],
-        "gross_profit": 6569584,
-        "net_income": 6569584,
+        "gross_profit": 8249584,
+        "net_income": 8249584,
         "revenue": [
           {
             "account_code": "4010",
             "account_id": "<id-17>",
             "account_name": "Sales Revenue",
-            "amount": 6571684
+            "amount": 8251684
           }
         ],
         "start_date": "<day-30>",
         "total_cogs": 2100,
         "total_expenses": 0,
-        "total_revenue": 6571684
+        "total_revenue": 8251684
       }
     }
   },
@@ -459,13 +468,13 @@
             "account_code": "1010",
             "account_id": "<id-12>",
             "account_name": "Cash",
-            "amount": 31158382
+            "amount": 31354485
           },
           {
             "account_code": "1020",
             "account_id": "<id-13>",
             "account_name": "Accounts Receivable",
-            "amount": 7299459
+            "amount": 8984956
           },
           {
             "account_code": "1030",
@@ -481,7 +490,7 @@
             "account_code": "2020",
             "account_id": "<id-15>",
             "account_name": "Sales Tax Payable",
-            "amount": 4123534
+            "amount": 4325134
           },
           {
             "account_code": "2200",
@@ -490,10 +499,10 @@
             "amount": 2500
           }
         ],
-        "retained_earnings": 34329707,
-        "total_assets": 38455741,
-        "total_equity": 34329707,
-        "total_liabilities": 4126034
+        "retained_earnings": 36009707,
+        "total_assets": 40337341,
+        "total_equity": 36009707,
+        "total_liabilities": 4327634
       }
     }
   }

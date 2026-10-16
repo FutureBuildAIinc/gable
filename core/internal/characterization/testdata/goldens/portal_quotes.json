@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.ca",
+        "email": "demo@tarnwick.example",
         "password": "password"
       }
     },
@@ -15,20 +15,21 @@
       "body": {
         "config": {
           "created_at": "<ts+0d>",
-          "dealer_name": "Gable Lumber & Supply",
+          "dealer_name": "Gable Building Supply",
           "id": "<id-1>",
+          "locale": "en-CA",
           "logo_url": "",
           "primary_color": "#00FFA3",
-          "support_email": "support@gablelumber.ca",
+          "support_email": "support@gablebuildingsupply.example",
           "support_phone": "250-555-1000",
           "updated_at": "<ts+0d>"
         },
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@tarnwick.example",
           "id": "<id-3>",
-          "name": "Sam Kelbrook",
+          "name": "Sam Tarnwick",
           "role": "Admin",
           "status": "Active",
           "updated_at": "<ts+0d>"
@@ -657,19 +658,52 @@
           "accepted_at": null,
           "created_at": "<ts+0d>",
           "delivery_type": "PICKUP",
-          "erp_state": "ACCEPTED",
-          "expires_at": "<ts+30d>",
+          "erp_state": "SENT",
+          "expires_at": "<ts+14d>",
           "freight_amount": 0,
           "id": "<id-33>",
           "lines": [
             {
               "customer_note": "",
-              "description": "5/8 Drywall Firecode 4x8",
+              "description": "2x6x10 SPF Premium",
               "id": "<id-34>",
+              "is_special_order": false,
+              "line_total": 392,
+              "price_uom": "PCS",
+              "product_id": "<id-35>",
+              "product_sku": "LUM-2610-PREM",
+              "quantity": 40,
+              "unit_price": 9.8,
+              "uom": "PCS"
+            }
+          ],
+          "notes": "",
+          "priced": true,
+          "project_id": null,
+          "project_name": null,
+          "rejected_at": null,
+          "sent_at": null,
+          "status": "PRICED",
+          "total_amount": 392,
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "accepted_at": null,
+          "created_at": "<ts+0d>",
+          "delivery_type": "PICKUP",
+          "erp_state": "ACCEPTED",
+          "expires_at": "<ts+30d>",
+          "freight_amount": 0,
+          "id": "<id-36>",
+          "lines": [
+            {
+              "customer_note": "",
+              "description": "5/8 Drywall Type X 4x8",
+              "id": "<id-37>",
               "is_special_order": false,
               "line_total": 819,
               "price_uom": "PCS",
-              "product_id": "<id-35>",
+              "product_id": "<id-38>",
               "product_sku": "DW-58-FC",
               "quantity": 39,
               "unit_price": 21,
@@ -678,11 +712,11 @@
             {
               "customer_note": "",
               "description": "3/4 Plywood G1S 4x8 (Fir)",
-              "id": "<id-36>",
+              "id": "<id-39>",
               "is_special_order": false,
               "line_total": 722,
               "price_uom": "PCS",
-              "product_id": "<id-37>",
+              "product_id": "<id-40>",
               "product_sku": "PLY-34-CDX",
               "quantity": 19,
               "unit_price": 38,
@@ -691,11 +725,11 @@
             {
               "customer_note": "",
               "description": "3\" Deck Screws (2.5kg)",
-              "id": "<id-38>",
+              "id": "<id-41>",
               "is_special_order": false,
               "line_total": 779.74,
               "price_uom": "BOX",
-              "product_id": "<id-39>",
+              "product_id": "<id-42>",
               "product_sku": "SCR-DECK-3-5",
               "quantity": 26,
               "unit_price": 29.99,
@@ -704,11 +738,11 @@
             {
               "customer_note": "",
               "description": "2x8x16 Hem-Fir No.2",
-              "id": "<id-40>",
+              "id": "<id-43>",
               "is_special_order": false,
               "line_total": 623,
               "price_uom": "PCS",
-              "product_id": "<id-41>",
+              "product_id": "<id-44>",
               "product_sku": "LUM-2816-NO2",
               "quantity": 28,
               "unit_price": 22.25,
@@ -717,11 +751,11 @@
             {
               "customer_note": "",
               "description": "Ext Door 36x80 Steel 6-Panel",
-              "id": "<id-42>",
+              "id": "<id-45>",
               "is_special_order": false,
               "line_total": 6440,
               "price_uom": "PCS",
-              "product_id": "<id-43>",
+              "product_id": "<id-46>",
               "product_sku": "DR-EXT-3680-STL",
               "quantity": 23,
               "unit_price": 280,
@@ -730,11 +764,11 @@
             {
               "customer_note": "",
               "description": "Casing 2-1/4 MDF 14'",
-              "id": "<id-44>",
+              "id": "<id-47>",
               "is_special_order": false,
               "line_total": 337.5,
               "price_uom": "PCS",
-              "product_id": "<id-45>",
+              "product_id": "<id-48>",
               "product_sku": "MLD-CASE-MDF",
               "quantity": 25,
               "unit_price": 13.5,
@@ -743,11 +777,11 @@
             {
               "customer_note": "",
               "description": "R-14 Fiberglass Batts 15x93",
-              "id": "<id-46>",
+              "id": "<id-49>",
               "is_special_order": false,
               "line_total": 5984,
               "price_uom": "BAG",
-              "product_id": "<id-47>",
+              "product_id": "<id-50>",
               "product_sku": "INS-R13-15",
               "quantity": 88,
               "unit_price": 68,
@@ -756,11 +790,11 @@
             {
               "customer_note": "",
               "description": "Joist Hanger 2x10",
-              "id": "<id-48>",
+              "id": "<id-51>",
               "is_special_order": false,
               "line_total": 12.95,
               "price_uom": "PCS",
-              "product_id": "<id-49>",
+              "product_id": "<id-52>",
               "product_sku": "HANGER-210",
               "quantity": 7,
               "unit_price": 1.85,
@@ -769,7 +803,7 @@
           ],
           "notes": "",
           "priced": true,
-          "project_id": "<id-50>",
+          "project_id": "<id-53>",
           "project_name": "Glenmore Lofts",
           "rejected_at": null,
           "sent_at": null,
@@ -784,16 +818,16 @@
           "erp_state": "SENT",
           "expires_at": "<ts-13d>",
           "freight_amount": 0,
-          "id": "<id-51>",
+          "id": "<id-54>",
           "lines": [
             {
               "customer_note": "",
               "description": "R-20 Fiberglass Batts 15x93",
-              "id": "<id-52>",
+              "id": "<id-55>",
               "is_special_order": false,
               "line_total": 7052,
               "price_uom": "BAG",
-              "product_id": "<id-53>",
+              "product_id": "<id-56>",
               "product_sku": "INS-R19-15",
               "quantity": 86,
               "unit_price": 82,
@@ -802,11 +836,11 @@
             {
               "customer_note": "",
               "description": "Vinyl H Mold 1/4 X 12'",
-              "id": "<id-54>",
+              "id": "<id-57>",
               "is_special_order": false,
               "line_total": 324,
               "price_uom": "EA",
-              "product_id": "<id-55>",
+              "product_id": "<id-58>",
               "product_sku": "CORNHMOLD14",
               "quantity": 54,
               "unit_price": 6,
@@ -814,12 +848,12 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
-              "id": "<id-56>",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 24 X 8",
+              "id": "<id-59>",
               "is_special_order": false,
               "line_total": 2703.75,
               "price_uom": "EA",
-              "product_id": "<id-57>",
+              "product_id": "<id-60>",
               "product_sku": "CORNSFT2408V",
               "quantity": 103,
               "unit_price": 26.25,
@@ -828,11 +862,11 @@
             {
               "customer_note": "",
               "description": "2x8x16 Hem-Fir No.2",
-              "id": "<id-58>",
+              "id": "<id-61>",
               "is_special_order": false,
               "line_total": 1579.75,
               "price_uom": "PCS",
-              "product_id": "<id-41>",
+              "product_id": "<id-44>",
               "product_sku": "LUM-2816-NO2",
               "quantity": 71,
               "unit_price": 22.25,
@@ -840,12 +874,12 @@
             },
             {
               "customer_note": "",
-              "description": "Cemtrim Textured 7/16 X 6 X 12",
-              "id": "<id-59>",
+              "description": "Composite Trim Textured 7/16 X 6 X 12",
+              "id": "<id-62>",
               "is_special_order": false,
               "line_total": 1504.44,
               "price_uom": "EA",
-              "product_id": "<id-60>",
+              "product_id": "<id-63>",
               "product_sku": "CORNCTRMG12+",
               "quantity": 84,
               "unit_price": 17.91,
@@ -854,8 +888,8 @@
           ],
           "notes": "",
           "priced": true,
-          "project_id": "<id-61>",
-          "project_name": "Mission Hill Custom Home",
+          "project_id": "<id-64>",
+          "project_name": "Lakeview Custom Home",
           "rejected_at": null,
           "sent_at": null,
           "status": "PRICED",
@@ -869,12 +903,12 @@
           "erp_state": "DRAFT",
           "expires_at": "<ts-38d>",
           "freight_amount": 0,
-          "id": "<id-62>",
+          "id": "<id-65>",
           "lines": [
             {
               "customer_note": "",
               "description": "2x4x8 SPF Premium",
-              "id": "<id-63>",
+              "id": "<id-66>",
               "is_special_order": false,
               "line_total": 275,
               "price_uom": "PCS",
@@ -886,12 +920,12 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
-              "id": "<id-64>",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 16 X 12",
+              "id": "<id-67>",
               "is_special_order": false,
               "line_total": 3687.62,
               "price_uom": "EA",
-              "product_id": "<id-65>",
+              "product_id": "<id-68>",
               "product_sku": "CORNSFT1612V",
               "quantity": 94,
               "unit_price": 39.23,
@@ -899,12 +933,12 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
-              "id": "<id-66>",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 16 X 12",
+              "id": "<id-69>",
               "is_special_order": false,
               "line_total": 274.61,
               "price_uom": "EA",
-              "product_id": "<id-65>",
+              "product_id": "<id-68>",
               "product_sku": "CORNSFT1612V",
               "quantity": 7,
               "unit_price": 39.23,
@@ -912,12 +946,12 @@
             },
             {
               "customer_note": "",
-              "description": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
-              "id": "<id-67>",
+              "description": "Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier",
+              "id": "<id-70>",
               "is_special_order": false,
               "line_total": 463.32,
               "price_uom": "EA",
-              "product_id": "<id-68>",
+              "product_id": "<id-71>",
               "product_sku": "CORNSHTGR49",
               "quantity": 33,
               "unit_price": 14.04,
@@ -926,7 +960,7 @@
           ],
           "notes": "",
           "priced": false,
-          "project_id": "<id-69>",
+          "project_id": "<id-72>",
           "project_name": "Knox Park Pavilion",
           "rejected_at": null,
           "sent_at": null,
@@ -1009,7 +1043,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-70>"
+          "request_id": "<id-73>"
         }
       }
     }
@@ -1018,7 +1052,7 @@
     "name": "portal_quotes.get.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/quotes/<id-71>"
+      "path": "/api/portal/v1/quotes/<id-74>"
     },
     "response": {
       "status": 404,
@@ -1029,7 +1063,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-72>"
+          "request_id": "<id-75>"
         }
       }
     }
@@ -1050,7 +1084,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-73>"
+          "request_id": "<id-76>"
         }
       }
     }
@@ -1071,7 +1105,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-74>"
+          "request_id": "<id-77>"
         }
       }
     }
@@ -1093,10 +1127,10 @@
       "content_type": "application/json",
       "body": {
         "accepted_at": null,
-        "branch_id": "<id-75>",
+        "branch_id": "<id-78>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "delivery",
         "expires_at": null,
         "exposure_cents": 0,
@@ -1148,7 +1182,7 @@
           }
         ],
         "margin_total_cents": 0,
-        "number": "Q-000031",
+        "number": "Q-000034",
         "original_content_type": null,
         "original_filename": null,
         "parse_map": null,
@@ -1181,10 +1215,10 @@
       "content_type": "application/json",
       "body": {
         "accepted_at": null,
-        "branch_id": "<id-75>",
+        "branch_id": "<id-78>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "pickup",
         "expires_at": null,
         "exposure_cents": 0,
@@ -1216,7 +1250,7 @@
           }
         ],
         "margin_total_cents": 0,
-        "number": "Q-000032",
+        "number": "Q-000035",
         "original_content_type": null,
         "original_filename": null,
         "parse_map": null,
@@ -1305,7 +1339,7 @@
           "reason": "This quote has not been priced and sent by the dealer yet, or it has already been closed."
         },
         "meta": {
-          "request_id": "<id-76>"
+          "request_id": "<id-79>"
         }
       }
     }
@@ -1358,7 +1392,7 @@
     "name": "portal_quotes.accept.unknown",
     "request": {
       "method": "POST",
-      "path": "/api/portal/v1/quotes/<id-71>/accept"
+      "path": "/api/portal/v1/quotes/<id-74>/accept"
     },
     "response": {
       "status": 404,
@@ -1369,7 +1403,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-77>"
+          "request_id": "<id-80>"
         }
       }
     }
@@ -1389,7 +1423,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-78>"
+          "request_id": "<id-81>"
         }
       }
     }

@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+/**
+ * The purchase order list: the desk's first view of a PO. Three things must
+ * be readable without clicking into a row: the vendor, the yard, and the total
+ * in dollars with thousands separators. The list used to print a UUID for the
+ * PO id and a bare cents number for the total: both were noise.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import './PurchaseOrderList'
+import type { PurchaseOrderList } from './PurchaseOrderList'
+import { branchContext } from '../../services/BranchContext'
+import { mountAsync, text as textOf } from '../../test/dom'
+
+const PO_1_ID = '00000000-0000-4000-8000-0000000000a1'
+const PO_2_ID = '00000000-0000-4000-8000-0000000000a2'
+const MAIN_BRANCH_ID = '00000000-0000-4000-8000-0000000000b1'
+const VENDOR_1_ID = '00000000-0000-4000-8000-0000000000v1'
+const VENDOR_2_ID = '00000000-0000-4000-8000-0000000000v2'
+// The list route carries only vendor_id; the page names the vendor from the vendor list.
+const VENDORS = [
+  { id: VENDOR_1_ID, name: 'Acme Lumber' },
+  { id: VENDOR_2_ID, name: 'Stone Yard Co' },
+]
+
+function po(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PO_1_ID,
+    branch_id: MAIN_BRANCH_ID,
+    vendor_id: VENDOR_1_ID,
+    status: 'DRAFT',
+    source: 'MANUAL',
+    created_at: '2031-03-09T08:00:00Z',
+    updated_at: '2031-03-09T08:00:00Z',
+    line_count: 4,
+    total_cost: 123456.78,
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  ;(branchContext as unknown as { _branches: unknown[] })._branches = [
+    { id: MAIN_BRANCH_ID, code: 'MAIN', name: 'Main Yard', active: true, is_home: true },
+  ]
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  ;(branchContext as unknown as { _branches: unknown[] })._branches = []
+})
+
+function stubAll(poList: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/reorder-alerts')) return jsonResponse([])
+    if (url.includes('/source-summary')) return jsonResponse({})
+    if (url.includes('/purchase-orders')) return jsonResponse(poList)
+    if (url.includes('/vendors')) return jsonResponse(VENDORS)
+    return jsonResponse([])
+  }))
+}
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
+
+describe('purchase order list columns', () => {
+  it('shows the vendor name as its own column, resolved from vendor_id', async () => {
+    stubAll([po({ id: PO_1_ID, vendor_id: VENDOR_1_ID })])
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    expect(textOf(el)).toContain('Acme Lumber')
+  })
+
+  it('shows the yard name as its own column (resolved from branch_id)', async () => {
+    stubAll([po({ id: PO_1_ID, branch_id: MAIN_BRANCH_ID })])
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    expect(textOf(el)).toContain('Main Yard')
+  })
+
+  it('groups thousands on the total cost and never prints a bare integer', async () => {
+    stubAll([po({ id: PO_1_ID, total_cost: 123456.78 })])
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    expect(textOf(el)).toContain('$123,456.78')
+    expect(textOf(el)).not.toContain('$123456.78')
+  })
+
+  it('renders two rows independently with their own vendor and yard', async () => {
+    stubAll([
+      po({ id: PO_1_ID, vendor_id: VENDOR_1_ID, total_cost: 1000 }),
+      po({ id: PO_2_ID, vendor_id: VENDOR_2_ID, branch_id: MAIN_BRANCH_ID, total_cost: 2000 }),
+    ])
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    expect(textOf(el)).toContain('Acme Lumber')
+    expect(textOf(el)).toContain('Stone Yard Co')
+  })
+
+  it('reads "Not set" when the vendor is not in the vendor list', async () => {
+    stubAll([po({ id: PO_1_ID, vendor_id: '00000000-0000-4000-8000-0000000000v9' })])
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    expect(textOf(el)).toContain('Not set')
+  })
+
+  it('names the yard on each reorder row when the rows span yards (reorder is per yard)', async () => {
+    const alert = (branch_id: string, branch_name: string, stock: string) => ({
+      branch_id, branch_name, product_id: 'p1', sku: 'HANGER-28', description: 'Joist Hanger 2x8', vendor: null, vendor_id: null,
+      reorder_point: '150', reorder_qty: '200', current_stock: stock, deficit: String(150 - Number(stock)),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/reorder-alerts')) {
+        return jsonResponse({ items: [alert('y1', 'Lake Country Outpost', '100'), alert('y2', 'West Kelowna Satellite', '100')], next_cursor: null, limit: 0 })
+      }
+      if (url.includes('/source-summary')) return jsonResponse({})
+      if (url.includes('/purchase-orders')) return jsonResponse([])
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    const yards = Array.from(el.querySelectorAll('[data-testid="reorder-yard"]')).map((n) => textOf(n))
+    expect(yards).toEqual(['Lake Country Outpost', 'West Kelowna Satellite'])
+  })
+
+  it('names the yard on a reorder row even when every row is at one yard', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/reorder-alerts')) {
+        return jsonResponse({ items: [{
+          branch_id: 'y1', branch_name: 'Lake Country Outpost', product_id: 'p1', sku: 'HANGER-28', description: 'Joist Hanger 2x8',
+          vendor: null, vendor_id: null, reorder_point: '150', reorder_qty: '200', current_stock: '100', deficit: '50',
+        }], next_cursor: null, limit: 0 })
+      }
+      if (url.includes('/source-summary')) return jsonResponse({})
+      if (url.includes('/purchase-orders')) return jsonResponse([])
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    const yards = Array.from(el.querySelectorAll('[data-testid="reorder-yard"]')).map((n) => textOf(n))
+    expect(yards).toEqual(['Lake Country Outpost'])
+  })
+
+  it('says in words which products Generate Replenishment POs left alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/reorder-check') && init?.method === 'POST') {
+        return jsonResponse({ status: 'success', count: 0, no_reorder_qty: ['HANGER-28', 'NAIL-16D'] })
+      }
+      if (url.includes('/reorder-alerts')) {
+        return jsonResponse({ items: [{
+          branch_id: 'y1', branch_name: 'Lake Country Outpost', product_id: 'p1', sku: 'HANGER-28', description: 'Joist Hanger 2x8',
+          vendor: null, vendor_id: null, reorder_point: '150', reorder_qty: '0', current_stock: '150', deficit: '0',
+        }], next_cursor: null, limit: 0 })
+      }
+      if (url.includes('/source-summary')) return jsonResponse({})
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).includes('Generate Replenishment POs')) as HTMLButtonElement
+    button.click()
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+    const note = el.querySelector('[data-testid="reorder-left-alone"]')
+    expect(note).toBeTruthy()
+    expect(textOf(note as Element)).toContain('HANGER-28')
+    expect(textOf(note as Element)).toContain('NAIL-16D')
+    expect(textOf(note as Element)).toContain('no reorder quantity')
+  })
+})

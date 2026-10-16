@@ -25,7 +25,7 @@ import './AccountsPayable'
 import type { LitElement } from 'lit'
 import type { VendorInvoice, APPayment, APAgingSummary } from '../../types/ap'
 import type { Vendor } from '../../types/vendor'
-import { mountAsync, text, jsonResponse, clickByText, update, flush, q } from '../../test/dom'
+import { mountAsync, text, jsonResponse, clickByText, update, flush, q, chooseOption } from '../../test/dom'
 
 const VENDOR_ID = '11111111-1111-1111-1111-111111111111'
 const BRANCH_ID = '22222222-2222-4222-8222-222222222222'
@@ -230,7 +230,7 @@ describe('accounts payable: reading cents', () => {
     serve({
       agingSummary: [
         aging(),
-        aging({ vendor_id: 'v2', vendor_name: 'Ridgeline Supply', current: 100_000, past_30: 0, past_60: 0, past_90: 0, total: 100_000 }),
+        aging({ vendor_id: 'v2', vendor_name: 'Quillfield Supply', current: 100_000, past_30: 0, past_60: 0, past_90: 0, total: 100_000 }),
       ],
     })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
@@ -240,7 +240,7 @@ describe('accounts payable: reading cents', () => {
     expect(text(el)).toContain('$6,000.00')
     // total 900,000 + 100,000 = 1,000,000 cents
     expect(text(el)).toContain('$10,000.00')
-    expect(text(el)).toContain('Ridgeline Supply')
+    expect(text(el)).toContain('Quillfield Supply')
   })
 
   it('shows payments on the payments tab', async () => {
@@ -276,10 +276,8 @@ describe('accounts payable: writing the wire scales', () => {
   ) {
     await clickByText(el, 'button', 'Log Vendor Bill')
 
-    const selects = Array.from(el.querySelectorAll<HTMLSelectElement>('select'))
-    const vendorSelect = selects[0]
-    vendorSelect.value = VENDOR_ID
-    vendorSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const selects = Array.from(el.querySelectorAll<HTMLElement & { value: string }>('gable-select'))
+    await chooseOption(selects[0], VENDOR_ID)
 
     const setText = (input: HTMLInputElement, value: string) => {
       input.value = value
@@ -287,13 +285,13 @@ describe('accounts payable: writing the wire scales', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    // Two text inputs in this drawer: the vendor invoice number, then the
-    // single line item's description. Both are `required` and the submit
-    // handler rejects a blank description, so the draft is not submittable
-    // without it.
-    const textInputs = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="text"]'))
-    setText(textInputs[0], 'CL-9001')
-    setText(textInputs[1], opts.description ?? '2x4 SPF #2')
+    // The vendor invoice number, then the single line item's description,
+    // picked by their placeholders (the date fields are gable-date-field's
+    // own text boxes now, so a positional input[type=text] read would land
+    // on them). The submit handler rejects a blank description, so the draft
+    // is not submittable without it.
+    setText(q<HTMLInputElement>(el, 'input[placeholder="e.g. INV-1002"]'), 'CL-9001')
+    setText(q<HTMLInputElement>(el, 'input[placeholder="Item details..."]'), opts.description ?? '2x4 SPF #2')
 
     const numbers = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]'))
     // Line inputs come first (qty, unit price), tax is the last number field.
@@ -358,9 +356,8 @@ describe('accounts payable: writing the wire scales', () => {
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     await clickByText(el, 'button', 'Record Payment')
-    const vendorSelect = el.querySelector<HTMLSelectElement>('select')!
-    vendorSelect.value = VENDOR_ID
-    vendorSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const vendorSelect = el.querySelector<HTMLElement & { value: string }>('gable-select')!
+    await chooseOption(vendorSelect, VENDOR_ID)
     await update(el, {})
 
     const checkbox = el.querySelector<HTMLInputElement>('input[type="checkbox"]')

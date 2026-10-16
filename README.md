@@ -52,7 +52,7 @@ make db
 # 2. Apply migrations
 make migrate
 
-# 3. (Optional) seed demo data — the "Gable Lumber & Supply" fixture.
+# 3. (Optional) seed demo data — the "Gable Building Supply" fixture.
 #    DEMO_SEED=1 is REQUIRED: without it the seed writes nothing and exits 0,
 #    because it TRUNCATEs transactional tables and must never run by accident.
 DEMO_SEED=1 make seed

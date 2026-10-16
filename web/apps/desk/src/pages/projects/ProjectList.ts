@@ -8,7 +8,7 @@ import { FolderGit2, Plus, ArrowRight, RefreshCw, AlertTriangle, Briefcase } fro
 import { ProjectService } from '../../services/ProjectService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { router } from '../../lib/router.ts';
-import { format } from 'date-fns';
+import { formatDate } from '../../lib/dates.ts';
 import type { Project } from '../../types/project.ts';
 
 @customElement('gable-project-list')
@@ -93,7 +93,7 @@ export class ProjectList extends LitElement {
                     ${!this.isCreating ? html`
                         <button
                             @click=${() => { this.isCreating = true; }}
-                            class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-[0_0_15px_rgba(0,255,163,0.3)]"
+                            class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-glow"
                         >
                             ${icon(Plus, 18)} New Project
                         </button>
@@ -101,7 +101,7 @@ export class ProjectList extends LitElement {
                 </div>
 
                 ${this.isCreating ? html`
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-gable-green/30 rounded-2xl mb-6">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-gable-green/30 rounded-2xl mb-6">
                         <div class="p-4">
                             <form @submit=${(e: Event) => this._handleCreateProject(e)} class="flex gap-3 items-end">
                                 <div class="flex-1">
@@ -136,7 +136,7 @@ export class ProjectList extends LitElement {
                 ` : nothing}
 
                 ${this.projects.length === 0 ? html`
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-12 text-center">
                             ${icon(Briefcase, 48, 'w-12 h-12 text-zinc-600 mx-auto mb-4')}
                             <h3 class="text-lg font-medium text-white mb-2">No projects found</h3>
@@ -152,7 +152,7 @@ export class ProjectList extends LitElement {
                 ` : html`
                     <div class="space-y-3">
                         ${this.projects.map(project => html`
-                            <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                            <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                                 <div
                                     @click=${() => router.navigate(`/portal/projects/${project.id}`)}
                                     class="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors group"
@@ -164,7 +164,7 @@ export class ProjectList extends LitElement {
                                         <div>
                                             <h3 class="font-medium text-white">${project.name}</h3>
                                             <div class="text-sm text-zinc-500 mt-1 flex items-center gap-2">
-                                                <span>Created ${format(new Date(project.created_at), 'MMM d, yyyy')}</span>
+                                                <span>Created ${formatDate(project.created_at)}</span>
                                                 <span>&middot;</span>
                                                 <span class="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded border ${project.status === 'active'
                                                     ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'

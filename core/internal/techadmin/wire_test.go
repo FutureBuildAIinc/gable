@@ -42,6 +42,13 @@ type fixture struct {
 // a scoped key reaches (ADR 0009).
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureWith(t, func(s *techadmin.Service) *techadmin.Service { return s })
+}
+
+// newFixtureWith is newFixture with a hook that wires extra collaborators
+// (a vault, an AI client) onto the service before it is served.
+func newFixtureWith(t *testing.T, wire func(*techadmin.Service) *techadmin.Service) *fixture {
+	t.Helper()
 	testutil.LockOutboxTables(t)
 	t.Setenv("AUTH_MODE", "dev")
 	db := testutil.RequireDB(t)
@@ -49,6 +56,7 @@ func newFixture(t *testing.T) *fixture {
 	f.svc = techadmin.NewService(techadmin.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).
 		WithSettingsDefaults("", "", "")
+	f.svc = wire(f.svc)
 	mux := http.NewServeMux()
 	techadmin.NewHandler(f.svc).RegisterRoutes(mux)
 	validator := keyValidator{svc: f.svc}
@@ -83,7 +91,7 @@ func (v keyValidator) ValidateKey(ctx context.Context, rawKey string) (middlewar
 // each test starts from the same settings and leaves nothing behind.
 func (f *fixture) cleanup() {
 	ctx := context.Background()
-	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key')`)
+	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model','ai_last_test')`)
 	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM admin_revisions WHERE resource LIKE 'admin.settings.%'`)
 	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'admin_settings'`)
 }

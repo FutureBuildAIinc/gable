@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Western Red Cedar 2x framing lumber stack</title>
+  <defs>
+    <style>
+      .face{fill:#a85a3c}
+      .topEdge{fill:#c4784c}
+      .sideEdge{fill:#7a3c24}
+      .endGrain{fill:#6a2c1c}
+      .grain{fill:none;stroke:#7a3c24;stroke-linecap:round}
+      .ring{fill:none;stroke:#3a1f10}
+      .strap{fill:#3a3530}
+      .strapShade{fill:#5a524a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="104" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="face" x="30" y="170" width="200" height="20"/>
+    <rect class="topEdge" x="30" y="170" width="200" height="2"/>
+    <line class="grain" x1="36" y1="178" x2="226" y2="178" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="40" y1="186" x2="226" y2="186" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endGrain" x="230" y="170" width="14" height="20"/>
+    <ellipse class="ring" cx="237" cy="180" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="237" cy="180" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="148" width="200" height="20"/>
+    <rect class="topEdge" x="30" y="148" width="200" height="2"/>
+    <line class="grain" x1="38" y1="156" x2="226" y2="156" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="34" y1="164" x2="222" y2="164" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endGrain" x="230" y="148" width="14" height="20"/>
+    <ellipse class="ring" cx="237" cy="158" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="237" cy="158" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="126" width="200" height="20"/>
+    <rect class="topEdge" x="30" y="126" width="200" height="2"/>
+    <line class="grain" x1="40" y1="134" x2="226" y2="134" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="36" y1="142" x2="224" y2="142" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endGrain" x="230" y="126" width="14" height="20"/>
+    <ellipse class="ring" cx="237" cy="136" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="237" cy="136" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="104" width="200" height="20"/>
+    <rect class="topEdge" x="30" y="104" width="200" height="2"/>
+    <line class="grain" x1="38" y1="112" x2="226" y2="112" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="120" x2="222" y2="120" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endGrain" x="230" y="104" width="14" height="20"/>
+    <ellipse class="ring" cx="237" cy="114" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="237" cy="114" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <rect class="strap" x="78" y="100" width="5" height="92"/>
+  <rect class="strapShade" x="78" y="100" width="1.5" height="92"/>
+  <rect class="strap" x="172" y="100" width="5" height="92"/>
+  <rect class="strapShade" x="172" y="100" width="1.5" height="92"/>
+  <rect x="78" y="106" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="106" width="5" height="3" fill="#5a524a"/>
+  <rect x="78" y="186" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="186" width="5" height="3" fill="#5a524a"/>
+</svg>

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Box of shop towels</title>
+  <defs><style>
+    .boxFront{fill:#1a3a6e}
+    .boxSide{fill:#0e2a52}
+    .boxTop{fill:#2a4a8a}
+    .boxRim{fill:#08182e}
+    .towel{fill:#faf3e0}
+    .towelShade{fill:#d8c8a4}
+    .label{fill:#faf3e0}
+    .labelAccent{fill:#c84a2e}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+    .textCt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="96" ry="8" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="boxTop" points="36,86 200,86 216,98 52,98"/>
+    <rect class="boxRim" x="36" y="84" width="164" height="3"/>
+    <polygon class="boxSide" points="200,86 216,98 216,202 200,190"/>
+    <rect class="boxFront" x="36" y="86" width="164" height="104"/>
+    <polygon points="36,86 200,86 216,98 52,98" fill="none" stroke="#08182e" stroke-width="0.5" opacity="0.5"/>
+    <polygon points="200,86 216,98 216,202 200,190" fill="none" stroke="#08182e" stroke-width="0.5" opacity="0.5"/>
+    <rect x="36" y="86" width="164" height="104" fill="none" stroke="#08182e" stroke-width="0.5" opacity="0.5"/>
+    <rect class="boxRim" x="36" y="187" width="164" height="3" opacity="0.6"/>
+  </g>
+  <g>
+    <ellipse class="towel" cx="118" cy="94" rx="56" ry="10"/>
+    <ellipse class="towelShade" cx="118" cy="98" rx="56" ry="6" opacity="0.5"/>
+    <line x1="86" y1="92" x2="150" y2="92" stroke="#d8c8a4" stroke-width="0.4" opacity="0.7"/>
+    <line x1="86" y1="96" x2="150" y2="96" stroke="#d8c8a4" stroke-width="0.4" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="label" x="48" y="118" width="68" height="50" rx="1"/>
+    <rect class="labelAccent" x="48" y="118" width="68" height="6"/>
+    <rect class="labelAccent" x="48" y="162" width="68" height="6"/>
+    
+    <text class="textSub" x="82" y="150" font-size="6" fill="#1a3a6e" text-anchor="middle">SHOP TOWELS</text>
+    <text class="textCt" x="82" y="160" font-size="6" fill="#1a3a6e" text-anchor="middle">200 CT</text>
+  </g>
+  <g>
+    <rect x="124" y="124" width="64" height="60" fill="#faf3e0" opacity="0.85"/>
+    <rect x="124" y="124" width="64" height="60" fill="none" stroke="#1a3a6e" stroke-width="0.6"/>
+    <text x="156" y="148" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="600" letter-spacing="0.5" fill="#1a3a6e" text-anchor="middle">MULTI-USE</text>
+    <text x="156" y="158" font-family="Verdana,Arial,sans-serif" font-size="5" font-weight="600" letter-spacing="0.5" fill="#1a3a6e" text-anchor="middle">HEAVY DUTY</text>
+    <text x="156" y="172" font-family="Verdana,Arial,sans-serif" font-size="5" font-weight="700" letter-spacing="0.5" fill="#c84a2e" text-anchor="middle">12 x 17 IN</text>
+  </g>
+</svg>

@@ -203,35 +203,35 @@ test.describe('Payments, unapplied cash and AR', () => {
         if (!jobsByCustomer.has(q.customer_id)) jobsByCustomer.set(q.customer_id, new Set());
         jobsByCustomer.get(q.customer_id)!.add(q.job_id);
     }
-    let kelbrook = '';
+    let tarnwick = '';
     for (const [customer, jobs] of jobsByCustomer) {
         if (jobs.size < 2) continue;
         const c = (await (await request.get(`/api/v1/customers/${customer}`)).json()) as { credit_limit_cents: number | null; balance_cents: number };
-        if (c.credit_limit_cents === null) { kelbrook = customer; break; }
+        if (c.credit_limit_cents === null) { tarnwick = customer; break; }
         let live = 0;
         for (const status of ['confirmed', 'backordered', 'on_hold']) {
           const page = (await (await request.get(`/api/v1/orders?customer_id=${customer}&status=${status}&limit=200`)).json()) as { items: { total_cents: number }[] };
           live += page.items.reduce((n, o) => n + o.total_cents, 0);
         }
-        if (c.credit_limit_cents - c.balance_cents - live >= 2_000_000) { kelbrook = customer; break; }
+        if (c.credit_limit_cents - c.balance_cents - live >= 2_000_000) { tarnwick = customer; break; }
     }
-    if (!kelbrook) {
+    if (!tarnwick) {
         test.skip(true, 'the seed holds no customer with two jobs and credit room to age by');
         return;
     }
-    const jobIds = [...jobsByCustomer.get(kelbrook)!];
-    const kelbrookCustomer = (await (await request.get(`/api/v1/customers/${kelbrook}`)).json()) as { name: string; primary_branch_id: string };
-    const shipTos = ((await (await request.get(`/api/v1/customers/${kelbrook}/ship-tos`)).json()) as { items: { id: string; code: string }[] }).items;
+    const jobIds = [...jobsByCustomer.get(tarnwick)!];
+    const tarnwickCustomer = (await (await request.get(`/api/v1/customers/${tarnwick}`)).json()) as { name: string; primary_branch_id: string };
+    const shipTos = ((await (await request.get(`/api/v1/customers/${tarnwick}/ship-tos`)).json()) as { items: { id: string; code: string }[] }).items;
     expect(shipTos.length).toBeGreaterThanOrEqual(1);
     if (shipTos.length < 2) {
-      const second = await request.post(`/api/v1/customers/${kelbrook}/ship-tos`, {
+      const second = await request.post(`/api/v1/customers/${tarnwick}/ship-tos`, {
         data: { code: 'E2ESITE', name: 'E2E second site', line1: '2 Playwright Rd', city: 'Kelowna', region: 'BC', postal_code: 'V1Y 1Z1', country: 'CA' },
       });
       expect(second.status(), await second.text()).toBe(201);
       shipTos.push(await second.json());
     }
-    await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
-    await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
+    await billedInvoice(request, { id: tarnwick, name: tarnwickCustomer.name, primary_branch_id: tarnwickCustomer.primary_branch_id }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
+    await billedInvoice(request, { id: tarnwick, name: tarnwickCustomer.name, primary_branch_id: tarnwickCustomer.primary_branch_id }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
 
     // By customer first, then by job and by ship-to: the toggle re-reads the
     // aging and the group rows split.
@@ -240,7 +240,7 @@ test.describe('Payments, unapplied cash and AR', () => {
     await expect(page.getByTestId('aging-table')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-customer.png'), fullPage: true });
 
-    const jobRows = ((await (await request.get(`/api/v1/ar/aging?group_by=job&customer_id=${kelbrook}`)).json()) as { items: { job_name: string | null; job_id: string | null; total_cents: number }[] }).items
+    const jobRows = ((await (await request.get(`/api/v1/ar/aging?group_by=job&customer_id=${tarnwick}`)).json()) as { items: { job_name: string | null; job_id: string | null; total_cents: number }[] }).items
       .filter((r) => r.job_id && r.total_cents !== 0);
     await page.getByTestId('group-by-job').click();
     for (const row of jobRows) {
@@ -255,11 +255,16 @@ test.describe('Payments, unapplied cash and AR', () => {
     await expect(page.getByTestId('aging-row').filter({ hasText: shipTos[1].code }).first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-ship-to.png'), fullPage: true });
 
-    // The statement on the new AR route: the seeded customer's activity.
-    await page.goto('/reports/customer-statement');
+    // The statement on the new AR route: the seeded customer's activity. The
+    // AR routes hold the customer wall (customer_branches against the caller's
+    // reach, header or no header) and the seed writes the customer's branch
+    // row beside the customer, so the desk, pinned to the customer's own
+    // branch, reads the seeded customer like any other. The account page's
+    // Statement link lands here with the customer preselected, and the page
+    // runs the statement for that customer.
+    await page.evaluate((id) => localStorage.setItem('gable_current_branch_id', id), tarnwickCustomer.primary_branch_id);
+    await page.goto(`/reports/customer-statement?customer=${tarnwick}`);
     await expect(page.getByRole('heading', { name: 'Customer Statement' })).toBeVisible();
-    await page.getByLabel('Customer ID').fill(kelbrook);
-    await page.getByRole('button', { name: 'Generate' }).click();
     await expect(page.getByTestId('statement-currency')).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId('statement-currency')).toContainText('Opening Balance');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'customer-statement.png'), fullPage: true });

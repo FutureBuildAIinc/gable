@@ -74,7 +74,7 @@ func TestKeyBranchPin_Migration108LegacyTillSessionStaysReachable(t *testing.T) 
 	if status != http.StatusOK || !strings.Contains(string(buf), sess.String()) {
 		t.Errorf("current till with X-Branch-Id the register's branch: %d %s, want the open session", status, buf)
 	}
-	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/"+sess.String()+"/close", `{"counted_by_method":{"CASH":0.5}}`, hdr)
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/"+sess.String()+"/close", `{"counted_by_method":{"cash":50}}`, hdr)
 	if status != http.StatusOK {
 		t.Errorf("closing the open drawer with X-Branch-Id the register's branch: %d %s, want 200", status, buf)
 	}
@@ -135,8 +135,8 @@ func TestKeyBranchPin_Migration108LegacyReturnStaysReachable(t *testing.T) {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_returns WHERE id = $1`, ret)
 	})
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, subtotal, tax_amount, total, refund_method, status)
-		 VALUES ($1, $2, NULL, $3, 10.11, 0.99, 11.10, 'CASH', 'COMPLETED')`, ret, reg, uuid.New()); err != nil {
+		`INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, subtotal, tax_amount, total, refund_method, status, currency, number)
+		 VALUES ($1, $2, NULL, $3, 10.11, 0.99, 11.10, 'CASH', 'COMPLETED', 'USD', $4)`, ret, reg, uuid.New(), "RTPIN7-"+ret.String()[:8]); err != nil {
 		t.Fatal(err)
 	}
 	f.applyMigration108(t)
@@ -249,7 +249,7 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	})
 
 	// The till open on another branch's register: 403, no session.
-	status, buf := f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regB+`","opening_float":50}`, hdr)
+	status, buf := f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regB+`","opening_float_cents":5000}`, hdr)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
 		t.Errorf("a user opening a till on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
 	}
@@ -258,8 +258,9 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	}
 
 	// The return on another branch's register: 403, no return.
-	retBody := `{"register_id":"` + regB + `","refund_method":"CASH","lines":[{"product_id":"` +
-		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	retBody := `{"register_id":"` + regB + `","refund_method":"cash","reason":"pin",` +
+		`"customer_id":"` + f.custID.String() + `","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
 		t.Errorf("a user recording a return on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
@@ -269,7 +270,7 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	}
 
 	// The A controls: the caller's own register passes for both.
-	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regA+`","opening_float":50}`, hdr)
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regA+`","opening_float_cents":5000}`, hdr)
 	var sess struct {
 		ID       uuid.UUID  `json:"id"`
 		BranchID *uuid.UUID `json:"branch_id"`
@@ -278,8 +279,9 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	if status != http.StatusCreated || sess.BranchID == nil || *sess.BranchID != f.branchA {
 		t.Errorf("a user opening a till on its own register: %d %s, want 201 at branch A", status, buf)
 	}
-	retBody = `{"register_id":"` + regA + `","refund_method":"CASH","lines":[{"product_id":"` +
-		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	retBody = `{"register_id":"` + regA + `","refund_method":"cash","reason":"pin",` +
+		`"customer_id":"` + f.custID.String() + `","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
 	var ret struct {
 		ID       uuid.UUID  `json:"id"`
@@ -302,16 +304,22 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 	ctx := context.Background()
 	client := uuid.New()
 	batch := "pin-r7-" + uuid.NewString()[:8]
+	// the control's sale completes, so the pin's product needs stock
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, NULL, '', 50)`, f.posProd); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_sync_log WHERE batch_id = $1`, batch)
 	})
-	syncBody := func(batchRegister, itemRegister string) string {
+	syncBody := func(batchRegister, _ string) string {
 		return `{"batch_id":"` + batch + `","register_id":"` + batchRegister +
-			`","items":[{"client_id":"` + client.String() + `","register_id":"` + itemRegister +
+			`","items":[{"client_id":"` + client.String() +
 			`","cashier_id":"` + uuid.NewString() + `","customer_id":"` + f.custID.String() +
-			`","items":[],"tenders":[],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
+			`","items":[{"product_id":"` + f.posProd.String() + `","quantity":"1"}],` +
+			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
 	}
 	logRows := func() (n int) {
 		if err := f.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch).Scan(&n); err != nil {
@@ -355,7 +363,7 @@ func TestKeyBranchPin_SharedRefusalWordsNameTheCaller(t *testing.T) {
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	sh := "/api/v1/customers/" + s.id.String()
 	change := func() string {
-		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 666000 + int(time.Now().UnixNano()%1000)})
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": nextCreditLimit(666000)})
 	}
 	lowest := f.branchA
 	if f.branchB.String() < f.branchA.String() {

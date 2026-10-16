@@ -46,6 +46,7 @@ const PRODUCT: Product = {
   board_length_ft: null,
   random_length: false,
   units: [],
+  image_url: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -139,5 +140,24 @@ describe('ProductMarginModal', () => {
 
     expect(text(q(el, '[role="alert"]'))).toContain('target_margin: must be below 100')
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('the margins being typed survive a stock refresh', () => {
+  it('keeps them for the same product revision and resets them for a new one', async () => {
+    const el = await mount<GableProductMarginModal>('gable-product-margin-modal', { isOpen: true, product: PRODUCT })
+    const margin = q<HTMLInputElement>(el, 'input[type="number"]')
+    margin.value = '35'
+    margin.dispatchEvent(new Event('input'))
+    await update(el, {})
+    expect(text(el)).toContain('35.0%')
+
+    // The page refreshes the yard's stock figures: a new object, the same product and revision.
+    await update(el, { product: { ...PRODUCT, on_hand: '14.0000', available: '14.0000' } })
+    expect(text(el)).toContain('35.0%')
+
+    // A saved change (a new revision) still resets the form to the product's own figures.
+    await update(el, { product: { ...PRODUCT, revision: 4, target_margin: 31 } })
+    expect(text(el)).toContain('31.0%')
   })
 })

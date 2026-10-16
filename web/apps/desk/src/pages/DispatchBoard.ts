@@ -4,6 +4,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
+import { formatDay, todayDay } from '../lib/dates.ts';
 import { Truck, Calendar } from 'lucide';
 import type { Delivery, RouteStatus } from '../types/delivery';
 
@@ -37,7 +38,7 @@ export class DispatchBoard extends LitElement {
   }
 
   render() {
-    const today = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'long', day: 'numeric' });
+    const today = formatDay(todayDay());
 
     return html`
       <div class="h-[calc(100vh-2rem)] flex flex-col">

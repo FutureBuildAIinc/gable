@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { Truck, MapPin, Calendar, ChevronRight, User } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import type { Driver, Route } from '../../types/delivery';
@@ -59,21 +61,18 @@ export class DriverRouteList extends LitElement {
                     </h1>
                 </div>
 
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                     <div class="p-4">
                         <label class="block text-xs font-mono uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-2">
                             ${icon(User, 12)}
                             Select Driver
                         </label>
                         <div class="relative">
-                            <select
+                            <gable-select
                                 .value=${this.selectedDriver}
+                                .options=${[{ value: '', label: 'Choose your profile...' }, ...this.drivers.map(d => ({ value: d.id, label: d.name }))]}
                                 @change=${(e: Event) => { this.selectedDriver = (e.target as HTMLSelectElement).value; }}
-                                class="w-full bg-black/20 border border-white/10 text-white rounded-lg p-3 appearance-none focus:outline-none focus:border-gable-green/50 transition-colors"
-                            >
-                                <option value="">Choose your profile...</option>
-                                ${this.drivers.map(d => html`<option value="${d.id}">${d.name}</option>`)}
-                            </select>
+                            ></gable-select>
                             <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                 ${icon(ChevronRight, 16, 'text-zinc-500 rotate-90')}
                             </div>
@@ -85,14 +84,14 @@ export class DriverRouteList extends LitElement {
                     <h2 class="text-sm font-medium text-zinc-400 px-1">Assigned Routes</h2>
                     ${this.routes.map(route => html`
                         <div
-                            class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-transform cursor-pointer border-white/5 hover:border-gable-green/30"
+                            class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-transform cursor-pointer border-white/5 hover:border-gable-green/30"
                             @click=${() => router.navigate(`/driver/routes/${route.id}`)}
                         >
                             <div class="p-4">
                                 <div class="flex justify-between items-start mb-3">
                                     <div class="flex items-center gap-2 text-zinc-400 text-sm font-mono">
                                         ${icon(Calendar, 14)}
-                                        ${new Date(route.scheduled_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                                        ${formatDay(route.scheduled_date)}
                                     </div>
                                     <span class="text-[10px] font-mono px-2 py-0.5 rounded border uppercase tracking-wide ${this._statusConfig(route.status)}">
                                         ${route.status.replace('_', ' ')}

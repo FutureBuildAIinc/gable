@@ -45,6 +45,7 @@ const PRODUCT: Product = {
   board_length_ft: null,
   random_length: false,
   units: [],
+  image_url: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -111,5 +112,60 @@ describe('LineItemEditor', () => {
     const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [PRODUCT], customerId: 'c-1' })
     const detail = await pickAndAdd(el)
     expect(detail.unitPriceTenThousandths).toBe(42500)
+  })
+
+  it('holds the price at ten thousandths, never a float tail, and never invalid', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (new URL(url, 'http://localhost').pathname === '/api/v1/pricing/calculate') {
+        return jsonResponse({
+          customer_id: 'c', product_id: PRODUCT.id, quantity: '1', uom: 'PCS', unit_price_ten_thousandths: 46750.00190734863,
+          price_uom: 'PCS', uom_qty: '1', price_uom_qty: '1', line_total_cents: 468, price_basis: 'retail', details: '',
+        })
+      }
+      return jsonResponse({})
+    })
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [PRODUCT], customerId: 'c' })
+    const search = q<HTMLInputElement>(el, 'input[placeholder="Search SKU or Desc..."]')
+    search.value = 'SPF'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    ;(Array.from(el.querySelectorAll('div.cursor-pointer')).find((d) => (d.textContent ?? '').includes('SPF-2x4x8')) as HTMLElement).click()
+    await flush()
+    await update(el, {})
+    const price = q<HTMLInputElement>(el, 'input[aria-label="Unit price"]')
+    expect(price.value).toBe('4.675')
+    expect(price.type).toBe('text')
+    expect(price.validity.valid).toBe(true)
+    // A typed float tail is normalised to the wire's precision on commit.
+    price.value = '4.675000190734863'
+    price.dispatchEvent(new Event('change', { bubbles: true }))
+    await update(el, {})
+    expect(price.value).toBe('4.675')
+  })
+})
+
+describe('LineItemEditor search result pictures', () => {
+  it('shows a thumb beside a result whose product has a picture', async () => {
+    const withPic = { ...PRODUCT, id: 'p-pic', sku: 'PIC-1', image_url: '/catalog-illustrations/a.svg' }
+    const noPic = { ...PRODUCT, id: 'p-none', sku: 'PIC-2', image_url: null }
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [withPic, noPic] })
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'PIC'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    const results = Array.from(el.querySelectorAll('.cursor-pointer'))
+    expect(results.length).toBe(2)
+    expect(results[0].querySelector('gable-product-thumb img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
+    expect(results[1].querySelector('gable-product-thumb img')).toBeNull()
+  })
+
+  it('draws no thumb element while no product has a picture', async () => {
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [{ ...PRODUCT, sku: 'NOPIC-1' }] })
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'NOPIC'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    expect(el.querySelectorAll('.cursor-pointer').length).toBe(1)
+    expect(el.querySelector('gable-product-thumb')).toBeNull()
   })
 })

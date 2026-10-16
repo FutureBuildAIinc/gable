@@ -39,6 +39,7 @@ var forbiddenPayloadFields = []string{"revision", "original_file", "original_fil
 // *middleware.BranchGuard satisfies it.
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // AuditSink writes the draft act's audit row through the caller's executor.
@@ -264,7 +265,11 @@ func (s *Service) checkRecordBranch(ctx context.Context, branchID uuid.UUID) err
 
 // resolveBranchForCreate settles the draft's fixed branch: a payload branch
 // the caller may target (the guard's 403 naming payload.branch_id), else
-// the context branch, else ResolveBranchForWrite's default.
+// the context branch, else, for a user context with no branch, the user's
+// grants (exactly one granted branch: that one; several: the request must
+// name one; none: fail closed), never ResolveBranchForWrite's deployment
+// default, which no grant of the creator holds (SEC-NOHEADER-1). Callers
+// the grants never hold keep that default.
 func (s *Service) resolveBranchForCreate(ctx context.Context, payloadBranch *uuid.UUID) (uuid.UUID, error) {
 	if payloadBranch != nil {
 		if s.branches != nil {
@@ -280,6 +285,23 @@ func (s *Service) resolveBranchForCreate(ctx context.Context, payloadBranch *uui
 	}
 	if bc := branchctx.FromContext(ctx); bc != nil && bc.BranchID != nil {
 		return *bc.BranchID, nil
+	}
+	if s.branches != nil {
+		granted, err := s.branches.GrantsForCreate(ctx)
+		switch {
+		case err == nil && granted != nil:
+			return *granted, nil
+		case err == nil:
+		case errors.Is(err, middleware.ErrCreateBranchChoice):
+			return uuid.Nil, httpx.BadRequest("payload.branch_id is required: this caller holds more than one branch grant",
+				httpx.FieldError{Field: "payload.branch_id", Message: "is required: name one of the caller's granted branches"})
+		case errors.Is(err, middleware.ErrPayloadBranchRefused):
+			return uuid.Nil, &httpx.Error{Status: 403, Code: httpx.CodeForbidden,
+				Message: "branch_id is outside the branches this caller may target",
+				Details: []httpx.FieldError{{Field: "payload.branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+		default:
+			return uuid.Nil, err
+		}
 	}
 	id, err := middleware.ResolveBranchForWrite(ctx, s.repo.db)
 	if err != nil {

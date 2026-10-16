@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { ArrowLeft, AlertTriangle, ShoppingCart, Truck, FileText, Calendar } from 'lucide';
 import { ProjectService } from '../../services/ProjectService.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
@@ -92,7 +93,7 @@ export class ProjectDashboard extends LitElement {
                             </span>
                         </div>
                         <div class="text-xs text-zinc-500 mt-1 flex items-center gap-1">
-                            ${icon(Calendar, 12)} ${new Date(item.created_at).toLocaleDateString()}
+                            ${icon(Calendar, 12)} ${formatDate(item.created_at)}
                         </div>
                     </div>
                 </div>
@@ -175,7 +176,7 @@ export class ProjectDashboard extends LitElement {
 
                 <!-- Metrics -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
@@ -192,7 +193,7 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400">
@@ -209,7 +210,7 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
@@ -229,7 +230,7 @@ export class ProjectDashboard extends LitElement {
 
                 <!-- Timelines / Lists -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
                         <div class="p-4 border-b border-white/5 border-[1px] border-b-white/10 flex items-center justify-between">
                             <h3 class="font-medium text-white flex items-center gap-2">
                                 ${icon(ShoppingCart, 16, 'text-blue-400')} Recent Orders
@@ -246,7 +247,7 @@ export class ProjectDashboard extends LitElement {
                         `}
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
                         <div class="p-4 border-b border-white/5 border-[1px] border-b-white/10 flex items-center justify-between">
                             <h3 class="font-medium text-white flex items-center gap-2">
                                 ${icon(FileText, 16, 'text-emerald-400')} Recent Invoices

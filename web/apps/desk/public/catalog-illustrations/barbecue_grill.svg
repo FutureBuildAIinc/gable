@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Propane barbecue grill on cart</title>
+  <defs>
+    <style>
+      .lidMain{fill:#3a3d44}
+      .lidShade{fill:#1a1d24}
+      .lidHi{fill:#5a5d66}
+      .lidAccent{fill:#c84a3d}
+      .bodyMain{fill:#2a2d33}
+      .bodyShade{fill:#1a1d24}
+      .bodyHi{fill:#4a4d54}
+      .leg{fill:#1a1d24}
+      .wheel{fill:#3a3a3a}
+      .wheelHub{fill:#7a7a7a}
+      .grate{fill:#4a4a4a}
+      .handleBar{fill:#7a7a7a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="92" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="leg" x="58" y="180" width="6" height="50"/>
+    <rect class="leg" x="192" y="180" width="6" height="50"/>
+    <circle class="wheel" cx="68" cy="232" r="10"/>
+    <circle class="wheelHub" cx="68" cy="232" r="4"/>
+    <circle class="wheel" cx="188" cy="232" r="10"/>
+    <circle class="wheelHub" cx="188" cy="232" r="4"/>
+    <rect class="leg" x="56" y="186" width="146" height="6"/>
+  </g>
+  <g>
+    <rect class="bodyMain" x="42" y="100" width="172" height="84" rx="4"/>
+    <rect class="bodyShade" x="42" y="170" width="172" height="14" rx="4"/>
+    <rect class="bodyHi" x="42" y="100" width="172" height="3" opacity="0.5"/>
+    <rect class="handleBar" x="100" y="96" width="56" height="6" rx="3"/>
+    <rect class="handleBar" x="120" y="92" width="16" height="10" rx="3"/>
+  </g>
+  <g>
+    <ellipse class="lidMain" cx="128" cy="80" rx="86" ry="22"/>
+    <rect class="lidMain" x="42" y="78" width="172" height="22"/>
+    <ellipse class="lidShade" cx="128" cy="98" rx="86" ry="6"/>
+    <rect class="lidShade" x="42" y="94" width="172" height="6" opacity="0.6"/>
+    <rect class="lidHi" x="44" y="78" width="168" height="3" opacity="0.5"/>
+    <rect class="lidAccent" x="50" y="86" width="156" height="3"/>
+    <circle class="lidAccent" cx="128" cy="70" r="5"/>
+    <rect class="lidAccent" x="124" y="60" width="8" height="14" rx="2"/>
+    <rect class="lidHi" x="125" y="60" width="2" height="14" opacity="0.6"/>
+  </g>
+  <g opacity="0.7">
+    <line x1="60" y1="116" x2="200" y2="116" stroke="#5a5d66" stroke-width="1"/>
+    <line x1="60" y1="124" x2="200" y2="124" stroke="#5a5d66" stroke-width="1"/>
+    <line x1="60" y1="132" x2="200" y2="132" stroke="#5a5d66" stroke-width="1"/>
+    <line x1="60" y1="140" x2="200" y2="140" stroke="#5a5d66" stroke-width="1"/>
+  </g>
+  <g>
+    <rect class="bodyShade" x="48" y="156" width="22" height="22" rx="2"/>
+    <circle cx="59" cy="167" r="3" fill="#5a5d66"/>
+    <circle cx="59" cy="167" r="1" fill="#1a1d24"/>
+    <rect class="bodyShade" x="78" y="156" width="22" height="22" rx="2"/>
+    <circle cx="89" cy="167" r="3" fill="#5a5d66"/>
+    <circle cx="89" cy="167" r="1" fill="#1a1d24"/>
+    <rect class="bodyShade" x="156" y="156" width="22" height="22" rx="2"/>
+    <circle cx="167" cy="167" r="3" fill="#5a5d66"/>
+    <circle cx="167" cy="167" r="1" fill="#1a1d24"/>
+  </g>
+</svg>

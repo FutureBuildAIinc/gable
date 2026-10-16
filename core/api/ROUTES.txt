@@ -79,11 +79,14 @@ POST	/api/v1/admin/exposure-scan	internal/pricing	h.HandleAdminScan
 GET	/api/v1/admin/keys	internal/techadmin	h.ListKeys
 POST	/api/v1/admin/keys	internal/techadmin	h.CreateKey
 DELETE	/api/v1/admin/keys/{id}	internal/techadmin	h.RevokeKey
+GET	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.getSettings)
+PUT	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.putSettings)
 GET	/api/v1/admin/modules	internal/staff	h.ListModules
 PUT	/api/v1/admin/modules/{id}	internal/staff	h.SetModuleEnabled
 DELETE	/api/v1/admin/settings/ai	internal/techadmin	h.DeleteAISettings
 GET	/api/v1/admin/settings/ai	internal/techadmin	h.GetAISettings
 PUT	/api/v1/admin/settings/ai	internal/techadmin	h.SaveAISettings
+POST	/api/v1/admin/settings/ai/test	internal/techadmin	h.TestAIConnection
 DELETE	/api/v1/admin/settings/routing	internal/techadmin	h.DeleteRoutingSettings
 GET	/api/v1/admin/settings/routing	internal/techadmin	h.GetRoutingSettings
 PUT	/api/v1/admin/settings/routing	internal/techadmin	h.SaveRoutingSettings
@@ -107,6 +110,7 @@ GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
 GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
 POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
+POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
@@ -161,6 +165,11 @@ GET	/api/v1/dashboard/order-activity	internal/dashboard	h.HandleOrderActivity
 GET	/api/v1/dashboard/revenue-trend	internal/dashboard	h.HandleRevenueTrend
 GET	/api/v1/dashboard/summary	internal/dashboard	h.HandleSummary
 GET	/api/v1/dashboard/top-customers	internal/dashboard	h.HandleTopCustomers
+GET	/api/v1/dealer-profile	internal/dealerprofile	guarded(g.Read, h.Get)
+PUT	/api/v1/dealer-profile	internal/dealerprofile	guarded(g.Write, h.Put)
+GET	/api/v1/dealer-profile/locale	internal/dealerprofile	guarded(g.Locale, h.GetLocale)
+GET	/api/v1/dealer-profile/logo	internal/dealerprofile	guarded(g.Read, h.GetLogo)
+PUT	/api/v1/dealer-profile/logo	internal/dealerprofile	guarded(g.Write, h.PutLogo)
 POST	/api/v1/delivery/deliveries	internal/delivery	h.HandleAssignOrder
 GET	/api/v1/delivery/deliveries/{id}	internal/delivery	h.HandleGetDelivery
 POST	/api/v1/delivery/deliveries/{id}/adjust-qty	internal/delivery	h.HandleAdjustQuantity
@@ -188,6 +197,9 @@ PUT	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleUpdateVehicle
 POST	/api/v1/delivery/vehicles/{id}/photo	internal/delivery	h.HandleUploadVehiclePhoto
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
+GET	/api/v1/documents/print/purchase-order/{id}	internal/document	h.HandlePrintPurchaseOrder
+GET	/api/v1/documents/print/quote/{id}	internal/document	h.HandlePrintQuote
+GET	/api/v1/documents/print/statement/{id}	internal/document	h.HandlePrintStatement
 GET	/api/v1/drafts/orders	internal/order	k
 POST	/api/v1/drafts/orders	internal/order	k
 GET	/api/v1/drafts/orders/feed	internal/order	k
@@ -209,6 +221,7 @@ GET	/api/v1/edi/partners/{id}	internal/edi	h.GetPartner
 PUT	/api/v1/edi/partners/{id}	internal/edi	h.UpdatePartner
 GET	/api/v1/edi/partners/{id}/catalog	internal/edi	h.ListCatalog
 POST	/api/v1/edi/partners/{id}/import-catalog	internal/edi	h.ImportCatalog
+GET	/api/v1/email-deliveries	internal/emaildelivery	list
 GET	/api/v1/events	internal/events	h.List
 GET	/api/v1/gl/accounts	internal/gl	h.HandleListAccounts
 POST	/api/v1/gl/accounts	internal/gl	h.HandleCreateAccount
@@ -290,11 +303,16 @@ POST	/api/v1/payments/{id}/applications	internal/payment	h.HandleApply
 POST	/api/v1/payments/{id}/refunds	internal/payment	h.HandleRefund
 POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
+GET	/api/v1/pos/customers	internal/pos	h.FindCustomers
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
+POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
+POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent
+GET	/api/v1/pos/registers	internal/pos	h.ListRegisters
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
+GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill
 POST	/api/v1/pos/till/{id}/close	internal/pos	h.CloseTill
@@ -304,8 +322,12 @@ GET	/api/v1/pos/transactions	internal/pos	h.ListTransactions
 POST	/api/v1/pos/transactions	internal/pos	h.StartTransaction
 GET	/api/v1/pos/transactions/{id}	internal/pos	h.GetTransaction
 POST	/api/v1/pos/transactions/{id}/complete	internal/pos	h.CompleteTransaction
+PUT	/api/v1/pos/transactions/{id}/customer	internal/pos	h.AttachCustomer
 POST	/api/v1/pos/transactions/{id}/items	internal/pos	h.AddItem
 DELETE	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.RemoveItem
+PATCH	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.ChangeItemQuantity
+GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleReceipt
+POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction
 GET	/api/v1/pos/zreports	internal/pos	h.ListZReports
 GET	/api/v1/price_levels	internal/customer	h.HandleListPriceLevels
@@ -321,6 +343,7 @@ POST	/api/v1/pricing/category-rules/bulk	internal/pricing	h.HandleBulkUpsertRule
 DELETE	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleDeleteCategoryRule
 PUT	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleUpdateCategoryRule
 GET	/api/v1/pricing/category-rules/{id}/audit	internal/pricing	h.HandleGetRuleAudit
+POST	/api/v1/pricing/market-check	internal/marketcheck	wrap(runGuard, h.run)
 GET	/api/v1/pricing/matrix	internal/pricing	h.HandleGetMatrix
 GET	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleListPrograms
 POST	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleCreateProgram
@@ -373,6 +396,7 @@ GET	/api/v1/quotes/exposure	internal/pricing	h.HandleListExposure
 GET	/api/v1/quotes/{id}	internal/quote	h.HandleGetQuotePath
 PUT	/api/v1/quotes/{id}	internal/quote	h.HandleUpdateQuote
 POST	/api/v1/quotes/{id}/convert	internal/quote	h.HandleConvertToOrder
+POST	/api/v1/quotes/{id}/email	internal/document	h.HandleEmailQuote
 GET	/api/v1/quotes/{id}/exposure	internal/pricing	h.HandleGetQuoteExposure
 POST	/api/v1/quotes/{id}/exposure/acknowledge	internal/pricing	h.HandleAcknowledge
 POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalateNow

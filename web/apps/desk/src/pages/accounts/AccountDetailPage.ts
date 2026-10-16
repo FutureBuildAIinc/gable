@@ -2,22 +2,26 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents, formatDay } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
 import { AccountService } from '../../services/AccountService.ts';
+import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import type { Customer, CustomerRequest, CustomerUpdateRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import type { Payment } from '../../types/payment.ts';
 import { paymentService } from '../../services/paymentService.ts';
-import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
+import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
@@ -35,6 +39,8 @@ export class GableAccountDetail extends LitElement {
     @state() private summary: AccountSummary | null = null;
     @state() private transactions: CustomerTransaction[] = [];
     @state() private txnCursor: string | null = null;
+    /** Set when the subledger answers 404 for a customer kept at another yard: shown in the ledger's place. */
+    @state() private ledgerNote = '';
     @state() private txnLoadingMore = false;
     @state() private unappliedPayments: Payment[] = [];
     @state() private openInvoices: { id: string; number: string; open_cents: number }[] = [];
@@ -47,7 +53,7 @@ export class GableAccountDetail extends LitElement {
     @state() private voidReason = '';
     @state() private paymentBusy = false;
     @state() private loading = true;
-    @state() private activeTab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
+    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
     @state() private salesTeam: SalesPerson[] = [];
     @state() private showSpDropdown = false;
@@ -58,11 +64,40 @@ export class GableAccountDetail extends LitElement {
     @state() private editErrors: Record<string, string> = {};
     @state() private editMessage = '';
 
+    private _unsubBranch: (() => void) | null = null;
+    /** Each account load's turn: a yard switch while one is in flight makes its answer stale. */
+    private _loadSeq = 0;
+    /** The newest load that painted: the CRM feed starts over on it, once the yard's wall is known. */
+    @state() private _paintedSeq = 0;
+    /** Each payments read's turn: a read for the yard just left must not paint. */
+    private _paymentsSeq = 0;
+
     connectedCallback() {
         super.connectedCallback();
+        // A yard change moves the wall: the ledger may now be kept here (or no
+        // longer), so the page reads the account again, as the lists do.
+        this._unsubBranch = onBranchChanged(() => { void this._reloadForYard(); });
         if (this.routeId) {
             this.loadData(this.routeId);
         }
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
+    }
+
+    /** A yard change: the account again, then an open Payments tab again, each in its own turn. */
+    private async _reloadForYard() {
+        if (!this.routeId) return;
+        ++this._paymentsSeq;
+        this.paymentsLoaded = false;
+        this.paymentsLoading = false;
+        this.unappliedPayments = [];
+        this.openInvoices = [];
+        const current = await this.loadData(this.routeId);
+        if (current && this.activeTab === 'payments') await this.handleTab('payments');
     }
 
     updated(changed: Map<string, unknown>) {
@@ -72,30 +107,55 @@ export class GableAccountDetail extends LitElement {
         }
     }
 
-    private async loadData(customerId: string) {
+    /** Reads the account; answers whether this load is still the newest when it ends. */
+    private async loadData(customerId: string): Promise<boolean> {
+        const seq = ++this._loadSeq;
         try {
-            const [cust, summ, txnPage] = await Promise.all([
+            // The subledger keeps its yard's wall: for a customer kept at
+            // another yard it answers 404, which is not a failure of the page.
+            const ledger = AccountService.getTransactions(customerId).then(
+                page => ({ page, outside: false as const }),
+                (err: unknown) => {
+                    if (err instanceof LedgerOutsideYardError) return { page: null, outside: true as const };
+                    throw err;
+                });
+            const [cust, summ, led] = await Promise.all([
                 CustomerService.getCustomer(customerId),
                 AccountService.getAccountSummary(customerId),
-                AccountService.getTransactions(customerId)
+                ledger
             ]);
+            if (seq !== this._loadSeq) return false;
             this.customer = cust;
             this.summary = summ;
-            // The ledger's list envelope; the cursor walks it ("Load more"
-            // follows when the account outgrows one page).
-            this.transactions = txnPage.items;
-            this.txnCursor = txnPage.next_cursor;
+            if (led.page) {
+                // The ledger's list envelope; the cursor walks it ("Load more"
+                // follows when the account outgrows one page).
+                this.ledgerNote = '';
+                this.transactions = led.page.items;
+                this.txnCursor = led.page.next_cursor;
+            } else {
+                this.ledgerNote = ledgerYardNote(cust.branch_ids);
+                this.transactions = [];
+                this.txnCursor = null;
+            }
+            this._paintedSeq = seq;
             if (cust.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
+                    if (seq !== this._loadSeq) return false;
                     this.salesperson = sp;
-                } catch { ToastService.show('Failed to load salesperson details', 'error'); }
+                } catch {
+                    if (seq === this._loadSeq) ToastService.show('Failed to load salesperson details', 'error');
+                }
             }
+            return seq === this._loadSeq;
         } catch (error) {
+            if (seq !== this._loadSeq) return false;
             console.error('Failed to load account data:', error);
             ToastService.show('Failed to load account data', 'error');
+            return false;
         } finally {
-            this.loading = false;
+            if (seq === this._loadSeq) this.loading = false;
         }
     }
 
@@ -116,27 +176,30 @@ export class GableAccountDetail extends LitElement {
     }
 
     private async loadPayments(customerId: string) {
+        const seq = ++this._paymentsSeq;
         this.paymentsLoading = true;
         try {
             const [unapplied, open] = await Promise.all([
                 AccountService.getUnappliedPayments(customerId),
                 AccountService.getOpenInvoices(customerId)
             ]);
+            if (seq !== this._paymentsSeq) return;
             this.unappliedPayments = unapplied;
             this.openInvoices = open;
         } catch (error) {
+            if (seq !== this._paymentsSeq) return;
             console.error('Failed to load payments:', error);
             ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
         } finally {
-            this.paymentsLoading = false;
+            if (seq === this._paymentsSeq) this.paymentsLoading = false;
         }
     }
 
     /** A tab switch; the payments tab reads the unapplied cash and the open
      * invoices once it is first shown, not on every account load. */
-    private async handleTab(tab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm') {
+    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm') {
         this.activeTab = tab;
-        if (tab === 'payments' && !this.paymentsLoaded && this.customer) {
+        if (tab === 'payments' && !this.paymentsLoaded && this.customer && !this.ledgerNote) {
             this.paymentsLoaded = true;
             await this.loadPayments(this.customer.id);
         }
@@ -235,7 +298,7 @@ export class GableAccountDetail extends LitElement {
         this.showSpDropdown = !this.showSpDropdown;
     }
 
-    private renderTab(tabId: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
+    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
         const active = this.activeTab === tabId;
         return html`
             <button
@@ -299,20 +362,18 @@ export class GableAccountDetail extends LitElement {
         if (!this.applying) return nothing;
         const invoice = this.openInvoices.find(i => i.id === this.applyInvoiceId);
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="apply-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Apply unapplied cash</h2>
                     <p class="text-zinc-400 text-sm mb-6">${this.applying.number} holds ${formatCents(this.applying.unapplied_cents)} unapplied</p>
                     <form @submit=${this.submitApply} class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-zinc-400 mb-1">Invoice</label>
-                            <select
+                            <gable-select
                                 .value=${this.applyInvoiceId}
+                                .options=${this.openInvoices.map(i => ({ value: i.id, label: `${i.number} (${formatCents(i.open_cents)} open)` }))}
                                 @change=${(e: Event) => this.applyInvoiceId = (e.target as HTMLSelectElement).value}
-                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
-                            >
-                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${formatCents(i.open_cents)} open)</option>`)}
-                            </select>
+                            ></gable-select>
                             ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${formatCents(invoice.open_cents)} open</p>` : nothing}
                         </div>
                         <div>
@@ -325,7 +386,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.applying = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
+                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
                                 ${this.paymentBusy ? 'Applying...' : 'Apply'}
                             </button>
                         </div>
@@ -338,7 +399,7 @@ export class GableAccountDetail extends LitElement {
     private renderVoidDialog() {
         if (!this.voiding) return nothing;
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="void-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Void payment</h2>
                     <p class="text-zinc-400 text-sm mb-6">Voiding ${this.voiding.number} reverses every application of it and reopens its invoices${this.voiding.method === 'card' ? '; a card payment is refunded through the gateway instead' : ''}.</p>
@@ -354,7 +415,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.voiding = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
+                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
                                 ${this.paymentBusy ? 'Voiding...' : 'Void payment'}
                             </button>
                         </div>
@@ -420,18 +481,17 @@ export class GableAccountDetail extends LitElement {
                                 <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>
                             </dl>
                         </div>
-                        <!-- "New Transaction" was never given a target, so it stays disabled rather than looking live. -->
                         <div class="flex gap-2">
                             <button
                                 @click=${() => void this.openEdit()}
                                 ?disabled=${this.editing}
                                 class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
                             >Edit Profile</button>
-                            <button
-                                disabled
-                                title="Not implemented: start a quote from Quotes > Quote Builder instead."
-                                class="border border-white/10 text-zinc-500 px-3 py-1.5 rounded text-sm font-medium opacity-50 cursor-not-allowed"
-                            >New Transaction</button>
+                            <a
+                                href=${`/reports/customer-statement?customer=${customer.id}`}
+                                data-testid="account-statement-link"
+                                class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors inline-flex items-center"
+                            >Statement</a>
                         </div>
                     </div>
                 </div>
@@ -562,7 +622,6 @@ export class GableAccountDetail extends LitElement {
                 <div class="space-y-4">
                     <div class="flex items-center gap-1 border-b border-white/10 pb-1">
                         ${this.renderTab('ledger', 'Activity Ledger', Activity)}
-                        ${this.renderTab('invoices', 'Invoices', FileText)}
                         ${this.renderTab('payments', 'Payments', CreditCard)}
                         ${this.renderTab('shipto', 'Ship-to Addresses', MapPin)}
                         ${this.renderTab('contacts', 'Contacts', Users)}
@@ -570,7 +629,9 @@ export class GableAccountDetail extends LitElement {
                     </div>
 
                     <div class="min-h-[400px]">
-                        ${this.activeTab === 'ledger' ? html`
+                        ${this.activeTab === 'ledger' && this.ledgerNote ? html`
+                            <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="ledger-yard-note">${this.ledgerNote}</div>
+                        ` : this.activeTab === 'ledger' ? html`
                             <div class="border border-white/5 rounded-lg overflow-hidden bg-slate-steel/20">
                                 <table class="w-full text-sm">
                                     <thead class="bg-white/5 text-zinc-400 font-medium border-b border-white/5">
@@ -590,7 +651,7 @@ export class GableAccountDetail extends LitElement {
                                         ` : this.transactions.map(txn => html`
                                             <tr class="group hover:bg-white/5 transition-colors">
                                                 <td class="px-4 py-3 font-mono text-zinc-400">
-                                                    ${new Date(txn.created_at).toLocaleDateString()}
+                                                    ${formatDate(txn.created_at)}
                                                 </td>
                                                 <td class="px-4 py-3">
                                                     ${this.renderTxnTypeBadge(txn.type)}
@@ -617,7 +678,11 @@ export class GableAccountDetail extends LitElement {
                                 </div>` : nothing}
                         ` : nothing}
 
-                        ${this.activeTab === 'payments' ? html`
+                        ${this.activeTab === 'payments' && this.ledgerNote ? html`
+                            <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="payments-yard-note">${this.ledgerNote}</div>
+                        ` : nothing}
+
+                        ${this.activeTab === 'payments' && !this.ledgerNote ? html`
                             <div class="space-y-4" data-testid="payments-tab">
                                 <div class="flex items-center justify-between">
                                     <div>
@@ -654,7 +719,7 @@ export class GableAccountDetail extends LitElement {
                                                         <td class="px-4 py-3 text-right font-mono text-amber-400">${formatCents(pay.unapplied_cents)}</td>
                                                         <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                                                             <button
-                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-plate font-medium"
                                                                 data-testid="apply-payment"
                                                                 @click=${() => this.openApply(pay)}
                             ?disabled=${this.openInvoices.length === 0}
@@ -691,16 +756,12 @@ export class GableAccountDetail extends LitElement {
 
                         ${this.activeTab === 'crm' ? html`
                             <div class="mt-4">
-                                <gable-activity-feed customerId=${customer.id}></gable-activity-feed>
+                                ${this.ledgerNote ? html`
+                                    <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="activity-yard-note">${ledgerYardNote(customer.branch_ids, 'activity')}</div>
+                                ` : keyed(this._paintedSeq, html`<gable-activity-feed customerId=${customer.id}></gable-activity-feed>`)}
                             </div>
                         ` : nothing}
 
-                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'payments' && this.activeTab !== 'shipto' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
-                            <div class="flex flex-col items-center justify-center h-64 border border-dashed border-white/10 rounded-lg text-zinc-500">
-                                ${icon(AlertCircle, 32, 'mb-2 opacity-50')}
-                                <p>This view is under construction.</p>
-                            </div>
-                        ` : nothing}
                     </div>
                 </div>
             </div>

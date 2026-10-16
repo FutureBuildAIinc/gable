@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page } from '@playwright/test';
+import { answerAppDialog } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -59,7 +60,7 @@ test.describe('Order flow on the new contract', () => {
     await page.locator('gable-line-item-editor input[type="number"]').first().fill('10');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const createdRes = await created;
     expect(createdRes.status(), await createdRes.text()).toBe(201);
     const quote = await createdRes.json();
@@ -87,8 +88,8 @@ test.describe('Order flow on the new contract', () => {
 
     // The confirm is the transition on the loaded revision (ADR 0005 5.2).
     const confirm = page.waitForResponse((r) => r.url().endsWith(`/api/v1/orders/${order.id}/transitions`));
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: /Confirm Order/i }).click();
+    await answerAppDialog(page);
     const confirmRes = await confirm;
     expect(confirmRes.status(), await confirmRes.text()).toBe(200);
     expect(confirmRes.request().postDataJSON()).toEqual({ to: 'confirmed', revision: 1 });

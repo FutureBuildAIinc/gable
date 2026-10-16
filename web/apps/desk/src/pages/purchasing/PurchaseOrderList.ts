@@ -7,11 +7,16 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
+import { VendorService } from '../../services/VendorService';
+import { branchContext } from '../../services/BranchContext.ts';
 import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
 import { formatQuantity } from '../../lib/money';
+import { formatDollars } from '../../lib/utils.ts';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { poLabel } from '../../lib/utils';
+import { formatDate } from '../../lib/dates.ts';
 
 const statusColors: Record<string, string> = {
     DRAFT: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
@@ -41,8 +46,12 @@ export class PurchaseOrderList extends LitElement {
 
     @state() private pos: PurchaseOrder[] = [];
     @state() private alerts: ReorderAlert[] = [];
+    /** SKUs the last Generate left alone for want of a reorder quantity. */
+    @state() private leftAlone: string[] = [];
     @state() private loading = true;
     @state() private sourceSummary: POSourceSummary = {};
+    /** Vendor names by id: the list route carries only `vendor_id`. */
+    @state() private vendorNames: Record<string, string> = {};
     private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
@@ -64,11 +73,14 @@ export class PurchaseOrderList extends LitElement {
 
     private async _loadData() {
         try {
-            const [poData, alertData, summary] = await Promise.all([
+            const [poData, alertData, summary, vendors] = await Promise.all([
                 PurchaseOrderService.listPOs(),
                 PurchaseOrderService.getReorderAlerts(),
                 PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
+                VendorService.listVendors().catch(() => []),
             ]);
+            // The vendor list names each order's vendor; a missing or odd answer names none.
+            this.vendorNames = Object.fromEntries((Array.isArray(vendors) ? vendors : []).map((v) => [v.id, v.name]));
             this.pos = poData || [];
             this.alerts = alertData || [];
             this.sourceSummary = summary || {};
@@ -97,6 +109,8 @@ export class PurchaseOrderList extends LitElement {
         try {
             const res = await PurchaseOrderService.generateReorders();
             ToastService.show(`Generated ${res.count} draft purchase orders`, 'success');
+            // The products left alone for want of a reorder quantity, in words.
+            this.leftAlone = res.no_reorder_qty ?? [];
             this._loadData();
         } catch (err) {
             console.error(err);
@@ -117,7 +131,7 @@ export class PurchaseOrderList extends LitElement {
                 </div>
                 <button
                     @click=${() => router.navigate('/purchasing/new')}
-                    class="flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all"
+                    class="flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all"
                 >
                     ${icon(Plus, 16, 'w-4 h-4')}
                     New Purchase Order
@@ -160,6 +174,11 @@ export class PurchaseOrderList extends LitElement {
                                 Generate Replenishment POs
                             </button>
                         </div>
+                        ${this.leftAlone.length > 0 ? html`
+                            <p data-testid="reorder-left-alone" class="text-xs text-amber-300 mb-3">
+                                No order was written for ${this.leftAlone.join(', ')}: ${this.leftAlone.length === 1 ? 'it has' : 'they have'} no reorder quantity set and ${this.leftAlone.length === 1 ? 'is' : 'are'} only at the reorder point. Set a reorder quantity on the product to order it.
+                            </p>
+                        ` : nothing}
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             ${this.alerts.map((alert) => html`
                                 <div class="bg-amber-500/5 border border-amber-500/10 rounded-lg p-3">
@@ -167,6 +186,9 @@ export class PurchaseOrderList extends LitElement {
                                         <div>
                                             <span class="font-mono text-white text-sm">${alert.sku}</span>
                                             <p class="text-xs text-zinc-400 mt-0.5">${alert.description}</p>
+                                            ${alert.branch_name ? html`
+                                                <p class="text-xs text-zinc-500 mt-0.5" data-testid="reorder-yard">${alert.branch_name}</p>
+                                            ` : nothing}
                                         </div>
                                         <span class="text-amber-400 font-mono text-sm font-bold">
                                             -${formatQuantity(alert.deficit)}
@@ -200,6 +222,8 @@ export class PurchaseOrderList extends LitElement {
                             <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
                                 <tr>
                                     <th class="px-6 py-4">PO #</th>
+                                    <th class="px-6 py-4">Vendor</th>
+                                    <th class="px-6 py-4">Yard</th>
                                     <th class="px-6 py-4">Status</th>
                                     <th class="px-6 py-4">Source</th>
                                     <th class="px-6 py-4 text-right">Lines</th>
@@ -208,13 +232,26 @@ export class PurchaseOrderList extends LitElement {
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-white/5">
-                                ${this.pos.map((po) => html`
+                                ${this.pos.map((po) => {
+                                    // The yard is the branch the wire stamped on the PO; resolve
+                                    // its display name from the BranchContext. A branch outside
+                                    // the caller's list reads "Not set", never a raw id.
+                                    const yardName = po.branch_id
+                                        ? branchContext.branches.find((b) => b.id === po.branch_id)?.name ?? ''
+                                        : '';
+                                    return html`
                                     <tr
                                         @click=${() => router.navigate(`/purchasing/${po.id}`)}
                                         class="hover:bg-white/5 cursor-pointer transition-colors"
                                     >
                                         <td class="px-6 py-4 font-mono text-white">
-                                            ${po.id.slice(0, 8)}...
+                                            ${poLabel(po)}
+                                        </td>
+                                        <td class="px-6 py-4 text-zinc-200">
+                                            ${po.vendor_name ?? (po.vendor_id ? this.vendorNames[po.vendor_id] : undefined) ?? html`<span class="text-zinc-500">Not set</span>`}
+                                        </td>
+                                        <td class="px-6 py-4 text-zinc-200">
+                                            ${yardName || html`<span class="text-zinc-500">Not set</span>`}
                                         </td>
                                         <td class="px-6 py-4">
                                             <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border ${statusColors[po.status] || statusColors.DRAFT}">
@@ -230,13 +267,13 @@ export class PurchaseOrderList extends LitElement {
                                             ${po.line_count || 0}
                                         </td>
                                         <td class="px-6 py-4 text-right font-mono text-emerald-400">
-                                            $${(po.total_cost || 0).toFixed(2)}
+                                            ${formatDollars(po.total_cost)}
                                         </td>
                                         <td class="px-6 py-4 text-zinc-400">
-                                            ${new Date(po.created_at).toLocaleDateString()}
+                                            ${formatDate(po.created_at)}
                                         </td>
                                     </tr>
-                                `)}
+                                `;})}
                             </tbody>
                         </table>
                     `}

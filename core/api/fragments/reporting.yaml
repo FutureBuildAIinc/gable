@@ -372,7 +372,13 @@ paths:
         ACTIVE when a scheduler is attached (the shipped server) and STORED
         otherwise. A report_id that is not a saved report violates the foreign
         key and is a 500, as is a scheduler that cannot register the row (the
-        row stays saved).
+        row stays saved). The schedule records its creator from the caller's
+        token subject (created_by and creator_is_admin in a body are ignored);
+        a caller with no identity (an unbound key, the dev caller, a token with
+        an empty subject) is a 409 naming the missing caller identity, because
+        a schedule with no creator recorded can never run. A run the fail
+        closed rule refuses pauses the schedule (status PAUSED) and writes one
+        audit row.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -430,11 +436,15 @@ paths:
     get:
       operationId: reportsDailyTill
       tags: [reporting]
-      summary: Payments collected on one day, by method
+      summary: Net collections on one day at the caller's yard, by method
       description: >-
-        Roles admin, owner, finance. The date defaults to today in the server's
-        time zone. A date that is not YYYY-MM-DD is a 500. The report is cached
-        for 60 seconds per date.
+        Roles admin, owner, finance. The date defaults to the default branch's
+        business day, the day the dashboard's Collected today card is cut on; a
+        date is that calendar day in the same zone. The day's figures are the
+        card's: payments received at the caller's yard by their business date
+        received_on (their own branch, never a voided payment), the refunds
+        paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no
+        date never is. A date that is not YYYY-MM-DD is a 500.
       parameters:
         - name: date
           in: query
@@ -462,8 +472,11 @@ paths:
       summary: Invoiced, collected and outstanding totals for a period
       description: >-
         Roles admin, owner, finance. start defaults to 30 days ago and end to
-        now; end is inclusive of its whole day. A date that is not YYYY-MM-DD
-        is a 500. Cached for 60 seconds per start and end pair.
+        now; end is inclusive of its whole day. total_collected is the period's
+        net collections, counted as the dashboard card and the Daily Till count
+        them (payments by received_on at the caller's yard, voided payments
+        out, refunds paid out in the period less). A date that is not
+        YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
       parameters:
         - name: start
           in: query
@@ -737,8 +750,12 @@ components:
           description: CSV, XLSX or PDF, case insensitive; empty means CSV.
     ReportingSchedule:
       type: object
-      description: reporting.ReportSchedule. The timestamps are Postgres ::text strings.
-      required: [id, report_id, cron_expression, recipients, status, format, created_at, updated_at]
+      description: >-
+        reporting.ReportSchedule. The timestamps are Postgres ::text strings.
+        created_by and creator_is_admin record the creating caller the run
+        resolves its reach from (SEC-NOHEADER-1): a schedule with no creator
+        never runs.
+      required: [id, report_id, cron_expression, recipients, status, format, creator_is_admin, created_at, updated_at]
       properties:
         id:
           type: string
@@ -754,7 +771,7 @@ components:
             type: string
         status:
           type: string
-          description: ACTIVE when a scheduler is attached, STORED when none is.
+          description: ACTIVE when a scheduler is attached, STORED when none is, PAUSED once a run was refused for its creator's reach, after which it no longer fires.
         format:
           type: string
           enum: [CSV, XLSX, PDF]
@@ -764,6 +781,17 @@ components:
         next_run_at:
           type: string
           description: Absent until the first run. Postgres timestamptz text.
+        created_by:
+          type: string
+          description: >-
+            The creating caller's subject, the same text user_locations keys
+            grants by; empty when no caller identity was recorded (the run
+            refuses such a schedule).
+        creator_is_admin:
+          type: boolean
+          description: >-
+            True when the creator held the administrator or owner role when
+            the schedule was made, whose run keeps the every branch view.
         created_at:
           type: string
           description: Postgres timestamptz text.
@@ -812,16 +840,27 @@ components:
     ReportingDailyTill:
       type: object
       description: reporting.DailyTillReport. Amounts are float dollars.
-      required: [date, total_collected, by_method, transaction_count]
+      required: [date, total_collected, received, refunds, net_collected, by_method, transaction_count]
       properties:
         date:
           type: string
           format: date
+          description: The business day the figures are for.
         total_collected:
           type: number
+          description: The day's net collections, the same figure as net_collected.
+        received:
+          type: number
+          description: Payments received that day at the yard, before refunds.
+        refunds:
+          type: number
+          description: Refunds paid out that day.
+        net_collected:
+          type: number
+          description: Received less refunds, equal to the dashboard's Collected today.
         by_method:
           type: object
-          description: Dollars collected per payment method.
+          description: Dollars received per payment method, before refunds.
           additionalProperties:
             type: number
         transaction_count:

@@ -108,12 +108,14 @@ paths:
     get:
       operationId: adminGetAISettings
       tags: [admin]
-      summary: Show the OpenRouter key status
+      summary: Show the AI provider settings
       description: >-
-        Admin or owner, or a key holding admin:settings. Never returns the
-        key: key_hint is the first 10 and last 4 characters joined by three
-        dots (four asterisks for a key of 12 characters or fewer), and null
-        when no key is configured. base_url is present only when an admin
+        Admin or owner, or a key holding admin:settings. Never returns a
+        key: key_hint and anthropic_key_hint are four asterisks and the last
+        4 characters (four asterisks alone for a key of 12 characters or
+        fewer), and null when no key is configured. provider is openrouter
+        or anthropic; model is the effective Anthropic model;
+        vault_present says whether a key can be saved sealed. base_url is present only when an admin
         override is stored, null otherwise. revision is the resource's
         revision anchor and rides the ETag.
       responses:
@@ -134,10 +136,16 @@ paths:
     put:
       operationId: adminSaveAISettings
       tags: [admin]
-      summary: Save the OpenRouter key and base URL
+      summary: Save the AI provider, model and keys
       description: >-
-        Admin or owner, or a key holding admin:settings. api_key is
-        required. base_url is absent (leave the override as it is), a URL
+        Admin or owner, or a key holding admin:settings. A save must change
+        something: api_key (the OpenRouter key) is required only when the
+        body names no provider, model, base_url or anthropic_api_key, so a
+        provider alone switches back to OpenRouter and keeps both keys. The
+        settings take effect at once, no cached value outlives the save. The Anthropic key is sealed at rest and
+        refused with a 400 naming anthropic_api_key when the server has no
+        vault key; a model below Sonnet 5.5 is a 400 naming model. The audit
+        row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL
         (set the override; http and non host URLs are refused) or empty
         (clear the override, reverting to the environment default). The save,
         its audit row and the admin_settings.saved event are one transaction
@@ -202,6 +210,25 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/WireConflict" }
         "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/admin/settings/ai/test:
+    post:
+      operationId: adminTestAIConnection
+      tags: [admin]
+      summary: Test the AI provider connection
+      description: >-
+        Admin or owner, or a key holding admin:settings. Makes the cheapest
+        call the active provider allows (one output token) and answers ok, or
+        ok false with the provider's error in words. Never returns the key.
+      responses:
+        "200":
+          description: The test result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTestAIResult"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/settings/routing:
     get:
@@ -724,7 +751,7 @@ components:
           $ref: "#/components/schemas/ApiKey"
     AISettings:
       type: object
-      required: [configured, source, key_hint, base_url, revision]
+      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present, test_status]
       description: >-
         Go type techadmin.AISettings. source is admin (a stored override),
         env (a key from the environment only) or none. key_hint and base_url
@@ -741,6 +768,39 @@ components:
           type: [string, "null"]
         revision:
           type: integer
+        provider:
+          type: string
+          enum: [openrouter, anthropic]
+        model:
+          type: string
+        anthropic_configured:
+          type: boolean
+        anthropic_key_hint:
+          type: [string, "null"]
+        vault_present:
+          type: boolean
+        test_status:
+          type: string
+          enum: [none, untested, passed, refused, failed]
+          description: >-
+            The last test of the saved key: none with no key saved, untested
+            for a key never tested, passed, refused (the provider refused the
+            key) or failed (the test could not finish). A save runs the test.
+        test_message:
+          type: string
+          description: The plain sentence for refused and failed; absent otherwise.
+    AdminTestAIResult:
+      type: object
+      required: [ok, message, status]
+      description: Go type techadmin.TestResult. A provider failure is ok false with its words, never the key.
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        status:
+          type: string
+          enum: [passed, refused, failed]
     RoutingSettings:
       type: object
       required: [configured, source, key_hint, revision]
@@ -761,12 +821,18 @@ components:
         Go type techadmin.SaveAISettingsRequest. base_url is a pointer:
         absent leaves the override, empty clears it, a URL sets it. revision
         is the body form of the If-Match precondition.
-      required: [api_key]
       properties:
         api_key:
           type: string
         base_url:
           type: [string, "null"]
+        provider:
+          type: string
+          enum: [openrouter, anthropic]
+        model:
+          type: string
+        anthropic_api_key:
+          type: string
         revision:
           type: integer
     AdminSaveRoutingSettingsRequest:

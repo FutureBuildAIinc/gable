@@ -3,7 +3,7 @@
 
 package inventory_test
 
-// ADR 0006 7.2: the inventory levels list embeds a four field product summary
+// ADR 0006 7.2: the inventory levels list embeds a five field product summary
 // under include=product. The summary's field names must stay in lockstep with
 // product.View's: a change to the view (a rename, a typo) cannot drift the
 // embed silently. The test reflects both structs, reads every JSON tag, and
@@ -28,17 +28,17 @@ func TestInventoryLevels_ProductSummaryAlignsWithProductView(t *testing.T) {
 	if len(summaryFields) == 0 {
 		t.Fatal("inventory.ProductSummary has no JSON-tagged fields; the test cannot proceed")
 	}
-	// The summary is a four field subset of the view (id, sku, description,
-	// stock_uom, in that order). Each name must match a view field with the
+	// The summary is a five field subset of the view (id, sku, description,
+	// stock_uom, image_url, in that order). Each name must match a view field with the
 	// same JSON tag value, and the summary must not carry a field the view
 	// does not (a drift the other way).
-	if got, want := len(summaryFields), 4; got != want {
-		t.Fatalf("inventory.ProductSummary carries %d JSON fields, want %d (id, sku, description, stock_uom): %v", got, want, summaryFields)
+	if got, want := len(summaryFields), 5; got != want {
+		t.Fatalf("inventory.ProductSummary carries %d JSON fields, want %d (id, sku, description, stock_uom, image_url): %v", got, want, summaryFields)
 	}
 	// Iterate the summary's JSON names in declaration order (Go maps are
 	// unordered; we read the struct again to keep the order).
 	summaryOrder := jsonTagsOrdered(reflect.TypeOf(inventory.ProductSummary{}))
-	wantSummary := []string{"id", "sku", "description", "stock_uom"}
+	wantSummary := []string{"id", "sku", "description", "stock_uom", "image_url"}
 	for i, name := range wantSummary {
 		if summaryOrder[i] != name {
 			t.Errorf("inventory.ProductSummary field %d = %q, want %q (order matches product.View)", i, summaryOrder[i], name)

@@ -2,9 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import type { BankAccount, BankTransaction, ReconciliationSession } from '../../types/bankrecon';
 import {
     listBankAccounts,
@@ -17,6 +21,7 @@ import {
     unmatchTransaction,
     completeSession,
 } from '../../services/BankReconService';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 @customElement('gable-bank-reconciliation')
 export class BankReconciliation extends LitElement {
@@ -180,7 +185,7 @@ export class BankReconciliation extends LitElement {
     }
 
     private _statusColor(status: string) {
-        return status === 'MATCHED' ? '#22c55e' : status === 'EXCLUDED' ? '#6b7280' : '#eab308';
+        return cssVarColor(status === 'MATCHED' ? 'green-500' : status === 'EXCLUDED' ? 'gray-500' : 'yellow-500');
     }
 
     render() {
@@ -195,13 +200,13 @@ export class BankReconciliation extends LitElement {
                     <div class="flex gap-2">
                         <button
                             @click=${() => { this.tab = 'sessions'; this.activeSession = null; }}
-                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'sessions' ? 'bg-blue-500 text-white' : 'bg-transparent text-slate-400 hover:text-white'}"
+                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'sessions' ? 'bg-blue-500 text-plate' : 'bg-transparent text-slate-400 hover:text-white'}"
                         >
                             Sessions
                         </button>
                         <button
                             @click=${() => { this.tab = 'accounts'; }}
-                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'accounts' ? 'bg-blue-500 text-white' : 'bg-transparent text-slate-400 hover:text-white'}"
+                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'accounts' ? 'bg-blue-500 text-plate' : 'bg-transparent text-slate-400 hover:text-white'}"
                         >
                             Bank Accounts
                         </button>
@@ -259,7 +264,7 @@ export class BankReconciliation extends LitElement {
                     </div>
                     <button
                         @click=${this._handleImport}
-                        class="px-5 py-2 rounded-lg bg-violet-600 text-white font-semibold text-sm hover:bg-violet-500 transition-colors h-10"
+                        class="px-5 py-2 rounded-lg bg-violet-600 text-plate font-semibold text-sm hover:bg-violet-500 transition-colors h-10"
                     >
                         Import CSV
                     </button>
@@ -267,7 +272,7 @@ export class BankReconciliation extends LitElement {
                         <button
                             @click=${this._handleComplete}
                             ?disabled=${s.difference !== 0}
-                            class="px-5 py-2 rounded-lg font-semibold text-sm text-white transition-colors h-10 ${s.difference === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 cursor-not-allowed'}"
+                            class="px-5 py-2 rounded-lg font-semibold text-sm text-plate transition-colors h-10 ${s.difference === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 cursor-not-allowed'}"
                         >
                             Complete Reconciliation
                         </button>
@@ -297,7 +302,7 @@ export class BankReconciliation extends LitElement {
                                 ${s.transactions.map((txn: BankTransaction) => html`
                                     <tr class="border-b border-slate-800 ${this.selectedBankTxn === txn.id ? 'bg-blue-500/10' : ''}">
                                         <td class="px-3 py-2.5 text-slate-300">
-                                            ${new Date(txn.transaction_date).toLocaleDateString()}
+                                            ${formatDay(txn.transaction_date)}
                                         </td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${txn.amount >= 0 ? 'text-emerald-400' : 'text-red-400'}">
                                             ${this._formatBalance(txn.amount)}
@@ -305,7 +310,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300">${txn.description}</td>
                                         <td class="px-3 py-2.5 text-slate-500 text-xs font-mono">${txn.reference}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusColor(txn.status)}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusColor(txn.status)}">
                                                 ${txn.status}
                                             </span>
                                         </td>
@@ -351,7 +356,7 @@ export class BankReconciliation extends LitElement {
                                             this._handleMatch(this.selectedBankTxn, this.jeMatchValue);
                                         }
                                     }}
-                                    class="px-4 py-1.5 rounded bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors"
+                                    class="px-4 py-1.5 rounded bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors"
                                 >
                                     Match
                                 </button>
@@ -374,26 +379,21 @@ export class BankReconciliation extends LitElement {
                     <div class="grid grid-cols-4 gap-3">
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Bank Account</label>
-                            <select
+                            <gable-select
                                 .value=${this.newSessionAcctId}
+                                .options=${[{ value: '', label: 'Select account...' }, ...this.accounts.map(a => ({ value: a.id, label: a.name }))]}
                                 @change=${(e: Event) => this.newSessionAcctId = (e.target as HTMLSelectElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Select account...</option>
-                                ${this.accounts.map(a => html`<option value="${a.id}">${a.name}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Period Start</label>
-                            <input type="date" .value=${this.newSessionStart}
-                                @input=${(e: Event) => this.newSessionStart = (e.target as HTMLInputElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none" />
+                            <gable-date-field label="Period Start" .value=${this.newSessionStart}
+                                @change=${(e: Event) => this.newSessionStart = (e.target as GableDateField).value}></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Period End</label>
-                            <input type="date" .value=${this.newSessionEnd}
-                                @input=${(e: Event) => this.newSessionEnd = (e.target as HTMLInputElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none" />
+                            <gable-date-field label="Period End" .value=${this.newSessionEnd}
+                                @change=${(e: Event) => this.newSessionEnd = (e.target as GableDateField).value}></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Statement Ending Balance ($)</label>
@@ -403,7 +403,7 @@ export class BankReconciliation extends LitElement {
                         </div>
                     </div>
                     <button @click=${this._handleCreateSession}
-                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors">
+                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors">
                         Start Session
                     </button>
                 </div>
@@ -432,14 +432,14 @@ export class BankReconciliation extends LitElement {
                                     <tr class="border-b border-slate-800">
                                         <td class="px-3 py-2.5 text-slate-300">${s.bank_account_name || 'N/A'}</td>
                                         <td class="px-3 py-2.5 text-slate-300">
-                                            ${new Date(s.period_start).toLocaleDateString()} - ${new Date(s.period_end).toLocaleDateString()}
+                                            ${formatDay(s.period_start)} - ${formatDay(s.period_end)}
                                         </td>
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatBalance(s.statement_balance)}</td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${s.difference === 0 ? 'text-emerald-400' : 'text-red-400'}">
                                             ${this._formatBalance(s.difference)}
                                         </td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${s.status === 'COMPLETED' ? '#22c55e' : '#3b82f6'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${s.status === 'COMPLETED' ? cssVarColor('green-500') : cssVarColor('blue-500')}">
                                                 ${s.status}
                                             </span>
                                         </td>
@@ -494,7 +494,7 @@ export class BankReconciliation extends LitElement {
                         </div>
                     </div>
                     <button @click=${this._handleCreateAccount}
-                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors">
+                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors">
                         Add Account
                     </button>
                 </div>
@@ -523,7 +523,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.account_number || '---'}</td>
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.routing_number || '---'}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${a.is_active ? '#22c55e' : '#6b7280'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${a.is_active ? cssVarColor('green-500') : cssVarColor('gray-500')}">
                                                 ${a.is_active ? 'Active' : 'Inactive'}
                                             </span>
                                         </td>

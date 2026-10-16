@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,23 @@ func wall(alias string, branch, grants int) string {
 	  )`, alias, branch, grants)
 }
 
+// customerWall is the customer family's wall (SEC-NOHEADER-1, r4 P2-4): the
+// path's customer, aliased c, must hold a branch inside the caller's reach
+// through its customer_branches rows, the same predicate /customers/{id}
+// answers 404 through. Both reach placeholders nil (an administrator or
+// owner with no header, the single branch switch, an unbound key, the dev
+// caller) matches every customer, with or without a row, so the arm sits
+// outside the EXISTS as the customer, CRM and reporting walls have it
+// (r5 P2-1).
+func customerWall(branch, grants int) string {
+	return fmt.Sprintf(`(($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL)
+	  OR EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND (
+	    ($%[1]d::uuid IS NOT NULL AND cb.branch_id = $%[1]d)
+	    OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NOT NULL AND cb.branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d))
+	  )))`, branch, grants)
+}
+
 // LocalDate is the branch's calendar date at the instant (the business date of
 // ADR 0005 section 8.1).
 func (s *Service) LocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error) {
@@ -40,12 +58,35 @@ func (s *Service) LocalDate(ctx context.Context, branchID uuid.UUID, at time.Tim
 	return d, nil
 }
 
+// BusinessDate is the calendar date at the instant in the zone of the branch
+// a printed document belongs to, else of the default branch (the aging's
+// default), else UTC. A document names no branch only before it has one.
+func (s *Service) BusinessDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error) {
+	var d time.Time
+	err := s.ex(ctx).QueryRow(ctx, `
+		SELECT ($1::timestamptz AT TIME ZONE COALESCE(
+		        (SELECT timezone FROM locations WHERE id = $2),
+		        (SELECT l.timezone FROM locations l
+		          WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')),
+		        'UTC'))::date`,
+		at, branchID).Scan(&d)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read the document's date: %w", err)
+	}
+	return d, nil
+}
+
 // Now is the service clock (a test sets it).
 func (s *Service) Now() time.Time { return s.now() }
 
 // GetSummary is GET /api/v1/accounts/{id}: the balance (the subledger), the
 // credit limit (null for no limit), the credit left, and the open credit memos
-// plus unapplied cash as a negative figure.
+// plus unapplied cash as a negative figure. These are the customer's dealer wide
+// standing (ADR 0007 section 5.8; each payment and credit memo behind the
+// open credits and unapplied cash keeps its own wall): the customer is read
+// through ruling A's reach (a user and an unbound key reach every customer, a
+// key bound to a branch keeps its pin and reads a customer outside it as
+// missing). The subledger and the statement keep their wall (CustomerInWall).
 func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summary, error) {
 	var (
 		out   Summary
@@ -62,7 +103,9 @@ func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summar
 		                 WHERE m.customer_id = c.id AND m.status IN ('OPEN', 'PARTIAL')), 0)
 		       - COALESCE((SELECT SUM(ROUND(p.amount_unapplied * 100)::bigint) FROM payments p
 		                   WHERE p.customer_id = c.id AND p.status = 'POSTED'), 0)
-		FROM customers c WHERE c.id = $1`, customerID).Scan(&out.CustomerID, &out.Currency, &bal, &limit, &un)
+		FROM customers c WHERE c.id = $1 AND `+customerWall(2, 3),
+		customerID, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)).
+		Scan(&out.CustomerID, &out.Currency, &bal, &limit, &un)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("account not found")
 	}
@@ -78,6 +121,23 @@ func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summar
 	return &out, nil
 }
 
+// CustomerInWall answers a missing account (404) for a customer outside the
+// caller's finance wall: the customer family's wall the subledger and the
+// statement keep, since their rows come from finance documents. It is the
+// gate the subledger route runs before it reads.
+func (s *Service) CustomerInWall(ctx context.Context, customerID uuid.UUID) error {
+	var one int
+	err := s.ex(ctx).QueryRow(ctx, `SELECT 1 FROM customers c WHERE c.id = $1 AND `+customerWall(2, 3),
+		customerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("account not found")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the account: %w", err)
+	}
+	return nil
+}
+
 // TransactionFilter is the subledger list's keyset position.
 type TransactionFilter struct {
 	CustomerID uuid.UUID
@@ -87,15 +147,19 @@ type TransactionFilter struct {
 }
 
 // ListTransactions answers one page of a customer's subledger, newest first by
-// (created_at, id).
+// (created_at, id). The customer carries the family's wall, so a customer
+// outside the caller's reach reads as missing (the empty page a foreign
+// subledger would otherwise serve is never reached).
 func (s *Service) ListTransactions(ctx context.Context, f TransactionFilter) ([]Transaction, error) {
 	rows, err := s.ex(ctx).Query(ctx, `
 		SELECT t.id, t.customer_id, t.type, t.amount, t.balance_after, t.currency, t.source_kind, t.reference_id,
 		       COALESCE(t.description, ''), t.created_at
 		FROM customer_transactions t
 		WHERE t.customer_id = $1 AND ($2::timestamptz IS NULL OR (t.created_at, t.id) < ($2, $3::uuid))
+		  AND EXISTS (SELECT 1 FROM customers c WHERE c.id = t.customer_id AND `+customerWall(5, 6)+`)
 		ORDER BY t.created_at DESC, t.id DESC
-		LIMIT $4`, f.CustomerID, f.AfterTime, f.AfterID, f.Limit)
+		LIMIT $4`,
+		f.CustomerID, f.AfterTime, f.AfterID, f.Limit, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the transactions: %w", err)
 	}

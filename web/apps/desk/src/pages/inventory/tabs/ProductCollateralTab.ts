@@ -2,12 +2,15 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Trash2, Copy, Loader2, FileText, RefreshCw, AlertTriangle } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
 import type { PIMCollateral, CollateralType } from '../../../types/pim.ts';
+import { aiRefusalWords, renderAiNotice } from '../../../components/inventory/PimAiNotice.ts';
 
 const TYPES: { value: CollateralType; label: string }[] = [
     { value: 'sell_sheet', label: 'Sell Sheet' },
@@ -31,6 +34,7 @@ export class GableProductCollateralTab extends LitElement {
     @state() private tone = 'professional';
     @state() private audience = 'contractors and builders';
     @state() private generating = false;
+    @state() private aiNotice: string | null = null;
     @state() private copiedId: string | null = null;
     @state() private error: string | null = null;
 
@@ -44,12 +48,15 @@ export class GableProductCollateralTab extends LitElement {
     private async _handleGenerate() {
         this.generating = true;
         this.error = null;
+        this.aiNotice = null;
         try {
             await PIMService.generateCollateral(this.productId, { type: this.type, tone: this.tone, audience: this.audience });
             this.dispatchEvent(new CustomEvent('collateral-update', { bubbles: true, composed: true }));
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Collateral generation failed';
-            this.error = msg;
+            this.aiNotice = aiRefusalWords(err);
+            if (!this.aiNotice) {
+                this.error = err instanceof Error ? err.message : 'Collateral generation failed';
+            }
         } finally {
             this.generating = false;
         }
@@ -78,6 +85,7 @@ export class GableProductCollateralTab extends LitElement {
     render() {
         return html`
             <div class="space-y-6">
+                ${renderAiNotice(this.aiNotice)}
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <h3 class="text-sm font-medium text-zinc-300 flex items-center gap-2 mb-4">
@@ -87,33 +95,27 @@ export class GableProductCollateralTab extends LitElement {
                     <div class="flex flex-wrap items-end gap-4">
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Type</label>
-                            <select
+                            <gable-select
                                 .value=${this.type}
+                                .options=${TYPES.map(t => ({ value: t.value, label: t.label }))}
                                 @change=${(e: Event) => this.type = (e.target as HTMLSelectElement).value as CollateralType}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${TYPES.map(t => html`<option value="${t.value}">${t.label}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Tone</label>
-                            <select
+                            <gable-select
                                 .value=${this.tone}
+                                .options=${TONES.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))}
                                 @change=${(e: Event) => this.tone = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${TONES.map(t => html`<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="block text-xs text-zinc-500 mb-1">Audience</label>
-                            <select
+                            <gable-select
                                 .value=${this.audience}
+                                .options=${AUDIENCES.map(a => ({ value: a, label: a.charAt(0).toUpperCase() + a.slice(1) }))}
                                 @change=${(e: Event) => this.audience = (e.target as HTMLSelectElement).value}
-                                class="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                            >
-                                ${AUDIENCES.map(a => html`<option value="${a}">${a.charAt(0).toUpperCase() + a.slice(1)}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <button
                             @click=${this._handleGenerate}
@@ -174,7 +176,7 @@ export class GableProductCollateralTab extends LitElement {
                                     <pre class="whitespace-pre-wrap text-sm text-zinc-300 bg-zinc-800/50 rounded-lg p-3 font-sans">${c.content}</pre>
                                     ${c.generated_at ? html`
                                         <div class="mt-2 text-xs text-zinc-600">
-                                            Generated ${new Date(c.generated_at).toLocaleString()} by ${c.gen_model}
+                                            Generated ${formatDateTime(c.generated_at)} by ${c.gen_model}
                                         </div>
                                     ` : nothing}
                                 </div>

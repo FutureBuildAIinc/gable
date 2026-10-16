@@ -127,8 +127,18 @@ export const QuoteService = {
         return response.json();
     },
 
-    getOriginalFileUrl(quoteId: string): string {
-        return `${API_URL}/api/v1/quotes/${quoteId}/file`;
+    /** The stored original of a text list (plain text or csv), read as text. */
+    async getOriginalText(quoteId: string): Promise<string> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/quotes/${quoteId}/file`),
+            'Failed to fetch the original list',
+        );
+        return response.text();
+    },
+
+    /** The API path of the stored original: fetch it with the token (a bare src or href carries none). */
+    originalFilePath(quoteId: string): string {
+        return `/api/v1/quotes/${quoteId}/file`;
     },
 };
 

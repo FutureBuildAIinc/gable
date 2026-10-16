@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page } from '@playwright/test';
+import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -64,7 +65,7 @@ test.describe('Quote flow on the new contract', () => {
     await page.getByRole('button', { name: 'Add', exact: true }).click();
 
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
     const quote = await res.json();
@@ -123,17 +124,17 @@ test.describe('Quote flow on the new contract', () => {
     await page.locator('gable-line-item-editor input[type="number"]').first().fill('3');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
 
-    // Empty unit: a select of the 16 codes, not a free text box.
-    const select = page.getByLabel('Unit of measure');
+    // Empty unit: the app's own select of the 16 codes, not a free text box.
+    const select = page.getByLabel('Unit of measure').locator('xpath=ancestor-or-self::gable-select');
     await expect(select).toBeVisible();
-    expect(await select.evaluate((el) => el.tagName)).toBe('SELECT');
-    expect(await select.locator('option').count()).toBe(17); // 16 codes and the prompt
+    expect(await select.evaluate((el) => el.tagName)).toBe('GABLE-SELECT');
+    expect(await select.evaluate((el) => (el as unknown as { options: unknown[] }).options.length)).toBe(17); // 16 codes and the prompt
     await expect(page.getByText('Unit of measure required')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'quote-unit-select.png') });
 
     // Picking a unit does not strand the line: the server answers once with a
     // field error, and the select is still there to change the unit again.
-    await select.selectOption('BOX');
+    await pickOption(select, 'BOX');
     let refused = false;
     await page.route('**/api/v1/quotes', async (route) => {
       if (route.request().method() === 'POST' && !refused) {
@@ -150,13 +151,13 @@ test.describe('Quote flow on the new contract', () => {
       }
       await route.continue();
     });
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText(/uom: must be one of/)).toBeVisible();
     await expect(select).toBeVisible();
-    await select.selectOption(saleUnit);
+    await pickOption(select, saleUnit);
 
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
     expect(res.request().postDataJSON().lines[0].uom).toBe(saleUnit);

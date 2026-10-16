@@ -5,10 +5,12 @@ package seed
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
@@ -32,7 +34,7 @@ func newReceivables(dbURL string) (*receivables, error) {
 		return nil, fmt.Errorf("the seed's AR core could not connect: %w", err)
 	}
 	logger := slog.Default()
-	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger)}, nil
+	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger).WithClockForTest(seedNow)}, nil
 }
 
 func (r *receivables) close() { r.db.Close() }
@@ -47,6 +49,14 @@ type seedInvoice struct {
 	Subtotal   int64 // cents
 	Tax        int64 // cents
 	Paid       int64 // cents of the total paid by a seeded check, 0 for none
+
+	// The history's own fields; the base seed leaves them zero.
+	OrderID uuid.UUID // the order the payment is recorded against
+	PaidOn  time.Time // the day the payment is received, Date plus 7 days when zero
+	Method  string    // the payment method, CHECK when empty
+	// Stamp is the moment the history puts on the rows the act stamps with the
+	// present (zero for the base seed, which keeps them).
+	Stamp time.Time
 }
 
 func (s seedInvoice) total() int64 { return s.Subtotal + s.Tax }
@@ -68,8 +78,18 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 				}}); err != nil {
 				return err
 			}
-			if in.Paid <= 0 {
-				return nil
+			today, err := r.acct.LocalDate(ctx, in.BranchID, r.acct.Now())
+			if err != nil {
+				return err
+			}
+			// An invoice dated after the seed's day is left unpaid: no check
+			// is received before the invoice it pays or after the day the
+			// seed runs.
+			if in.Paid <= 0 || dayOf(in.Date) > dayOf(today) {
+				if !in.Stamp.IsZero() {
+					return nil
+				}
+				return r.stampInvoice(ctx, in, uuid.Nil, time.Time{})
 			}
 			var currency string
 			if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT currency FROM invoices WHERE id = $1`, in.ID).Scan(&currency); err != nil {
@@ -79,11 +99,33 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 			if in.Paid < in.total() {
 				note = "Partial payment"
 			}
-			_, _, err := r.acct.RecordPayment(ctx, account.RecordPaymentIn{
-				CustomerID: in.CustomerID, BranchID: in.BranchID, Currency: currency, Method: "CHECK", AmountCents: in.Paid,
-				Reference: fmt.Sprintf("CHK-%d", 1000+in.Date.YearDay()*7%9000), Notes: note, ReceivedOn: in.Date.AddDate(0, 0, 7),
-				Actor: "seed", Applications: []account.ApplyLine{{InvoiceID: in.ID, AmountCents: in.Paid}}})
-			return err
+			method, receivedOn := in.Method, in.PaidOn
+			if method == "" {
+				method = "CHECK"
+			}
+			if receivedOn.IsZero() {
+				receivedOn = in.Date.AddDate(0, 0, 7)
+			}
+			// The seed never dates money after the day it runs: a check the
+			// rule would date later is received on the seed's own day.
+			if dayOf(receivedOn) > dayOf(today) {
+				receivedOn = today
+			}
+			var orderID *uuid.UUID
+			if in.OrderID != uuid.Nil {
+				orderID = &in.OrderID
+			}
+			payID, _, err := r.acct.RecordPayment(ctx, account.RecordPaymentIn{
+				CustomerID: in.CustomerID, BranchID: in.BranchID, Currency: currency, Method: method, AmountCents: in.Paid,
+				Reference: fmt.Sprintf("CHK-%d", 1000+in.Date.YearDay()*7%9000), Notes: note, ReceivedOn: receivedOn,
+				OrderID: orderID, Actor: "seed", Applications: []account.ApplyLine{{InvoiceID: in.ID, AmountCents: in.Paid}}})
+			if err != nil {
+				return err
+			}
+			if in.Stamp.IsZero() {
+				return r.stampInvoice(ctx, in, payID, receivedOn)
+			}
+			return r.stampDay(ctx, in, payID)
 		})
 		if err != nil {
 			log.Printf("Seed: invoice %s was not posted: %v", in.ID, err)
@@ -92,6 +134,87 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 		posted++
 	}
 	return posted
+}
+
+// historyWorkers is how many connections the history posts on at once; the AR
+// core's pool holds ten.
+const historyWorkers = 6
+
+// postParallel posts the invoices on several connections at once, which the
+// history's volume needs to seed inside the stack's wait. A customer's
+// invoices all go to one worker, in the order given, so its subledger runs in
+// that order exactly as a single run writes it; the counters the acts draw on
+// (payment and entry numbers) are sequences, so the workers do not queue on
+// one another. The call returns once every worker is done.
+func (r *receivables) postParallel(ctx context.Context, invoices []seedInvoice) int {
+	lanes := make([][]seedInvoice, historyWorkers)
+	for _, in := range invoices {
+		w := int(in.CustomerID[0]) % historyWorkers
+		lanes[w] = append(lanes[w], in)
+	}
+	counts := make([]int, historyWorkers)
+	var wg sync.WaitGroup
+	for w := range lanes {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			counts[w] = r.post(ctx, lanes[w])
+		}(w)
+	}
+	wg.Wait()
+	total := 0
+	for _, n := range counts {
+		total += n
+	}
+	return total
+}
+
+// stampDay puts the history's day on the rows the acts wrote with the present,
+// through the AR core (the only writer of its tables, ADR 0005 section 9.3): the
+// invoice's rows take the history's moment and the payment's a second later, in
+// the same transaction as the acts.
+func (r *receivables) stampDay(ctx context.Context, in seedInvoice, payID uuid.UUID) error {
+	return r.acct.RestampHistory(ctx, in.ID, payID, in.Stamp, in.Stamp.Add(time.Second))
+}
+
+// dayOf is the calendar day of a moment, the form days compare in.
+func dayOf(t time.Time) string { return t.Format("2006-01-02") }
+
+// seedToday is the seed's own business day: the default branch's calendar day
+// now, in its time zone (the day the AR core refuses money past).
+func seedToday(db *sql.DB) (time.Time, error) {
+	var d time.Time
+	err := db.QueryRow(`SELECT ($1::timestamptz AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`, seedNow()).Scan(&d)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the seed's business day was not read: %w", err)
+	}
+	return d, nil
+}
+
+// stampInvoice puts the documents' own days on the rows the base seed's acts
+// wrote with the present: the invoice's rows take the invoice's day, the
+// payment's the day it was received, so a seeded ledger reads like a real one.
+// The stamps sit at midday and never after the present.
+func (r *receivables) stampInvoice(ctx context.Context, in seedInvoice, payID uuid.UUID, receivedOn time.Time) error {
+	now := r.acct.Now()
+	at := func(d time.Time) time.Time {
+		t := time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, time.UTC)
+		if t.After(now.Add(-time.Second)) {
+			t = now.Add(-time.Second)
+		}
+		return t
+	}
+	invoicedAt, paidAt := at(in.Date), invoicedAtOr(at(receivedOn), at(in.Date))
+	return r.acct.RestampDay(ctx, in.ID, payID, invoicedAt, paidAt)
+}
+
+// invoicedAtOr answers the payment's moment, never before the invoice's.
+func invoicedAtOr(paid, invoiced time.Time) time.Time {
+	if paid.Before(invoiced) {
+		return invoiced
+	}
+	return paid
 }
 
 // postMemo posts a draft credit memo the seed inserted (one ADJUST line, no

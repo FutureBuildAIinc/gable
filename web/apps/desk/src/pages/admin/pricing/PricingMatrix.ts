@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { LayoutGrid, RefreshCw, ChevronDown, ChevronRight, AlertTriangle, Plus, User, Grid3X3, X } from 'lucide';
@@ -28,6 +29,8 @@ export class GablePricingMatrix extends LitElement {
   @state() private _matrix: MatrixResponse | null = null;
   @state() private _loading = true;
   @state() private _error: string | null = null;
+  /** The server runs without the category pricing engine (its routes answer 404). */
+  @state() private _switchedOff = false;
   @state() private _selectedCategory: string | null = null;
 
   @state() private _drawerOpen = false;
@@ -57,6 +60,12 @@ export class GablePricingMatrix extends LitElement {
       const data = await categoryPricingService.getMatrix();
       this._matrix = data;
     } catch (err) {
+      // The engine is switched off on this server (CATEGORY_PRICING_ENABLED unset): its
+      // routes are not mounted, so the matrix answers 404. That is a setting, not a failure.
+      if (err instanceof ApiError && err.status === 404) {
+        this._switchedOff = true;
+        return;
+      }
       console.error('Failed to load pricing matrix:', err);
       this._error = apiErrorMessage(err, 'Failed to load pricing matrix');
     } finally {
@@ -269,6 +278,25 @@ export class GablePricingMatrix extends LitElement {
   }
 
   render() {
+    if (this._switchedOff) {
+      return html`
+        <div class="min-h-screen bg-deep-space p-8 space-y-6">
+          <h1 class="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+            ${icon(LayoutGrid, 32, 'w-8 h-8 text-gable-green')}
+            Pricing Matrix
+          </h1>
+          <a href="/pricing/market-check" data-testid="market-check-link" class="text-blueprint-blue underline text-sm">Market check</a>
+          <div class="bg-slate-steel border border-white/10 rounded-lg px-6 py-5 max-w-2xl">
+            <p class="text-white font-medium">Category pricing is off on this server</p>
+            <p class="text-sm text-slate-400 mt-1">
+              Prices come from the price lists and customer prices. A dealer that prices by product category turns
+              the engine on with <code class="font-mono text-blueprint-blue">CATEGORY_PRICING_ENABLED=true</code> on
+              the server.
+            </p>
+          </div>
+        </div>
+      `;
+    }
     return html`
       <div class="min-h-screen bg-deep-space p-8 space-y-6">
         <!-- Header -->
@@ -283,6 +311,10 @@ export class GablePricingMatrix extends LitElement {
             </p>
           </div>
           <div class="flex items-center gap-2">
+            <a href="/pricing/market-check" data-testid="market-check-link"
+              class="inline-flex items-center gap-2 px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 text-sm">
+              Market check
+            </a>
             ${this._activeTab === 'matrix' && !this._bulkMode ? html`
               <button
                 @click=${() => { this._bulkMode = true; }}
@@ -342,16 +374,11 @@ export class GablePricingMatrix extends LitElement {
             <span class="text-sm text-gable-green font-medium">
               ${this._selectedCells.size} cell${this._selectedCells.size !== 1 ? 's' : ''} selected
             </span>
-            <select
+            <gable-select
               .value=${this._bulkRuleType}
+              .options=${['markdown', 'markup', 'margin', 'fixed'].map(t => ({ value: t, label: t.toUpperCase() }))}
               @change=${(e: Event) => { this._bulkRuleType = (e.target as HTMLSelectElement).value as CategoryRuleType; }}
-              class="bg-deep-space border border-white/10 rounded px-2 py-1.5 text-white text-sm"
-            >
-              <option value="markdown">MARKDOWN</option>
-              <option value="markup">MARKUP</option>
-              <option value="margin">MARGIN</option>
-              <option value="fixed">FIXED</option>
-            </select>
+            ></gable-select>
             <input
               type="number"
               step="0.0001"

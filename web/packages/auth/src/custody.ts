@@ -25,6 +25,7 @@
  */
 
 import { authConfig } from './config.ts';
+import { BRANCH_STORAGE_KEY } from './branch.ts';
 import { decodeTokenClaims, isExpired, type GableTokenClaims } from './jwt.ts';
 
 /** The storage operations custody needs, so tests can inject doubles. */
@@ -57,7 +58,7 @@ export const SESSION_HANDOFF_KEY = 'gable.auth.session.v1';
 /** A signed-in session, in the shape the frontends render. */
 export type AuthSession =
   | { kind: 'token'; token: string; claims: GableTokenClaims }
-  | { kind: 'dev'; name: string };
+  | { kind: 'dev'; name: string; role?: string; homeYardCode?: string };
 
 /** The handoff record's on-the-wire shape. The v tags the payload shape. */
 interface HandoffRecord {
@@ -65,6 +66,18 @@ interface HandoffRecord {
   kind: 'token' | 'dev';
   token?: string;
   name?: string;
+  role?: string;
+  homeYardCode?: string;
+}
+
+/**
+ * The persona a dev card sets: the role the door uses to filter tiles and
+ * the home yard code the desk opens on. Both are optional, so the existing
+ * dev sign-in (a free display name only) keeps working unchanged.
+ */
+export interface DevPersona {
+  role?: string;
+  homeYardCode?: string;
 }
 
 export class InvalidTokenError extends Error {
@@ -80,6 +93,12 @@ export class DevModeDisabledError extends Error {
     this.name = 'DevModeDisabledError';
   }
 }
+
+/** The counter's remembered-sale keys (the desk's POS terminal writes them). */
+const COUNTER_SALE_KEY_PREFIX = 'gable.pos.sale.'
+
+/** The desk's open apps, its tab strip (the desk's `lib/workspace.ts` writes it). */
+const DESK_WORKSPACE_KEY = 'gable_workspace'
 
 export class AuthCustody {
   private _session: AuthSession | null = null;
@@ -126,7 +145,11 @@ export class AuthCustody {
     if (rec.kind === 'dev') {
       if (!authConfig.devMode) return null;
       if (typeof rec.name !== 'string' || rec.name.length === 0) return null;
-      return { kind: 'dev', name: rec.name };
+      const role = typeof rec.role === 'string' && rec.role.length > 0 ? rec.role : undefined;
+      const homeYardCode = typeof rec.homeYardCode === 'string' && rec.homeYardCode.length > 0
+        ? rec.homeYardCode
+        : undefined;
+      return { kind: 'dev', name: rec.name, role, homeYardCode };
     }
     return null;
   }
@@ -141,6 +164,18 @@ export class AuthCustody {
   get token(): string | null {
     const s = this.session;
     return s !== null && s.kind === 'token' ? s.token : null;
+  }
+
+  /**
+   * Who is signed in, as a stable key for per person settings (the theme
+   * choice): the token's sub claim (else its email), or `dev:<name>` for a
+   * dev session. Null when signed out.
+   */
+  get subject(): string | null {
+    const s = this.session;
+    if (s === null) return null;
+    if (s.kind === 'dev') return `dev:${s.name}`;
+    return s.claims.sub ?? s.claims.email ?? null;
   }
 
   /** The signed-in user's display name, from the token or the dev record. */
@@ -163,6 +198,28 @@ export class AuthCustody {
     const merged = Array.isArray(roles) ? roles.filter((r) => typeof r === 'string') : [];
     if (typeof role === 'string' && role !== '' && !merged.includes(role)) merged.push(role);
     return merged;
+  }
+
+  /**
+   * The persona's role when the session is a dev session with one (a
+   * persona card set it), otherwise null. The door uses this to filter its
+   * tiles in dev mode; a token session never sets it.
+   */
+  get personaRole(): string | null {
+    const s = this.session;
+    if (s === null || s.kind !== 'dev') return null;
+    return s.role ?? null;
+  }
+
+  /**
+   * The persona's home yard code when the session is a dev session with
+   * one, otherwise null. The desk's BranchContext uses this to open the
+   * right yard for a persona; a token session never sets it.
+   */
+  get personaHomeYardCode(): string | null {
+    const s = this.session;
+    if (s === null || s.kind !== 'dev') return null;
+    return s.homeYardCode ?? null;
   }
 
   /**
@@ -189,16 +246,34 @@ export class AuthCustody {
    * credential exists or is needed; the record carries a display name so
    * the door can render a user. Refused unless the build set
    * VITE_AUTH_DEV_MODE.
+   *
+   * `persona` is optional: a demo persona card passes the persona's role
+   * and home yard code so the door can filter tiles with the role and the
+   * desk can open the persona's home yard. A persona sign in also drops the
+   * yard an earlier session stored, which the desk would otherwise restore
+   * before it consults the persona. A free-form dev sign-in omits it, keeps
+   * the stored yard, and the session carries only the display name.
    */
-  signInDev(displayName: string): AuthSession {
+  signInDev(displayName: string, persona?: DevPersona): AuthSession {
     if (!authConfig.devMode) throw new DevModeDisabledError();
     const name = displayName.trim();
     if (name.length === 0) throw new InvalidTokenError('Empty display name');
 
-    const session: AuthSession = { kind: 'dev', name };
+    const role = persona?.role && persona.role.length > 0 ? persona.role : undefined;
+    const homeYardCode = persona?.homeYardCode && persona.homeYardCode.length > 0
+      ? persona.homeYardCode
+      : undefined;
+    if (persona) {
+      try {
+        globalThis.localStorage?.removeItem(BRANCH_STORAGE_KEY);
+      } catch {
+        // A hostile storage context: the desk falls back to its own yard rules.
+      }
+    }
+    const session: AuthSession = { kind: 'dev', name, role, homeYardCode };
     this._session = session;
     this._adopted = true;
-    this._writeHandoff({ v: 1, kind: 'dev', name });
+    this._writeHandoff({ v: 1, kind: 'dev', name, role, homeYardCode });
     return session;
   }
 
@@ -206,6 +281,19 @@ export class AuthCustody {
   signOut(): void {
     this._session = null;
     this._adopted = true;
+    // The counter remembers the empty sale a person last opened on each
+    // register; signing out forgets them (a stale hint is harmless, a kept one
+    // outlives the person). The desk's open apps are the person's too:
+    // signing out closes them, so the next person starts on their own home.
+    try {
+      const ls = globalThis.localStorage;
+      for (let i = ls.length - 1; i >= 0; i--) {
+        const k = ls.key(i);
+        if (k !== null && (k.startsWith(COUNTER_SALE_KEY_PREFIX) || k === DESK_WORKSPACE_KEY)) ls.removeItem(k);
+      }
+    } catch {
+      // A hostile storage context: nothing was remembered that we can reach.
+    }
     try {
       this._storage.removeItem(SESSION_HANDOFF_KEY);
     } catch {

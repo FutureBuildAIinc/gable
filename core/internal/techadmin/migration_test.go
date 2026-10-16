@@ -127,7 +127,7 @@ func TestMigration095_BackfillsRowsThatExist(t *testing.T) {
 		 ('00000000-0000-0000-0000-0000000000a1','First RFC','draft','p1','s1','c1', now() - interval '2 hours', now() - interval '2 hours'),
 		 ('00000000-0000-0000-0000-0000000000a2','Second RFC','approved','p2','s2', NULL, NULL, NULL);
 		INSERT INTO staff (id, email, full_name, staff_no, role, active) VALUES
-		 ('00000000-0000-0000-0000-0000000000b1','dana@gable.com','Dana Ramirez','STF-101','dispatcher',TRUE);
+		 ('00000000-0000-0000-0000-0000000000b1','dana@gablebuildingsupply.example','Dana Ramirez','STF-101','dispatcher',TRUE);
 		INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes, created_at) VALUES
 		 ('00000000-0000-0000-0000-0000000000c1','legacy','h','sk_live_xx','{quotes:read}', NULL);`); err != nil {
 		t.Fatalf("legacy rows: %v", err)

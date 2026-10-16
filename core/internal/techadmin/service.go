@@ -11,11 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -85,6 +87,27 @@ type Service struct {
 	envAIKey     string
 	envAIBaseURL string
 	envORSKey    string
+
+	vault    ai.Sealer // seals the AI keys at rest; nil or absent means no key can be stored sealed
+	aiTester AITester  // the test connection action
+}
+
+// AITester makes the cheapest call the active AI provider allows.
+// *ai.Client satisfies it.
+type AITester interface {
+	TestConnection(ctx context.Context) error
+}
+
+// WithVault wires the vault that seals the AI keys at rest.
+func (s *Service) WithVault(v ai.Sealer) *Service {
+	s.vault = v
+	return s
+}
+
+// WithAITester wires the client the test connection action calls.
+func (s *Service) WithAITester(t AITester) *Service {
+	s.aiTester = t
+	return s
 }
 
 func NewService(repo Repository) *Service {
@@ -357,9 +380,11 @@ func (s *Service) RevokeKey(ctx context.Context, id uuid.UUID) (revoked bool, er
 
 // --- the settings documents ---
 
-// GetAISettings reads the AI settings document: the key's status (a stored
-// row is the admin override; a key that comes only from the environment is
-// env), the base URL when an override is stored, and the resource revision.
+// GetAISettings reads the AI settings document: the active provider's key
+// status (a stored row is the admin override; an OpenRouter key that comes
+// only from the environment is env), the base URL when an override is
+// stored, the Anthropic provider's status, and the resource revision. No key
+// is ever returned, only masked hints.
 func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 	key, hasKey, err := s.repo.ReadSetting(ctx, settingAIKey)
 	if err != nil {
@@ -369,16 +394,53 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 	if err != nil {
 		return nil, err
 	}
+	provider, _, err := s.repo.ReadSetting(ctx, ai.SettingProvider)
+	if err != nil {
+		return nil, err
+	}
+	model, _, err := s.repo.ReadSetting(ctx, ai.SettingAnthropicModel)
+	if err != nil {
+		return nil, err
+	}
+	akey, hasAKey, err := s.repo.ReadSetting(ctx, ai.SettingAnthropicKey)
+	if err != nil {
+		return nil, err
+	}
 	rev, err := s.repo.ReadRevision(ctx, ResourceAISettings)
 	if err != nil {
 		return nil, err
 	}
-	if !hasKey {
+	if hasKey {
+		// A sealed key the vault cannot open (the vault key changed) reads
+		// as not stored: AI is off for it, as the client treats it.
+		if opened, oerr := ai.OpenValue(s.vault, key); oerr == nil {
+			key = opened
+		} else {
+			key, hasKey = s.envAIKey, false
+		}
+	} else {
 		key = s.envAIKey
 	}
-	out := &AISettings{Revision: rev, Source: "none"}
+	if provider != ai.ProviderAnthropic {
+		provider = ai.ProviderOpenRouter
+	}
+	if model == "" {
+		model = ai.DefaultAnthropicModel
+	}
+	out := &AISettings{
+		Revision:     rev,
+		Source:       "none",
+		Provider:     provider,
+		Model:        model,
+		VaultPresent: s.vault != nil && s.vault.Present(),
+	}
+	if hasAKey && akey != "" {
+		if opened, oerr := ai.OpenValue(s.vault, akey); oerr == nil && opened != "" {
+			out.AnthropicConfigured = true
+			out.AnthropicKeyHint = keyHint(opened)
+		}
+	}
 	if key != "" {
-		out.Configured = true
 		out.KeyHint = keyHint(key)
 		if hasKey {
 			out.Source = "admin"
@@ -386,22 +448,162 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 			out.Source = "env"
 		}
 	}
+	out.Configured = key != ""
+	if provider == ai.ProviderAnthropic {
+		out.Configured = out.AnthropicConfigured
+		if out.AnthropicConfigured {
+			out.Source = "admin"
+		} else {
+			out.Source = "none"
+		}
+	}
 	// Only an override is surfaced, so the UI can tell "override set" from
 	// "using the default" and never re-persists the default back.
 	if hasBase {
 		out.BaseURL = &baseURL
 	}
+	if err := s.readAITest(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
-// SaveAISettings writes the key and, when the body names it, the base URL in
-// one transaction on the client's revision: the anchor row is locked, the
-// revision checked, the rows written, the anchor bumped, the audit row
-// written and the event written last. A baseURL of nil leaves the override
-// alone; an empty one clears it, reverting to the environment default.
+// aiTestRow is the stored last test of the saved key.
+type aiTestRow struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+	// Revision is the AI settings revision the test ran on. A result from an
+	// older revision belongs to a key that may have changed since, so it
+	// reads as untested.
+	Revision int64 `json:"revision"`
+}
+
+// saveTestTimeout bounds the test a save runs, so a provider that does not
+// answer cannot hold the save's response for the client's whole timeout.
+const saveTestTimeout = 20 * time.Second
+
+// readAITest fills the document's test status from the stored last test:
+// "none" when no key is saved for the chosen provider, "untested" when one is
+// saved and was never tested, else the stored result.
+func (s *Service) readAITest(ctx context.Context, out *AISettings) error {
+	out.TestStatus, out.TestMessage = AITestNone, ""
+	if !out.Configured {
+		return nil
+	}
+	out.TestStatus = AITestUntested
+	raw, ok, err := s.repo.ReadSetting(ctx, settingAITest)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	var row aiTestRow
+	if json.Unmarshal([]byte(raw), &row) != nil {
+		return nil
+	}
+	if row.Revision != out.Revision {
+		return nil
+	}
+	switch row.Status {
+	case AITestPassed, AITestRefused, AITestFailed:
+		out.TestStatus, out.TestMessage = row.Status, row.Message
+	}
+	return nil
+}
+
+// runAITest calls the provider once and stores the result for the settings
+// document. A provider failure is an answer, not an error; only a storage
+// failure is returned. The message is the provider's refusal in words, never
+// the key.
+func (s *Service) runAITest(ctx context.Context, fromSave bool) (TestResult, error) {
+	// The revision the test runs on is read BEFORE the provider is asked: the
+	// result belongs to that revision, whenever the provider answers.
+	var rev int64
+	if s.aiTester != nil && s.repo != nil {
+		r, err := s.repo.ReadRevision(ctx, ResourceAISettings)
+		if err != nil {
+			return TestResult{}, err
+		}
+		rev = r
+	}
+	res := TestResult{OK: true, Status: AITestPassed, Message: "The provider answered."}
+	switch {
+	case s.aiTester == nil:
+		res = TestResult{Status: AITestFailed, Message: "AI is off: the AI client is not available on this server"}
+	default:
+		if err := s.aiTester.TestConnection(ctx); err != nil {
+			if words, refused := ai.RefusedMessage(err); refused {
+				res = TestResult{Status: AITestRefused, Message: words}
+			} else if unreachable := unreachableProvider(err); unreachable != "" {
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(unreachable, fromSave)}
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(s.aiProviderLabel(ctx), fromSave)}
+			} else {
+				res = TestResult{Status: AITestFailed, Message: err.Error()}
+			}
+		}
+	}
+	if s.aiTester == nil || s.repo == nil {
+		return res, nil
+	}
+	stored := aiTestRow{Status: res.Status, Message: res.Message, Revision: rev}
+	if res.Status == AITestPassed {
+		stored.Message = ""
+	}
+	// A result of an older revision never replaces one of a later revision:
+	// two tests that finish out of order leave the later key's result.
+	if raw, ok, rerr := s.repo.ReadSetting(ctx, settingAITest); rerr == nil && ok {
+		var prev aiTestRow
+		if json.Unmarshal([]byte(raw), &prev) == nil && prev.Revision > rev {
+			return res, nil
+		}
+	}
+	row, err := json.Marshal(stored)
+	if err != nil {
+		return res, err
+	}
+	return res, s.repo.WriteSetting(ctx, settingAITest, string(row))
+}
+
+// SaveAISettings writes the OpenRouter key and, when the body names it, the
+// base URL (the original save, kept for its callers).
 func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *string, pre Precondition) (*AISettings, error) {
+	return s.SaveAISettingsFull(ctx, AISave{APIKey: apiKey, BaseURL: baseURL}, pre)
+}
+
+// SaveAISettingsFull writes the AI settings in one transaction on the
+// client's revision: the anchor row is locked, the revision checked, the rows
+// written (keys sealed with the vault), the anchor bumped, the audit row
+// written and the event written last. The audit row and the event name who
+// and which provider, never a key. An Anthropic key with no vault key is
+// refused before anything is written (ErrNoVault).
+func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precondition) (*AISettings, error) {
+	if in.Model != "" {
+		if err := ai.ValidateAnthropicModel(in.Model); err != nil {
+			return nil, err
+		}
+	}
+	if in.AnthropicAPIKey != "" && (s.vault == nil || !s.vault.Present()) {
+		return nil, ai.ErrNoVault
+	}
+	var sealedOR, sealedAnthropic string
+	var err error
+	if in.APIKey != "" {
+		sealedOR = in.APIKey
+		if s.vault != nil && s.vault.Present() {
+			if sealedOR, err = ai.SealValue(s.vault, in.APIKey); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if in.AnthropicAPIKey != "" {
+		if sealedAnthropic, err = ai.SealValue(s.vault, in.AnthropicAPIKey); err != nil {
+			return nil, err
+		}
+	}
 	var out *AISettings
-	err := s.inTx(ctx, func(ctx context.Context) error {
+	err = s.inTx(ctx, func(ctx context.Context) error {
 		rev, err := s.repo.LockRevision(ctx, ResourceAISettings)
 		if err != nil {
 			return err
@@ -409,15 +611,32 @@ func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *st
 		if err := pre.check(rev); err != nil {
 			return err
 		}
-		if err := s.repo.WriteSetting(ctx, settingAIKey, apiKey); err != nil {
-			return err
+		if sealedOR != "" {
+			if err := s.repo.WriteSetting(ctx, settingAIKey, sealedOR); err != nil {
+				return err
+			}
 		}
-		if baseURL != nil {
-			if *baseURL == "" {
+		if sealedAnthropic != "" {
+			if err := s.repo.WriteSetting(ctx, ai.SettingAnthropicKey, sealedAnthropic); err != nil {
+				return err
+			}
+		}
+		if in.Provider != "" {
+			if err := s.repo.WriteSetting(ctx, ai.SettingProvider, in.Provider); err != nil {
+				return err
+			}
+		}
+		if in.Model != "" {
+			if err := s.repo.WriteSetting(ctx, ai.SettingAnthropicModel, in.Model); err != nil {
+				return err
+			}
+		}
+		if in.BaseURL != nil {
+			if *in.BaseURL == "" {
 				if err := s.repo.DeleteSetting(ctx, settingAIBaseURL); err != nil {
 					return err
 				}
-			} else if err := s.repo.WriteSetting(ctx, settingAIBaseURL, *baseURL); err != nil {
+			} else if err := s.repo.WriteSetting(ctx, settingAIBaseURL, *in.BaseURL); err != nil {
 				return err
 			}
 		}
@@ -431,9 +650,15 @@ func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *st
 		if err != nil {
 			return err
 		}
-		changes := map[string]any{"resource": ResourceAISettings, "revision": next}
-		if baseURL != nil {
-			changes["base_url_cleared"] = *baseURL == ""
+		changes := map[string]any{"resource": ResourceAISettings, "revision": next, "provider": out.Provider}
+		if in.BaseURL != nil {
+			changes["base_url_cleared"] = *in.BaseURL == ""
+		}
+		if in.Model != "" {
+			changes["model"] = in.Model
+		}
+		if in.AnthropicAPIKey != "" {
+			changes["anthropic_key_changed"] = true
 		}
 		if s.audit != nil {
 			if err := s.audit.Log(ctx, audit.Entry{
@@ -450,13 +675,70 @@ func (s *Service) SaveAISettings(ctx context.Context, apiKey string, baseURL *st
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateAI()
+	// Saving a key tests it with the provider (N7), so the document the
+	// admin reads says whether the key works, not only that one is saved. The
+	// test is the provider's answer, never a reason to refuse the save.
+	if out.Configured && s.aiTester != nil {
+		tctx, cancel := context.WithTimeout(ctx, saveTestTimeout)
+		_, terr := s.runAITest(tctx, true)
+		cancel()
+		if terr != nil {
+			// The save is committed: a result that could not be stored is
+			// logged, never answered as a failed save.
+			slog.Error("failed to store the AI test result after a save", "error", terr)
+		}
+		if fresh, gerr := s.GetAISettings(ctx); gerr == nil {
+			return fresh, nil
+		}
+	}
 	return out, nil
+}
+
+// TestAIConnection runs the test connection action and stores its result as
+// the last test of the saved key. A provider failure is an answer (ok false
+// and its words), not an error.
+func (s *Service) TestAIConnection(ctx context.Context) TestResult {
+	res, err := s.runAITest(ctx, false)
+	if err != nil {
+		slog.Error("failed to store the AI test result", "error", err)
+	}
+	return res
+}
+
+// SealLegacySettings seals any AI key row still stored in plain text, the
+// read time upgrade run at startup. A row that is already sealed, or any row
+// when no vault key exists, is left alone. It returns how many it sealed and
+// never loses a key: a value is replaced only by its own sealed form.
+func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
+	if s.vault == nil || !s.vault.Present() {
+		return 0, nil
+	}
+	n := 0
+	for _, key := range []string{settingAIKey, ai.SettingAnthropicKey} {
+		v, ok, err := s.repo.ReadSetting(ctx, key)
+		if err != nil {
+			return n, err
+		}
+		if !ok || v == "" || ai.IsSealedValue(v) {
+			continue
+		}
+		sealed, err := ai.SealValue(s.vault, v)
+		if err != nil {
+			return n, err
+		}
+		if err := s.repo.WriteSetting(ctx, key, sealed); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // DeleteAISettings removes the admin override (key and base URL together, so
 // both revert to their environment defaults) on the client's revision.
 func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error {
-	return s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		rev, err := s.repo.LockRevision(ctx, ResourceAISettings)
 		if err != nil {
 			return err
@@ -469,6 +751,11 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		}
 		if err := s.repo.DeleteSetting(ctx, settingAIBaseURL); err != nil {
 			return err
+		}
+		for _, k := range []string{ai.SettingAnthropicKey, ai.SettingProvider, ai.SettingAnthropicModel, settingAITest} {
+			if err := s.repo.DeleteSetting(ctx, k); err != nil {
+				return err
+			}
 		}
 		next := rev + 1
 		if err := s.repo.BumpRevision(ctx, ResourceAISettings, next); err != nil {
@@ -487,6 +774,47 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		}
 		return s.record(ctx, "admin_settings.deleted", "admin_settings", settingsEntityID(ResourceAISettings), changes, next)
 	})
+	if err == nil {
+		s.invalidateAI()
+	}
+	return err
+}
+
+// unreachableProvider is the provider's name when err is an unreachable
+// provider, else "".
+func unreachableProvider(err error) string {
+	var ue *ai.UnreachableError
+	if errors.As(err, &ue) {
+		return ue.ProviderName()
+	}
+	return ""
+}
+
+// unreachableWords is the sentence for a test that could not reach provider: a
+// save says the key is saved, a pressed test does not.
+func unreachableWords(provider string, fromSave bool) string {
+	if fromSave {
+		return ai.UnreachableWords(provider)
+	}
+	return ai.PressedUnreachableWords(provider)
+}
+
+// aiProviderLabel is the display name of the chosen provider.
+func (s *Service) aiProviderLabel(ctx context.Context) string {
+	if p, _, err := s.repo.ReadSetting(ctx, ai.SettingProvider); err == nil && p == ai.ProviderAnthropic {
+		return "Anthropic"
+	}
+	return "OpenRouter"
+}
+
+// invalidateAI drops the AI client's cached settings after a committed save
+// or delete, so the very next call (the test connection included) uses what
+// was saved. The tester is the AI client in serve; a tester with no cache has
+// nothing to drop.
+func (s *Service) invalidateAI() {
+	if r, ok := s.aiTester.(interface{ Invalidate() }); ok {
+		r.Invalidate()
+	}
 }
 
 // GetRoutingSettings reads the routing settings document, the AI settings'

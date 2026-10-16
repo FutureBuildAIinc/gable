@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Plastic electrical outlet box</title>
+  <defs>
+    <style>
+      .boxMain{fill:#3a3d44}
+      .boxShade{fill:#1a1d24}
+      .boxHi{fill:#5a5d66}
+      .boxOpen{fill:#1a1a1a}
+      .screwMain{fill:#7a7a7a}
+      .screwShade{fill:#3a3d44}
+      .cableMain{fill:#1a1a1a}
+      .cableShade{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="78" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g transform="rotate(-15 128 128)">
+    <polygon class="boxMain" points="48,84 200,84 200,200 200,200 86,200 86,200 134,200 134,200 152,200 152,200 86,200 86,200 48,200"/>
+    <polygon class="boxMain" points="48,84 200,84 200,200 48,200"/>
+    <polygon class="boxHi" points="48,84 200,84 200,90 48,90" opacity="0.5"/>
+    <polygon class="boxShade" points="48,194 200,194 200,200 48,200" opacity="0.7"/>
+    <rect class="boxShade" x="194" y="84" width="6" height="116" opacity="0.6"/>
+    <ellipse class="boxOpen" cx="124" cy="142" rx="22" ry="14"/>
+    <ellipse cx="124" cy="142" rx="22" ry="14" fill="none" stroke="#5a5d66" stroke-width="0.8" opacity="0.5"/>
+  </g>
+  <g>
+    <circle class="screwMain" cx="68" cy="166" r="3"/>
+    <line x1="65" y1="166" x2="71" y2="166" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="68" y1="163" x2="68" y2="169" stroke="#1a1a1a" stroke-width="0.8"/>
+    <circle class="screwMain" cx="180" cy="166" r="3"/>
+    <line x1="177" y1="166" x2="183" y2="166" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="180" y1="163" x2="180" y2="169" stroke="#1a1a1a" stroke-width="0.8"/>
+  </g>
+  <g>
+    <ellipse class="cableMain" cx="40" cy="186" rx="20" ry="14"/>
+    <ellipse class="cableShade" cx="40" cy="186" rx="20" ry="6" opacity="0.6"/>
+    <line x1="56" y1="186" x2="86" y2="186" stroke="#1a1a1a" stroke-width="2"/>
+  </g>
+</svg>

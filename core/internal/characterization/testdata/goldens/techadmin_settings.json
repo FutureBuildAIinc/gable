@@ -9,11 +9,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": false,
         "key_hint": null,
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 1,
-        "source": "none"
+        "source": "none",
+        "test_status": "none",
+        "vault_present": false
       }
     }
   },
@@ -158,11 +164,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": false,
         "key_hint": null,
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 1,
-        "source": "none"
+        "source": "none",
+        "test_status": "none",
+        "vault_present": false
       }
     }
   },
@@ -182,11 +194,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": true,
-        "key_hint": "golden-pla...alue",
+        "key_hint": "****alue",
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 2,
-        "source": "admin"
+        "source": "admin",
+        "test_status": "passed",
+        "vault_present": false
       }
     }
   },
@@ -200,11 +218,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": true,
-        "key_hint": "golden-pla...alue",
+        "key_hint": "****alue",
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 2,
-        "source": "admin"
+        "source": "admin",
+        "test_status": "passed",
+        "vault_present": false
       }
     }
   },
@@ -255,11 +279,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": false,
         "key_hint": null,
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 3,
-        "source": "none"
+        "source": "none",
+        "test_status": "none",
+        "vault_present": false
       }
     }
   },
@@ -363,7 +393,7 @@
       "content_type": "application/json",
       "body": {
         "configured": true,
-        "key_hint": "golden-pla...ting",
+        "key_hint": "****ting",
         "revision": 2,
         "source": "admin"
       }
@@ -380,7 +410,7 @@
       "content_type": "application/json",
       "body": {
         "configured": true,
-        "key_hint": "golden-pla...ting",
+        "key_hint": "****ting",
         "revision": 2,
         "source": "admin"
       }

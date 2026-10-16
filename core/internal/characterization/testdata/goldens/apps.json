@@ -295,7 +295,7 @@
             "enabled": true,
             "key": "ai",
             "name": "AI Client",
-            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+            "summary": "Provider routed AI client (OpenRouter or Anthropic), KeyStore, and model routing (library)."
           },
           {
             "category": "Platform",
@@ -737,7 +737,7 @@
             "enabled": true,
             "key": "ai",
             "name": "AI Client",
-            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+            "summary": "Provider routed AI client (OpenRouter or Anthropic), KeyStore, and model routing (library)."
           },
           {
             "category": "Platform",
@@ -1162,7 +1162,7 @@
             "enabled": true,
             "key": "ai",
             "name": "AI Client",
-            "summary": "OpenRouter client, KeyStore, and model routing (library)."
+            "summary": "Provider routed AI client (OpenRouter or Anthropic), KeyStore, and model routing (library)."
           },
           {
             "category": "Platform",

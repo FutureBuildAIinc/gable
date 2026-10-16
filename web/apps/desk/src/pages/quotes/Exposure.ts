@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -124,17 +125,18 @@ export class QuoteExposurePage extends LitElement {
       </div>
 
       <div class="flex items-center gap-3 mb-4">
-        <select
+        <gable-select
           .value=${this.stateFilter}
+          .options=${[
+            { value: '', label: 'All states' },
+            { value: 'FLAGGED', label: 'Flagged' },
+            { value: 'ESCALATED', label: 'Escalated' },
+            { value: 'ACK_REQUIRED', label: 'Ack Required' },
+            { value: 'ACKNOWLEDGED', label: 'Acknowledged' },
+            { value: 'OVERRIDDEN', label: 'Overridden' },
+          ]}
           @change=${(e: Event) => { this.stateFilter = (e.target as HTMLSelectElement).value; this._load(); }}
-          class="bg-slate-steel border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50">
-          <option value="">All states</option>
-          <option value="FLAGGED">Flagged</option>
-          <option value="ESCALATED">Escalated</option>
-          <option value="ACK_REQUIRED">Ack Required</option>
-          <option value="ACKNOWLEDGED">Acknowledged</option>
-          <option value="OVERRIDDEN">Overridden</option>
-        </select>
+        ></gable-select>
       </div>
 
       <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">

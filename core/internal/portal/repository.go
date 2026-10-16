@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -116,17 +117,20 @@ func (r *PostgresRepository) GetCustomerUserByEmail(ctx context.Context, email s
 	return &u, nil
 }
 
-// GetPortalConfig fetches the first (singleton) portal config row.
+// GetPortalConfig fetches the first (singleton) portal config row. The locale
+// is not the row's own: it is the dealer profile's, defaulting to en-US.
 func (r *PostgresRepository) GetPortalConfig(ctx context.Context) (*PortalConfig, error) {
 	query := `
-		SELECT id, dealer_name, logo_url, primary_color, support_email, support_phone, created_at, updated_at
+		SELECT id, dealer_name, logo_url, primary_color, support_email, support_phone,
+		       COALESCE((SELECT locale FROM dealer_profile WHERE id = 1), 'en-US'),
+		       created_at, updated_at
 		FROM portal_config
 		LIMIT 1
 	`
 	var cfg PortalConfig
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query).Scan(
 		&cfg.ID, &cfg.DealerName, &cfg.LogoURL, &cfg.PrimaryColor,
-		&cfg.SupportEmail, &cfg.SupportPhone, &cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.SupportEmail, &cfg.SupportPhone, &cfg.Locale, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -464,6 +468,9 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 		`, newOrderID, customerID, now, sourceOrderID)
 		if err != nil {
 			return fmt.Errorf("failed to create reorder: %w", err)
+		}
+		if err := customerlink.Ensure(txCtx, r.db, "orders", newOrderID); err != nil {
+			return err
 		}
 
 		// 2. Copy the billable lines with fresh UUIDs and current product

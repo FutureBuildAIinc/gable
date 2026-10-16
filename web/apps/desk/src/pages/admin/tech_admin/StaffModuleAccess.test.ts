@@ -34,7 +34,7 @@ function roster(danaHasAILM = true): StaffMember[] {
   return [
     {
       id: DANA,
-      email: 'dispatcher@gable.com',
+      email: 'dispatcher@gablebuildingsupply.example',
       full_name: 'Dana Ramirez',
       staff_no: 'STF-001',
       role: 'dispatcher',
@@ -46,7 +46,7 @@ function roster(danaHasAILM = true): StaffMember[] {
     },
     {
       id: YUKI,
-      email: 'yard@gable.com',
+      email: 'yard@gablebuildingsupply.example',
       full_name: 'Yuki Tan',
       staff_no: null,
       role: 'yard',
@@ -198,7 +198,7 @@ describe('Staff tab — roster', () => {
     const dana = Array.from(el.querySelectorAll('tbody tr')).find((tr) =>
       text(tr).includes('Dana Ramirez'),
     )!
-    expect(text(dana)).toContain('dispatcher@gable.com')
+    expect(text(dana)).toContain('dispatcher@gablebuildingsupply.example')
     expect(text(dana)).toContain('STF-001')
     expect(text(dana)).toContain('Active')
 

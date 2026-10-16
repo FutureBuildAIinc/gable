@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Red pipe wrench with hook jaw and adjusting nut</title>
+  <defs>
+    <style>
+      .bodyMain{fill:#c84a2e}
+      .bodyHi{fill:#e8684a}
+      .bodyShade{fill:#7a2818}
+      .jawMain{fill:#5a5e64}
+      .jawHi{fill:#a8acb2}
+      .jawShade{fill:#2a2e34}
+      .tooth{fill:#3a3e44}
+      .gripMain{fill:#c84a2e}
+      .gripHi{fill:#e8684a}
+      .gripShade{fill:#7a2818}
+      .knurl{fill:#3a3d44}
+      .knurlHi{fill:#a8acb2}
+      .nutMain{fill:#5a5e64}
+      .nutHi{fill:#a8acb2}
+      .nutShade{fill:#2a2e34}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="104" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <path class="bodyMain" d="M 36 110 L 138 110 L 138 144 L 36 144 Z"/>
+    <rect class="bodyHi" x="36" y="110" width="102" height="3" opacity="0.6"/>
+    <rect class="bodyShade" x="36" y="138" width="102" height="6" opacity="0.5"/>
+  </g>
+  <g>
+    <path class="jawMain" d="M 36 100 L 110 100 L 116 110 L 110 144 L 36 144 L 42 134 L 102 134 L 102 110 L 42 39 Z"/>
+    <path class="jawHi" d="M 36 100 L 110 100 L 116 110 L 110 112 L 36 112 Z" opacity="0.6"/>
+    <path class="jawShade" d="M 36 144 L 110 144 L 116 144 L 110 144 Z" opacity="0.5"/>
+    <g>
+      <polygon class="tooth" points="44,108 50,108 48,116"/>
+      <polygon class="tooth" points="56,108 62,108 60,116"/>
+      <polygon class="tooth" points="68,108 74,108 72,116"/>
+      <polygon class="tooth" points="80,108 86,108 84,116"/>
+      <polygon class="tooth" points="92,108 98,108 96,116"/>
+    </g>
+    <g>
+      <polygon class="tooth" points="44,134 50,134 48,142"/>
+      <polygon class="tooth" points="56,134 62,134 60,142"/>
+      <polygon class="tooth" points="68,134 74,134 72,142"/>
+      <polygon class="tooth" points="80,134 86,134 84,142"/>
+      <polygon class="tooth" points="92,134 98,134 96,142"/>
+    </g>
+  </g>
+  <g>
+    <circle class="nutMain" cx="128" cy="127" r="14"/>
+    <circle class="nutHi" cx="128" cy="123" r="11" opacity="0.5"/>
+    <circle class="nutShade" cx="128" cy="131" r="11" opacity="0.5"/>
+    <g stroke="#a8acb2" stroke-width="0.8" opacity="0.7">
+      <line x1="116" y1="127" x2="140" y2="127"/>
+      <line x1="118" y1="120" x2="138" y2="134"/>
+      <line x1="118" y1="134" x2="138" y2="120"/>
+      <line x1="128" y1="115" x2="128" y2="139"/>
+    </g>
+  </g>
+  <g>
+    <path class="bodyMain" d="M 138 116 L 160 110 L 160 144 L 138 144 Z"/>
+    <rect class="bodyHi" x="138" y="110" width="22" height="2" opacity="0.6"/>
+    <rect class="bodyShade" x="156" y="116" width="4" height="28" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="gripMain" x="160" y="112" width="76" height="30" rx="3"/>
+    <rect class="gripHi" x="160" y="112" width="76" height="4" rx="2" opacity="0.6"/>
+    <rect class="gripShade" x="160" y="138" width="76" height="4" rx="2" opacity="0.5"/>
+    <g>
+      <line x1="170" y1="118" x2="170" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+      <line x1="180" y1="118" x2="180" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+      <line x1="190" y1="118" x2="190" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+      <line x1="200" y1="118" x2="200" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+      <line x1="210" y1="118" x2="210" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+      <line x1="220" y1="118" x2="220" y2="138" stroke="#3a3d44" stroke-width="0.8"/>
+    </g>
+    <ellipse class="gripMain" cx="236" cy="127" rx="6" ry="15"/>
+    <ellipse class="gripShade" cx="236" cy="127" rx="6" ry="6"/>
+  </g>
+</svg>

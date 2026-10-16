@@ -11,8 +11,10 @@ import (
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -56,23 +58,30 @@ func newBranchWall(db *database.DB) *branchWall {
 	return w
 }
 
-// reporting mounts the reporting surface in its three registrations. Every
-// report spans every branch's rows, so a branch bound key is refused the
-// surface outright by the route allowlist gate (ADR 0007 section 5.5) and the
-// role guard alone serves everyone else. Three methods because serve builds
+// reporting mounts the reporting surface in its three registrations. The
+// reports follow the caller's reach (the principal's ruling on the reporting
+// surface): the branch middleware settles the context and each query carries
+// the wall, so a finance user with no header reads the granted branches'
+// figures only while an administrator or owner keeps the all branch view. A
+// branch bound key is still refused the surface outright by the route
+// allowlist gate (ADR 0007 section 5.5). Three methods because serve builds
 // the scheduler between the registrations.
 func (w *branchWall) reporting(mux *http.ServeMux, h *reporting.Handler) {
-	h.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner", "finance"), w.mw))
 }
 
-// reportingSchedules is reporting over the builder and schedule routes.
+// reportingSchedules is reporting over the builder and schedule routes: the
+// builder's entity queries carry the same reach wall as the reports.
 func (w *branchWall) reportingSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
-	wireReportSchedules(mux, h, executor)
+	wireReportSchedules(mux, h, executor, w.mw)
 }
 
-// reportingBIIntegration is reporting over the BI export routes.
+// reportingBIIntegration is reporting over the BI export routes. The export
+// entities carry the same reach wall as the reports (the branch middleware
+// settles it), so a header caller exports its branch's rows; an
+// administrator or owner with no header keeps every branch's.
 func (w *branchWall) reportingBIIntegration(mux *http.ServeMux, h *reporting.Handler) {
-	h.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
+	h.RegisterBIIntegrationRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"), w.mw))
 }
 
 // eventsFeed mounts the events feed: the outbox carries every branch's events
@@ -200,14 +209,17 @@ func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
 // accounts mounts the account and AR routes: the reads (summary, subledger,
 // aging, statement) behind the role guard and the branch middleware, the
 // reconciliation and the application reversal behind the finance guard. The
-// summary, the subledger and the statement name a customer in the path, so
-// the read guard carries the customer branch wall beside the branch
-// middleware: a bound key reaches them only while that customer holds its
-// pin (round 6 P1-2). The aging reads carry the repository's branch wall and
-// name no customer, so the wall passes them; the application reversal walls
-// through the invoice its application settles (the repository's wall), and
-// the reconciliation reads every branch's books (its ledger half carries no
-// branch fact), so a bound key is refused it by the route allowlist gate.
+// summary, the subledger and the statement name a customer in the path. The
+// summary reads through ruling A's reach (ADR 0007 section 5.8): every
+// customer for a user and an unbound key, a bound key only while that customer
+// holds its pin (round 6 P1-2). The subledger and the statement keep the
+// family's wall (customer_branches, r4 P2-4): a customer outside the caller's
+// yards reads as missing there, with or without a header. The aging reads
+// carry the repository's branch wall and name no customer, so the wall passes
+// them; the application reversal walls through the invoice its application
+// settles (the repository's wall), and the reconciliation's pure GL columns
+// are refused to a scoped caller by the service, so a bound key is refused it
+// by the route allowlist gate.
 func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 	customer := w.keyWall.CustomerBranch(accountCustomerPathOf())
 	account.NewHandler(svc).RegisterRoutes(mux,
@@ -279,8 +291,26 @@ func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) f
 // sale names (round 10 P1-1). The cashier creates refuse a machine key
 // outright in the handler (a cashier must be a user).
 func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
-	h.RegisterRoutes(mux, w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()),
-		"POST /api/v1/pos/sync"))
+	// The counter's operator routes (the resolve and the payback, the finance
+	// money movers) run behind the finance wall: the claim's sale is read
+	// through the caller's branch context, so a finance user held to one
+	// branch finds another branch's claim a missing row (ninth review P1-3,
+	// ADR 0007 section 2.3). The handler also holds the claim's sale to the
+	// wall, which is what scopes a caller with no context branch
+	// (default_branch_required=false, no header) to its grants (r12 P1-2),
+	// the same record hold the document and purchase order routes carry.
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
+		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
+		w.scoped("finance", "owner"))
+}
+
+// posReceipts mounts the counter's receipt pair (print and email of a sale's
+// own invoice) under the counter's own roles and the same branch middleware as
+// the sale read, so a sale the caller cannot read answers what that read
+// answers. The document handler renders and sends; the POS service names the
+// sale's invoice.
+func (w *branchWall) posReceipts(mux *http.ServeMux, h *document.Handler, sales document.SaleInvoices, roles ...string) {
+	h.WithSaleReceipts(sales).RegisterReceiptRoutes(mux, w.scoped(roles...))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {
@@ -305,5 +335,33 @@ func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
 // record checks on the invoice and order modules' own routes arrive with
 // their seam.)
 func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
-	h.WithBranchWall(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+	// The statement routes name a customer in the path, so a branch bound key
+	// reaches them only while that customer holds its pin, as the AR
+	// statement read does.
+	base := w.scoped("admin", "owner", "sales", "finance")
+	guard := w.patternWall(base, w.keyWall.CustomerBranch(accountCustomerPathOf()),
+		"GET /api/v1/documents/print/statement/{id}", "POST /api/v1/ar/customers/{id}/statement/email")
+	// A purchase order is the purchasing roles' document.
+	h.WithBranchWall(w.guard).RegisterRoutes(mux, guard, w.scoped("admin", "owner", "purchasing"))
+}
+
+// emailDeliveries mounts the delivery record behind the branch middleware:
+// each row carries the branch of the document it sent, and the list is held
+// to the caller's branches.
+func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handler) {
+	h.RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+}
+
+// dealerProfile mounts the dealer profile: every role that prints reads it
+// and its logo, and only admin and owner write them. The profile is one
+// dealer wide row, so it runs behind the role guard alone and a branch bound
+// key is refused the writes by the route allowlist gate. The locale alone is
+// the one read every signed in desk person may call (a cashier, the yard and
+// a driver format their dates for it too).
+func (w *branchWall) dealerProfile(mux *http.ServeMux, h *dealerprofile.Handler) {
+	h.RegisterRoutes(mux, dealerprofile.Guards{
+		Read:   middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing"),
+		Write:  middleware.RequireRole("admin", "owner"),
+		Locale: middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"),
+	})
 }

@@ -334,7 +334,7 @@ func TestAILMValidateStaffResponseContract(t *testing.T) {
 		body   string
 		golden string
 	}{
-		{"entitled", `{"email":"dispatcher@gable.com"}`, "ailm_validate_staff_entitled.json"},
+		{"entitled", `{"email":"dispatcher@gablebuildingsupply.example"}`, "ailm_validate_staff_entitled.json"},
 		{"unknown", `{"email":"stranger@example.com"}`, "ailm_validate_staff_unknown.json"},
 	}
 
@@ -440,7 +440,7 @@ func TestAILMRequestContract(t *testing.T) {
 func TestAILMValidateStaffRequestContract(t *testing.T) {
 	t.Parallel()
 
-	body := mustIndent(t, map[string]string{"email": "dispatcher@gable.com"})
+	body := mustIndent(t, map[string]string{"email": "dispatcher@gablebuildingsupply.example"})
 	assertGolden(t, "ailm_validate_staff_request.json", body)
 
 	srv := newTestServer(fullFakeStore(), testKey)

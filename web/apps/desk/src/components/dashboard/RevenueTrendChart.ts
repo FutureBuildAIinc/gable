@@ -4,6 +4,8 @@
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
+import { onThemeChange, themeColor } from '@gable/design-system';
+import { formatDay } from '../../lib/dates.ts';
 import type { RevenueTrendPoint } from '../../types/dashboard.ts';
 
 @customElement('gable-revenue-trend-chart')
@@ -14,6 +16,15 @@ export class GableRevenueTrendChart extends LitElement {
     @property({ type: Boolean }) loading = false;
 
     private _chart: Chart<'line'> | null = null;
+    private _offTheme: (() => void) | null = null;
+    private _resizeObserver: ResizeObserver | null = null;
+
+    connectedCallback() {
+        super.connectedCallback();
+        // A block host: an inline custom element would size from its content.
+        this.style.display = 'block';
+        this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
+    }
 
     updated(changedProperties: Map<string, unknown>) {
         super.updated(changedProperties);
@@ -26,10 +37,29 @@ export class GableRevenueTrendChart extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        this._offTheme?.();
+        this._offTheme = null;
         this._destroyChart();
     }
 
+    /**
+     * Chart.js's own responsive resize did not reach the canvas when the
+     * window narrowed (the wrapper shrank, the canvas kept its pixel width),
+     * so the wrapper is watched and the chart resized by hand. Re-observed
+     * each time the chart is rebuilt; disconnected when it is destroyed.
+     */
+    private _observeWrapper(canvas: HTMLCanvasElement) {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
+        const wrapper = canvas.parentElement;
+        if (!wrapper || typeof ResizeObserver === 'undefined') return;
+        this._resizeObserver = new ResizeObserver(() => { this._chart?.resize(); });
+        this._resizeObserver.observe(wrapper);
+    }
+
     private _destroyChart() {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         if (this._chart) {
             this._chart.destroy();
             this._chart = null;
@@ -38,6 +68,8 @@ export class GableRevenueTrendChart extends LitElement {
 
     private _renderChart() {
         requestAnimationFrame(() => {
+            // Gone before its frame: build nothing, so no chart or observer is left.
+            if (!this.isConnected) return;
             const canvas = this.querySelector<HTMLCanvasElement>('#revenueTrendCanvas');
             if (!canvas) return;
 
@@ -53,25 +85,34 @@ export class GableRevenueTrendChart extends LitElement {
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
 
-            // Create gradient
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-            gradient.addColorStop(0, 'rgba(0, 255, 163, 0.3)');
-            gradient.addColorStop(1, 'rgba(0, 255, 163, 0)');
+            // The fill is scriptable: it is built from the chart's own drawing
+            // area (top to the axis), so it is right at creation and after any
+            // resize, whatever the canvas's own height was when it was made.
+            const gradient = (c: { chart: Chart }) => {
+                const area = c.chart.chartArea;
+                if (!area) return 'transparent';
+                const g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                g.addColorStop(0, themeColor('gable-green', 0.3));
+                g.addColorStop(1, themeColor('gable-green', 0));
+                return g;
+            };
 
             this._chart = new Chart(canvas, {
                 type: 'line',
                 data: {
-                    labels: formattedData.map(d => d.date),
+                    // The axis reads its days in the date module's style,
+                    // like the rest of the page; the tooltip's title follows.
+                    labels: formattedData.map(d => formatDay(d.date)),
                     datasets: [{
                         data: formattedData.map(d => d.revenue),
-                        borderColor: '#00FFA3',
+                        borderColor: themeColor('gable-green'),
                         borderWidth: 3,
                         backgroundColor: gradient,
                         fill: true,
                         tension: 0.4,
                         pointRadius: 0,
                         pointHoverRadius: 6,
-                        pointHoverBackgroundColor: '#ffffff',
+                        pointHoverBackgroundColor: themeColor('white'),
                         pointHoverBorderWidth: 0,
                     }],
                 },
@@ -88,12 +129,12 @@ export class GableRevenueTrendChart extends LitElement {
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(22, 24, 33, 0.9)',
-                            titleColor: '#a1a1aa',
+                            backgroundColor: themeColor('slate-steel', 0.9),
+                            titleColor: themeColor('zinc-400'),
                             titleFont: { size: 11 },
-                            bodyColor: '#00FFA3',
+                            bodyColor: themeColor('gable-green'),
                             bodyFont: { family: 'JetBrains Mono, monospace', weight: 'bold', size: 16 },
-                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderColor: themeColor('white', 0.1),
                             borderWidth: 1,
                             cornerRadius: 8,
                             padding: 12,
@@ -109,7 +150,7 @@ export class GableRevenueTrendChart extends LitElement {
                         x: {
                             grid: { display: false },
                             ticks: {
-                                color: '#52525b',
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                             },
@@ -117,10 +158,10 @@ export class GableRevenueTrendChart extends LitElement {
                         },
                         y: {
                             grid: {
-                                color: 'rgba(255,255,255,0.05)',
+                                color: themeColor('white', 0.05),
                             },
                             ticks: {
-                                color: '#52525b',
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                                 callback: (value) => `$${Number(value).toLocaleString()}`,
@@ -130,6 +171,7 @@ export class GableRevenueTrendChart extends LitElement {
                     },
                 },
             });
+            this._observeWrapper(canvas);
         });
     }
 
@@ -152,10 +194,12 @@ export class GableRevenueTrendChart extends LitElement {
         return html`
             <div class="rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
                 <div class="p-4 border-b border-white/5">
-                    <h3 class="text-base font-semibold text-white">Revenue Trend</h3>
+                    <h3 class="text-base font-semibold text-white">Collected, last 7 days</h3>
                 </div>
                 <div class="flex-1 min-h-0 p-4">
-                    <canvas id="revenueTrendCanvas" class="w-full h-full"></canvas>
+                    <div data-testid="chart-canvas-wrap" class="relative h-full w-full">
+                        <canvas id="revenueTrendCanvas" class="absolute inset-0"></canvas>
+                    </div>
                 </div>
             </div>
         `;

@@ -181,7 +181,19 @@ Every push to this repository is published. So:
 
 - No secret, token, key or password in any file, commit message or pull request. The docker compose dev defaults already in the repository are fine to reuse.
 - No real dealer's name, figures or data, and no person's name in code, tests, seed data or docs. Test data is the repository's own seed or invented.
-- No code, function or test copied from another product's repository. Patterns may inform a design; text is never copied.
+- No code, function or test copied from another product's repository, with one exception: FutureBuild, which owns
+  this repository, may adapt code, functions and tests it wrote itself from an internal FutureBuild codebase it has
+  cleared for this repository. Adapted code follows this repository's conventions and design system and carries the
+  SPDX header a new file at its path takes (the next rule), in place of any header, licence line or provenance
+  comment its source carried. No file in this repository, and no commit message, pull request or branch name,
+  credits or names the codebase adapted code came from, or gives that codebase's paths or commits. Adapted code
+  never brings in a secret or credential, an internal host, an internal note, a real dealer's or customer's name,
+  figures or data, a person's name or data, or anything that names, describes or is specific to one dealer or its
+  systems (its business rules, seeds, role records or screens). Everything else is patterns only: patterns may
+  inform a design; text is never copied. That includes any document text and any third party's code inside such a
+  codebase: anything vendored, and any file or passage that carries, or is credited to, someone else's copyright,
+  licence or package. Mirroring a published Gable sidecar's wire types for a contract test, as
+  `core/internal/integrations` does for AI_LM, is not copying from another product.
 - Every new file carries the SPDX header its directory's row in `LICENSE-MAP.md` gives (copy the two header lines from a neighbouring file of the same kind). Never change the SPDX identifier of an existing file. The REUSE job is a merge gate.
 - Documents carry no calendar dates or durations, and no em or en dashes.
 - Never commit build binaries or generated artefacts that have a generator, and never leave scratch files (for example `pr-body.txt`) in the repository root.
@@ -216,9 +228,13 @@ When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/s
 
 ### AR balance: derive from documents; `customers.balance_due` is a secondary record
 For **reads / decisions**, derive the customer's AR from documents, never from the
-denormalized `customers.balance_due` column. The portal AR summary, dashboard and reporting
+denormalized `customers.balance_due` column. The portal AR summary and reporting
 read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (each repeats the
 set that `invoice.OpenInvoiceStatuses` names; they do not net partial payments, the gate does).
+The dashboard's Outstanding AR is the yard's net open receivable as `core/internal/account/aging.go`
+reads it today (each invoice's open amount, each numbered credit memo's open amount, each payment's
+unapplied cash as a negative, inside the caller's wall, nothing voided), so it equals AR Aging's
+total for the same yard; the count beside it stays the number of `UNPAID` and `PARTIAL` invoices.
 The order **credit-limit gate** reads
 `OpenReceivableCents` in the order repository (ADR 0005 section 5.3): the open amounts of the
 customer's open invoices and open credit memos (negative), less its unapplied cash, plus the
@@ -305,7 +321,7 @@ this repository's history. Each is cited by the artifact you can actually inspec
 
 ### #10 candidates — pick one based on the active discovery doc
 
-**A. ~~Finish reporting scheduler~~ — Done August 2026.** `core/internal/reporting/scheduler.go` runs. `ExecuteAndSendReport` decodes the saved report's `DefinitionJSON` through the shared `definitionFromSaved`, `notification.LogEmailService` implements `SendEmailWithAttachment`, and `main.go` constructs the scheduler, attaches it to the handler via `WithScheduleExecutor` (in `wireReportSchedules`) and stops it in shutdown step 3.6. Schedules created through the API are written `ACTIVE` and registered with the cron engine immediately; `execution.enabled` on every schedule response is derived from the attached executor, so the API's claim and the runtime cannot drift. Proven end to end against Postgres in `internal/reporting/scheduler_postgres_test.go`. Two caveats worth knowing: **delivery is log-only** — the run genuinely queries and renders a real CSV, then hands it to `LogEmailService`, which logs instead of sending, and the API discloses this in `execution.delivery` (see the cross-cutting SMTP item below); and cron expressions use the **six-field, seconds-first** dialect (`reporting.ValidateCronExpression`, one shared parser with the engine). Still open: honouring `format = PDF` (a PDF schedule is delivered as CSV with a note in the body — XLSX is rendered properly), and a `report_schedule_runs` observability table.
+**A. ~~Finish reporting scheduler~~ — Done August 2026.** `core/internal/reporting/scheduler.go` runs. `ExecuteAndSendReport` decodes the saved report's `DefinitionJSON` through the shared `definitionFromSaved`, `notification.LogEmailService` implements `SendEmailWithAttachment`, and `main.go` constructs the scheduler, attaches it to the handler via `WithScheduleExecutor` (in `wireReportSchedules`) and stops it in shutdown step 3.6. Schedules created through the API are written `ACTIVE` and registered with the cron engine immediately; `execution.enabled` on every schedule response is derived from the attached executor, so the API's claim and the runtime cannot drift. Proven end to end against Postgres in `internal/reporting/scheduler_postgres_test.go`. Two caveats worth knowing: **delivery is log-only unless `SMTP_HOST` is set** — the run genuinely queries and renders a real CSV, then hands it to the process's `EmailService`: `LogEmailService` (no host) logs instead of sending and the API discloses this in `execution.delivery`, while the SMTP sender (host set) delivers and the API falls back to its neutral statement (see the cross-cutting SMTP item below); and cron expressions use the **six-field, seconds-first** dialect (`reporting.ValidateCronExpression`, one shared parser with the engine). Still open: honouring `format = PDF` (a PDF schedule is delivered as CSV with a note in the body — XLSX is rendered properly), and a `report_schedule_runs` observability table.
 
 **B. ~~Will-call / pickup ticket workflow.~~ Superseded by `docs/adr/0005-sales-and-money-core.md` section 5.5 (built in C2-2b): a will-call order is `delivery_type` `pickup`, fulfilled with `picked_up_by` through `POST /api/v1/orders/{id}/fulfillments`, never routed, with its cost of goods sold posted in the fulfilment's transaction; there is no ticket table and no `READY_FOR_PICKUP` status.** The original proposal follows for the record. **Will-call / pickup ticket workflow.** Orders currently flow `DRAFT → CONFIRMED → FULFILLED` with no pickup path. Real LBM dealers split delivery vs. will-call pickup as a hard distinction (the customer drives to the yard). Needs: new `will_call_tickets` table, `READY_FOR_PICKUP` order status, signature-on-pickup (POD reuse from `delivery/`), customer notification when ready. Greenfield module — biggest scope of these four.
 
@@ -316,7 +332,7 @@ this repository's history. Each is cited by the artifact you can actually inspec
 ### Cross-cutting / lower-priority backlog
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
 - Frontend admin UI for `system_settings` (currently operators edit via psql). Unblocks self-service for the `reorder.*` keys added in #9.
-- Add an SMTP/SendGrid `notification.EmailService` implementation (currently only `LogEmailService` exists, and it logs every email rather than sending — invoices, delivery notifications and scheduled reports alike). Required before scheduled reports and customer-facing email features are useful in prod. It is one line in `main.go`: every consumer depends on the interface. A real sender should not implement `DeliveryDescription()`; that method is how `LogEmailService` discloses itself to the reporting API, and its absence is what makes `execution.delivery` fall back to a neutral statement.
+- ~~Add an SMTP `notification.EmailService` implementation.~~ Done: `notification.SMTPEmailService` (STARTTLS, implicit TLS or clear text for a local catcher, optional PLAIN auth) is chosen by `notification.NewEmailServiceFromEnv` in `core serve` and `core worker` when `SMTP_HOST` is set, configured only from `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` and `SMTP_TLS`; a set host with no `SMTP_FROM` refuses to start. Without `SMTP_HOST` the log sender stays, and it alone implements `DeliveryDescription()` (the real sender must not: that method is how `LogEmailService` discloses itself to the reporting API). Every customer facing send writes an `email_deliveries` row (`GET /api/v1/email-deliveries`). A provider API sender (SendGrid and the like) is still open and would be a second `EmailService`; see `docs/modules/notification.md`.
 - ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`. Superseded by the transactional outbox (`core/pkg/outbox`, see Tech Stack above): still no broker, and a durable backend remains blueprint Phase 2+.
 - ~~`inventory.MockRepository` missing `DeallocateStock` breaks `go vet`~~ **Already fixed** — the mock implements it (`internal/inventory/service_test.go`); `go vet ./...` is clean.
 - Convert remaining leaf modules to installable apps per `docs/modularization-blueprint.md` §5 — the five dark pages (bankrecon, matching, rebates, purchasing recommendations) are the best next candidates.

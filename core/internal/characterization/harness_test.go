@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -259,6 +260,10 @@ func newHarness(t *testing.T, freshURL string) *harness {
 		"DEMO_SEED":    "1",
 		"GODEBUG":      "randautoseed=0",
 		"TZ":           "Etc/UTC",
+		// The seed's business day is its branches' calendar day: the branches
+		// take the zone the server reads, so the seeded days and the server's
+		// day cut agree at every hour of the UTC day.
+		"SEED_BRANCH_TIMEZONE": "Etc/UTC",
 	}), buildDir+"/core", "", "seed")
 
 	pinBranchZonesToUTC(t, freshURL)
@@ -351,15 +356,25 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string, extraEnv map
 		t.Fatalf("create server log: %v", err)
 	}
 
+	// Saving an AI key tests it with the provider (item 130, N7), so the
+	// server's provider is a local stand-in that answers every call: the
+	// goldens never reach the network and never depend on its answer.
+	aiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"stub","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(aiStub.Close)
+
 	cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
 	cmd.Dir = srvDir
 	env := map[string]string{
-		"PORT":           strconv.Itoa(port),
-		"DATABASE_URL":   dbURL,
-		"AUTH_MODE":      "dev",
-		"LOG_LEVEL":      "ERROR",
-		"EDI_OUTPUT_DIR": filepath.Join(srvDir, "edi_out"),
-		"TZ":             "Etc/UTC",
+		"OPENROUTER_BASE_URL": aiStub.URL,
+		"PORT":                strconv.Itoa(port),
+		"DATABASE_URL":        dbURL,
+		"AUTH_MODE":           "dev",
+		"LOG_LEVEL":           "ERROR",
+		"EDI_OUTPUT_DIR":      filepath.Join(srvDir, "edi_out"),
+		"TZ":                  "Etc/UTC",
 		// The harness client is the loopback peer and rotates
 		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
 		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
@@ -469,8 +484,8 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 		vars[v] = s.String
 	}
 
-	one("customer", `SELECT id FROM customers WHERE account_number = 'KELBROOK-001'`)
-	one("customerEmail", `SELECT email FROM customers WHERE account_number = 'KELBROOK-001'`)
+	one("customer", `SELECT id FROM customers WHERE account_number = 'TARNWICK-001'`)
+	one("customerEmail", `SELECT email FROM customers WHERE account_number = 'TARNWICK-001'`)
 	one("product", `SELECT id FROM products WHERE sku = 'LUM-248-PREM'`)
 	one("productSheet", `SELECT id FROM products WHERE sku = 'PLY-34-CDX'`)
 	one("branch", `SELECT id FROM locations WHERE code = 'KEL-MAIN'`)
@@ -713,7 +728,8 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		case []any:
 			sortPrimaryArray(body)
 		case map[string]any:
-			// Paged envelopes: the primary array sits one level down.
+			// Paged envelopes: the primary array sits one level down (the
+			// cursor envelope's items, the legacy offset envelope's data).
 			if data, ok := body["data"].([]any); ok {
 				sortPrimaryArray(data)
 			}
@@ -723,6 +739,20 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		}
 	}
 	t.Logf("step %s: %s %s -> %d (%s)", s.name, s.method, path, resp.StatusCode, resp.Header.Get("Content-Type"))
+	if resp.StatusCode >= 400 {
+		// The refusal's code and blockers beside the status, so a golden
+		// drift investigation reads the run log instead of guessing. The
+		// router's own plain text refusals (404, 405) have no body to read.
+		var e map[string]any
+		if json.Unmarshal(raw, &e) == nil {
+			if eb, ok := e["error"].(map[string]any); ok {
+				t.Logf("step %s: error body: %v", s.name, eb)
+			}
+		}
+		if capturedBody != nil {
+			t.Logf("step %s: request body: %v", s.name, capturedBody)
+		}
+	}
 
 	if s.extract != nil {
 		doc := decodeJSON(t, raw)

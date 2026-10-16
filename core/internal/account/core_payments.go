@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -54,6 +55,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	if in.AmountCents <= 0 {
 		return uuid.Nil, nil, invalidField("amount_cents", "must be greater than zero")
 	}
+	if err := s.refuseDayToCome(ctx, in.BranchID, in.ReceivedOn, "received_on"); err != nil {
+		return uuid.Nil, nil, err
+	}
 	id := in.PaymentID
 	if id == uuid.Nil {
 		id = uuid.New()
@@ -97,6 +101,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("failed to record the payment: %w", err)
+	}
+	if err := customerlink.Ensure(ctx, s.db, "payments", id); err != nil {
+		return uuid.Nil, nil, err
 	}
 	fx := &Effects{}
 	payID := id
@@ -167,6 +174,18 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
 	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, on, "applied_on"); err != nil {
+		return err
+	}
+	// the counter's hold first (C2-5, FROM-PRINCIPAL 60): a payment whose
+	// unapplied cash is a declined void tender's credit applies to no
+	// invoice, whatever invoice the request names; the refusal names the
+	// origin and nothing of the application is written. Every path that
+	// applies a payment's unapplied cash (the apply route, a receipt's own
+	// applications, the deposit path) runs through here.
+	if err := s.refuseHeldTenderCredit(ctx, pay.ID); err != nil {
+		return err
+	}
 	ids := make([]uuid.UUID, len(lines))
 	seen := map[uuid.UUID]bool{}
 	var cash int64
@@ -212,6 +231,11 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	plans := make([]plan, 0, len(lines))
 	for _, l := range lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return conflict("invoice_void", "the invoice is void: it takes no application")
@@ -319,6 +343,9 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	if m.Status != "OPEN" && m.Status != "PARTIAL" {
 		return nil, httpx.InvalidStateTransition("only an open credit memo can be applied: it is " + lower(m.Status))
 	}
+	if err := s.refuseDayToCome(ctx, m.BranchID, in.On, "applied_on"); err != nil {
+		return nil, err
+	}
 	if len(in.Lines) == 0 {
 		return nil, invalidField("applications", "name at least one invoice")
 	}
@@ -357,6 +384,11 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	}
 	for _, l := range in.Lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return nil, err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return nil, conflict("invoice_void", "the invoice is void: it takes no application")
@@ -414,6 +446,14 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 	inv := byID[in.InvoiceID]
 	if inv.Status != invUnpaid && inv.Status != invPartial {
 		return nil, httpx.InvalidStateTransition("only an unpaid or partly paid invoice can be written off: it is " + lower(inv.Status))
+	}
+	if err := s.refuseDayToCome(ctx, inv.BranchID, in.On, "on"); err != nil {
+		return nil, err
+	}
+	// the counter's hold first (C2-5): a held interim invoice refuses before
+	// its amounts are even read
+	if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+		return nil, err
 	}
 	if in.AmountCents > inv.Open {
 		return nil, conflict("exceeds_open_amount", fmt.Sprintf("invoice %s has %d cents open: %d cents were asked", inv.Number, inv.Open, in.AmountCents))
@@ -473,6 +513,9 @@ func (s *Service) Reverse(ctx context.Context, in ReverseIn) (*Effects, error) {
 	}
 	if probe.Kind == KindDiscount {
 		return nil, conflict("discount_stands_with_payment", "a discount stands beside the payment that earned it: reverse that payment's application")
+	}
+	if err := s.refuseDayToComeOf(ctx, "invoices", probe.InvoiceID, in.On, "reversed_on"); err != nil {
+		return nil, err
 	}
 	r := &reversal{invoices: map[uuid.UUID]*invoiceRow{}, invoiceAdd: map[uuid.UUID]int64{}}
 	switch {
@@ -677,6 +720,9 @@ func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, 
 	if pay.Status != "POSTED" {
 		return nil, httpx.InvalidStateTransition("the payment is already voided")
 	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, in.On, "voided_on"); err != nil {
+		return nil, err
+	}
 	if pay.Method == "CARD" {
 		return nil, conflict("card_payment", "a card payment is not voided here: refund it through the gateway")
 	}
@@ -783,6 +829,9 @@ func (s *Service) RefundPayment(ctx context.Context, in RefundPaymentIn) (uuid.U
 	if pay.Status != "POSTED" {
 		return uuid.Nil, nil, conflict("payment_voided", "the payment is voided: it refunds nothing")
 	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, in.On, "refunded_on"); err != nil {
+		return uuid.Nil, nil, err
+	}
 	if in.AmountCents > pay.Unapplied {
 		return uuid.Nil, nil, conflict("exceeds_unapplied", fmt.Sprintf("the payment has %d cents unapplied: %d cents were asked", pay.Unapplied, in.AmountCents))
 	}
@@ -836,6 +885,9 @@ func (s *Service) RefundCreditMemo(ctx context.Context, in RefundCreditMemoIn) (
 	}
 	if m.Status != "OPEN" && m.Status != "PARTIAL" {
 		return uuid.Nil, nil, httpx.InvalidStateTransition("only an open credit memo can be refunded: it is " + lower(m.Status))
+	}
+	if err := s.refuseDayToCome(ctx, m.BranchID, in.On, "refunded_on"); err != nil {
+		return uuid.Nil, nil, err
 	}
 	if in.AmountCents > -m.Open {
 		return uuid.Nil, nil, conflict("exceeds_open_credit", fmt.Sprintf("the credit memo has %d cents of open credit: %d cents were asked", -m.Open, in.AmountCents))

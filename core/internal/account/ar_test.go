@@ -48,6 +48,7 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	loadBranchZone(db)
 	w := &arWorld{t: t, db: db, customerID: uuid.New()}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
@@ -245,8 +246,37 @@ func (w *arWorld) netOf(code string, debitMinusCredit bool, upTo *time.Time) int
 // The world's documents.
 // ---------------------------------------------------------------------------
 
+// daysFromNow is the business day n days from today in the default branch's
+// zone, as a UTC midnight date, read from the database as the production code
+// reads it (a POSIX zone name Go cannot load is read the same). The AR core
+// refuses money dated after the branch's own day, so a test that dated "today"
+// by the process clock would be refused in the hours between UTC's midnight
+// and the branch's.
 func daysFromNow(n int) time.Time {
-	return time.Now().UTC().AddDate(0, 0, n).Truncate(24 * time.Hour)
+	branchDayMu.Lock()
+	db := branchDayDB
+	branchDayMu.Unlock()
+	if db == nil {
+		panic("daysFromNow before a world was made")
+	}
+	var day time.Time
+	if err := db.Pool.QueryRow(context.Background(), `SELECT `+testutil.BranchDaySQL).Scan(&day); err != nil {
+		panic(fmt.Sprintf("the branch's day: %v", err))
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)
+}
+
+var (
+	branchDayMu sync.Mutex
+	branchDayDB *database.DB
+)
+
+// loadBranchZone remembers the test database of the world being made: the
+// pool of an earlier world is closed with its test.
+func loadBranchZone(db *database.DB) {
+	branchDayMu.Lock()
+	branchDayDB = db
+	branchDayMu.Unlock()
 }
 
 func date(t time.Time) string { return t.Format("2006-01-02") }
@@ -836,10 +866,12 @@ func TestARDiscountTakenAndReversed(t *testing.T) {
 	inv := w.invoice(10000, daysFromNow(-1), withDiscount(twoPct, daysFromNow(5)))
 	pay := w.payment(10000, daysFromNow(0), "CHECK")
 
-	// Past the due date: refused.
+	// Past the due date: refused (an invoice whose discount date has gone,
+	// applied today; money is never dated after the business day).
+	lateInv := w.invoice(10000, daysFromNow(-3), withDiscount(twoPct, daysFromNow(-1)))
 	_, err := w.act("discount late", func(ctx context.Context) (*account.Effects, error) {
-		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: inv.ID, AmountCents: 5000, DiscountCents: 100}},
-			On: daysFromNow(6), Actor: "u-test"})
+		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: lateInv.ID, AmountCents: 5000, DiscountCents: 100}},
+			On: daysFromNow(0), Actor: "u-test"})
 	})
 	if err == nil || !strings.Contains(err.Error(), "discount") {
 		t.Errorf("late discount = %v, want the discount refusal", err)
@@ -1310,5 +1342,189 @@ func TestAREveryWriteKindKeepsTheReconciliationClean(t *testing.T) {
 		if d.CustomerID == w.customerID {
 			t.Errorf("reconciliation drift: %+v", d)
 		}
+	}
+}
+
+// RULE (the demo history's restamp, ADR 0005 section 9.3): RestampHistory
+// moves the stamps of a paid invoice and of the payment applied to it, and
+// links that payment to the invoice, moving no amount, status, open amount or
+// balance; it refuses a call with no transaction, an invoice that is not paid,
+// a payment not applied to the invoice and a day out of order or in the
+// future, and writes nothing when it refuses.
+func TestARRestampHistoryMovesOnlyTheStampsOfASettledInvoice(t *testing.T) {
+	w := newARWorld(t)
+	ctx := context.Background()
+	on := daysFromNow(-20)
+	paid := w.invoice(12500, on)
+	payPaid := w.payment(12500, on, "CHECK", account.ApplyLine{InvoiceID: paid.ID, AmountCents: 12500})
+	unpaid := w.invoice(4000, on)
+	partial := w.invoice(9000, on)
+	payPartial := w.payment(3000, on, "CHECK", account.ApplyLine{InvoiceID: partial.ID, AmountCents: 3000})
+
+	text := func(sql string) string {
+		t.Helper()
+		var s string
+		if err := w.db.Pool.QueryRow(ctx, sql, w.customerID, w.entries).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+		return s
+	}
+	// Every amount, status and balance the world's documents and ledger hold.
+	amounts := func() string {
+		return text(`SELECT concat_ws(' | ',
+			(SELECT string_agg(id::text || '=' || status || '/' || ROUND(amount_open * 100)::bigint || '/' || ROUND(total_amount * 100)::bigint, ',' ORDER BY id) FROM invoices WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || status || '/' || ROUND(amount * 100)::bigint || '/' || ROUND(amount_unapplied * 100)::bigint, ',' ORDER BY id) FROM payments WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || ROUND(amount * 100)::bigint, ',' ORDER BY id) FROM ar_applications WHERE customer_id = $1),
+			(SELECT ROUND(SUM(amount) * 100)::bigint::text FROM customer_transactions WHERE customer_id = $1),
+			(SELECT ROUND(balance_due * 100)::bigint::text FROM customers WHERE id = $1),
+			(SELECT string_agg(l.id::text || '=' || l.debit || '/' || l.credit, ',' ORDER BY l.id) FROM gl_journal_lines l WHERE l.journal_entry_id = ANY($2)))`)
+	}
+	// Every stamp and link the restamp may write.
+	stamps := func() string {
+		return text(`SELECT concat_ws(' | ',
+			(SELECT string_agg(id::text || '=' || COALESCE(paid_at::text, '-') || '/' || updated_at, ',' ORDER BY id) FROM invoices WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at || '/' || COALESCE(invoice_id::text, '-'), ',' ORDER BY id) FROM payments WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM ar_applications WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM customer_transactions WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM gl_journal_entries WHERE id = ANY($2)))`)
+	}
+	restamp := func(inv, pay uuid.UUID, invoicedAt, paidAt time.Time) error {
+		return w.db.RunInTx(ctx, func(ctx context.Context) error {
+			return w.svc.RestampHistory(ctx, inv, pay, invoicedAt, paidAt)
+		})
+	}
+
+	// The refusals first, while every stamp is still the acts' own.
+	later := on.Add(10 * time.Hour)
+	beforeMoney, beforeStamps := amounts(), stamps()
+	if err := w.svc.RestampHistory(ctx, paid.ID, payPaid, later, later.Add(time.Second)); !errors.Is(err, account.ErrNoTransaction) {
+		t.Errorf("no transaction: err = %v, want ErrNoTransaction", err)
+	}
+	for _, c := range []struct {
+		name               string
+		inv, pay           uuid.UUID
+		invoicedAt, paidAt time.Time
+	}{
+		{"an unpaid invoice with another invoice's payment", unpaid.ID, payPaid, later, later.Add(time.Second)},
+		{"a part paid invoice", partial.ID, payPartial, later, later.Add(time.Second)},
+		{"a paid invoice with a payment not applied to it", paid.ID, payPartial, later, later.Add(time.Second)},
+		{"a payment day in the future", paid.ID, payPaid, later, time.Now().Add(24 * time.Hour)},
+		{"a payment day before the invoice's", paid.ID, payPaid, later, later.Add(-time.Second)},
+		{"a zero day", paid.ID, payPaid, time.Time{}, time.Time{}},
+	} {
+		if err := restamp(c.inv, c.pay, c.invoicedAt, c.paidAt); err == nil {
+			t.Errorf("%s: the restamp was not refused", c.name)
+		}
+	}
+	if got := amounts(); got != beforeMoney {
+		t.Errorf("a refused restamp moved money:\n before %s\n after  %s", beforeMoney, got)
+	}
+	if got := stamps(); got != beforeStamps {
+		t.Errorf("a refused restamp wrote a stamp or a link:\n before %s\n after  %s", beforeStamps, got)
+	}
+
+	// The settled invoice and its payment take the history's day, and only
+	// the stamps and the link move.
+	invoicedAt := on.Add(9 * time.Hour)
+	paidAt := invoicedAt.Add(time.Second)
+	if err := restamp(paid.ID, payPaid, invoicedAt, paidAt); err != nil {
+		t.Fatalf("restamp a settled invoice: %v", err)
+	}
+	if got := amounts(); got != beforeMoney {
+		t.Errorf("the restamp moved money:\n before %s\n after  %s", beforeMoney, got)
+	}
+	w.assertInvariants("after the restamp")
+	at := func(sql string, args ...any) time.Time {
+		t.Helper()
+		var v time.Time
+		if err := w.db.Pool.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+		return v
+	}
+	for _, c := range []struct {
+		name string
+		got  time.Time
+		want time.Time
+	}{
+		{"the invoice's paid_at", at(`SELECT paid_at FROM invoices WHERE id = $1`, paid.ID), paidAt},
+		{"the payment's created_at", at(`SELECT created_at FROM payments WHERE id = $1`, payPaid), paidAt},
+		{"the application's created_at", at(`SELECT created_at FROM ar_applications WHERE invoice_id = $1 AND payment_id = $2`, paid.ID, payPaid), paidAt},
+		{"the invoice's subledger row", at(`SELECT created_at FROM customer_transactions WHERE source_kind = 'invoice' AND reference_id = $1`, paid.ID), invoicedAt},
+		{"the invoice's ledger entry", at(`SELECT created_at FROM gl_journal_entries WHERE source_ref_id = $1 AND reverses_entry_id IS NULL`, paid.ID), invoicedAt},
+	} {
+		if !c.got.Equal(c.want) {
+			t.Errorf("%s = %s, want %s", c.name, c.got.UTC(), c.want.UTC())
+		}
+	}
+	var linked uuid.UUID
+	if err := w.db.Pool.QueryRow(ctx, `SELECT invoice_id FROM payments WHERE id = $1`, payPaid).Scan(&linked); err != nil || linked != paid.ID {
+		t.Errorf("the payment links to %s (%v), want %s", linked, err, paid.ID)
+	}
+	if got := at(`SELECT created_at FROM payments WHERE id = $1`, payPartial); got.Equal(paidAt) {
+		t.Errorf("the other payment took the history's day")
+	}
+}
+
+// RULE (the demo history's restamp): it moves only the rows of the payment it
+// names. An invoice settled by two payments keeps the other payment's
+// application, subledger and ledger stamps; a payment whose application was
+// reversed is refused, even once another payment has settled the invoice.
+func TestARRestampHistoryTouchesOnlyThePaymentItNames(t *testing.T) {
+	w := newARWorld(t)
+	ctx := context.Background()
+	on := daysFromNow(-20)
+	day := on.Add(9 * time.Hour)
+	stampsOf := func(pay uuid.UUID) string {
+		t.Helper()
+		var s string
+		if err := w.db.Pool.QueryRow(ctx, `SELECT concat_ws(' | ',
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM ar_applications WHERE payment_id = $1),
+			(SELECT string_agg(t.id::text || '=' || t.created_at, ',' ORDER BY t.id) FROM customer_transactions t
+				WHERE t.source_kind = 'application' AND t.reference_id IN (SELECT id FROM ar_applications WHERE payment_id = $1)),
+			(SELECT string_agg(e.id::text || '=' || e.created_at, ',' ORDER BY e.id) FROM gl_journal_entries e
+				WHERE e.source_ref_id = $1 OR e.source_ref_id IN (SELECT id FROM ar_applications WHERE payment_id = $1)),
+			(SELECT created_at::text || '/' || COALESCE(invoice_id::text, '-') FROM payments WHERE id = $1))`, pay).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	restamp := func(inv, pay uuid.UUID) error {
+		return w.db.RunInTx(ctx, func(ctx context.Context) error {
+			return w.svc.RestampHistory(ctx, inv, pay, day, day.Add(time.Second))
+		})
+	}
+
+	// Two payments settle one invoice; the restamp names the first.
+	shared := w.invoice(12500, on)
+	first := w.payment(5000, on, "CHECK", account.ApplyLine{InvoiceID: shared.ID, AmountCents: 5000})
+	second := w.payment(7500, on, "CHECK", account.ApplyLine{InvoiceID: shared.ID, AmountCents: 7500})
+	before := stampsOf(second)
+	if err := restamp(shared.ID, first); err != nil {
+		t.Fatalf("restamp with the first payment: %v", err)
+	}
+	if got := stampsOf(second); got != before {
+		t.Errorf("the other payment's stamps moved:\n before %s\n after  %s", before, got)
+	}
+	w.assertInvariants("after the shared restamp")
+
+	// A payment whose application was reversed; another payment then settles
+	// the invoice.
+	reapplied := w.invoice(8000, on)
+	undone := w.payment(8000, on, "CHECK", account.ApplyLine{InvoiceID: reapplied.ID, AmountCents: 8000})
+	app := w.appID(reapplied.ID, "PAYMENT")
+	w.mustAct("reverse the application", func(ctx context.Context) (*account.Effects, error) {
+		return w.svc.Reverse(ctx, account.ReverseIn{ApplicationID: app, Reason: "wrong invoice", Actor: "u-finance", On: daysFromNow(0)})
+	})
+	w.payment(8000, on, "CHECK", account.ApplyLine{InvoiceID: reapplied.ID, AmountCents: 8000})
+	if status, _ := w.invoiceRow(reapplied.ID); status != "PAID" {
+		t.Fatalf("the reapplied invoice = %s, want PAID", status)
+	}
+	beforeUndone := stampsOf(undone)
+	if err := restamp(reapplied.ID, undone); err == nil {
+		t.Errorf("a payment whose application was reversed took the history's day")
+	}
+	if got := stampsOf(undone); got != beforeUndone {
+		t.Errorf("the refused restamp wrote:\n before %s\n after  %s", beforeUndone, got)
 	}
 }

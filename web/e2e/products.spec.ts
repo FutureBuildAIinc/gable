@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page } from '@playwright/test';
+import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -58,7 +59,7 @@ test.describe('Product flow on the new contract', () => {
     await expect(page.getByRole('heading', { name: 'Add Product to Pile' })).toBeVisible();
     await page.getByPlaceholder('e.g. 2x4x8-SPF').fill(u.sku);
     await page.getByPlaceholder('e.g. 2x4x8 SPF Premium Stud').fill(u.description);
-    await page.locator('gable-add-product-modal select').first().selectOption('BOX');
+    await pickOption(page.locator('gable-add-product-modal gable-select').first(), 'BOX');
     await page.locator('gable-add-product-modal input[type="number"]').fill('4.25');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'product-create-form.png') });
 

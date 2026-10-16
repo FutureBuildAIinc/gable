@@ -26,7 +26,9 @@ import (
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/gl"
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
@@ -35,6 +37,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -74,6 +77,7 @@ func asRole(next http.Handler) http.Handler {
 
 type wallFixture struct {
 	srv                *httptest.Server
+	docHandler         *document.Handler
 	branchA, branchB   uuid.UUID
 	yardA, yardB       uuid.UUID
 	productID          uuid.UUID
@@ -235,7 +239,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
-	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
+	quoteSvc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	wall.quotes(mux, quoteSvc)
 	// The crm mount, driven here as serve wires it: the activity routes
 	// behind the branch middleware, their writes one transaction with the
 	// audit row and the activity.* event.
@@ -259,14 +264,27 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
-	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
 	accountSvc := account.NewService(db, glSvc, slog.Default())
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
-	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
+	docStore := document.NewStore(db)
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
+	docSvc := document.NewService(product.NewRepository(db)).
+		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
+	deliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default())).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc)
 	wall.documents(mux, docHandler)
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	f.docHandler = docHandler
 	wall.invoices(mux, invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).WithOutbox(outbox.NewWriter(db, "")).WithOrders(orderSvc).WithStock(invSvc))
+	// The counter, as serve mounts it: the register routes behind the cashier
+	// wall, the refund claim resolution behind the finance wall (its sale read
+	// carries the branch context).
+	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db)
+	wall.pos(mux, pos.NewHandler(posSvc))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -466,6 +484,23 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if got := f.call(t, "POST", "/api/v1/locations", create("BRANCH", nil), role, "u-a", A); got != no {
 			t.Errorf("%s create type BRANCH: %d, want 403", role, got)
 		}
+	}
+
+	// POS refund claim resolution: the finance money mover runs behind the
+	// branch middleware and its own finance and owner wall (the claim's sale
+	// read carries the branch context, so another branch's claim is a missing
+	// row).
+	resolve := func() string {
+		return fmt.Sprintf(`{"outcome":"no_refund","reconciliation_reference":"R","reason":"w"}`)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "cashier", "u-a", A); got != no {
+		t.Errorf("cashier on the resolution: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "finance", "u-a", B); got != no {
+		t.Errorf("finance at an ungranted branch header: %d, want 403 (the branch middleware)", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "finance", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("finance inside the branch on an unknown claim: %d, want 404", got)
 	}
 	if got := f.call(t, "POST", "/api/v1/locations", create("BIN", f.branchB), "admin", "boss", ""); got != http.StatusCreated {
 		t.Errorf("admin create under any branch: %d, want 201", got)
@@ -1089,22 +1124,23 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 type poRecSummary struct {
 	Items []struct {
 		ProductID     string  `json:"product_id"`
+		BranchID      string  `json:"branch_id"`
 		CurrentStock  float64 `json:"current_stock"`
 		AvgDailySales float64 `json:"avg_daily_sales"`
 	} `json:"items"`
 }
 
-// The purchase order recommendations route runs behind the branch middleware,
-// so its stock read and its sales velocity read must scope to the SAME branch
-// set: a bound purchasing user held to branch A is recommended from branch
-// A's stock and branch A's sales, never its branches' stock against every
-// branch's demand; a bound user with no grants sees no stock and no sales,
-// so the product carries no recommendation at all; an administrator without
-// a header reads every branch's stock and demand, as before.
+// The purchase order recommendations route runs behind the branch middleware
+// and reads per yard (item 135 b): a row is one product at one yard, from that
+// yard's stock and that yard's sales. A bound purchasing user held to branch A
+// sees branch A's row only; a user with no grants sees no row at all (a
+// product in no yard in reach is no yard's signal); an administrator with no
+// header reads a row per yard, yard A at 5 stock and 1 a day, yard B at 50 and
+// 10 a day, never one company row of 55 and 11.
 func TestBranchWall_PORecommendationScoping(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
-	A := f.branchA.String()
+	A, B := f.branchA.String(), f.branchB.String()
 	ctx := context.Background()
 
 	for _, r := range []struct {
@@ -1145,49 +1181,44 @@ func TestBranchWall_PORecommendationScoping(t *testing.T) {
 		}
 	}
 
-	itemFor := func(t *testing.T, body []byte, productID string) (found bool, stock, sales float64) {
+	type yardRow struct{ stock, sales float64 }
+	rowsFor := func(t *testing.T, body []byte, productID string) map[string]yardRow {
 		t.Helper()
 		var sum poRecSummary
 		if err := json.Unmarshal(body, &sum); err != nil {
 			t.Fatalf("recommendations body: %v\n%s", err, body)
 		}
+		out := map[string]yardRow{}
 		for _, it := range sum.Items {
 			if it.ProductID == productID {
-				return true, it.CurrentStock, it.AvgDailySales
+				out[it.BranchID] = yardRow{it.CurrentStock, it.AvgDailySales}
 			}
 		}
-		return false, 0, 0
+		return out
 	}
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantStock               float64
-		wantSales               float64
-		wantSalesAsserted       bool
+		want                    map[string]yardRow
 	}{
-		// The fixture product carries no sales history outside the seeded
-		// orders, so a caller that sees neither stock nor real sales falls
-		// back to the synthetic velocity proxy; only the stock number is
-		// asserted there.
-		{"purchasing, header A", "purchasing", "u-a", A, 5, 1, true},
-		{"purchasing, no header", "purchasing", "u-a", "", 5, 1, true},
-		{"purchasing u-none, no header", "purchasing", "u-none", "", 0, 0, false},
-		{"admin, no header", "admin", "boss", "", 55, 11, true},
+		{"purchasing, header A", "purchasing", "u-a", A, map[string]yardRow{A: {5, 1}}},
+		{"purchasing, no header", "purchasing", "u-a", "", map[string]yardRow{A: {5, 1}}},
+		{"purchasing u-none, no header", "purchasing", "u-none", "", map[string]yardRow{}},
+		{"admin, no header", "admin", "boss", "", map[string]yardRow{A: {5, 1}, B: {50, 10}}},
 	} {
 		status, body := f.callBody(t, "GET", "/api/v1/purchase-orders/recommendations", "", c.role, c.sub, c.header)
 		if status != http.StatusOK {
 			t.Errorf("recommendations, %s: %d, want 200", c.name, status)
 			continue
 		}
-		found, stock, sales := itemFor(t, body, f.productID.String())
-		if !found {
-			t.Errorf("recommendations, %s: product absent from the recommendations", c.name)
+		got := rowsFor(t, body, f.productID.String())
+		if len(got) != len(c.want) {
+			t.Errorf("recommendations, %s: rows by yard = %v, want %v", c.name, got, c.want)
 			continue
 		}
-		if stock != c.wantStock {
-			t.Errorf("recommendations, %s: current_stock = %v, want %v", c.name, stock, c.wantStock)
-		}
-		if c.wantSalesAsserted && sales != c.wantSales {
-			t.Errorf("recommendations, %s: avg_daily_sales = %v, want %v", c.name, sales, c.wantSales)
+		for yard, w := range c.want {
+			if g, ok := got[yard]; !ok || g != w {
+				t.Errorf("recommendations, %s: yard %s = %v, want %v", c.name, yard, g, w)
+			}
 		}
 	}
 }
@@ -1672,5 +1703,192 @@ func TestBranchWall_InvoiceAndCreditMemoRoutes(t *testing.T) {
 		if got := strings.Contains(string(body), c.idB); got != c.wantB {
 			t.Errorf("%s: branch B's record present = %v, want %v", c.name, got, c.wantB)
 		}
+	}
+}
+
+// The forms added by item M3 follow the same wall as the invoice and pick
+// ticket: a quote or purchase order of another branch is that module's own 404
+// with a context branch and a 403 with none; a statement is held to the
+// customer's primary branch; the delivery record lists only the caller's
+// branch; and an email route that sends writes its delivery row.
+func TestBranchWall_FormsAndDeliveries(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	ctx := context.Background()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLF-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLF-"+quoteB.String()[:8])
+	delA, delB := uuid.New(), uuid.New()
+	for _, d := range []struct{ id, branch uuid.UUID }{{delA, f.branchA}, {delB, f.branchB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO email_deliveries (id, branch_id, recipient, subject, document_type, status)
+			VALUES ($1, $2, $3, 'wall', 'invoice', 'sent')`, d.id, d.branch, "wall-"+d.id.String()+"@example.test"); err != nil {
+			t.Fatalf("seed delivery: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		f.docHandler.Wait()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM email_deliveries WHERE id IN ($1, $2) OR document_id IN ($3, $4, $5)`, delA, delB, quoteA, quoteB, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	// A customer whose primary branch is B but that branch A also holds
+	// (customer_branches) is the caller's to read, so its statement prints
+	// and emails; one that only B holds is not found at A.
+	shared, onlyB := uuid.New(), uuid.New()
+	for _, c := range []struct {
+		id    uuid.UUID
+		links []uuid.UUID
+	}{{shared, []uuid.UUID{f.branchA, f.branchB}}, {onlyB, []uuid.UUID{f.branchB}}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, email, primary_branch_id) VALUES ($1, 'wall shared', $2, 'shared@example.test', $3)`,
+			c.id, "WLSH-"+c.id.String()[:8], f.branchB); err != nil {
+			t.Fatalf("seed customer: %v", err)
+		}
+		for _, b := range c.links {
+			if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, c.id, b); err != nil {
+				t.Fatalf("seed customer branch: %v", err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		f.docHandler.Wait()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM email_deliveries WHERE document_id IN ($1, $2)`, shared, onlyB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, shared, onlyB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, shared, onlyB)
+	})
+
+	const ok = http.StatusOK
+	for _, c := range []struct {
+		name, method, path, role, sub, header string
+		want                                  int
+	}{
+		{"sales prints foreign quote", "GET", "/api/v1/documents/print/quote/" + quoteB.String(), "sales", "u-a", A, http.StatusNotFound},
+		{"sales prints foreign quote, no header", "GET", "/api/v1/documents/print/quote/" + quoteB.String(), "sales", "u-a", "", http.StatusForbidden},
+		{"sales prints own quote", "GET", "/api/v1/documents/print/quote/" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales emails foreign quote", "POST", "/api/v1/quotes/" + quoteB.String() + "/email", "sales", "u-a", A, http.StatusNotFound},
+		{"sales emails own quote", "POST", "/api/v1/quotes/" + quoteA.String() + "/email", "sales", "u-a", A, http.StatusAccepted},
+		{"purchasing prints foreign purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poB.String(), "purchasing", "u-a", A, http.StatusNotFound},
+		{"purchasing prints foreign purchase order, no header", "GET", "/api/v1/documents/print/purchase-order/" + f.poB.String(), "purchasing", "u-a", "", http.StatusForbidden},
+		{"purchasing prints own purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poA.String(), "purchasing", "u-a", A, ok},
+		{"sales may not print a purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"sales prints the statement of a customer of branch A", "GET", "/api/v1/documents/print/statement/" + f.docCust.String(), "sales", "u-a", A, ok},
+		{"finance emails the statement", "POST", "/api/v1/ar/customers/" + f.docCust.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
+		{"the statement document takes the period the page shows", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=2026-01-01&to=2026-01-31", "sales", "u-a", A, ok},
+		{"a statement period that runs backwards is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=2026-02-01&to=2026-01-31", "sales", "u-a", A, http.StatusBadRequest},
+		{"a bad statement date is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=nope", "sales", "u-a", A, http.StatusBadRequest},
+		{"an unknown statement customer is a 404", "GET", "/api/v1/documents/print/statement/" + uuid.NewString(), "sales", "u-a", A, http.StatusNotFound},
+		{"finance prints the statement of a customer branch A shares", "GET", "/api/v1/documents/print/statement/" + shared.String(), "finance", "u-a", A, ok},
+		{"finance emails the statement of a customer branch A shares", "POST", "/api/v1/ar/customers/" + shared.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
+		{"finance does not find a customer only branch B holds", "GET", "/api/v1/documents/print/statement/" + onlyB.String(), "finance", "u-a", A, http.StatusNotFound},
+		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	f.docHandler.Wait()
+
+	// A customer with no email address is refused in words, never a 500, and
+	// nothing is recorded: the statement and the quote answer the wire 400
+	// naming the customer, the invoice its legacy 400.
+	bare, bareQuote, bareInv, bareOrder := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'wall no email', $2, $3)`,
+		bare, "WLNE-"+bare.String()[:8], f.branchA); err != nil {
+		t.Fatalf("seed customer without email: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, bare, f.branchA); err != nil {
+		t.Fatalf("seed customer branch: %v", err)
+	}
+	seedWallQuote(t, db, bareQuote, f.branchA, bare, "WLN-"+bareQuote.String()[:8])
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency) VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`, bareOrder, bare, f.branchA); err != nil {
+		t.Fatalf("seed order: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id, currency) VALUES ($1, $2, $3, 'UNPAID', 10, $4, 'USD')`, bareInv, bareOrder, bare, f.branchA); err != nil {
+		t.Fatalf("seed invoice: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id = $1`, bareInv)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id = $1`, bareOrder)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id = $1`, bareQuote)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, bare)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, bare)
+	})
+	for _, c := range []struct{ name, path string }{
+		{"statement", "/api/v1/ar/customers/" + bare.String() + "/statement/email"},
+		{"quote", "/api/v1/quotes/" + bareQuote.String() + "/email"},
+		{"invoice", "/api/v1/invoices/" + bareInv.String() + "/email"},
+	} {
+		status, body := f.callBody(t, "POST", c.path, "", "finance", "u-a", A)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "no email address") {
+			t.Errorf("%s email for a customer with no address: %d %s, want a 400 in words", c.name, status, body)
+		}
+	}
+	f.docHandler.Wait()
+	var sent int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id IN ($1, $2, $3)`, bare, bareQuote, bareInv).Scan(&sent); err != nil || sent != 0 {
+		t.Errorf("a refused email left %d delivery rows (%v), want 0", sent, err)
+	}
+
+	// The statement of a customer whose primary branch is A, read by a caller
+	// held to branch B, is not served.
+	B := f.branchB.String()
+	if got := f.call(t, "GET", "/api/v1/documents/print/statement/"+f.docCust.String(), "", "sales", "u-b", B); got == ok {
+		t.Errorf("a caller held to branch B printed branch A's customer statement: %d", got)
+	}
+
+	// The delivery record: a finance caller held to A lists A's row and not B's.
+	status, body := f.callBody(t, "GET", "/api/v1/email-deliveries?limit=200", "", "finance", "u-a", A)
+	if status != ok || !strings.Contains(string(body), delA.String()) || strings.Contains(string(body), delB.String()) {
+		t.Errorf("deliveries held to A: %d, want 200 with A's row and not B's: %s", status, body)
+	}
+	// The sends the routes made are recorded with the log sender's answer.
+	var n int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'sent' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
+		t.Errorf("the emailed quote left %d delivery rows (%v), want 1", n, err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'statement'`, f.docCust).Scan(&n); err != nil || n != 1 {
+		t.Errorf("the emailed statement left %d delivery rows (%v), want 1", n, err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1`, quoteB).Scan(&n); err != nil || n != 0 {
+		t.Errorf("the refused foreign quote email left %d delivery rows (%v), want 0", n, err)
+	}
+}
+
+// TestBranchWall_DealerProfileLocale: the locale read every signed in desk
+// person may call (G1 walk note N15: the pages format their dates for it).
+// Every desk role gets 200 with {"locale": ...}; a cashier, the yard and a
+// driver included, though the profile read itself still refuses them (its
+// guard is unchanged); no role at all is refused.
+func TestBranchWall_DealerProfileLocale(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+
+	var want string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT locale FROM dealer_profile WHERE id = 1`).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"admin", "owner", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"} {
+		status, buf := f.callBody(t, "GET", "/api/v1/dealer-profile/locale", "", role, "u-"+role, "")
+		if status != http.StatusOK {
+			t.Errorf("locale read as %s: %d %s", role, status, buf)
+			continue
+		}
+		var body struct {
+			Locale string `json:"locale"`
+		}
+		if err := json.Unmarshal(buf, &body); err != nil || body.Locale != want {
+			t.Errorf("locale read as %s: %s (want locale %q)", role, buf, want)
+		}
+	}
+
+	// The profile's own read keeps its guard: a cashier is refused it.
+	if s := f.call(t, "GET", "/api/v1/dealer-profile", "", "cashier", "u-cashier", ""); s != http.StatusForbidden {
+		t.Errorf("the profile read as cashier: %d, want 403", s)
+	}
+	// Signed out (the stand-in auth injects no role) is refused the locale.
+	if s := f.call(t, "GET", "/api/v1/dealer-profile/locale", "", "", "", ""); s != http.StatusForbidden {
+		t.Errorf("the locale read with no role: %d, want 403", s)
 	}
 }

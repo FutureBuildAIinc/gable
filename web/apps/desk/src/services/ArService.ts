@@ -7,6 +7,7 @@
 import type { ArAgingItem, ArAgingPage, ArAgingSummary, ArStatement, AgingGroupBy } from '../types/account';
 import { walkCursor } from '../lib/cursorWalk';
 import { fetchWithAuth } from './fetchClient';
+import { LedgerOutsideYardError } from '../lib/ledgerYards';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -47,6 +48,9 @@ export const ArService = {
         if (to) qs.set('to', to);
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/ar/customers/${customerId}/statement${suffix}`);
+        if (response.status === 404) {
+            throw new LedgerOutsideYardError();
+        }
         if (!response.ok) {
             throw new Error('Failed to load the statement');
         }

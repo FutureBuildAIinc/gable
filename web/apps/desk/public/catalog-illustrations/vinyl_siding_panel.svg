@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <ellipse cx="128" cy="226" rx="78" ry="6" fill="#000" opacity="0.18"/>
+  <rect x="40" y="70" width="176" height="146" fill="#eae6dc"/>
+  <rect x="40" y="70" width="176" height="146" fill="none" stroke="#cac6bc" stroke-width="1"/>
+  <path d="M 40 80 Q 128 76 216 78 L 216 90 Q 128 88 40 90 Z" fill="#dad4c4"/>
+  <path d="M 40 80 Q 128 76 216 78 L 216 90 Q 128 88 40 90 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <path d="M 40 100 Q 128 96 216 98 L 216 110 Q 128 108 40 110 Z" fill="#dad4c4"/>
+  <path d="M 40 100 Q 128 96 216 98 L 216 110 Q 128 108 40 110 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <path d="M 40 120 Q 128 116 216 118 L 216 130 Q 128 128 40 130 Z" fill="#dad4c4"/>
+  <path d="M 40 120 Q 128 116 216 118 L 216 130 Q 128 128 40 130 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <path d="M 40 140 Q 128 136 216 138 L 216 150 Q 128 150 40 150 Z" fill="#dad4c4"/>
+  <path d="M 40 140 Q 128 136 216 138 L 216 150 Q 128 150 40 150 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <path d="M 40 160 Q 128 156 216 158 L 216 170 Q 128 170 40 170 Z" fill="#dad4c4"/>
+  <path d="M 40 160 Q 128 156 216 158 L 216 170 Q 128 170 40 170 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <path d="M 40 180 Q 128 176 216 178 L 216 190 Q 128 190 40 190 Z" fill="#dad4c4"/>
+  <path d="M 40 180 Q 128 176 216 178 L 216 190 Q 128 190 40 190 Z" fill="none" stroke="#b8b4a4" stroke-width="0.6"/>
+  <line x1="40" y1="70" x2="40" y2="216" stroke="#cac6bc" stroke-width="1"/>
+  <line x1="216" y1="70" x2="216" y2="216" stroke="#cac6bc" stroke-width="1"/>
+</svg>

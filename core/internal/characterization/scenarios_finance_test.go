@@ -59,7 +59,7 @@ func posGroups() []groupDef {
 				name:    "pos.till.open",
 				method:  "POST",
 				path:    "/api/v1/pos/till/open",
-				body:    map[string]any{"register_id": "REG-01", "opening_float": 100.0},
+				body:    map[string]any{"register_id": "REG-01", "opening_float_cents": 10000},
 				extract: map[string]string{"myTill": "/id"},
 			},
 			{name: "pos.till.current", method: "GET", path: "/api/v1/pos/till/current?register_id=REG-01"},
@@ -172,6 +172,8 @@ func reportingGroups() []groupDef {
 				extract: map[string]string{"mySavedReport": "/id"},
 			},
 			{name: "reporting.saved.list", method: "GET", path: "/api/v1/reporting/saved"},
+			// The dev caller carries no identity, so the create is the 409
+			// naming the missing caller identity (SEC-NOHEADER-1 round 4).
 			{
 				name:   "reporting.schedule.create",
 				method: "POST",
@@ -180,7 +182,6 @@ func reportingGroups() []groupDef {
 					"report_id": "{mySavedReport}", "cron_expression": "0 6 * * * *",
 					"recipients": []any{"goldens@example.com"}, "format": "CSV",
 				},
-				extract: map[string]string{"mySchedule": "/schedule/id"},
 			},
 			{name: "reporting.schedule.list", method: "GET", path: "/api/v1/reporting/schedules"},
 			{name: "reporting.schedule.create.missing_fields", method: "POST",

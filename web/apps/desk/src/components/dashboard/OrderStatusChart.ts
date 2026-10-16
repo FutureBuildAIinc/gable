@@ -4,8 +4,16 @@
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
+import { onThemeChange, themeColor } from '@gable/design-system';
 
-const COLORS = ['#00FFA3', '#38BDF8', '#818cf8', '#fbbf24', '#f43f5e', '#a1a1aa'];
+/**
+ * The series, by token, so they follow Industrial Dark and Gable light. The
+ * third (the fulfilled share, nearly the whole ring) is indigo 400 in dark and
+ * the sage fill in light. In light the first three step apart in lightness
+ * (deep green, a mid blue, the sage fill), so they read in greyscale; in dark
+ * they are Gable green, the blueprint blue and indigo 400 exactly.
+ */
+const SERIES = ['chart-series-1', 'chart-series-2', 'chart-fulfilled', 'amber-400', 'rose-500', 'zinc-400'];
 
 /** Helper to map status to readable names */
 function formatStatus(status: string): string {
@@ -22,6 +30,15 @@ export class GableOrderStatusChart extends LitElement {
     @state() private _totalOrders = 0;
 
     private _chart: Chart<'doughnut'> | null = null;
+    private _offTheme: (() => void) | null = null;
+    private _resizeObserver: ResizeObserver | null = null;
+
+    connectedCallback() {
+        super.connectedCallback();
+        // A block host: an inline custom element would size from its content.
+        this.style.display = 'block';
+        this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
+    }
 
     updated(changedProperties: Map<string, unknown>) {
         super.updated(changedProperties);
@@ -34,10 +51,29 @@ export class GableOrderStatusChart extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        this._offTheme?.();
+        this._offTheme = null;
         this._destroyChart();
     }
 
+    /**
+     * Chart.js's own responsive resize did not reach the canvas when the
+     * window narrowed (the wrapper shrank, the canvas kept its pixel width),
+     * so the wrapper is watched and the chart resized by hand. Re-observed
+     * each time the chart is rebuilt; disconnected when it is destroyed.
+     */
+    private _observeWrapper(canvas: HTMLCanvasElement) {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
+        const wrapper = canvas.parentElement;
+        if (!wrapper || typeof ResizeObserver === 'undefined') return;
+        this._resizeObserver = new ResizeObserver(() => { this._chart?.resize(); });
+        this._resizeObserver.observe(wrapper);
+    }
+
     private _destroyChart() {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         if (this._chart) {
             this._chart.destroy();
             this._chart = null;
@@ -47,6 +83,8 @@ export class GableOrderStatusChart extends LitElement {
     private _renderChart() {
         // Defer to next frame to ensure DOM is ready
         requestAnimationFrame(() => {
+            // Gone before its frame: build nothing, so no chart or observer is left.
+            if (!this.isConnected) return;
             const canvas = this.querySelector<HTMLCanvasElement>('#orderStatusCanvas');
             if (!canvas) return;
 
@@ -69,7 +107,7 @@ export class GableOrderStatusChart extends LitElement {
                     labels: data.map(d => d.name),
                     datasets: [{
                         data: data.map(d => d.value),
-                        backgroundColor: data.map((_, i) => COLORS[i % COLORS.length]),
+                        backgroundColor: data.map((_, i) => themeColor(SERIES[i % SERIES.length])),
                         borderWidth: 0,
                         spacing: 4,
                     }],
@@ -82,7 +120,7 @@ export class GableOrderStatusChart extends LitElement {
                         legend: {
                             position: 'bottom',
                             labels: {
-                                color: '#a1a1aa',
+                                color: themeColor('zinc-400'),
                                 usePointStyle: true,
                                 pointStyle: 'circle',
                                 padding: 16,
@@ -90,11 +128,11 @@ export class GableOrderStatusChart extends LitElement {
                             },
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(22, 24, 33, 0.9)',
-                            titleColor: '#a1a1aa',
-                            bodyColor: '#ffffff',
+                            backgroundColor: themeColor('slate-steel', 0.9),
+                            titleColor: themeColor('zinc-400'),
+                            bodyColor: themeColor('white'),
                             bodyFont: { family: 'JetBrains Mono, monospace', weight: 'bold' },
-                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderColor: themeColor('white', 0.1),
                             borderWidth: 1,
                             cornerRadius: 8,
                             padding: 8,
@@ -102,6 +140,7 @@ export class GableOrderStatusChart extends LitElement {
                     },
                 },
             });
+            this._observeWrapper(canvas);
         });
     }
 
@@ -120,16 +159,18 @@ export class GableOrderStatusChart extends LitElement {
         }
 
         return html`
-            <div class="rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
+            <div data-testid="order-status-card" class="rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
                 <div class="p-4 border-b border-white/5">
                     <h3 class="text-base font-semibold text-white">Order Status</h3>
                 </div>
                 <div class="flex-1 min-h-0 relative p-4">
                     <div class="absolute inset-0 flex items-center justify-center flex-col pointer-events-none z-10">
                         <span class="text-4xl font-bold text-white font-mono">${this._totalOrders}</span>
-                        <span class="text-xs text-zinc-500 uppercase tracking-widest">Active</span>
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest">Orders</span>
                     </div>
-                    <canvas id="orderStatusCanvas" class="w-full h-full"></canvas>
+                    <div data-testid="chart-canvas-wrap" class="relative h-full w-full">
+                        <canvas id="orderStatusCanvas" class="absolute inset-0"></canvas>
+                    </div>
                 </div>
             </div>
         `;

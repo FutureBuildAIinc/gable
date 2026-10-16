@@ -4,6 +4,9 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import '../../components/ui/gable-date-field.ts';
+import { todayDay } from '../../lib/dates.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatStatementCents, statementAmountClasses } from './statement-format';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchBalanceSheet } from '../../services/GLService';
@@ -16,7 +19,7 @@ export class BalanceSheet extends LitElement {
 
     @state() private report: BalanceSheetReport | null = null;
     @state() private loading = true;
-    @state() private asOfDate = new Date().toISOString().split('T')[0];
+    @state() private asOfDate = todayDay();
 
     connectedCallback() {
         super.connectedCallback();
@@ -91,12 +94,11 @@ export class BalanceSheet extends LitElement {
                     </div>
                     <div class="flex items-center gap-3">
                         <label class="text-sm text-zinc-400">As of:</label>
-                        <input
-                            type="date"
-                            class="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                        <gable-date-field
+                            label="As of"
                             .value=${this.asOfDate}
-                            @change=${(e: Event) => { this.asOfDate = (e.target as HTMLInputElement).value; }}
-                        />
+                            @change=${(e: Event) => { this.asOfDate = (e.target as GableDateField).value; }}
+                        ></gable-date-field>
                         <button
                             @click=${() => this._load()}
                             class="px-4 py-2 bg-gable-green/10 text-gable-green border border-gable-green/30 rounded-lg text-sm font-medium hover:bg-gable-green/20 transition-colors"

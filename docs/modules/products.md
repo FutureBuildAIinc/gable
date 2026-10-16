@@ -49,7 +49,7 @@ column).
 |---|---|---|
 | GET | `/api/v1/products` | Cursor list of products, newest first. |
 | POST | `/api/v1/products` | Create a product. |
-| GET | `/api/v1/products/reorder-alerts` | List products below their reorder point. |
+| GET | `/api/v1/products/reorder-alerts` | List products at or below their reorder point, one row per product and yard. |
 | GET | `/api/v1/products/{id}` | One product with its base fields and stock totals. |
 | GET | `/api/v1/products/{id}/detail` | The product with the embedded PIM content and media. |
 | PATCH | `/api/v1/products/{id}/dimensions` | Write the parametric geometry. |

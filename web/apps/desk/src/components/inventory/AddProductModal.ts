@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { UOM_OPTIONS } from '../../types/product';
 import type { ProductCreate, UOM } from '../../types/product';
@@ -139,7 +140,7 @@ export class GableAddProductModal extends LitElement {
     if (!this.isOpen) return nothing;
 
     return html`
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="add-product-modal-title">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="add-product-modal-title">
         <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
           <div class="mb-6">
             <h2 id="add-product-modal-title" class="text-xl font-bold text-zinc-100">Add Product to Pile</h2>
@@ -179,13 +180,11 @@ export class GableAddProductModal extends LitElement {
 
             <div>
               <label class="block text-sm font-medium text-zinc-400 mb-1">Primary UOM</label>
-              <select
+              <gable-select
                 .value=${this._uom}
+                .options=${UOM_OPTIONS.map((opt) => ({ value: opt, label: opt }))}
                 @change=${(e: Event) => this._uom = (e.target as HTMLSelectElement).value as UOM}
-                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent"
-              >
-                ${UOM_OPTIONS.map((opt) => html`<option value=${opt}>${opt}</option>`)}
-              </select>
+              ></gable-select>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
@@ -201,15 +200,11 @@ export class GableAddProductModal extends LitElement {
               </div>
               <div>
                 <label class="block text-sm font-medium text-zinc-400 mb-1">Vendor / Manufacturer</label>
-                <select
+                <gable-select
                   .value=${this._vendorId}
+                  .options=${[{ value: '', label: '— Select vendor —' }, ...this._vendors.map((v) => ({ value: v.id, label: v.name })), { value: NEW_VENDOR_SENTINEL, label: '+ New vendor…' }]}
                   @change=${(e: Event) => this._vendorId = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-600 focus:border-transparent"
-                >
-                  <option value="">— Select vendor —</option>
-                  ${this._vendors.map((v) => html`<option value=${v.id}>${v.name}</option>`)}
-                  <option value=${NEW_VENDOR_SENTINEL}>+ New vendor…</option>
-                </select>
+                ></gable-select>
               </div>
             </div>
 
@@ -250,7 +245,7 @@ export class GableAddProductModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting}
-                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-plate rounded text-sm font-medium transition-colors disabled:opacity-50"
               >
                 ${this._isSubmitting ? 'Saving...' : 'Create Product'}
               </button>

@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './InvoiceList'
 import type { GableInvoiceList } from './InvoiceList'
-import { mountAsync, text, flush } from '../../test/dom'
+import { mountAsync, text, flush, chooseOption } from '../../test/dom'
 import { invoiceSummary, routedFetch } from '../../test/salesFixtures'
 
 describe('gable-invoice-list', () => {
@@ -48,6 +48,18 @@ describe('gable-invoice-list', () => {
     expect(call.url.searchParams.get('include')).toBe('total')
   })
 
+  it('links the order by name, never by a fragment of its id', async () => {
+    const routes = routedFetch({
+      '/api/v1/invoices': () => page([invoiceSummary({ id: 'a', number: 'IN-000002', order_id: '0a1b2c3d-0000-4000-8000-000000000001' })]),
+      '/api/v1/customers': () => ({ items: [], next_cursor: null, limit: 200 }),
+    })
+    vi.stubGlobal('fetch', vi.fn(routes.fn))
+    el = await mountAsync<GableInvoiceList>('gable-invoice-list')
+    const link = el.querySelector<HTMLAnchorElement>('a[href="/orders/0a1b2c3d-0000-4000-8000-000000000001"]')
+    expect(link?.textContent?.trim()).toBe('View order')
+    expect(text(el)).not.toContain('0a1b2c3d')
+  })
+
   it('shows lowercase statuses as words and an Overdue badge only where is_overdue is set', async () => {
     el = await mountAsync<GableInvoiceList>('gable-invoice-list')
     const rows = Array.from(el.querySelectorAll('tbody tr'))
@@ -73,9 +85,8 @@ describe('gable-invoice-list', () => {
 
   it('sends the status and overdue filters under their contract names', async () => {
     el = await mountAsync<GableInvoiceList>('gable-invoice-list')
-    const select = el.querySelector('select[aria-label="Status"]') as HTMLSelectElement
-    select.value = 'partial'
-    select.dispatchEvent(new Event('change'))
+    const select = el.querySelector('gable-select[label="Status"]') as HTMLElement & { value: string }
+    await chooseOption(select, 'partial')
     await flush()
     const overdue = el.querySelector('input[aria-label="Overdue only"]') as HTMLInputElement
     overdue.checked = true

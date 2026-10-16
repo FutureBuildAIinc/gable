@@ -6,10 +6,11 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { Plus } from 'lucide';
 import type { Product } from '../../types/product';
-import { PricingService } from '../../services/pricing.service';
+import { resolveLinePrice } from '../../lib/line-price';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
-import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput } from '../../lib/money';
+import { isDrawablePath } from '../ProductThumb';
+import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput, floatDollarsToTenThousandths } from '../../lib/money';
 
 @customElement('gable-line-item-editor')
 export class GableLineItemEditor extends LitElement {
@@ -38,29 +39,11 @@ export class GableLineItemEditor extends LitElement {
     this._searchTerm = p.sku;
     this._isSearchOpen = false;
 
-    if (this.customerId) {
-      try {
-        const pricing = await PricingService.calculatePrice(this.customerId, p.id);
-        if (this._selectedProduct?.id !== p.id) return; // another product was picked while this answered
-        if (pricing.price_uom === p.stock_uom) {
-          // The exact scale 4 price per stocking unit, kept as the integer the quote line carries.
-          this._price = tenThousandthsToInput(pricing.unit_price_ten_thousandths);
-          this._priceDetails = pricing;
-        } else {
-          // A price in another unit would need the line's conversion pair; use the base price until then.
-          this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
-          this._priceDetails = null;
-        }
-      } catch (err) {
-        console.error('Failed to fetch price', err);
-        ToastService.show('Resolved price failed, using fallback base price', 'error');
-        this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
-        this._priceDetails = null;
-      }
-    } else {
-      this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
-      this._priceDetails = null;
-    }
+    const priced = await resolveLinePrice(this.customerId, p.id, p.stock_uom, p.base_price_ten_thousandths);
+    if (this._selectedProduct?.id !== p.id) return; // another product was picked while this answered
+    if (priced.failed) ToastService.show('Resolved price failed, using fallback base price', 'error');
+    this._price = tenThousandthsToInput(priced.unitPriceTenThousandths);
+    this._priceDetails = priced.details;
   }
 
   private get _parsedQuantity(): string | null {
@@ -73,6 +56,20 @@ export class GableLineItemEditor extends LitElement {
 
   private get _canAdd(): boolean {
     return !!this._selectedProduct && this._parsedQuantity !== null && this._parsedPrice !== null;
+  }
+
+  /** On commit, a price with a float tail (4.675000190734863) is held at ten thousandths (4.675). */
+  private _normalisePrice(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const text = input.value.trim();
+    this._price = text;
+    if (dollarsToTenThousandths(text) !== null) return;
+    const n = Number(text);
+    if (text !== '' && Number.isFinite(n) && n >= 0) {
+      this._price = tenThousandthsToInput(floatDollarsToTenThousandths(n));
+      // The binding may already hold this string, so write the box itself.
+      input.value = this._price;
+    }
   }
 
   private _handleAdd() {
@@ -99,8 +96,10 @@ export class GableLineItemEditor extends LitElement {
   }
 
   render() {
+    // Room for a thumb on every result only while some product carries a picture.
+    const pictures = this.products.some(p => isDrawablePath(p.image_url));
     return html`
-      <div class="bg-[#161821] border border-white/10 p-4 rounded-lg mb-4">
+      <div class="bg-slate-steel border border-white/10 p-4 rounded-lg mb-4">
         <h3 class="text-sm font-medium text-gray-400 mb-3 uppercase tracking-wider">Add Line Item</h3>
         <div class="grid grid-cols-12 gap-4 items-end">
           <!-- Product Search -->
@@ -109,7 +108,7 @@ export class GableLineItemEditor extends LitElement {
             <div class="relative">
               <input
                 type="text"
-                class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                 placeholder="Search SKU or Desc..."
                 .value=${this._searchTerm}
                 @input=${(e: InputEvent) => {
@@ -120,17 +119,20 @@ export class GableLineItemEditor extends LitElement {
                 @focus=${() => this._isSearchOpen = true}
               />
               ${this._isSearchOpen && this._searchTerm ? html`
-                <div class="absolute z-50 w-full mt-1 bg-[#0A0B10] border border-white/10 rounded shadow-xl max-h-48 overflow-auto">
+                <div class="absolute z-50 w-full mt-1 bg-deep-space border border-white/10 rounded shadow-xl max-h-48 overflow-auto">
                   ${this._filteredProducts.map(p => html`
                     <div
-                      class="px-3 py-2 hover:bg-[#00FFA3]/10 cursor-pointer text-sm"
+                      class="px-3 py-2 hover:bg-gable-green/10 cursor-pointer text-sm flex items-center gap-3"
                       @click=${() => this._handleSelectProduct(p)}
                     >
-                      <div class="flex justify-between">
-                        <span class="text-white font-mono">${p.sku}</span>
-                        <span class="text-gray-500 text-xs">${p.stock_uom}</span>
+                      ${pictures ? html`<gable-product-thumb .src=${p.image_url} .size=${24} reserve></gable-product-thumb>` : nothing}
+                      <div class="min-w-0 flex-1">
+                        <div class="flex justify-between">
+                          <span class="text-white font-mono">${p.sku}</span>
+                          <span class="text-gray-500 text-xs">${p.stock_uom}</span>
+                        </div>
+                        <div class="text-gray-400 text-xs truncate">${p.description}</div>
                       </div>
-                      <div class="text-gray-400 text-xs truncate">${p.description}</div>
                     </div>
                   `)}
                 </div>
@@ -144,7 +146,7 @@ export class GableLineItemEditor extends LitElement {
             <label class="block text-xs font-medium text-gray-500 mb-1">Qty</label>
             <input
               type="number"
-              class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-gable-green outline-none"
               .value=${this._quantity}
               @input=${(e: InputEvent) => this._quantity = (e.target as HTMLInputElement).value}
               min="1"
@@ -156,14 +158,16 @@ export class GableLineItemEditor extends LitElement {
           <div class="col-span-2">
             <label class="block text-xs font-medium text-gray-500 mb-1">Price</label>
             <input
-              type="number"
-              class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
+              type="text"
+              inputmode="decimal"
+              aria-label="Unit price"
+              class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-gable-green outline-none"
               .value=${this._price}
               @input=${(e: InputEvent) => this._price = (e.target as HTMLInputElement).value}
-              step="0.01"
+              @change=${this._normalisePrice}
             />
             ${this._priceDetails && this._priceDetails.price_basis !== 'retail' ? html`
-              <div class="text-[10px] text-[#00FFA3] whitespace-nowrap mt-1">${this._priceDetails.details}</div>
+              <div class="text-[10px] text-gable-green whitespace-nowrap mt-1">${this._priceDetails.details}</div>
             ` : nothing}
           </div>
 
@@ -172,7 +176,7 @@ export class GableLineItemEditor extends LitElement {
             <button
               @click=${this._handleAdd}
               ?disabled=${!this._canAdd}
-              class="w-full flex items-center justify-center bg-[#00FFA3] text-black font-medium py-2 rounded hover:bg-[#00FFA3]/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="w-full flex items-center justify-center bg-gable-green text-black font-medium py-2 rounded hover:bg-gable-green/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ${icon(Plus, 16, 'mr-1')} Add
             </button>

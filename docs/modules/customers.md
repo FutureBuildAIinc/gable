@@ -95,6 +95,7 @@ their own scope segment.
 | `tier` | lowercase enum | `retail`, `silver`, `gold`, `platinum`. |
 | `is_active` | boolean | Whether the customer is active. |
 | `primary_branch_id` | UUID | The home branch. |
+| `branch_ids` | UUID array | The yards the customer trades at, the home yard included. |
 | `price_level_id` | UUID, nullable | The price level that drives pricing. |
 | `price_level` | object, nullable | Embedded price level summary. |
 | `salesperson_id`, `salesperson_name` | UUID, text, nullable | The book owner. |
@@ -178,6 +179,19 @@ only), and on no other customer route; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
+
+Customers are dealer wide accounts (ADR 0007 section 5.8, ruling A): the
+customer, contact, ship to and escalation policy reads, the list, the count
+and the lookup by email answer every customer to a user (with or without
+`X-Branch-Id`), an administrator or owner and a key bound to no branch, so any
+yard's people may sell to any customer. The writes and locks of the family and
+the CRM activities keep the branch wall (ADR 0007 section 5.7): a user with no
+header is held to the user's own grants through the customer's branches, and a
+write outside the reach is refused with nothing written. The first document at
+a yard the customer is not linked to adds the link and an audit row
+(`customer.branch_linked`) in the document's transaction, and the answer's
+`branch_ids` lists the yards the customer trades at beside `primary_branch_id`,
+its home yard.
 
 A key bound to one branch (ADR 0007 section 5.5) reads a customer its
 branch shares with another, and changes a shared customer's record only on

@@ -24,7 +24,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './SavedReports'
 import type { SavedReports } from './SavedReports'
-import { mountAsync, update, flush, q, clickByText, jsonResponse } from '../../test/dom'
+import { mountAsync, update, flush, q, clickByText, jsonResponse, chooseOption } from '../../test/dom'
 import { ToastService } from '../../lib/toast-service'
 
 const REPORT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -82,7 +82,7 @@ function stubFetch(execution: unknown, schedules: unknown[] = []): Stub {
       return jsonResponse({ schedules, execution })
     }
     if (url.includes('/reporting/saved') && url.endsWith('/run')) {
-      return jsonResponse([{ customer: 'Kelbrook Homes', total: 1200 }])
+      return jsonResponse([{ customer: 'Tarnwick Homes', total: 1200 }])
     }
     if (url.includes('/reporting/saved')) {
       return jsonResponse(SAVED_REPORTS)
@@ -204,9 +204,8 @@ describe('SavedReports: schedule form', () => {
     const toast = vi.spyOn(ToastService, 'show').mockImplementation(() => {})
     const { el, stub } = await openScheduleModal(EXECUTION_DISABLED)
 
-    const freq = q<HTMLSelectElement>(el, 'select[aria-label="Frequency"]')
-    freq.value = 'custom'
-    freq.dispatchEvent(new Event('change', { bubbles: true }))
+    const freq = q<HTMLElement & { value: string }>(el, 'gable-select#schedule-frequency')
+    await chooseOption(freq, 'custom')
     await update(el, {})
 
     const cron = q<HTMLInputElement>(el, 'input[aria-label="Cron expression"]')

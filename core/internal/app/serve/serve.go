@@ -33,10 +33,12 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
@@ -46,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
@@ -257,23 +260,43 @@ func Run() {
 		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
 		middleware.RequireRole("admin", "owner"))
 
-	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
-	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
-	// product image generation. Base URL and per-task model slugs are admin-overridable.
-	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey)
+	// Unified AI client: the chosen provider's key (DB-first via system_settings,
+	// env fallback for OpenRouter) powers all AI features: material-list/freight
+	// OCR, PIM content, and product image (photo) or illustration generation. Base URL and per-task model slugs are admin-overridable.
+	//
+	// The provider (OpenRouter or the native Anthropic one) is chosen in Tech
+	// Admin. AI keys are sealed at rest with the same vault key the payment
+	// credentials use; the Anthropic key has no environment fallback.
+	aiVault, aiVaultErr := payment.NewVault(cfg.PaymentVaultKey)
+	if aiVaultErr != nil {
+		// The error text is not logged: a parse error can echo a character of
+		// the value.
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key (64 hex characters); AI keys cannot be sealed or opened")
+		aiVault = &payment.Vault{}
+	}
+	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey).WithSealer(aiVault)
 	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
 	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
 		WithBaseURLStore(aiBaseURLStore).
+		WithProviderStore(ai.NewKeyStore(db.Pool, ai.SettingProvider, ai.ProviderOpenRouter)).
+		WithAnthropicKeyStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicKey, "").WithSealer(aiVault)).
+		WithAnthropicModelStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicModel, ai.DefaultAnthropicModel)).
 		WithModels(ai.NewModelRouter(db.Pool, ai.ModelDefaults{
 			Text:   cfg.AIModelText,
 			Vision: cfg.AIModelVision,
 			Cheap:  cfg.AIModelCheap,
 			Image:  cfg.AIModelImage,
 		}))
+	techAdminSvc.WithVault(aiVault).WithAITester(aiClient)
+	if n, err := techAdminSvc.SealLegacySettings(context.Background()); err != nil {
+		logger.Error("sealing stored AI keys failed", "error", err)
+	} else if n > 0 {
+		logger.Info("sealed stored AI keys at rest", "count", n)
+	}
 	if cfg.OpenRouterAPIKey != "" {
-		logger.Info("AI initialized via OpenRouter (env key present, admin can override via Tech Admin > AI Settings)")
+		logger.Info("AI initialized (OpenRouter env key present; the provider and keys are chosen in Tech Admin > AI Settings)")
 	} else {
-		logger.Info("AI initialized via OpenRouter (no env key — admin can configure via Tech Admin > AI Settings)")
+		logger.Info("AI initialized (no env key; the provider and its key are chosen in Tech Admin > AI Settings)")
 	}
 
 	// AI Parsing Module (Material List Intake)
@@ -282,7 +305,7 @@ func Run() {
 	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// PIM Module (AI-Powered Product Information Management) — text generation and
-	// image generation both run through the unified OpenRouter client.
+	// image generation both run through the unified AI client, on the chosen provider.
 	pimRepo := pim.NewRepository(db)
 	pimSvc := pim.NewService(pimRepo, productSvc)
 	pimSvc.WithAI(aiClient)
@@ -379,6 +402,14 @@ func Run() {
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
+	// Market check: our prices against a live store through an FB Connect
+	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
+	// the pricing rules' walls.
+	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
+		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
+		WithAudit(marketcheck.AuditRecorder{L: auditLog})
+	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, db)
+
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
 		catPricingRepo := pricing.NewCategoryRepository(db)
@@ -431,6 +462,7 @@ func Run() {
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(aiClient)
+	poSvc.WithBranchGuard(wall.guard)
 	// The receive writes purchase_order.received in its transaction (ADR 0005 5.4).
 	poSvc.WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 	velocityRepo := purchase_order.NewVelocityRepository(db)
@@ -588,11 +620,24 @@ func Run() {
 	})
 
 	// Notification Module
-	emailSvc := notification.NewLogEmailService(logger)
+	// The SMTP sender when SMTP_HOST is set, the log sender otherwise; a set
+	// host with no From address (or any bad SMTP_* value) refuses to start.
+	emailSvc, err := notification.NewEmailServiceFromEnv(os.Getenv, logger)
+	if err != nil {
+		logger.Error("Email configuration error", "error", err)
+		os.Exit(1)
+	}
 
 	// Document Module
-	docSvc := document.NewService(productRepo)
-	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
+	emailDeliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	docStore := document.NewStore(db)
+	docSvc := document.NewService(productRepo).
+		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(emailDeliverySvc)
 	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
@@ -606,7 +651,7 @@ func Run() {
 	}
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
+	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
@@ -655,21 +700,41 @@ func Run() {
 
 	wall.payments(mux, paymentSvc)
 
-	// POS Module (Retail Counter Sales)
+	// POS Module (Retail Counter Sales), on the wire contract (ADR 0005
+	// section 14.2 C2-5): the completed sale one transaction (stock out, the
+	// POS invoice posted with tax and COGS, each tender a payment applied),
+	// the void through the counter's own path, returns as credit memos, and
+	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
-	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
-	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
-	posSvc.WithAuditLog(auditLog)
-	posSvc.WithTax(taxSvc, invoiceRepo)
-	posSvc.WithTillLedger(glSvc) // post drawer over/short to the GL at close
-	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal /
-	// Run Terminal API), NOT the Run online/keyed-web charge API (rpGateway) —
-	// that rail is the Contractor Portal / invoice online-payment path. Until
-	// the Clover terminal integration lands, counter CARD tenders are recorded
-	// as externally-captured (the device settles); posSvc.WithGateway is where
+	posSvc := pos.NewService(db, posRepo, logger).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithTaxProvider(taxSvc).
+		WithInvoices(invoiceSvc).
+		WithAR(accountSvc).
+		WithInventory(inventorySvc).
+		WithLedger(glSvc). // post drawer over/short to the GL inside the close's transaction
+		WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
+	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal),
+	// NOT the Run online/keyed-web charge API: until the Clover terminal
+	// integration lands, counter CARD tenders are recorded as
+	// externally-captured (the device settles); posSvc.WithGateway is where
 	// the Clover terminal gateway wires in.
+	// The counter also guards the AR core's applications: while a sale's void
+	// has standing refund claims, the sale's invoice takes no application
+	// (its open cents are the void's interim, C2-5), and a payment whose
+	// unapplied cash is a declined void tender's credit applies to no invoice
+	// either (the credit is payable back only to its card, C2-5,
+	// FROM-PRINCIPAL 60).
+	accountSvc.WithInvoiceApplyGuard(posSvc)
+	accountSvc.WithTenderCreditGuard(posSvc)
+	// and the payment refund route holds the same credit to the counter's
+	// terminal rail: the online gateway is never the way back for it
+	paymentSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
+	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract
 	// (C4-1b, ADR 0008 7.4). The bills carry a branch, so every route runs
@@ -704,13 +769,17 @@ func Run() {
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
-	// recipients via emailSvc — which is the log-only LogEmailService, so the
-	// report is genuinely generated and the send is recorded in the log rather
-	// than transmitted. The schedule API publishes that distinction itself
+	// recipients via emailSvc: the SMTP sender when SMTP_HOST is set, otherwise
+	// the log-only LogEmailService, which records the send in the log rather
+	// than transmitting it. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
 	// so wiring it here is what flips the API from "saved but never run" to
-	// "runs". Stops in step 3.6 of graceful shutdown, before the DB pool closes.
-	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc)
+	// "runs". Each run executes under its creator's recorded reach
+	// (SEC-NOHEADER-1), and a run the fail closed rule refuses (no creator
+	// recorded, a creator holding no grant) writes an audit row beside its
+	// log line. Stops in step 3.6 of graceful shutdown, before the DB pool
+	// closes.
+	reportScheduler := newReportScheduler(db, reportingSvc, emailSvc)
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}
@@ -765,6 +834,8 @@ func Run() {
 		OrderSvc:      orderSvc,
 		DeliverySvc:   deliverySvc,
 		EventsOrg:     cfg.EventsOrg,
+		MW:            wall.mw,
+		Guard:         wall.guard,
 	})
 
 	// SMS Notification Service
@@ -877,14 +948,14 @@ func Run() {
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
 	if strings.EqualFold(cfg.AuthMode, "dev") {
-		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting Kelbrook demo customer claims")
-		// Look up the Kelbrook Construction demo account; fall back to the
+		logger.Warn("AUTH_MODE=dev: Portal auth bypassed - injecting Tarnwick demo customer claims")
+		// Look up the Tarnwick Construction demo account; fall back to the
 		// first customer in the table so a non-Kelowna fork can still boot.
 		var demoCustomerID uuid.UUID
 		row := db.Pool.QueryRow(context.Background(),
-			"SELECT id FROM customers WHERE account_number = 'KELBROOK-001' LIMIT 1")
+			"SELECT id FROM customers WHERE account_number = 'TARNWICK-001' LIMIT 1")
 		if err := row.Scan(&demoCustomerID); err != nil {
-			logger.Warn("Kelbrook demo customer not found, falling back to first customer", "error", err)
+			logger.Warn("Tarnwick demo customer not found, falling back to first customer", "error", err)
 			fallback := db.Pool.QueryRow(context.Background(), "SELECT id FROM customers LIMIT 1")
 			if err := fallback.Scan(&demoCustomerID); err != nil {
 				logger.Error("Failed to load demo customer", "error", err)
@@ -895,8 +966,8 @@ func Run() {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				claims := &middleware.PortalClaims{
 					CustomerID: demoCustomerID,
-					Email:      "demo@kelbrook.ca",
-					Name:       "Sam Kelbrook",
+					Email:      "demo@tarnwick.example",
+					Name:       "Sam Tarnwick",
 					// Role is load-bearing and was previously left empty, so
 					// getPortalUserRole returned "" and requireAdmin refused
 					// every request: GET /users, GET/POST /invites and the
@@ -1129,6 +1200,16 @@ func Run() {
 	}
 	logger.Info("Shutdown step 1/4: HTTP server stopped")
 
+	// Step 1.5: let the document emails still in flight finish and write
+	// their email_deliveries rows, bounded by the shutdown deadline; the
+	// pool closes only after this.
+	logger.Info("Shutdown step 1.5/4: waiting for document emails in flight...")
+	if docHandler.WaitContext(ctx) {
+		logger.Info("Shutdown step 1.5/4: document emails recorded")
+	} else {
+		logger.Warn("Shutdown step 1.5/4: document emails still in flight at the deadline")
+	}
+
 	// Step 2: Cancel metrics collector goroutine
 	logger.Info("Shutdown step 2/4: stopping metrics collector...")
 	metricsCancel()
@@ -1275,7 +1356,7 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error {
 	// Resolve product description for the PO line; a line with no product
 	// (the quote accept path, which carries none) takes a plain one.
 	desc := "special order"
@@ -1284,7 +1365,7 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, productID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, branch, productID, vendorID, desc, quantity, unitCost)
 }
 
 // pricingAuditAdapter bridges the pricing package's mirrored audit entries
@@ -1303,28 +1384,6 @@ func (a pricingAuditAdapter) Log(ctx context.Context, e pricing.AuditEntry) erro
 	})
 }
 
-// posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.
-type posCalcAdapter struct {
-	pricingSvc  *pricing.Service
-	customerSvc *customer.Service
-}
-
-func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, basePrice float64, quantity float64) (float64, error) {
-	cust, err := a.customerSvc.GetCustomer(ctx, customerID)
-	if err != nil {
-		return basePrice, nil // Fallback to base price if customer lookup fails
-	}
-	// The counter (fenced) turns this float into cents with a +0.5 truncation,
-	// which misrounds a half cent price whose float is just below it (20.025
-	// is 2002.4999 cents). So hand it a price already rounded half away from
-	// zero to whole cents, in integers.
-	sp, err := a.pricingSvc.CalculateScaled(ctx, cust, productID, basePrice, quantity, nil)
-	if err != nil {
-		return basePrice, nil
-	}
-	return float64(pricing.CentsOf(sp.Price)) / 100, nil
-}
-
 // rowOrNone unwraps RowFor's lookup; the table and the registrations sit
 // in the same change, so a miss is a wiring bug that fails loudly at boot.
 func rowOrNone(r links.Row, ok bool) links.Row {
@@ -1332,4 +1391,14 @@ func rowOrNone(r links.Row, ok bool) links.Row {
 		panic("links: the declarative table names no such row")
 	}
 	return r
+}
+
+// registerMarketCheck mounts the Market check's three routes with their
+// walls: the settings behind the admin and owner role guard, the run behind
+// the pricing rules' wall. One function, so serve and the wire test mount the
+// same guards.
+func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, db *database.DB) {
+	marketcheck.NewHandler(svc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner"),
+		pricingRulesCustomerWall(keyWall, db, "admin", "owner"))
 }

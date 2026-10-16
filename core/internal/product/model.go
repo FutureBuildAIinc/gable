@@ -119,6 +119,11 @@ type Product struct {
 	RandomLength     bool             `json:"-"`
 	Units            []UnitSetRowView `json:"-"`
 
+	// ImageURL is the picture path as the reads answer it: set only while
+	// the catalog.product_images setting is on (the repository applies the
+	// setting in its statement), nil for a product with none.
+	ImageURL *string `json:"-"`
+
 	CreatedAt httpx.Timestamp `json:"-"`
 	UpdatedAt httpx.Timestamp `json:"-"`
 }
@@ -175,6 +180,10 @@ type View struct {
 	BoardLengthFT    *httpx.Quantity  `json:"board_length_ft"`
 	RandomLength     bool             `json:"random_length"`
 	Units            []UnitSetRowView `json:"units"`
+
+	// ImageURL is the product's picture path while the catalog.product_images
+	// setting is on; null when it is off or the product has no picture.
+	ImageURL *string `json:"image_url"`
 }
 
 // ViewOf builds the wire view of a domain row. The scaled fields are already
@@ -221,7 +230,7 @@ func ViewOf(p *Product) View {
 		SaleUOM: p.SaleUOM, PriceUOM: p.PriceUOM, PurchaseUOM: p.PurchaseUOM,
 		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
 		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
-		Units: p.Units,
+		Units: p.Units, ImageURL: p.ImageURL,
 	}
 }
 
@@ -276,8 +285,12 @@ func (g Geometry) HasDimensions() bool {
 // 'mesh' source (migration 080).
 const GeometrySourceParametric = "parametric"
 
-// ReorderAlert represents a product that's below its reorder point.
+// ReorderAlert represents a product at or below its reorder point at one yard.
 type ReorderAlert struct {
+	// BranchID and BranchName are the yard this row is for: reorder is per
+	// yard (FROM-PRINCIPAL item 135 b), one row per product and yard.
+	BranchID     uuid.UUID      `json:"branch_id"`
+	BranchName   string         `json:"branch_name"`
 	ProductID    uuid.UUID      `json:"product_id"`
 	SKU          string         `json:"sku"`
 	Description  string         `json:"description"`

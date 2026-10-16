@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -90,6 +91,31 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.AdjustStock(r.Context(), req); err != nil {
+		if errors.Is(err, ErrLocationOutsideBranch) {
+			httputil.RespondError(w, r, "location_id is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
+		if errors.Is(err, ErrCountNeedsLocation) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
+				Message: "Name the location you counted or adjusted. A count or adjustment with no location is not written here, because this product may be held in more than one location or the caller is not working in one yard."})
+			return
+		}
+		if errors.Is(err, ErrYardHoldsNoRow) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
+				Message: "Name the location you counted. This yard holds no row of this product yet, so nothing was written."})
+			return
+		}
+		if errors.Is(err, ErrWouldGoNegative) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "insufficient_stock",
+				Message: "That adjustment would take the location below zero. Name the location the stock is in and adjust that one."})
+			return
+		}
+		var below *BelowAllocatedError
+		if errors.As(err, &below) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "below_allocated",
+				Message: fmt.Sprintf("The count of %g is below the %g allocated to orders at this location. Count at least the allocated figure, or release the orders first.", below.Counted, below.Allocated)})
+			return
+		}
 		slog.Error("AdjustStock failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
@@ -112,6 +138,10 @@ func (h *Handler) MoveStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.MoveStock(r.Context(), req); err != nil {
+		if errors.Is(err, ErrLocationOutsideBranch) {
+			httputil.RespondError(w, r, "from_location_id or to_location_id is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
 		slog.Error("MoveStock failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return

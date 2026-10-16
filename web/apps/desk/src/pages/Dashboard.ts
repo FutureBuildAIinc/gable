@@ -8,6 +8,7 @@ import { RefreshCw, DollarSign, ShoppingCart, Truck, CreditCard, Calendar, Alert
 import { DashboardService } from '../services/DashboardService.ts';
 import { ToastService } from '../lib/toast-service.ts';
 import { onBranchChanged } from '../lib/branch-listener.ts';
+import { formatDay, formatTime, todayDay } from '../lib/dates.ts';
 import type {
     DashboardSummary,
     InventoryAlert,
@@ -19,6 +20,7 @@ import type {
 // Side-effect imports: register child custom elements
 import '../components/dashboard/KPICard.ts';
 import '../components/dashboard/RevenueTrendChart.ts';
+import { formatCents } from '../lib/utils.ts';
 import '../components/dashboard/OrderStatusChart.ts';
 import '../components/dashboard/TopCustomersTable.ts';
 import '../components/dashboard/InventoryAlertsWidget.ts';
@@ -95,12 +97,8 @@ export class GableDashboard extends LitElement {
         }
     }
 
-    private formatCurrency(cents: number) {
-        return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-    }
-
     render() {
-        const currentDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const currentDate = formatDay(todayDay());
 
         const hour = new Date().getHours();
         const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
@@ -127,7 +125,7 @@ export class GableDashboard extends LitElement {
 
                     <div class="flex items-center gap-3">
                         <div class="text-right text-xs text-zinc-500 hidden md:block">
-                            <div class="font-mono">Last updated: ${this.lastRefresh.toLocaleTimeString()}</div>
+                            <div class="font-mono">Last updated: ${formatTime(this.lastRefresh)}</div>
                             <div class="flex items-center gap-1 justify-end mt-1">
                                 <span class="w-2 h-2 rounded-full ${this.error ? 'bg-rose-500' : 'bg-gable-green'} animate-pulse"></span>
                                 ${this.error ? 'Error' : 'Live'}
@@ -167,18 +165,22 @@ export class GableDashboard extends LitElement {
                 <!-- KPI Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <gable-kpi-card
-                        card-title="Today's Revenue"
-                        .value=${this.summary ? this.formatCurrency(this.summary.today_revenue) : '$0.00'}
+                        card-title="Collected today"
+                        .value=${this.summary ? formatCents(this.summary.today_revenue) : '$0.00'}
                         .trend=${this.summary?.today_revenue_change ?? undefined}
                         .iconHtml=${icon(DollarSign, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-gable-green"
+                        href="/reports/daily-till"
+                        link-label="Open today's sales"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Active Orders"
                         .value=${this.summary?.active_orders ?? 0}
                         .iconHtml=${icon(ShoppingCart, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
+                        href="/orders?status=confirmed"
+                        link-label="Open the active orders"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Pending Dispatch"
@@ -186,14 +188,18 @@ export class GableDashboard extends LitElement {
                         .iconHtml=${icon(Truck, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-blueprint-blue"
+                        href="/dispatch"
+                        link-label="Open the deliveries waiting for dispatch"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Outstanding AR"
-                        .value=${this.summary ? this.formatCurrency(this.summary.outstanding_ar) : '$0.00'}
+                        .value=${this.summary ? formatCents(this.summary.outstanding_ar) : '$0.00'}
                         .subValue=${this.summary ? `${this.summary.outstanding_ar_count} invoices` : undefined}
                         .iconHtml=${icon(CreditCard, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-amber-400"
+                        href="/reports/ar-aging"
+                        link-label="Open AR Aging"
                     ></gable-kpi-card>
                 </div>
 

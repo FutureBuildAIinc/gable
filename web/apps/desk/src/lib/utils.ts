@@ -47,12 +47,29 @@ export function formatPrice4(tenThousandths: number | null | undefined): string 
     return `${negative && abs !== 0 ? '-' : ''}$${wholeText}.${frac}`;
 }
 
-// A business date (YYYY-MM-DD, no time zone) rendered in the user's locale. Built
-// from its parts so a west-of-UTC machine never shows the day before; anything
-// that is not a plain date is returned as it came.
-export function formatDay(day: string | null | undefined): string {
-    if (!day) return '—';
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-    if (!m) return day;
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
+// formatDay MOVED to ./dates.ts (the one date module, G1 walk note N15); it
+// is re-exported here so the existing `import { formatDay } from './utils'`
+// callers keep working.
+export { formatDay } from './dates.ts';
+
+// Money rendering for endpoints that already answer in float dollars (the
+// purchase order wire). Sits beside `formatCents` rather than replacing it:
+// the cents helper reads int64 cents; the dollars helper reads float dollars,
+// and the two never share a call site. Same rules: a leading "$", exactly two
+// decimal places, thousands separators grouped, the minus sign outside the
+// symbol. 123456.78 -> "$123,456.78", -73.88 -> "-$73.88", null -> "$0.00".
+export function formatDollars(amount: number | null | undefined): string {
+    const n = typeof amount === 'number' && isFinite(amount) ? amount : 0;
+    // Intl rounds the whole value to cents and carries into the dollars
+    // (9.996 -> "10.00"); a value that rounds to zero is never negative.
+    const text = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+    const negative = n < 0 && text !== '0.00';
+    return `${negative ? '-' : ''}$${text}`;
+}
+
+// A purchase order's label on every desk surface: its document number
+// (PO-000042), or the first eight characters of its id when a response from
+// an older core carries none.
+export function poLabel(po: { id: string; number?: string | null }): string {
+    return po.number || po.id.slice(0, 8);
 }

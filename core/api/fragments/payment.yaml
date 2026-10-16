@@ -83,7 +83,9 @@ paths:
         allow) in the same transaction, each application its own entry (DR 2200 / CR
         1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied,
         exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch,
-        discount_not_available, period_closed. Writes payment.recorded, then
+        discount_not_available, period_closed, and void_claim_pending when the
+        invoice's sale has a void whose refund claims still stand (the counter's
+        interim; the refusal names the claims). Writes payment.recorded, then
         payment.applied and invoice.partial or invoice.paid per invoice, then
         customer.updated (part balance).
       parameters:
@@ -163,7 +165,9 @@ paths:
         posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The
         precondition is the payment's revision. Refused with 409 exceeds_unapplied,
         exceeds_open_amount, invoice_void, payment_voided, customer_mismatch,
-        currency_mismatch, discount_not_available or period_closed. Writes payment.applied,
+        currency_mismatch, discount_not_available, period_closed, or
+        void_claim_pending when the invoice's sale has a void whose refund claims
+        still stand (the counter's interim; the refusal names the claims). Writes payment.applied,
         invoice.partial or invoice.paid per invoice, and customer.updated.
       parameters:
         - name: id

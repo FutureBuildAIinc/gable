@@ -10,6 +10,7 @@ import { OrderService } from '../../services/OrderService.ts';
 import { type OrderSummary, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 const STATUS_FILTERS: (OrderStatus | 'all')[] = ['all', 'draft', 'on_hold', 'confirmed', 'backordered', 'fulfilled', 'cancelled'];
 
@@ -26,6 +27,13 @@ export class GableOrderList extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A link may name a tab in the address (the dashboard's Active
+        // Orders card opens /orders?status=confirmed). An unknown value
+        // opens All.
+        const requested = new URLSearchParams(window.location.search).get('status')?.toLowerCase();
+        if (requested && requested !== 'all' && (STATUS_FILTERS as string[]).includes(requested)) {
+            this.status = requested as OrderStatus;
+        }
         this.loadOrders();
         this._unsubBranch = onBranchChanged(() => {
             this.loading = true;
@@ -72,6 +80,9 @@ export class GableOrderList extends LitElement {
     private setStatus(status: OrderStatus | 'all') {
         if (this.status === status) return;
         this.status = status;
+        // The address follows the chosen tab (a replace, not a new history
+        // entry), so a reload or a copied link reopens what is on screen.
+        history.replaceState(null, '', status === 'all' ? '/orders' : `/orders?status=${status}`);
         this.loading = true;
         this.loadOrders();
     }
@@ -98,7 +109,7 @@ export class GableOrderList extends LitElement {
                     <p class="text-gray-400 text-sm mb-4">${this.error}</p>
                     <button
                         @click=${() => { this.error = null; this.loadOrders(); }}
-                        class="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                        class="px-4 py-2 bg-gable-green text-deep-space rounded font-medium hover:opacity-90"
                     >
                         Retry
                     </button>
@@ -150,7 +161,7 @@ export class GableOrderList extends LitElement {
                                             ${order.hold_reason ? html`<span class="ml-2 text-xs text-amber-400">${order.hold_reason === 'credit_limit' ? 'credit hold' : 'held'}</span>` : ''}
                                         </td>
                                         <td class="p-4 text-gable-green font-mono text-right">${formatCents(order.total_cents)}</td>
-                                        <td class="p-4 text-zinc-400 text-right">${new Date(order.created_at).toLocaleDateString()}</td>
+                                        <td class="p-4 text-zinc-400 text-right">${formatDate(order.created_at)}</td>
                                         <td class="p-4 text-right">${icon(ArrowRight, 16, 'text-zinc-500')}</td>
                                     </tr>
                                 `)}

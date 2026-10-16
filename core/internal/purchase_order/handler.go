@@ -10,7 +10,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/gablelbm/gable/internal/ai"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -113,6 +116,10 @@ func (h *Handler) HandleListPOs(w http.ResponseWriter, r *http.Request) {
 type CreatePORequest struct {
 	VendorID string         `json:"vendor_id"`
 	Lines    []CreatePOLine `json:"lines"`
+	// BranchID names the branch the order is bought for. Required in effect
+	// for a caller whose grants hold several branches and sends no header;
+	// the grants decide it for a single grant caller (SEC-NOHEADER-1).
+	BranchID string `json:"branch_id"`
 }
 
 type CreatePOLine struct {
@@ -135,6 +142,16 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var branchID *uuid.UUID
+	if strings.TrimSpace(req.BranchID) != "" {
+		parsed, err := uuid.Parse(strings.TrimSpace(req.BranchID))
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid branch_id", http.StatusBadRequest, err)
+			return
+		}
+		branchID = &parsed
+	}
+
 	lines := make([]CreatePOLineInput, len(req.Lines))
 	for i, l := range req.Lines {
 		lines[i] = CreatePOLineInput{
@@ -145,8 +162,16 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceManual)
+	po, err := h.service.CreateManualPOAt(r.Context(), vendorID, lines, SourceManual, branchID)
 	if err != nil {
+		// The branch resolution's refusals (a 403 naming branch_id for a
+		// branch outside the caller's grants, a 400 naming it when several
+		// grants could decide) carry their own status.
+		var httpErr *httpx.Error
+		if errors.As(err, &httpErr) {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to create purchase order", http.StatusInternalServerError, err)
 		return
 	}
@@ -262,17 +287,32 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
-	count, err := h.service.CreateReorders(r.Context())
+	res, err := h.service.CreateReordersRun(r.Context())
 	if err != nil {
+		// The branch resolution's refusals (a 403 naming branch_id for a
+		// caller with no grants, a 400 naming it when several grants could
+		// decide) carry their own status.
+		var httpErr *httpx.Error
+		if errors.As(err, &httpErr) {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to create reorder purchase orders", http.StatusInternalServerError, err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// no_reorder_qty names the products the run left alone because they
+	// carry no reorder quantity and no deficit (a yard exactly at its point).
+	left := res.NoReorderQty
+	if left == nil {
+		left = []string{}
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
-		"count":  count,
+		"status":         "success",
+		"count":          res.Created,
+		"no_reorder_qty": left,
 	})
 }
 
@@ -408,6 +448,20 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.UploadFreightInvoice(r.Context(), poID, fileBytes, contentType, header.Filename)
 	if err != nil {
+		if msg, off := ai.OffMessage(err); off {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: ai.CodeAIOff,
+				Message: msg + " Until then, enter the freight total by hand."})
+			return
+		}
+		if msg, ok := ai.UnsupportedTypeMessage(err); ok {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnsupportedMediaType, Code: "unsupported_type", Message: msg})
+			return
+		}
+		if msg, ok := ai.RefusedMessage(err); ok {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusBadGateway, Code: ai.CodeAIRefused,
+				Message: msg + " Until then, enter the freight total by hand.", Operator: true})
+			return
+		}
 		httputil.RespondError(w, r, "failed to upload freight invoice", http.StatusBadRequest, err)
 		return
 	}

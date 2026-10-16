@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Decorator style switch and outlet, white</title>
+  <defs><style>
+    .body{fill:#f4f0e8}
+    .bodyHi{fill:#fbf7ee}
+    .bodyShade{fill:#b8b1a4}
+    .face{fill:#f8f4ec}
+    .faceShade{fill:#cdc6b6}
+    .recept{fill:#2a2e34}
+    .receptShade{fill:#1a1d22}
+    .toggle{fill:#e8e2d2}
+    .toggleHi{fill:#f4eedc}
+    .toggleShade{fill:#b8b1a4}
+    .screw{fill:#8a8474}
+    .screwSlot{fill:#3a3530}
+    .center{fill:#5a5e64}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="104" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="bodyShade" x="40" y="46" width="80" height="180" rx="8"/>
+    <rect class="body" x="36" y="42" width="80" height="180" rx="8"/>
+    <rect class="bodyHi" x="36" y="42" width="80" height="4" rx="2"/>
+    <rect class="bodyShade" x="36" y="216" width="80" height="6" rx="2"/>
+    <rect class="face" x="44" y="50" width="64" height="164" rx="4"/>
+    <rect class="faceShade" x="44" y="50" width="64" height="3" rx="2"/>
+  </g>
+  <g>
+    <rect class="toggleShade" x="62" y="68" width="28" height="40" rx="4"/>
+    <rect class="toggle" x="60" y="66" width="28" height="40" rx="4"/>
+    <rect class="toggleHi" x="60" y="66" width="28" height="3" rx="2"/>
+    <rect class="toggleShade" x="60" y="92" width="28" height="14" rx="2" opacity="0.7"/>
+    <ellipse class="center" cx="74" cy="86" rx="3" ry="3"/>
+    <rect class="toggleShade" x="68" y="74" width="12" height="3" rx="1"/>
+    <rect class="toggleShade" x="68" y="96" width="12" height="3" rx="1"/>
+  </g>
+  <g>
+    <rect class="toggleShade" x="62" y="158" width="28" height="40" rx="4"/>
+    <rect class="toggle" x="60" y="156" width="28" height="40" rx="4"/>
+    <rect class="toggleHi" x="60" y="156" width="28" height="3" rx="2"/>
+    <rect class="toggleShade" x="60" y="182" width="28" height="14" rx="2" opacity="0.7"/>
+    <ellipse class="center" cx="74" cy="176" rx="3" ry="3"/>
+    <rect class="toggleShade" x="68" y="164" width="12" height="3" rx="1"/>
+    <rect class="toggleShade" x="68" y="186" width="12" height="3" rx="1"/>
+  </g>
+  <g>
+    <rect class="bodyShade" x="142" y="46" width="80" height="180" rx="8"/>
+    <rect class="body" x="138" y="42" width="80" height="180" rx="8"/>
+    <rect class="bodyHi" x="138" y="42" width="80" height="4" rx="2"/>
+    <rect class="bodyShade" x="138" y="216" width="80" height="6" rx="2"/>
+    <rect class="face" x="146" y="50" width="64" height="164" rx="4"/>
+    <rect class="faceShade" x="146" y="50" width="64" height="3" rx="2"/>
+  </g>
+  <g>
+    <ellipse class="recept" cx="166" cy="98" rx="3" ry="6"/>
+    <ellipse class="recept" cx="190" cy="98" rx="3" ry="6"/>
+    <ellipse class="receptShade" cx="166" cy="100" rx="2" ry="4" opacity="0.7"/>
+    <ellipse class="receptShade" cx="190" cy="100" rx="2" ry="4" opacity="0.7"/>
+    <ellipse class="center" cx="178" cy="116" rx="4" ry="4"/>
+    <ellipse class="center" cx="178" cy="116" rx="2" ry="2" fill="#3a3530"/>
+  </g>
+  <g>
+    <ellipse class="recept" cx="166" cy="166" rx="3" ry="6"/>
+    <ellipse class="recept" cx="190" cy="166" rx="3" ry="6"/>
+    <ellipse class="receptShade" cx="166" cy="168" rx="2" ry="4" opacity="0.7"/>
+    <ellipse class="receptShade" cx="190" cy="168" rx="2" ry="4" opacity="0.7"/>
+    <ellipse class="center" cx="178" cy="184" rx="4" ry="4"/>
+    <ellipse class="center" cx="178" cy="184" rx="2" ry="2" fill="#3a3530"/>
+  </g>
+  <g>
+    <circle class="screw" cx="48" cy="58" r="3"/>
+    <line x1="46" y1="58" x2="50" y2="58" stroke="#3a3530" stroke-width="0.8"/>
+    <circle class="screw" cx="48" cy="206" r="3"/>
+    <line x1="46" y1="206" x2="50" y2="206" stroke="#3a3530" stroke-width="0.8"/>
+    <circle class="screw" cx="206" cy="58" r="3"/>
+    <line x1="204" y1="58" x2="208" y2="58" stroke="#3a3530" stroke-width="0.8"/>
+    <circle class="screw" cx="206" cy="206" r="3"/>
+    <line x1="204" y1="206" x2="208" y2="206" stroke="#3a3530" stroke-width="0.8"/>
+  </g>
+</svg>

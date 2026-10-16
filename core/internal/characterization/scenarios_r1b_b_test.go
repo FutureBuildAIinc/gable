@@ -18,7 +18,7 @@ func bLogin(name string) stepDef {
 		name:   name,
 		method: "POST",
 		path:   "/api/portal/v1/login",
-		body:   map[string]any{"email": "demo@kelbrook.ca", "password": "password"},
+		body:   map[string]any{"email": "demo@tarnwick.example", "password": "password"},
 	}
 }
 

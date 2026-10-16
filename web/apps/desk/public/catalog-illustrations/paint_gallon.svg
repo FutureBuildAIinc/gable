@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>One gallon paint can, exterior satin</title>
+  <defs><style>
+    .canBody{fill:#f0e4cc}
+    .canShade{fill:#d8c8a4}
+    .canTop{fill:#e8dcc0}
+    .canTopRim{fill:#a89878}
+    .canBottomRim{fill:#a89878}
+    .label{fill:#faf3e0}
+    .labelBand{fill:#3a3e44}
+    .labelAccent{fill:#c84a3d}
+    .swatch{fill:#d4c4a0}
+    .handle{fill:none;stroke:#3a3530;stroke-width:2;stroke-linecap:round}
+    .handleGrip{fill:#3a3530}
+    .textBrand{font-family:Georgia,Verdana,serif;font-weight:700;letter-spacing:1.5px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2.5px}
+    .textSheen{font-family:Verdana,Arial,sans-serif;font-weight:500;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="78" ry="7" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="canBody" x="58" y="78" width="140" height="140"/>
+    <rect class="canShade" x="186" y="78" width="12" height="140" opacity="0.5"/>
+    <rect class="canShade" x="58" y="200" width="140" height="18" opacity="0.4"/>
+    <rect class="canBottomRim" x="56" y="214" width="144" height="6"/>
+    <ellipse class="canTop" cx="128" cy="78" rx="70" ry="10"/>
+    <ellipse cx="128" cy="78" rx="70" ry="10" fill="none" stroke="#a89878" stroke-width="0.6"/>
+    <ellipse class="canTopRim" cx="128" cy="78" rx="64" ry="7" opacity="0.6"/>
+    <ellipse cx="128" cy="78" rx="58" ry="4" fill="#c8b890" opacity="0.7"/>
+  </g>
+  <path class="handle" d="M 70 76 C 70 36 186 36 186 76"/>
+  <ellipse class="handleGrip" cx="128" cy="40" rx="14" ry="4"/>
+  <rect class="handleGrip" x="115" y="38" width="26" height="6" rx="2"/>
+  <g>
+    <rect class="label" x="58" y="108" width="100" height="86"/>
+    <rect class="labelBand" x="58" y="108" width="100" height="22"/>
+    <rect class="labelBand" x="58" y="178" width="100" height="16"/>
+    
+    <rect class="labelAccent" x="64" y="138" width="6" height="30"/>
+    <text class="textSub" x="74" y="150" font-size="7" fill="#3a3e44">EXTERIOR</text>
+    <text class="textSub" x="74" y="160" font-size="7" fill="#3a3e44">LATEX</text>
+    <text class="textSheen" x="74" y="190" font-size="7" fill="#faf3e0">SATIN</text>
+  </g>
+  <g>
+    <rect x="158" y="108" width="40" height="86" fill="#7a3a2e"/>
+    <rect x="158" y="108" width="40" height="86" fill="none" stroke="#3a3530" stroke-width="0.6"/>
+    <rect x="158" y="108" width="40" height="6" fill="#ffffff" opacity="0.25"/>
+    <rect x="158" y="186" width="40" height="8" fill="#3a1a14"/>
+    <text x="178" y="160" font-family="Verdana,Arial,sans-serif" font-size="22" font-weight="700" fill="#faf3e0" text-anchor="middle">#</text>
+  </g>
+  <line x1="58" y1="108" x2="198" y2="108" stroke="#3a3530" stroke-width="0.5" opacity="0.5"/>
+  <line x1="58" y1="194" x2="198" y2="194" stroke="#3a3530" stroke-width="0.5" opacity="0.5"/>
+  <ellipse cx="128" cy="78" rx="70" ry="10" fill="none" stroke="#7a6e54" stroke-width="0.4"/>
+</svg>

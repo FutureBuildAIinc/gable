@@ -116,8 +116,8 @@ func testCatalog() []product.Product {
 		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000003"), SKU: "OSB-716-4X8", Description: "OSB 7/16 4x8 Sheathing", UOMPrimary: "PCS", BasePrice: 18.99},
 		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000004"), SKU: "CDX-12-4X8", Description: "CDX Plywood 1/2 4x8", UOMPrimary: "PCS", BasePrice: 32.50},
 		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000005"), SKU: "2X10-16-HF", Description: "2x10x16 Hem Fir #2", UOMPrimary: "PCS", BasePrice: 22.75},
-		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000006"), SKU: "QUIK-80", Description: "Quikrete 80lb Concrete Mix", UOMPrimary: "BAG", BasePrice: 5.99},
-		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000007"), SKU: "TYVEK-9X150", Description: "Tyvek HomeWrap 9x150", UOMPrimary: "RL", BasePrice: 169.00},
+		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000006"), SKU: "CONC-80", Description: "Concrete Mix 80lb", UOMPrimary: "BAG", BasePrice: 5.99},
+		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000007"), SKU: "HWRAP-9X150", Description: "House Wrap 9x150", UOMPrimary: "RL", BasePrice: 169.00},
 		{ID: uuid.MustParse("10000000-0000-0000-0000-000000000008"), SKU: "2X4-PT-8", Description: "2x4x8 Pressure Treated #2", UOMPrimary: "PCS", BasePrice: 8.99},
 	}
 }

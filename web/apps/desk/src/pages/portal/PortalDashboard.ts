@@ -6,7 +6,9 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { DollarSign, CreditCard, AlertTriangle, ShoppingCart, ArrowRight, RefreshCw } from 'lucide';
 import { PortalService } from '../../services/PortalService';
+import { formatDate } from '../../lib/dates.ts';
 import type { PortalDashboard as DashboardData } from '../../types/portal';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -81,9 +83,9 @@ export class PortalDashboard extends LitElement {
         }
 
         const stats = [
-            { title: 'Current Balance', value: formatCurrency(this.data?.balance_due || 0), iconData: DollarSign, color: '#00FFA3' },
-            { title: 'Credit Limit', value: formatCurrency(this.data?.credit_limit || 0), iconData: CreditCard, color: '#38BDF8' },
-            { title: 'Past Due', value: formatCurrency(this.data?.past_due || 0), iconData: AlertTriangle, color: this.data?.past_due && this.data.past_due > 0 ? '#F43F5E' : '#00FFA3' },
+            { title: 'Current Balance', value: formatCurrency(this.data?.balance_due || 0), iconData: DollarSign, color: 'gable-green' },
+            { title: 'Credit Limit', value: formatCurrency(this.data?.credit_limit || 0), iconData: CreditCard, color: 'blueprint-blue' },
+            { title: 'Past Due', value: formatCurrency(this.data?.past_due || 0), iconData: AlertTriangle, color: this.data?.past_due && this.data.past_due > 0 ? 'safety-red' : 'gable-green' },
         ];
 
         return html`
@@ -104,12 +106,12 @@ export class PortalDashboard extends LitElement {
                 <!-- Stats Row -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     ${stats.map(stat => html`
-                        <div class="group hover:-translate-y-1 transition-transform duration-300 rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="group hover:-translate-y-1 transition-transform duration-300 rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-6">
                                 <div class="flex justify-between items-start mb-4">
                                     <div
                                         class="p-3 rounded-lg border"
-                                        style="background-color: ${stat.color}10; border-color: ${stat.color}20"
+                                        style="background-color: ${cssVarColor(stat.color, 0.063)}; border-color: ${cssVarColor(stat.color, 0.125)}"
                                     >
                                         ${icon(stat.iconData, 24, `w-6 h-6`)}
                                     </div>
@@ -122,7 +124,7 @@ export class PortalDashboard extends LitElement {
                 </div>
 
                 <!-- Recent Orders -->
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                     <div class="flex flex-row items-center justify-between pb-2 p-6">
                         <h3 class="text-lg font-semibold text-white">Recent Orders</h3>
                         <a
@@ -138,14 +140,14 @@ export class PortalDashboard extends LitElement {
                                 <div class="space-y-3">
                                     ${this.data.recent_orders.map(order => html`
                                         <div
-                                            class="flex justify-between items-center p-3 rounded-lg hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
+                                            class="flex justify-between items-center p-3 rounded-lg hover:bg-hover-row transition-colors border border-transparent hover:border-white/5"
                                         >
                                             <div>
                                                 <div class="font-medium text-white font-mono text-sm">
                                                     ${order.id.substring(0, 8).toUpperCase()}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
-                                                    ${new Date(order.created_at).toLocaleDateString()} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
+                                                    ${formatDate(order.created_at)} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
                                                 </div>
                                             </div>
                                             <div class="text-right flex items-center gap-3">
@@ -157,7 +159,7 @@ export class PortalDashboard extends LitElement {
                                                 </div>
                                                 <a
                                                     href="/portal/orders"
-                                                    class="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-white transition-colors"
+                                                    class="p-1.5 rounded-lg hover:bg-hover-row text-zinc-500 hover:text-white transition-colors"
                                                 >
                                                     ${icon(ShoppingCart, 14)}
                                                 </a>

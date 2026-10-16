@@ -49,9 +49,17 @@ const (
 
 // PurchaseRecommendation represents a suggested purchase order for a product.
 type PurchaseRecommendation struct {
-	ProductID     uuid.UUID    `json:"product_id"`
-	ProductSKU    string       `json:"product_sku"`
-	ProductName   string       `json:"product_name"`
+	// A recommendation is one product at one yard (item 135 b): the stock is
+	// that yard's, the sales are that yard's, and the suggestion is for that
+	// yard. A company wide figure never decides one.
+	BranchID    uuid.UUID `json:"branch_id"`
+	BranchName  string    `json:"branch_name"`
+	ProductID   uuid.UUID `json:"product_id"`
+	ProductSKU  string    `json:"product_sku"`
+	ProductName string    `json:"product_name"`
+	// VendorID is the product's vendor, by id, so a new purchase order from
+	// this row is created for that vendor; absent when the product has none.
+	VendorID      *uuid.UUID   `json:"vendor_id,omitempty"`
 	VendorName    string       `json:"vendor_name,omitempty"`
 	CurrentStock  float64      `json:"current_stock"`
 	AvgDailySales float64      `json:"avg_daily_sales"`
@@ -85,6 +93,7 @@ type RecommendationService struct {
 	productSvc   *product.Service
 	vendorSvc    *vendor.Service
 	velocityRepo salesVelocityLister
+	yardVelocity yardVelocityLister
 	config       RecommendationConfig
 }
 
@@ -116,7 +125,17 @@ func (rs *RecommendationService) WithConfig(cfg RecommendationConfig) *Recommend
 // when a product has zero sales history in the lookback window.
 func (rs *RecommendationService) WithVelocityRepo(v salesVelocityLister) *RecommendationService {
 	rs.velocityRepo = v
+	// The real repository also answers per yard; a fake that does not keeps
+	// the product wide demand for every yard.
+	if yv, ok := v.(yardVelocityLister); ok {
+		rs.yardVelocity = yv
+	}
 	return rs
+}
+
+// yardVelocityLister is the optional per yard demand read.
+type yardVelocityLister interface {
+	ListSalesVelocityByYard(ctx context.Context, lookbackDays int) ([]YardVelocity, error)
 }
 
 // CalculateReorderPoint computes: (Avg Daily Sales x Lead Time Days) + Safety Stock
@@ -214,101 +233,129 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 		}
 	}
 
+	// Stock per yard: one read for the caller's reach (the context yard, the
+	// granted yards, or every yard). A product held at no yard in reach is no
+	// yard's signal and carries no recommendation.
+	yardStock, err := rs.repo.ListYardStock(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load yard stock: %w", err)
+	}
+	stockByProduct := make(map[uuid.UUID][]YardStock)
+	for _, ys := range yardStock {
+		stockByProduct[ys.ProductID] = append(stockByProduct[ys.ProductID], ys)
+	}
+	// Demand per yard when the reader answers it; otherwise the product wide
+	// figure stands in for every yard.
+	velByYard := make(map[uuid.UUID]map[uuid.UUID]float64)
+	if rs.yardVelocity != nil {
+		if yv, vErr := rs.yardVelocity.ListSalesVelocityByYard(ctx, rs.config.LookbackDays); vErr == nil {
+			for _, v := range yv {
+				if velByYard[v.BranchID] == nil {
+					velByYard[v.BranchID] = map[uuid.UUID]float64{}
+				}
+				velByYard[v.BranchID][v.ProductID] = v.UnitsSold
+			}
+		}
+	}
+
 	var recommendations []PurchaseRecommendation
 	totalEstCost := 0.0
 
 	for _, p := range products {
-		// 3. Get current inventory level
-		invItems, err := rs.inventorySvc.ListByProduct(ctx, p.ID.String())
-		if err != nil {
-			continue // Skip products with inventory errors
-		}
-
-		currentStock := 0.0
-		for _, inv := range invItems {
-			currentStock += inv.Quantity - inv.Allocated
-		}
-
-		// 4. Compute sales velocity. Prefer real order_lines velocity; fall
-		// back to the synthetic reorder-point proxy when a new SKU has no
-		// sales history yet so brand-new products still surface in the list.
-		avgDailySales := rs.dailySalesFor(p, velByProduct)
-		stdDevSales := avgDailySales * 0.3 // 30% coefficient of variation
-
-		if avgDailySales <= 0 {
-			continue // No sales velocity, skip
-		}
-
-		// 5. Get lead time from vendor or use default. Prefer canonical
-		// vendor_id; fall back to display-name lookup for legacy rows.
-		leadTime := rs.config.DefaultLeadTimeDays
-		vendorName := ""
-		var matchedVendor *vendor.Vendor
-		if p.VendorID != nil {
-			if v, ok := vendorByID[*p.VendorID]; ok {
-				matchedVendor = v
+		for _, ys := range stockByProduct[p.ID] {
+			currentStock := ys.Available
+			vel := velByProduct
+			if rs.yardVelocity != nil {
+				vel = velByYard[ys.BranchID]
 			}
-		}
-		if matchedVendor == nil && p.Vendor != nil && *p.Vendor != "" {
-			if v, ok := vendorByName[*p.Vendor]; ok {
-				matchedVendor = v
+
+			// 4. Compute sales velocity. Prefer real order_lines velocity; fall
+			// back to the synthetic reorder-point proxy when a new SKU has no
+			// sales history yet so brand-new products still surface in the list.
+			avgDailySales := rs.dailySalesFor(p, vel)
+			stdDevSales := avgDailySales * 0.3 // 30% coefficient of variation
+
+			if avgDailySales <= 0 {
+				continue // No sales velocity, skip
 			}
-		}
-		if matchedVendor != nil {
-			vendorName = matchedVendor.Name
-			if matchedVendor.AverageLeadTimeDays > 0 {
-				leadTime = matchedVendor.AverageLeadTimeDays
+
+			// 5. Get lead time from vendor or use default. Prefer canonical
+			// vendor_id; fall back to display-name lookup for legacy rows.
+			leadTime := rs.config.DefaultLeadTimeDays
+			vendorName := ""
+			var vendorID *uuid.UUID
+			var matchedVendor *vendor.Vendor
+			if p.VendorID != nil {
+				if v, ok := vendorByID[*p.VendorID]; ok {
+					matchedVendor = v
+				}
 			}
-		} else if p.Vendor != nil {
-			vendorName = *p.Vendor
+			if matchedVendor == nil && p.Vendor != nil && *p.Vendor != "" {
+				if v, ok := vendorByName[*p.Vendor]; ok {
+					matchedVendor = v
+				}
+			}
+			if matchedVendor != nil {
+				vendorName = matchedVendor.Name
+				id := matchedVendor.ID
+				vendorID = &id
+				if matchedVendor.AverageLeadTimeDays > 0 {
+					leadTime = matchedVendor.AverageLeadTimeDays
+				}
+			} else if p.Vendor != nil {
+				vendorName = *p.Vendor
+			}
+
+			// 6. Calculate reorder metrics
+			safetyStock := CalculateSafetyStock(rs.config.ZScore, stdDevSales, leadTime)
+			reorderPoint := CalculateReorderPoint(avgDailySales, leadTime, safetyStock)
+
+			// 7. Only recommend if stock is at or below 2x reorder point
+			if currentStock > reorderPoint*2 {
+				continue
+			}
+
+			// 8. Calculate suggested quantity
+			annualDemand := avgDailySales * 365
+			vendorCostEstimate := p.BasePrice * 0.6 // Estimate vendor cost at 60% of base price
+			eoq := CalculateEOQ(annualDemand, vendorCostEstimate)
+			suggestedQty := math.Max(eoq, rs.config.MinOrderQty)
+
+			// Ensure we order enough to get back above reorder point + buffer
+			minNeeded := reorderPoint*1.5 - currentStock
+			if minNeeded > suggestedQty {
+				suggestedQty = math.Ceil(minNeeded)
+			}
+
+			estimatedCost := suggestedQty * vendorCostEstimate
+
+			// 9. Classify urgency
+			urgency := ClassifyUrgency(currentStock, reorderPoint, avgDailySales, leadTime)
+			daysOut := DaysUntilStockout(currentStock, avgDailySales)
+
+			rec := PurchaseRecommendation{
+				BranchID:      ys.BranchID,
+				BranchName:    ys.YardName,
+				ProductID:     p.ID,
+				ProductSKU:    p.SKU,
+				ProductName:   p.Description,
+				VendorID:      vendorID,
+				VendorName:    vendorName,
+				CurrentStock:  math.Round(currentStock*100) / 100,
+				AvgDailySales: math.Round(avgDailySales*100) / 100,
+				StdDevSales:   math.Round(stdDevSales*100) / 100,
+				LeadTimeDays:  leadTime,
+				ReorderPoint:  math.Round(reorderPoint*100) / 100,
+				SafetyStock:   math.Round(safetyStock*100) / 100,
+				SuggestedQty:  suggestedQty,
+				EstimatedCost: math.Round(estimatedCost*100) / 100,
+				Urgency:       urgency,
+				DaysUntilOut:  daysOut,
+			}
+
+			recommendations = append(recommendations, rec)
+			totalEstCost += estimatedCost
 		}
-
-		// 6. Calculate reorder metrics
-		safetyStock := CalculateSafetyStock(rs.config.ZScore, stdDevSales, leadTime)
-		reorderPoint := CalculateReorderPoint(avgDailySales, leadTime, safetyStock)
-
-		// 7. Only recommend if stock is at or below 2x reorder point
-		if currentStock > reorderPoint*2 {
-			continue
-		}
-
-		// 8. Calculate suggested quantity
-		annualDemand := avgDailySales * 365
-		vendorCostEstimate := p.BasePrice * 0.6 // Estimate vendor cost at 60% of base price
-		eoq := CalculateEOQ(annualDemand, vendorCostEstimate)
-		suggestedQty := math.Max(eoq, rs.config.MinOrderQty)
-
-		// Ensure we order enough to get back above reorder point + buffer
-		minNeeded := reorderPoint*1.5 - currentStock
-		if minNeeded > suggestedQty {
-			suggestedQty = math.Ceil(minNeeded)
-		}
-
-		estimatedCost := suggestedQty * vendorCostEstimate
-
-		// 9. Classify urgency
-		urgency := ClassifyUrgency(currentStock, reorderPoint, avgDailySales, leadTime)
-		daysOut := DaysUntilStockout(currentStock, avgDailySales)
-
-		rec := PurchaseRecommendation{
-			ProductID:     p.ID,
-			ProductSKU:    p.SKU,
-			ProductName:   p.Description,
-			VendorName:    vendorName,
-			CurrentStock:  math.Round(currentStock*100) / 100,
-			AvgDailySales: math.Round(avgDailySales*100) / 100,
-			StdDevSales:   math.Round(stdDevSales*100) / 100,
-			LeadTimeDays:  leadTime,
-			ReorderPoint:  math.Round(reorderPoint*100) / 100,
-			SafetyStock:   math.Round(safetyStock*100) / 100,
-			SuggestedQty:  suggestedQty,
-			EstimatedCost: math.Round(estimatedCost*100) / 100,
-			Urgency:       urgency,
-			DaysUntilOut:  daysOut,
-		}
-
-		recommendations = append(recommendations, rec)
-		totalEstCost += estimatedCost
 	}
 
 	// Sort by urgency (critical first) then by days until stockout
@@ -318,7 +365,17 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 		if ui != uj {
 			return ui < uj
 		}
-		return recommendations[i].DaysUntilOut < recommendations[j].DaysUntilOut
+		if recommendations[i].DaysUntilOut != recommendations[j].DaysUntilOut {
+			return recommendations[i].DaysUntilOut < recommendations[j].DaysUntilOut
+		}
+		// A stable order for ties: one product's yards sit together, by name.
+		if recommendations[i].ProductSKU != recommendations[j].ProductSKU {
+			return recommendations[i].ProductSKU < recommendations[j].ProductSKU
+		}
+		if recommendations[i].BranchName != recommendations[j].BranchName {
+			return recommendations[i].BranchName < recommendations[j].BranchName
+		}
+		return recommendations[i].BranchID.String() < recommendations[j].BranchID.String()
 	})
 
 	// Build summary

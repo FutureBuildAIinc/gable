@@ -52,7 +52,10 @@ const (
 const (
 	settingAIKey     = "openrouter_api_key"
 	settingAIBaseURL = "openrouter_base_url"
-	settingORSKey    = "openrouteservice_api_key"
+	// settingAITest holds the last test of the saved key: {"status", "message"}.
+	// Never a key; the message is the provider's refusal in words.
+	settingAITest = "ai_last_test"
+	settingORSKey = "openrouteservice_api_key"
 )
 
 // AISettings is the AI settings document: the key's status (never the key
@@ -64,7 +67,52 @@ type AISettings struct {
 	KeyHint    *string `json:"key_hint"`
 	BaseURL    *string `json:"base_url"`
 	Revision   int64   `json:"revision"`
+
+	// The provider choice and the native Anthropic provider's status. The
+	// Anthropic key is never returned, only whether one is stored and its
+	// masked hint. VaultPresent says whether a key can be saved at all.
+	Provider            string  `json:"provider"` // "openrouter" or "anthropic"
+	Model               string  `json:"model"`    // the effective Anthropic model
+	AnthropicConfigured bool    `json:"anthropic_configured"`
+	AnthropicKeyHint    *string `json:"anthropic_key_hint"`
+	VaultPresent        bool    `json:"vault_present"`
+
+	// The last test of the saved key (N7): "none" with no key saved,
+	// "untested" for a key never tested, then "passed", "refused" (the
+	// provider refused the key) or "failed" (the test could not finish).
+	// TestMessage is the plain sentence for refused and failed. A save
+	// runs the test, so a fresh key reads from its own test.
+	TestStatus  string `json:"test_status"`
+	TestMessage string `json:"test_message,omitempty"`
 }
+
+// AISave is the AI settings write: every field is optional except that a
+// save must change something. An empty string leaves a field as it is.
+type AISave struct {
+	APIKey          string  // OpenRouter key; "" leaves it
+	BaseURL         *string // nil leaves, "" clears
+	Provider        string  // "" leaves
+	Model           string  // "" leaves
+	AnthropicAPIKey string  // "" leaves
+}
+
+// TestResult is the answer of the test connection action.
+type TestResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+	// Status is "passed", "refused" or "failed", the value the settings
+	// document's test_status takes from this test.
+	Status string `json:"status"`
+}
+
+// AI test statuses, the settings document's test_status.
+const (
+	AITestNone     = "none"
+	AITestUntested = "untested"
+	AITestPassed   = "passed"
+	AITestRefused  = "refused"
+	AITestFailed   = "failed"
+)
 
 // RoutingSettings is the routing (OpenRouteService) settings document, the
 // AI settings' shape without the base URL.
@@ -75,15 +123,16 @@ type RoutingSettings struct {
 	Revision   int64   `json:"revision"`
 }
 
-// keyHint is the masked hint a configured key shows: its first 10 and last 4
-// characters, or four asterisks when the key is too short to hint safely.
+// keyHint is the masked hint a configured key shows: four asterisks and its
+// last 4 characters, or four asterisks alone when the key is too short to
+// hint safely.
 func keyHint(key string) *string {
 	if key == "" {
 		return nil
 	}
 	hint := "****"
 	if len(key) > 12 {
-		hint = key[:10] + "..." + key[len(key)-4:]
+		hint += key[len(key)-4:]
 	}
 	return &hint
 }

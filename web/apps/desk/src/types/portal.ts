@@ -44,6 +44,8 @@ export interface PortalConfig {
     primary_color: string;
     support_email: string;
     support_phone: string;
+    /** The dealer profile's locale (a BCP 47 tag); the portal's dates are formatted for it. */
+    locale: string;
 }
 
 export interface PortalLoginResponse {

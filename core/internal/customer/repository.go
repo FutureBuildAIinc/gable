@@ -149,10 +149,24 @@ func mapWriteError(err error, what string) error {
 	return fmt.Errorf("%s: %w", what, err)
 }
 
-// wall is the branch wall predicate for a customer alias: a nil branch means
-// no wall. arg is the positional parameter that carries the branch.
-func wall(alias string, arg int) string {
-	return fmt.Sprintf(`($%d::uuid IS NULL OR EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = %s.id AND cb.branch_id = $%d))`, arg, alias, arg)
+// wall is the branch wall predicate for a customer alias: the customer's
+// branches (its customer_branches rows) held to the caller's reach
+// (SEC-NOHEADER-1). branch and grants are the positional parameters that
+// carry the context branch and the no header user's grants sub; both nil
+// (an administrator or owner without a header, an unbound key) is no wall.
+func wall(alias string, branch, grants int) string {
+	return Wall(alias, branch, grants)
+}
+
+// Wall is the same predicate for a caller outside the package (the tax
+// exemption routes hold the customer they name to it).
+func Wall(alias string, branch, grants int) string {
+	return fmt.Sprintf(`(
+		    ($%[2]d::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = %[1]s.id AND cb.branch_id = $%[2]d))
+		    OR ($%[2]d::uuid IS NULL AND $%[3]d::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = %[1]s.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $%[3]d)))
+		    OR ($%[2]d::uuid IS NULL AND $%[3]d::text IS NULL)
+		  )`, alias, branch, grants)
 }
 
 // nullable returns the value for a parameterised nullable text column.
@@ -181,7 +195,8 @@ const customerColumns = `
 	ROUND(c.balance_due * 100)::bigint,
 	c.currency,
 	COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-	c.payment_terms_id, pt.code, pt.name, c.po_required, c.revision, c.created_at, COALESCE(c.updated_at, c.created_at)`
+	c.payment_terms_id, pt.code, pt.name, c.po_required, c.revision, c.created_at, COALESCE(c.updated_at, c.created_at),
+	ARRAY(SELECT cb.branch_id FROM customer_branches cb WHERE cb.customer_id = c.id UNION SELECT c.primary_branch_id ORDER BY 1)`
 
 const customerFrom = `
 	FROM customers c
@@ -205,7 +220,7 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		&c.SalespersonID, &c.SalespersonName,
 		&credit, &balance, &c.Currency, &c.EffectiveCurrency,
 		&c.PaymentTermsID, &c.PaymentTerms.Code, &c.PaymentTerms.Name, &c.POrequired,
-		&c.Revision, &created, &updated); err != nil {
+		&c.Revision, &created, &updated, &c.BranchIDs); err != nil {
 		return err
 	}
 	c.Tier = CustomerTier(tier)
@@ -263,6 +278,7 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 		return mapWriteError(err, "failed to insert customer")
 	}
 	c.PrimaryBranchID = branch
+	c.BranchIDs = []uuid.UUID{branch}
 	// Mirror into customer_branches so the branch wall works uniformly.
 	if _, err := exec.Exec(ctx,
 		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
@@ -282,7 +298,7 @@ func nilIfZero(id uuid.UUID) any {
 func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Customer, error) {
 	c := &Customer{}
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+customerColumns+customerFrom+`
-		WHERE c.id = $1 AND `+wall("c", 2), id, branchctx.IDForQuery(ctx))
+		WHERE c.id = $1 AND `+wall("c", 2, 3), id, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx))
 	if err := scanCustomer(row, c); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -295,7 +311,7 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email string) (*Customer, error) {
 	c := &Customer{}
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+customerColumns+customerFrom+`
-		WHERE c.email = $1 AND `+wall("c", 2)+` ORDER BY c.created_at, c.id LIMIT 1`, email, branchctx.IDForQuery(ctx))
+		WHERE c.email = $1 AND `+wall("c", 2, 3)+` ORDER BY c.created_at, c.id LIMIT 1`, email, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx))
 	if err := scanCustomer(row, c); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -308,8 +324,8 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 func (r *PostgresRepository) LockCustomer(ctx context.Context, id uuid.UUID) error {
 	var locked uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT c.id FROM customers c WHERE c.id = $1 AND `+wall("c", 2)+` FOR UPDATE OF c`,
-		id, branchctx.IDForQuery(ctx)).Scan(&locked)
+		`SELECT c.id FROM customers c WHERE c.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF c`,
+		id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -354,8 +370,8 @@ func likePattern(q string) string {
 
 // customerWhere builds the one predicate the list and its count share.
 func customerWhere(ctx context.Context, f ListFilter, withCursor bool) (string, []any) {
-	args := []any{branchctx.IDForQuery(ctx)}
-	conds := []string{wall("c", 1)}
+	args := []any{branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)}
+	conds := []string{wall("c", 1, 2)}
 	add := func(cond string, v any) {
 		args = append(args, v)
 		conds = append(conds, strings.ReplaceAll(cond, "?", fmt.Sprintf("$%d", len(args))))
@@ -421,7 +437,7 @@ func (r *PostgresRepository) GetEscalationPolicy(ctx context.Context, customerID
 		SELECT c.price_escalation_policy, ROUND(c.escalation_threshold_pct * 10000)::bigint,
 		       c.escalation_agreement_signed_at, c.escalation_agreement_ref, c.revision
 		FROM customers c
-		WHERE c.id = $1 AND `+wall("c", 2), customerID, branchctx.IDForQuery(ctx)).
+		WHERE c.id = $1 AND `+wall("c", 2, 3), customerID, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)).
 		Scan(&policy, &threshold, &signed, &p.AgreementRef, &p.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

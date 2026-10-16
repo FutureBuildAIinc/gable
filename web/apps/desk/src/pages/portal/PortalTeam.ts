@@ -2,8 +2,10 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { Users, UserPlus, RefreshCw, AlertTriangle, Shield, CheckCircle2, XCircle, Clock } from 'lucide';
@@ -95,7 +97,7 @@ export class PortalTeam extends LitElement {
                     </div>
                     <button
                         @click=${() => router.navigate('/portal/team/invite')}
-                        class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-[0_0_15px_rgba(0,255,163,0.3)]"
+                        class="flex items-center gap-2 px-4 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-colors shadow-glow"
                     >
                         ${icon(UserPlus, 18)} Invite Member
                     </button>
@@ -107,7 +109,7 @@ export class PortalTeam extends LitElement {
                         <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
                             ${icon(Users, 18, 'text-zinc-400')} Current Members
                         </h2>
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                             <div class="divide-y divide-white/5">
                                 ${this.users.map(user => html`
                                     <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-white/[0.02] transition-colors">
@@ -129,22 +131,18 @@ export class PortalTeam extends LitElement {
                                         </div>
                                         <div class="flex items-center gap-3">
                                             <div class="relative">
-                                                <select
+                                                <gable-select
                                                     .value=${user.role}
+                                                    .options=${['View-Only', 'Buyer', 'Admin'].map(r => ({ value: r, label: r }))}
                                                     @change=${(e: Event) => this._handleRoleChange(user.id, (e.target as HTMLSelectElement).value)}
-                                                    class="appearance-none bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green cursor-pointer"
-                                                >
-                                                    <option value="View-Only" class="bg-zinc-900">View-Only</option>
-                                                    <option value="Buyer" class="bg-zinc-900">Buyer</option>
-                                                    <option value="Admin" class="bg-zinc-900">Admin</option>
-                                                </select>
+                                                ></gable-select>
                                                 ${icon(Shield, 14, 'absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none')}
                                             </div>
 
                                             ${user.status === 'Active' ? html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Inactive')}
-                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Deactivate User"
                                                 >
                                                     ${icon(XCircle, 18)}
@@ -152,7 +150,7 @@ export class PortalTeam extends LitElement {
                                             ` : html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Active')}
-                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Reactivate User"
                                                 >
                                                     ${icon(CheckCircle2, 18)}
@@ -171,7 +169,7 @@ export class PortalTeam extends LitElement {
                             <h2 class="text-lg font-medium text-white mb-4 flex items-center gap-2">
                                 ${icon(Clock, 18, 'text-zinc-400')} Pending Invites
                             </h2>
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                 <div class="divide-y divide-white/5">
                                     ${this.invites.map(invite => html`
                                         <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -182,7 +180,7 @@ export class PortalTeam extends LitElement {
                                                 <div>
                                                     <div class="font-medium text-white">${invite.email}</div>
                                                     <div class="text-sm text-zinc-500">
-                                                        Invited on ${new Date(invite.created_at).toLocaleDateString()} · Expires ${new Date(invite.expires_at).toLocaleDateString()}
+                                                        Invited on ${formatDate(invite.created_at)} · Expires ${formatDate(invite.expires_at)}
                                                     </div>
                                                 </div>
                                             </div>

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/yardstock"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,7 +43,7 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 		INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id)
 		VALUES ($1, $2, $3, $4,
 			COALESCE($5::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
-		RETURNING created_at, updated_at, branch_id
+		RETURNING number, created_at, updated_at, branch_id
 	`
 	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		po.ID,
@@ -50,7 +51,7 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 		po.Status,
 		po.Source,
 		branchArg,
-	).Scan(&po.CreatedAt, &po.UpdatedAt, &po.BranchID)
+	).Scan(&po.Number, &po.CreatedAt, &po.UpdatedAt, &po.BranchID)
 }
 
 func (r *Repository) AddPOLine(ctx context.Context, line *PurchaseOrderLine) error {
@@ -107,17 +108,18 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 		return nil, fmt.Errorf("vendor_id required lookup")
 	}
 
-	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
-		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
+		SELECT id, number, vendor_id, status, source, created_at, updated_at, branch_id
 		FROM purchase_orders
 		WHERE vendor_id = $1 AND status = 'DRAFT'
-		  AND ($2::uuid IS NULL OR branch_id = $2)
+		  AND ` + middleware.Wall("", 2, 3) + `
 		LIMIT 1
 	`
 	var po PurchaseOrder
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID, branchID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(
 		&po.ID,
+		&po.Number,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
@@ -131,19 +133,41 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 	return &po, nil
 }
 
+// GetDraftPOByVendorAt is the draft purchase order of the vendor at one
+// branch whose source is one of sources. It carries no wall, because the
+// branch is named by the caller (a reorder alert's yard, or the linked order's
+// own branch), not found by reach. The source keeps the two automatic flows
+// apart: a reorder line never lands on a special order's draft and a special
+// order's line never lands on a reorder draft. A person's own MANUAL draft is
+// named by both callers, because it is theirs to receive either kind of line.
+func (r *Repository) GetDraftPOByVendorAt(ctx context.Context, vendorID, branch uuid.UUID, sources ...string) (*PurchaseOrder, error) {
+	var po PurchaseOrder
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
+		FROM purchase_orders
+		WHERE vendor_id = $1 AND status = 'DRAFT' AND branch_id = $2 AND source = ANY($3::text[])
+		ORDER BY created_at
+		LIMIT 1`, vendorID, branch, sources).Scan(
+		&po.ID, &po.VendorID, &po.Status, &po.Source, &po.CreatedAt, &po.UpdatedAt, &po.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	return &po, nil
+}
+
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
-	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
-		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
+		SELECT po.id, po.number, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
 		       COUNT(pol.id) AS line_count,
 		       COALESCE(SUM(pol.quantity * pol.cost), 0) AS total_cost
 		FROM purchase_orders po
 		LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id
-		WHERE ($1::uuid IS NULL OR po.branch_id = $1)
+		WHERE ` + middleware.Wall("po", 1, 2) + `
 		GROUP BY po.id
 		ORDER BY po.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POs: %w", err)
 	}
@@ -154,6 +178,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 		var po PurchaseOrder
 		if err := rows.Scan(
 			&po.ID,
+			&po.Number,
 			&po.VendorID,
 			&po.Status,
 			&po.Source,
@@ -194,10 +219,11 @@ func (r *Repository) GetSourceSummary(ctx context.Context) (map[string]int, erro
 
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
 	branchID := middleware.BranchIDForQuery(ctx)
-	query := `SELECT id, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
+	query := `SELECT id, number, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
 	var po PurchaseOrder
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchID).Scan(
 		&po.ID,
+		&po.Number,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
@@ -362,4 +388,52 @@ func (r *Repository) LocationBranch(ctx context.Context, id uuid.UUID) (uuid.UUI
 		return uuid.Nil, false, fmt.Errorf("failed to read the location's branch: %w", err)
 	}
 	return *branch, true, nil
+}
+
+// YardStock is one product's available stock (on hand less allocated) at one
+// yard, summed the way the low stock alert and the reorder list sum it
+// (pkg/yardstock): the yard's own row, its zones and its bins.
+type YardStock struct {
+	ProductID uuid.UUID
+	BranchID  uuid.UUID
+	YardName  string
+	Available float64
+}
+
+// ListYardStock returns every product's stock per yard in the caller's reach:
+// the context branch, else the granted branches, else every yard. A row in no
+// yard is in no yard's sum.
+func (r *Repository) ListYardStock(ctx context.Context) ([]YardStock, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT i.product_id, l.branch_id, COALESCE(y.name, y.code, ''),
+		       COALESCE(SUM(i.quantity - i.allocated), 0)::float8
+		FROM `+yardstock.Rows+`
+		LEFT JOIN locations y ON y.id = l.branch_id
+		WHERE `+middleware.Wall("l", 1, 2)+`
+		GROUP BY i.product_id, l.branch_id, y.name, y.code
+		ORDER BY y.name, y.code, l.branch_id`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("list yard stock: %w", err)
+	}
+	defer rows.Close()
+	var out []YardStock
+	for rows.Next() {
+		var ys YardStock
+		if err := rows.Scan(&ys.ProductID, &ys.BranchID, &ys.YardName, &ys.Available); err != nil {
+			return nil, fmt.Errorf("scan yard stock: %w", err)
+		}
+		out = append(out, ys)
+	}
+	return out, rows.Err()
+}
+
+// VendorName is a vendor's name; empty when there is no such vendor.
+func (r *Repository) VendorName(ctx context.Context, id uuid.UUID) (string, error) {
+	var name string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COALESCE((SELECT name FROM vendors WHERE id = $1), '')`, id).Scan(&name)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the vendor's name: %w", err)
+	}
+	return name, nil
 }

@@ -3,6 +3,7 @@
 
 import type { ParseResponse } from '../types/parsing';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -24,11 +25,18 @@ export const ParsingService = {
             timeout: AI_PARSE_TIMEOUT,
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Failed to parse material list');
-        }
+        // The wire error envelope carries the words a person reads and the
+        // code a caller branches on (ai_refused, unsupported_type).
+        if (!response.ok) throw await parseApiError(response, 'Failed to parse material list');
 
         return response.json();
+    },
+
+    /**
+     * Parse a pasted list. It goes to the same route as a text file, so a list
+     * a person types is read by the server's own reader with no AI key.
+     */
+    async uploadPastedList(text: string): Promise<ParseResponse> {
+        return ParsingService.uploadMaterialList(new File([text], 'pasted-list.txt', { type: 'text/plain' }));
     },
 };

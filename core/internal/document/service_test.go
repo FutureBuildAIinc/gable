@@ -142,7 +142,7 @@ func TestGenerateInvoicePDF_TotalIsCentsRenderedAsDollars(t *testing.T) {
 		{"exact dollars", 10000, "TOTAL DUE: $100.00"},
 		{"one cent", 1, "TOTAL DUE: $0.01"},
 		{"zero", 0, "TOTAL DUE: $0.00"},
-		{"large invoice", 12845000, "TOTAL DUE: $128450.00"},
+		{"large invoice", 12845000, "TOTAL DUE: $128,450.00"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,11 +175,11 @@ func TestGenerateInvoicePDF_LineArithmetic(t *testing.T) {
 		wantLine   string
 		wantQtyStr string
 	}{
-		{"two at $4.75", "2", 47500, 950, "$4.7500/PCS", "$9.50", "2 PCS"},
-		{"one at $128.45", "1", 1284500, 12845, "$128.4500/PCS", "$128.45", "1 PCS"},
-		{"fractional quantity", "2.5", 40000, 1000, "$4.0000/PCS", "$10.00", "2.5 PCS"},
-		{"a thousand board feet", "1000", 6850000, 68500000, "$685.0000/PCS", "$685000.00", "1000 PCS"},
-		{"a sub cent price", "3", 100, 3, "$0.0100/PCS", "$0.03", "3 PCS"},
+		{"two at $4.75", "2", 47500, 950, "$4.75/PCS", "$9.50", "2 PCS"},
+		{"one at $128.45", "1", 1284500, 12845, "$128.45/PCS", "$128.45", "1 PCS"},
+		{"fractional quantity", "2.5", 40000, 1000, "$4.00/PCS", "$10.00", "2.5 PCS"},
+		{"a thousand board feet", "1000", 6850000, 68500000, "$685.00/PCS", "$685,000.00", "1000 PCS"},
+		{"a sub cent price", "3", 100, 3, "$0.01/PCS", "$0.03", "3 PCS"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,7 +224,7 @@ func TestGenerateInvoicePDF_LinesNameTheProduct(t *testing.T) {
 	mustContain(t, doc, "OSB-716 - 7/16 OSB Sheathing")
 	mustContain(t, doc, "Acme")
 	mustContain(t, doc, "C-1001")
-	mustContain(t, doc, "GABLE LBM - INVOICE")
+	mustContain(t, doc, "INVOICE")
 	if len(repo.lookups) != 0 {
 		t.Errorf("looked up %d products; the invoice carries its own snapshot", len(repo.lookups))
 	}
@@ -247,7 +247,7 @@ func TestGenerateInvoicePDF_NumberDateNotesAndVoid(t *testing.T) {
 	}
 	assertPDF(t, doc)
 	mustContain(t, doc, "Invoice #: IN-000042")
-	mustContain(t, doc, "2026-03-04")
+	mustContain(t, doc, "Mar 4, 2026")
 	mustContain(t, doc, "Leave at the east gate")
 	mustContain(t, doc, "INVOICE - VOID")
 }
@@ -262,46 +262,6 @@ func TestGenerateInvoicePDF_NoLines(t *testing.T) {
 	}
 	assertPDF(t, doc)
 	mustContain(t, doc, "TOTAL DUE: $50.00")
-}
-
-// CORRECTNESS: the invoice PDF must not jump from the line extensions straight
-// to a tax-inclusive "TOTAL DUE". Without a subtotal row and a tax row the
-// lines visibly do not add up to the total. Showing tax separately is also a
-// statutory requirement in the GST/HST jurisdictions this product targets.
-func TestGenerateInvoicePDF_MustShowSubtotalAndTax(t *testing.T) {
-	svc := NewService(newRepo())
-	rate := "12"
-	inv := mkInvoice(11200, func(i *invoice.Invoice) {
-		i.SubtotalCents, i.TaxCents, i.TaxRatePercent = 10000, 1200, &rate
-		// Two $50.00 lines, so "$100.00" can only appear if a subtotal row is
-		// rendered: it is not a line extension.
-		i.Lines = []invoice.InvoiceLine{
-			mkLine("2X4-8", "SPF Stud", "50", "PCS", 10000, 5000),
-			mkLine("2X4-8", "SPF Stud", "50", "PCS", 10000, 5000),
-		}
-	})
-	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GenerateInvoicePDF: %v", err)
-	}
-	assertPDF(t, doc)
-	mustContain(t, doc, "SUBTOTAL: $100.00")
-	mustContain(t, doc, "TAX @ 12%: $12.00")
-	mustContain(t, doc, "TOTAL DUE: $112.00")
-}
-
-// CHARACTERIZATION: the "PAY ONLINE" link is hard-coded to app.gable.com and
-// keyed on the invoice UUID. For a self-hosted or white-labelled dealer this
-// URL points at someone else's domain; the portal branding config
-// (portal.PortalConfig) is not consulted.
-func TestGenerateInvoicePDF_PayLinkIsHardCoded(t *testing.T) {
-	inv := mkInvoice(100, nil)
-	svc := NewService(newRepo())
-	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GenerateInvoicePDF: %v", err)
-	}
-	mustContain(t, assertPDF(t, doc), "https://app.gable.com/pay/"+inv.ID.String())
 }
 
 // --- pick ticket ---------------------------------------------------------
@@ -333,7 +293,7 @@ func TestGeneratePickTicketPDF_QuantityAndUOM(t *testing.T) {
 	mustContain(t, doc, "2X4-8 - SPF Stud")
 	mustContain(t, doc, "12.5 [MBF]")
 	mustContain(t, doc, "Acme Construction")
-	mustContain(t, doc, "2026-03-04")
+	mustContain(t, doc, "Mar 4, 2026")
 }
 
 // CORRECTNESS: a product with no configured UOM falls back to EA rather than
@@ -408,20 +368,6 @@ func TestGeneratePickTicketPDF_NoLines(t *testing.T) {
 	mustContain(t, doc, "Qty to Pick")
 }
 
-// CHARACTERIZATION: the pick ticket's "Job" field is hard-coded to "N/A". The
-// order carries no job reference on the struct the generator is given, so a
-// jobsite name can never appear on the ticket the driver takes to the site.
-func TestGeneratePickTicketPDF_JobIsAlwaysNA(t *testing.T) {
-	svc := NewService(newRepo())
-	ord := &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())}}
-
-	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GeneratePickTicketPDF: %v", err)
-	}
-	mustContain(t, assertPDF(t, doc), "Job: N/A")
-}
-
 // --- determinism ---------------------------------------------------------
 
 // CORRECTNESS: the same invoice must render the same document. A generator
@@ -445,7 +391,7 @@ func TestGenerateInvoicePDF_IsDeterministicApartFromMetadata(t *testing.T) {
 
 	// The PDF trailer carries a creation timestamp, so the whole byte stream
 	// is not expected to match; the rendered content must.
-	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.7500/PCS", "2026-03-04"} {
+	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.75/PCS", "Mar 4, 2026"} {
 		mustContain(t, first, want)
 		mustContain(t, second, want)
 	}

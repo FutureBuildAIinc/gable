@@ -67,7 +67,7 @@ export class GableLocalTestHub extends LitElement {
   render() {
     const isDemo = import.meta.env.VITE_DEMO_MODE === 'true';
     const eyebrow = isDemo ? 'Public Demo' : 'Local Dev Hub';
-    const backendLabel = isDemo ? 'the GableLBM demo backend' : 'the local backend';
+    const backendLabel = isDemo ? 'the Gable demo backend' : 'the local backend';
     return html`
       <div class="min-h-screen bg-deep-space text-white font-sans">
         <div class="max-w-6xl mx-auto px-6 py-12">
@@ -81,7 +81,7 @@ export class GableLocalTestHub extends LitElement {
           </h1>
           <p class="text-zinc-400 max-w-2xl mb-2">
             Choose a UI surface to exercise against ${backendLabel}. Demo tenant:
-            <span class="text-white font-medium">Gable Lumber &amp; Supply, Kelowna BC</span>
+            <span class="text-white font-medium">Gable Building Supply, Kelowna BC</span>
             (Kelowna Main, West Kelowna, Lake Country).
           </p>
           <p class="text-xs text-zinc-500 mb-10 font-mono">
@@ -112,9 +112,9 @@ export class GableLocalTestHub extends LitElement {
 
           <footer class="mt-12 pt-6 border-t border-white/5 flex flex-wrap items-center gap-4 text-xs text-zinc-500">
             <span class="font-mono">Portal logins:</span>
-            <code class="text-zinc-300">demo@gable.com</code>
-            <code class="text-zinc-300">summit@gable.com</code>
-            <code class="text-zinc-300">elite@gable.com</code>
+            <code class="text-zinc-300">demo@tarnwick.example</code>
+            <code class="text-zinc-300">thornmere@thornmerehomes.example</code>
+            <code class="text-zinc-300">pellmoor@pellmoorcustom.example</code>
             <span class="text-zinc-500">/ password <code class="text-zinc-300">password</code></span>
           </footer>
         </div>

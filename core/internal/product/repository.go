@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/yardstock"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -76,14 +78,15 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // and quantity columns read as text so the scan is exact (ADR 0001 section
 // 7: never through float64). The unit set columns of ADR 0006 section 3.1
 // (C3-2A-units) ride at the end.
-const productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
+var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
 		       COALESCE(p.weight_lbs, 0)::text,
 		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
 		       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
 		       p.lead_time_days, p.revision, p.created_at, p.updated_at,
 		       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
 		       p.sale_uom, p.price_uom, p.purchase_uom,
-		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length`
+		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
+		       ` + pictures.ImageSQL("p")
 
 // stockColumns and stockJoin read a product's stock totals in the same
 // statement as the product, in the stocking unit (ADR 0006 7.1): one
@@ -131,6 +134,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
+		&p.ImageURL,
 	}
 	if withStock {
 		dest = append(dest, &onHand, &allocated)
@@ -345,24 +349,29 @@ func (r *PostgresRepository) CountProducts(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
-// ListBelowReorder returns products whose current stock is below their reorder point
+// ListBelowReorder returns one row per product and yard whose stock is at or
+// below the product's reorder point (FROM-PRINCIPAL item 135 b). A yard's stock
+// is read the way the low stock alert reads it (pkg/yardstock): the yard's own
+// row, its zones and its bins, by locations.branch_id; a row in no yard is in
+// no yard's sum, so a company wide total never decides a reorder. With a
+// branch context the one yard; with none, every yard in the caller's reach
+// (the grants, or every yard for an unwalled caller and the cron engine), each
+// row naming its yard.
 func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.vendor, p.vendor_id,
+		SELECT l.branch_id, COALESCE(y.name, y.code, ''),
+		       p.id, p.sku, p.description, p.vendor, p.vendor_id,
 		       p.reorder_point::text, COALESCE(p.reorder_qty, 0)::text,
 		       COALESCE(SUM(i.quantity), 0)::text AS current_stock,
 		       (p.reorder_point - COALESCE(SUM(i.quantity), 0))::text AS deficit
 		FROM products p
-		LEFT JOIN inventory i ON p.id = i.product_id
-		  AND ($1::uuid IS NULL AND $2::text IS NULL
-		    OR i.location_id IN (SELECT l.id FROM locations l
-		         WHERE ($1::uuid IS NOT NULL AND l.branch_id = $1)
-		            OR ($1::uuid IS NULL AND l.branch_id IN
-		                (SELECT branch_id FROM user_locations WHERE user_sub = $2))))
+		JOIN ` + yardstock.Rows + ` ON i.product_id = p.id
+		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE p.reorder_point > 0
-		GROUP BY p.id
-		HAVING COALESCE(SUM(i.quantity), 0) < p.reorder_point
-		ORDER BY (p.reorder_point - COALESCE(SUM(i.quantity), 0)) DESC`
+		  AND ` + middleware.Wall("l", 1, 2) + `
+		GROUP BY l.branch_id, y.name, y.code, p.id
+		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "p.reorder_point") + `
+		ORDER BY (p.reorder_point - COALESCE(SUM(i.quantity), 0)) DESC, p.sku, l.branch_id`
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
@@ -375,6 +384,7 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 		var a ReorderAlert
 		var rp, rq, stock, deficit string
 		if err := rows.Scan(
+			&a.BranchID, &a.BranchName,
 			&a.ProductID, &a.SKU, &a.Description, &a.Vendor, &a.VendorID,
 			&rp, &rq, &stock, &deficit,
 		); err != nil {

@@ -6,6 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { MapPin, Plus, Minus, ArrowRightLeft, Loader2, Warehouse } from 'lucide';
 import { InventoryService } from '../../../services/InventoryService.ts';
+import { onBranchChanged } from '../../../lib/branch-listener.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import { formatQuantity, parseScaled } from '../../../lib/money.ts';
 import type { Inventory } from '../../../types/product.ts';
@@ -24,9 +25,26 @@ export class GableProductStockTab extends LitElement {
     @state() private adjustReason = '';
     @state() private adjusting = false;
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
         this._loadInventory();
+        // The levels are the current yard's; a yard change loads them again,
+        // and an adjustment opened at the old yard is closed, not posted there.
+        this._unsubBranch = onBranchChanged(() => {
+            this._closeAdjustModal();
+            this.loading = true;
+            this._loadInventory();
+        });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async _loadInventory() {
@@ -186,7 +204,7 @@ export class GableProductStockTab extends LitElement {
 
                 <!-- Adjust Modal -->
                 ${this.adjustModal ? html`
-                    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" @click=${() => this._closeAdjustModal()}>
+                    <div class="fixed inset-0 bg-backdrop/60 flex items-center justify-center z-50" @click=${() => this._closeAdjustModal()}>
                         <div class="bg-zinc-900 border border-white/10 rounded-xl p-6 w-full max-w-sm" @click=${(e: Event) => e.stopPropagation()}>
                             <h3 class="text-white font-medium mb-1">Adjust Stock</h3>
                             <p class="text-zinc-500 text-sm mb-4">${this.productDescription} @ ${this.adjustModal.locationName}</p>
