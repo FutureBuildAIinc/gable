@@ -290,6 +290,13 @@ func plantFixture122(t *testing.T, db *sql.DB) {
 	`, fxContractC1P1, fxContractOrph, fxCustomerID("M122-C01"), fxP1, fxP2))
 }
 
+// beforeCombo is a customer's pre migration pricing program: the tier, the
+// dealer level it named, and that level's multiplier.
+type beforeCombo struct {
+	tier, level string
+	mult        *big.Rat
+}
+
 // tierMultiplier is the hard coded multiplier of the pre migration engine.
 func tierMultiplier(tier string) *big.Rat {
 	switch tier {
@@ -484,10 +491,6 @@ func TestMigration122BackfillPreservesEveryPrice(t *testing.T) {
 
 	// The dealer's own level, tier and the level's multiplier for each
 	// customer, read before the migration drops the columns.
-	type beforeCombo struct {
-		tier, level string
-		mult        *big.Rat
-	}
 	before := map[string]beforeCombo{}
 	for _, c := range fxCustomers {
 		level, tier := fixtureCombo(t, db, c.acct)
@@ -782,4 +785,244 @@ func hasTable(t *testing.T, db *sql.DB, table string) bool {
 func typeExists(t *testing.T, db *sql.DB, name string) bool {
 	t.Helper()
 	return mustScalar[int](t, db, `SELECT count(*) FROM pg_type WHERE typname = $1`, name) > 0
+}
+
+// fixtureUp122 plants the fixture and applies the migration, the world every
+// down test starts from.
+func fixtureUp122(t *testing.T) *sql.DB {
+	t.Helper()
+	db := scratch122(t)
+	plantFixture122(t, db)
+	applyMigrationFile(t, db, "122_price_levels_profiles_and_costs.sql")
+	return db
+}
+
+// applyDown122 applies the down file and fails the test when it refuses.
+func applyDown122(t *testing.T, db *sql.DB) {
+	t.Helper()
+	files, err := filepath.Glob("../../migrations/down/122_price_levels_profiles_and_costs.down.sql")
+	if err != nil || len(files) != 1 {
+		t.Fatalf("down migration 122 not found: %v", err)
+	}
+	sqlText, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), string(sqlText)); err != nil {
+		t.Fatalf("applying the down file: %v", err)
+	}
+}
+
+// refuseDown122 applies the down file and requires the refusal to name the
+// row the caller planted.
+func refuseDown122(t *testing.T, db *sql.DB, want string) {
+	t.Helper()
+	files, err := filepath.Glob("../../migrations/down/122_price_levels_profiles_and_costs.down.sql")
+	if err != nil || len(files) != 1 {
+		t.Fatalf("down migration 122 not found: %v", err)
+	}
+	sqlText, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), string(sqlText)); err == nil {
+		t.Fatalf("the down file ran, want a refusal naming %q", want)
+	} else if !strings.Contains(err.Error(), want) {
+		t.Errorf("the refusal does not name the planted row (%q): %v", want, err)
+	}
+}
+
+// TestMigration122DownRestoresTheBackfillFixture runs the down file on the
+// backfilled fixture: every dropped column and table comes back, the fresh
+// levels and the created rules are gone, the orphaned rows are home, and
+// every (customer, product) pair prices again exactly as it did before the
+// migration was ever applied.
+func TestMigration122DownRestoresTheBackfillFixture(t *testing.T) {
+	db := scratch122(t)
+	plantFixture122(t, db)
+
+	// The prices before, computed against the pre migration world.
+	before := map[string]beforeCombo{}
+	for _, c := range fxCustomers {
+		level, tier := fixtureCombo(t, db, c.acct)
+		bc := beforeCombo{tier: tier}
+		if level != nil {
+			bc.level = *level
+			mult := mustScalar[string](t, db, `SELECT multiplier::text FROM price_levels WHERE id = $1`, *level)
+			bc.mult = ratOfDecimal(mult)
+		}
+		before[c.acct] = bc
+	}
+	wantPrice := map[string]*big.Rat{}
+	for _, c := range fxCustomers {
+		for _, p := range []string{fxP1, fxP2, fxP3} {
+			wantPrice[c.acct+"\x00"+p] = expectedPriceBefore(t, db, c.acct, before[c.acct].tier, before[c.acct].mult, p)
+		}
+	}
+
+	applyMigrationFile(t, db, "122_price_levels_profiles_and_costs.sql")
+	applyDown122(t, db)
+
+	// price_levels: the old shape, the old values, the fresh levels gone.
+	for _, col := range []string{"code", "basis", "adjust_percent", "position", "is_active", "revision"} {
+		if hasColumn(t, db, "price_levels", col) {
+			t.Errorf("price_levels.%s is not dropped by the down file", col)
+		}
+	}
+	if mult := mustScalar[string](t, db, `SELECT multiplier::text FROM price_levels WHERE id = $1`, fxSilverLevel); mult != "0.9500" {
+		t.Errorf("the Silver level's multiplier is %s after the round trip, want 0.9500 (from the percent)", mult)
+	}
+	if mult := mustScalar[string](t, db, `SELECT multiplier::text FROM price_levels WHERE id = $1`, fxRetailB); mult != "1.0500" {
+		t.Errorf("the second Retail level's multiplier is %s after the round trip, want 1.0500", mult)
+	}
+	if n := mustScalar[int](t, db, `SELECT count(*) FROM price_levels WHERE name IN ('Silver tier', 'Gold tier', 'Platinum tier')`); n != 0 {
+		t.Errorf("%d fresh tier level(s) remain after the down file", n)
+	}
+
+	// customers: the enum, the columns, the original values.
+	if !typeExists(t, db, "customer_tier") {
+		t.Errorf("the customer_tier type is not restored")
+	}
+	for _, col := range []string{"tier", "price_level_id"} {
+		if !hasColumn(t, db, "customers", col) {
+			t.Fatalf("customers.%s is not restored", col)
+		}
+	}
+	if hasColumn(t, db, "customers", "price_profile_id") {
+		t.Errorf("customers.price_profile_id is not dropped by the down file")
+	}
+	for _, c := range fxCustomers {
+		var tier string
+		var level sql.NullString
+		if err := db.QueryRow(`SELECT tier::text, price_level_id::text FROM customers WHERE account_number = $1`, c.acct).Scan(&tier, &level); err != nil {
+			t.Fatalf("customer %s after the down: %v", c.acct, err)
+		}
+		if tier != before[c.acct].tier {
+			t.Errorf("customer %s: tier %q after the round trip, want %q", c.acct, tier, before[c.acct].tier)
+		}
+		if before[c.acct].level == "" {
+			if level.Valid {
+				t.Errorf("customer %s held no level before, holds %s after", c.acct, level.String)
+			}
+		} else if !level.Valid || level.String != before[c.acct].level {
+			t.Errorf("customer %s: level %v after the round trip, want %s", c.acct, level, before[c.acct].level)
+		}
+	}
+
+	// The category rules: the tier column and the old targets are back, the
+	// created rules are gone, the orphaned rows are home.
+	if !hasColumn(t, db, "category_pricing_rules", "tier") {
+		t.Errorf("category_pricing_rules.tier is not restored")
+	}
+	for _, id := range []string{fxTierSilver, fxTierGold, fxTierPlat, fxTierRtl, fxTierWs, fxTierGoldChild} {
+		if n := mustScalar[int](t, db, `SELECT count(*) FROM category_pricing_rules WHERE id = $1 AND target_type = 'TIER'`, id); n != 1 {
+			t.Errorf("tier rule %s is not restored as it was (n=%d)", id, n)
+		}
+	}
+	if n := mustScalar[int](t, db, `SELECT count(*) FROM category_pricing_rules WHERE target_type IN ('LEVEL', 'PROFILE')`); n != 0 {
+		t.Errorf("%d created LEVEL or PROFILE rule(s) remain after the down file", n)
+	}
+	if hasTable(t, db, "category_pricing_rules_orphaned") {
+		t.Errorf("category_pricing_rules_orphaned is not dropped by the down file")
+	}
+	if hasTable(t, db, "category_pricing_rule_backfill") {
+		t.Errorf("category_pricing_rule_backfill is not dropped by the down file")
+	}
+
+	// The contracts: the old key, no unit or branch, the orphaned row home.
+	if hasColumn(t, db, "customer_contracts", "price_uom") || hasColumn(t, db, "customer_contracts", "branch_id") {
+		t.Errorf("the contract's new columns are not dropped by the down file")
+	}
+	var orphanCustomer sql.NullString
+	if err := db.QueryRow(`SELECT customer_id::text FROM customer_contracts WHERE id = $1`, fxContractOrph).Scan(&orphanCustomer); err != nil {
+		t.Errorf("the orphaned contract is not restored: %v", err)
+	} else if orphanCustomer.Valid {
+		t.Errorf("the restored orphaned contract names a customer")
+	}
+	if hasTable(t, db, "customer_contracts_orphaned") {
+		t.Errorf("customer_contracts_orphaned is not dropped by the down file")
+	}
+
+	// The rules and the rest of the new shape, gone.
+	if hasColumn(t, db, "pricing_rules", "price_uom") {
+		t.Errorf("pricing_rules.price_uom is not dropped by the down file")
+	}
+	for _, table := range []string{"product_prices", "price_profiles", "price_profile_backfill", "vendor_price_levels", "vendor_product_costs"} {
+		if hasTable(t, db, table) {
+			t.Errorf("%s is not dropped by the down file", table)
+		}
+	}
+	if n := mustScalar[int](t, db, `SELECT count(*) FROM system_settings WHERE key LIKE 'pricing.%'`); n != 0 {
+		t.Errorf("%d pricing setting(s) remain after the down file", n)
+	}
+	if hasFunction(t, db, "price_profile_default_id") {
+		t.Errorf("price_profile_default_id() is not dropped by the down file")
+	}
+
+	// And every pair prices again exactly as it did before.
+	for _, c := range fxCustomers {
+		for _, p := range []string{fxP1, fxP2, fxP3} {
+			got := expectedPriceBefore(t, db, c.acct, before[c.acct].tier, before[c.acct].mult, p)
+			if want := wantPrice[c.acct+"\x00"+p]; want.Cmp(got) != 0 {
+				t.Errorf("customer %s product %s: price after the round trip %s, want %s",
+					c.acct, p, got.FloatString(4), want.FloatString(4))
+			}
+		}
+	}
+}
+
+func hasFunction(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	return mustScalar[int](t, db, `SELECT count(*) FROM pg_proc WHERE proname = $1`, name) > 0
+}
+
+// TestMigration122DownRefuses names the row wherever new shape data has no
+// place in the old one: a LEVEL or PROFILE rule the backfill did not make, a
+// level on another basis, a customer on a profile the map does not hold, a
+// product price, a branched contract, a vendor cost.
+func TestMigration122DownRefuses(t *testing.T) {
+	t.Run("a profile rule the backfill did not make", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, fmt.Sprintf(`INSERT INTO category_pricing_rules
+			(target_type, price_profile_id, category_id, rule_type, rule_value, created_by)
+			SELECT 'PROFILE', p.id, '%s', 'MARKDOWN', 5, 'm122 down test'
+			FROM price_profiles p LIMIT 1`, fxRootCategory))
+		refuseDown122(t, db, "m122 down test")
+	})
+
+	t.Run("a level on another basis", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, `UPDATE price_levels SET basis = 'AVERAGE_COST' WHERE code = 'TIER_SILVER'`)
+		refuseDown122(t, db, "TIER_SILVER")
+	})
+
+	t.Run("a customer on a profile the map does not hold", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, fmt.Sprintf(`INSERT INTO price_profiles (code, name, price_level_id)
+			VALUES ('NEWMAP', 'm122 new profile', (SELECT id FROM price_levels WHERE code = 'SILVER' AND name = 'Silver' LIMIT 1))`))
+		mustExec(t, db, `UPDATE customers SET price_profile_id = (SELECT id FROM price_profiles WHERE code = 'NEWMAP')
+			WHERE account_number = 'M122-C01'`)
+		refuseDown122(t, db, "M122-C01")
+	})
+
+	t.Run("a product price", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, fmt.Sprintf(`INSERT INTO product_prices (product_id, price_level_id, branch_id, price_uom, unit_price)
+			VALUES ('%s', NULL, (SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1), 'EA', 5.0000)`, fxP1))
+		refuseDown122(t, db, fxP1)
+	})
+
+	t.Run("a branched contract", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, fmt.Sprintf(`UPDATE customer_contracts SET branch_id = (SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1)
+			WHERE id = '%s'`, fxContractC1P1))
+		refuseDown122(t, db, string(fxContractC1P1))
+	})
+
+	t.Run("a vendor cost", func(t *testing.T) {
+		db := fixtureUp122(t)
+		mustExec(t, db, fmt.Sprintf(`INSERT INTO vendor_product_costs (vendor_id, vendor_price_level_id, product_id, purchase_uom, unit_cost, effective_from)
+			SELECT '%s', vpl.id, '%s', 'EA', 1.0000, CURRENT_DATE FROM vendor_price_levels vpl WHERE vpl.code = 'LIST' LIMIT 1`, fxVendor, fxP1))
+		refuseDown122(t, db, fxP1)
+	})
 }
