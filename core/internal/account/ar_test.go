@@ -101,11 +101,24 @@ func (w *arWorld) cleanup() {
 		exec(`DELETE FROM credit_memos WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customer_transactions WHERE customer_id = $1`, c)
 		exec(`DELETE FROM invoice_lines WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, c)
+		// The run items, the finance charge items and the holds all name the
+		// customer (the charge items name its invoices too), so they go
+		// before the invoices and the customer they point at.
+		exec(`DELETE FROM ar_statement_run_items WHERE customer_id = $1`, c)
+		exec(`DELETE FROM ar_finance_charge_items WHERE customer_id = $1`, c)
 		exec(`DELETE FROM invoices WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customer_ship_tos WHERE customer_id = $1`, c)
 		exec(`DELETE FROM projects WHERE customer_id = $1`, c)
+		exec(`DELETE FROM credit_limit_changes WHERE customer_id = $1`, c)
+		exec(`DELETE FROM credit_holds WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customers WHERE id = $1`, c)
 	}
+	// The runs outlast no world: their items cascade with them, and a run may
+	// name several worlds' customers, so they are cleared whole.
+	exec(`DELETE FROM ar_finance_charge_items`)
+	exec(`DELETE FROM ar_finance_charge_runs`)
+	exec(`DELETE FROM ar_statement_run_items`)
+	exec(`DELETE FROM ar_statement_runs`)
 }
 
 // ---------------------------------------------------------------------------

@@ -84,14 +84,14 @@ type StatementQuery struct {
 	JobID      *uuid.UUID
 }
 
-// statementRowsSQL reads the subledger with each row's own day: the invoice's
+// statementDayRowsSQL is the subledger with each row's own day: the invoice's
 // invoice day (its void's voided day), the credit memo's memo day (its void's
 // voided day), an application's applied day (its reversal's reversed day), a
 // refund's refunded day; the row's stamp only for a row with no document. The
-// opening balance, the period and the order all follow that day.
-const statementRowsSQL = `
-SELECT x.id, x.day, x.type, x.description, x.amount, x.balance_after, x.currency, x.source_kind, x.reference_id, x.job
-FROM (
+// opening balance, the period and the order all follow that day. The finance
+// charge flag marks a row whose source invoice is one: a statement run counts
+// those apart from the invoices. It takes the customer as $1.
+const statementDayRowsSQL = `
 	SELECT t.id, t.type, COALESCE(t.description, '') AS description, t.amount, t.balance_after, t.currency,
 	       t.source_kind, t.reference_id, t.created_at,
 	       COALESCE(
@@ -100,7 +100,8 @@ FROM (
 	           CASE WHEN t.source_kind = 'application' THEN CASE WHEN t.type = 'REVERSAL' THEN ap.reversed_on ELSE ap.applied_on END END,
 	           CASE WHEN t.source_kind = 'refund' THEN rf.refunded_on END,
 	           (t.created_at AT TIME ZONE tz.name)::date) AS day,
-	       COALESCE(inv.project_id, cm.project_id, ai.project_id, rcm.project_id, legacy.project_id) AS job
+	       COALESCE(inv.project_id, cm.project_id, ai.project_id, rcm.project_id, legacy.project_id) AS job,
+	       COALESCE(inv.origin = 'FINANCE_CHARGE', ai.origin = 'FINANCE_CHARGE', FALSE) AS fc
 	FROM customer_transactions t
 	CROSS JOIN (SELECT COALESCE((SELECT l.timezone FROM locations l JOIN customers c ON c.primary_branch_id = l.id WHERE c.id = $1), 'UTC') AS name) tz
 	LEFT JOIN invoices inv ON t.source_kind = 'invoice' AND inv.id = t.reference_id
@@ -110,7 +111,12 @@ FROM (
 	LEFT JOIN payment_refunds rf ON t.source_kind = 'refund' AND rf.id = t.reference_id
 	LEFT JOIN credit_memos rcm ON rcm.id = rf.credit_memo_id
 	LEFT JOIN invoices legacy ON t.source_kind IS NULL AND legacy.id = t.reference_id
-	WHERE t.customer_id = $1
+	WHERE t.customer_id = $1`
+
+// statementRowsSQL reads the day rows in statement order.
+const statementRowsSQL = `
+SELECT x.id, x.day, x.type, x.description, x.amount, x.balance_after, x.currency, x.source_kind, x.reference_id, x.job
+FROM (` + statementDayRowsSQL + `
 ) x
 ORDER BY x.currency, x.day, x.created_at, x.id`
 
