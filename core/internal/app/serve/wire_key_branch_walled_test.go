@@ -345,6 +345,14 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		}
 		return f.regA
 	}
+	// the customer of the row's branch: the batch names it, and it is the
+	// customer the wall holds a bound key to
+	custOf := func(row uuid.UUID) uuid.UUID {
+		if row == f.txnB {
+			return f.custB
+		}
+		return f.custID
+	}
 	posTender := fixed(`{"tenders":[{"method":"cash","amount_cents":500}]}`)
 	posReturn := func(row uuid.UUID) string {
 		return fmt.Sprintf(`{"register_id":%q,"refund_method":"cash","reason":"pin","customer_id":%q,`+
@@ -355,7 +363,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":%q}]}`,
-			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), f.custID.String(),
+			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), custOf(row).String(),
 			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	posOpen := func(row uuid.UUID) string {
@@ -504,10 +512,10 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
 			noControl: "the completion deducts stock from a location this fixture does not stock, so the control answers 422 past the body and the transaction read"},
 		{method: "POST", path: "/api/v1/pos/transactions/%s/void", body: fixed(`{"reason":"pin"}`), twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
-		// The sync is held by the module itself now: a batch whose register
-		// names another branch is refused before any item runs (round 7), so
-		// the foreign leg is a held leg and the control on the pin's own
-		// register reaches the module.
+		// The sync's replay is refused by rule (money never queues) once past
+		// the walls, so the foreign leg is held on the customer the batch
+		// names (round 10 P1-1) and the control on the pin's own customer and
+		// register is answered by the rule's 409.
 		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true},
 		// The creates that take the branch they land on from the body.
 		{method: "POST", path: "/api/v1/customers", twin: f.branchB, own: f.branchA,

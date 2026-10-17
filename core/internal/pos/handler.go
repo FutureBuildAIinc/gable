@@ -543,24 +543,23 @@ func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sale)
 }
 
-// SyncOffline is POST /pos/sync.
+// SyncOffline is POST /pos/sync: refused by rule. Money never queues
+// offline, so a batch that parses answers 409 money_never_queues and the
+// service never runs: no sale, invoice, payment or sync log row of it is
+// written. The malformed shapes keep their 400 and the branch and customer
+// wall middlewares ahead of this handler keep their refusals.
 func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
 	var req offlineSyncRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	batch, err := req.parse()
-	if err != nil {
+	if _, err := req.parse(); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	resp, err := h.service.SyncOfflineTransactions(r.Context(), batch, actorFrom(r))
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeMoneyNeverQueues,
+		Message: "money never queues offline: complete the sale online"})
 }
 
 // GetCatalog is GET /pos/catalog: the offline cache (a bare array, never
