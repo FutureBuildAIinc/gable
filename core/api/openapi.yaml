@@ -394,6 +394,519 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/ar/credit-holds:
+    get:
+      operationId: arCreditHoldsList
+      tags: [ar]
+      summary: List credit holds
+      description: >-
+        The credit holds, newest first by (placed_at, id) in the cursor list envelope, each with the account's standing beside it (the limit, null for no limit, the balance, and the open invoice cents past due). status selects standing (the default: active and overridden), released or all. A customer named outside the caller's branches is 404, the subledger's wall.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [standing, released, all], default: standing}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of credit holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHoldPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    post:
+      operationId: arCreditHoldPlace
+      tags: [ar]
+      summary: Place a manual credit hold
+      description: >-
+        Roles admin, owner, finance. Places a hold of type manual (the default), over_limit or past_due with a required reason, and writes customers.credit_hold in the same transaction. Idempotent: an account that already carries a standing hold answers it with 200 and placed false; a new hold answers 201 with placed true. The standing hold carries the answer either way.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldPlaceRequest"
+      responses:
+        "200":
+          description: The standing hold, already in place.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "201":
+          description: The hold, placed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/evaluate:
+    post:
+      operationId: arCreditHoldsEvaluate
+      tags: [ar]
+      summary: Run the credit hold sweep
+      description: >-
+        Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldEvaluateRequest"
+      responses:
+        "200":
+          description: The sweep's answer, placed and lifted counts included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHoldEvaluation"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/{id}/release:
+    post:
+      operationId: arCreditHoldRelease
+      tags: [ar]
+      summary: Release a credit hold
+      description: >-
+        Roles admin, owner, finance; a reason is required. Ends a standing hold (active or overridden) with who and why, and clears customers.credit_hold in the same transaction. A released hold refuses with 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldReleaseRequest"
+      responses:
+        "200":
+          description: The hold, released.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/{id}/override:
+    post:
+      operationId: arCreditHoldOverride
+      tags: [ar]
+      summary: Put a time-bounded override on a credit hold
+      description: >-
+        Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldOverrideRequest"
+      responses:
+        "200":
+          description: The hold, overridden until the window ends.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/customers/{id}/credit-limit-changes:
+    get:
+      operationId: arCreditLimitChangesList
+      tags: [ar]
+      summary: List a customer's credit limit changes
+      description: >-
+        The credit limit history, newest first by (created_at, id) in the cursor list envelope: what the limit was, what it became, who asked, who approved, and when it was decided. A customer outside the caller's branches is 404, the subledger's wall.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of credit limit changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChangePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    post:
+      operationId: arCreditLimitChangeRequest
+      tags: [ar]
+      summary: Record (and optionally apply) a credit limit change
+      description: >-
+        Roles admin, owner, finance. Records one change with the old limit, the new one, a required reason and who asked, as pending. With approve true the same act applies the new limit to the customer, stamps who approved it and when, and answers 200; a recorded request answers 201.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditLimitChangeRequest"
+      responses:
+        "200":
+          description: The change, approved and applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChange"
+        "201":
+          description: The change, recorded as pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChange"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/worklist:
+    get:
+      operationId: arWorklist
+      tags: [ar]
+      summary: The controller's collections and credit worklist
+      description: >-
+        The overdue and over-limit accounts, worst first, one row per customer with any past due bucket or any balance. The severity score weighs the over 90 bucket four times, the 61 to 90 bucket twice, the 31 to 60 bucket and the over-limit amount once each, and a standing hold adds a bump that outranks any plain overdue account. Every row carries the aging buckets, the credit limit (null for no limit), the utilisation percent, the hold state and the recommended action: hold for a held, over limit or 90 day account, finance_charge for 61 to 90, call for 31 to 60, send_statement for the rest. The aging carries the caller's branch wall; limit is 10 to 500 rows.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked worklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArWorklist"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+  /api/v1/ar/statements/runs:
+    get:
+      operationId: arStatementRunsList
+      tags: [ar]
+      summary: List batch statement runs
+      description: The batch statement runs, newest first by (created_at, id) in the cursor list envelope.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of runs, without their items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRunPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+    post:
+      operationId: arStatementRunCreate
+      tags: [ar]
+      summary: Generate a batch statement run
+      description: >-
+        Roles admin, owner, finance. Records one run over the customers the period names: every customer with a non-zero balance, or exactly the customers customer_ids names. Each item carries the opening balance (the subledger rows before period_start), the invoices, the payments and the finance charges of the period, the closing balance and the aging buckets of period_end, taken as of that day and never re-derived. A run writes no balance, no document and no subledger row: two runs of one period answer the same numbers. With queue_email true, every item whose closing balance is positive is marked queued with the id of its statement.queued outbox event; a zero balance is skipped. period_end defaults to today and period_start to a month before it; neither may end after today. Answers 201 with the completed run and its items.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArStatementRunRequest"
+      responses:
+        "201":
+          description: The run, completed, with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/statements/runs/{id}:
+    get:
+      operationId: arStatementRunGet
+      tags: [ar]
+      summary: Inspect one batch statement run
+      description: The run with its items, customers by name.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The run and its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/ar/finance-charges/rules:
+    get:
+      operationId: arFinanceChargeRulesGet
+      tags: [ar]
+      summary: Read the finance charge rules
+      description: >-
+        The tenant's finance charge rules: the monthly rate in basis points, the grace days, the minimum charge and the minimum overdue balance, whether the charges compound, and the income account the charge credits. Migration 124 seeds the row charges off.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRules"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    put:
+      operationId: arFinanceChargeRulesUpdate
+      tags: [ar]
+      summary: Write the finance charge rules
+      description: >-
+        Roles admin, owner, finance. Writes the whole policy in one act: the rate (at most 100000 basis points, 100 percent a month), the grace days (0 to 365), the two minimums, the compound flag, and an income account the chart of accounts must hold.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArFinanceChargeRules"
+      responses:
+        "200":
+          description: The rules, written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRules"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/finance-charges/runs:
+    get:
+      operationId: arFinanceChargeRunsList
+      tags: [ar]
+      summary: List finance charge runs
+      description: The finance charge runs, newest first by (created_at, id) in the cursor list envelope.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of runs, without their items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRunPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+    post:
+      operationId: arFinanceChargeRunCreate
+      tags: [ar]
+      summary: Preview or execute a finance charge run
+      description: >-
+        Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArFinanceChargeRunRequest"
+      responses:
+        "200":
+          description: The run, executed or previewed, with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/finance-charges/runs/{id}:
+    get:
+      operationId: arFinanceChargeRunGet
+      tags: [ar]
+      summary: Inspect one finance charge run
+      description: The run with its items, customers by name, each naming the invoice and the entry it generated when executed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The run and its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/customers/{customerId}/activities:
     get:
       operationId: activityList
@@ -16531,6 +17044,289 @@ components:
         currencies:
           type: array
           items: {$ref: "#/components/schemas/ArLedgerRow"}
+    CreditStanding:
+      type: object
+      required: [credit_limit_cents, current_balance_cents, past_due_cents]
+      properties:
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "null for no limit."}
+        current_balance_cents: {type: integer, format: int64}
+        past_due_cents: {type: integer, format: int64, description: "The open invoice cents past their due date."}
+    CreditHold:
+      type: object
+      required: [id, customer_id, customer_name, reason, hold_type, status, placed_by, placed_at, released_by, released_at, release_reason, override_until, override_by, override_reason, max_order_cents]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        reason: {type: string}
+        hold_type: {type: string, enum: [manual, over_limit, past_due]}
+        status: {type: string, enum: [active, released, overridden]}
+        placed_by: {type: [string, "null"], description: "null on a hold the sweep placed."}
+        placed_at: {type: string, format: date-time}
+        released_by: {type: [string, "null"]}
+        released_at: {type: [string, "null"], format: date-time}
+        release_reason: {type: [string, "null"]}
+        override_until: {type: [string, "null"], format: date-time}
+        override_by: {type: [string, "null"]}
+        override_reason: {type: [string, "null"]}
+        max_order_cents: {type: [integer, "null"], format: int64, description: "The order size the override window allows."}
+        credit:
+          $ref: "#/components/schemas/CreditStanding"
+    CreditHoldPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHold"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    CreditHoldPlaceRequest:
+      type: object
+      required: [customer_id, reason]
+      properties:
+        customer_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        hold_type: {type: string, enum: [manual, over_limit, past_due], default: manual}
+    CreditHoldReleaseRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 500}
+    CreditHoldOverrideRequest:
+      type: object
+      required: [override_reason, override_until]
+      properties:
+        override_reason: {type: string, minLength: 1, maxLength: 500}
+        override_until: {type: string, format: date-time, description: "A future instant: the window the override buys."}
+        max_order_cents: {type: [integer, "null"], format: int64}
+    CreditHoldEvaluateRequest:
+      type: object
+      required: []
+      properties:
+        dry_run: {type: boolean, default: true}
+        customer_ids:
+          type: array
+          description: "Absent, every active credit account; present, exactly these."
+          items: {type: string, format: uuid}
+    CreditHoldPlacement:
+      type: object
+      required: [customer_id, hold_type, reason]
+      properties:
+        customer_id: {type: string, format: uuid}
+        hold_type: {type: string, enum: [over_limit, past_due]}
+        reason: {type: string}
+        hold_id: {type: string, format: uuid, description: "Set on an executed sweep; empty on a dry run."}
+    CreditHoldReleaseRecord:
+      type: object
+      required: [hold_id, customer_id, reason]
+      properties:
+        hold_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        reason: {type: string}
+    CreditHoldEvaluation:
+      type: object
+      required: [dry_run, evaluated, would_place, would_release, placed, released]
+      properties:
+        dry_run: {type: boolean}
+        evaluated: {type: integer, description: "The accounts the sweep read."}
+        would_place:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHoldPlacement"}
+        would_release:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHoldReleaseRecord"}
+        placed: {type: integer, description: "Zero on a dry run."}
+        released: {type: integer, description: "Zero on a dry run."}
+    CreditLimitChange:
+      type: object
+      required: [id, customer_id, old_limit_cents, new_limit_cents, requested_by, approved_by, status, reason, created_at, decided_at]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        old_limit_cents: {type: integer, format: int64}
+        new_limit_cents: {type: integer, format: int64}
+        requested_by: {type: [string, "null"]}
+        approved_by: {type: [string, "null"]}
+        status: {type: string, enum: [pending, approved, rejected]}
+        reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: [string, "null"], format: date-time}
+    CreditLimitChangePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CreditLimitChange"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    CreditLimitChangeRequest:
+      type: object
+      required: [new_limit_cents, reason]
+      properties:
+        new_limit_cents: {type: integer, format: int64, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        approve: {type: boolean, default: false, description: "true applies the limit in the same act."}
+    ArWorklistRow:
+      type: object
+      required: [customer_id, customer_name, currency, balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, past_due_cents, over_limit_cents, credit_limit_cents, credit_utilization_pct, hold_status, severity_score, recommended_action]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        balance_cents: {type: integer, format: int64}
+        current_cents: {type: integer, format: int64}
+        days_1_30_cents: {type: integer, format: int64}
+        days_31_60_cents: {type: integer, format: int64}
+        days_61_90_cents: {type: integer, format: int64}
+        over_90_cents: {type: integer, format: int64}
+        past_due_cents: {type: integer, format: int64}
+        over_limit_cents: {type: integer, format: int64}
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "null for no limit."}
+        credit_utilization_pct: {type: [integer, "null"], description: "The balance over the limit, percent; null for no limit."}
+        hold_status: {type: string, enum: [none, active, overridden]}
+        hold_id: {type: string, format: uuid}
+        override_until: {type: [string, "null"], format: date-time}
+        severity_score: {type: integer, format: int64}
+        recommended_action: {type: string, enum: [hold, call, send_statement, finance_charge]}
+    ArWorklist:
+      type: object
+      required: [as_of, rows]
+      properties:
+        as_of: {type: string, format: date}
+        rows:
+          type: array
+          items: {$ref: "#/components/schemas/ArWorklistRow"}
+    ArStatementRunItem:
+      type: object
+      required: [id, run_id, customer_id, customer_name, currency, opening_balance_cents, invoices_cents, payments_cents, finance_charges_cents, closing_balance_cents, delivery_status, outbox_id, aging_buckets]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        opening_balance_cents: {type: integer, format: int64, description: "The subledger before period_start."}
+        invoices_cents: {type: integer, format: int64}
+        payments_cents: {type: integer, format: int64}
+        finance_charges_cents: {type: integer, format: int64}
+        closing_balance_cents: {type: integer, format: int64}
+        delivery_status: {type: string, enum: [not_queued, queued, sent, failed, skipped]}
+        outbox_id: {type: [string, "null"], format: uuid, description: "The statement.queued event of a queued item."}
+        aging_buckets:
+          type: object
+          description: "The aging as of period_end: current, days_1_30, days_31_60, days_61_90 and over_90, in cents."
+          additionalProperties: {type: integer, format: int64}
+    ArStatementRun:
+      type: object
+      required: [id, period_start, period_end, as_of_date, status, total_customers, queued_count, sent_count, total_balance_cents, triggered_by, created_at, completed_at]
+      properties:
+        id: {type: string, format: uuid}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        as_of_date: {type: string, format: date}
+        status: {type: string, enum: [running, completed, failed]}
+        total_customers: {type: integer}
+        queued_count: {type: integer}
+        sent_count: {type: integer}
+        total_balance_cents: {type: integer, format: int64}
+        triggered_by: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: [string, "null"], format: date-time}
+        items:
+          type: array
+          description: "On the by-id read and the create answer; the list read carries none."
+          items: {$ref: "#/components/schemas/ArStatementRunItem"}
+    ArStatementRunPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ArStatementRun"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    ArStatementRunRequest:
+      type: object
+      required: []
+      properties:
+        period_start: {type: string, format: date, description: "Default a month before period_end."}
+        period_end: {type: string, format: date, description: "Default today; never after today."}
+        customer_ids:
+          type: array
+          description: "Absent, every customer with a non-zero balance; present, exactly these."
+          items: {type: string, format: uuid}
+        queue_email: {type: boolean, default: false}
+    ArFinanceChargeRunRequest:
+      type: object
+      required: []
+      properties:
+        as_of_date: {type: string, format: date, description: "Default today; never after today."}
+        dry_run: {type: boolean, default: true}
+        customer_ids:
+          type: array
+          description: "Absent, every eligible customer; present, exactly these."
+          items: {type: string, format: uuid}
+    ArFinanceChargeRules:
+      type: object
+      required: [monthly_rate_bps, grace_days, min_charge_cents, min_balance_cents, compound, income_account_code, updated_by, updated_at]
+      properties:
+        monthly_rate_bps: {type: integer, format: int64, minimum: 0, maximum: 100000, description: "10000 basis points is 100 percent a month."}
+        grace_days: {type: integer, minimum: 0, maximum: 365}
+        min_charge_cents: {type: integer, format: int64, minimum: 0}
+        min_balance_cents: {type: integer, format: int64, minimum: 0}
+        compound: {type: boolean, description: "false, the default, never charges on a finance charge invoice."}
+        income_account_code: {type: string, description: "The chart account the charge credits; 4060 by default."}
+        updated_by: {type: [string, "null"]}
+        updated_at: {type: string, format: date-time}
+    ArFinanceChargeItem:
+      type: object
+      required: [id, run_id, customer_id, customer_name, currency, overdue_cents, charge_cents, invoice_id, invoice_number, journal_entry_id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        overdue_cents: {type: integer, format: int64, description: "The basis the charge was taken on."}
+        charge_cents: {type: integer, format: int64}
+        invoice_id: {type: [string, "null"], format: uuid, description: "null on a dry run's preview."}
+        invoice_number: {type: [string, "null"]}
+        journal_entry_id: {type: [string, "null"], format: uuid, description: "null on a dry run's preview."}
+        created_at: {type: string, format: date-time}
+    ArFinanceChargeRun:
+      type: object
+      required: [id, as_of_date, rate_bps, grace_days, min_charge_cents, status, total_charged_cents, customer_count, triggered_by, created_at, completed_at]
+      properties:
+        id: {type: string, format: uuid}
+        as_of_date: {type: string, format: date}
+        rate_bps: {type: integer, format: int64}
+        grace_days: {type: integer}
+        min_charge_cents: {type: integer, format: int64}
+        status: {type: string, enum: [running, completed, failed, dry_run]}
+        total_charged_cents: {type: integer, format: int64}
+        customer_count: {type: integer}
+        triggered_by: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: [string, "null"], format: date-time, description: "null on a dry run: a preview never completes."}
+        items:
+          type: array
+          description: "On the by-id read and the run answer; the list read carries none."
+          items: {$ref: "#/components/schemas/ArFinanceChargeItem"}
+    ArFinanceChargeRunPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ArFinanceChargeRun"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
     ActivityType:
       type: string
       description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.

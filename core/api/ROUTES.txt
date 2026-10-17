@@ -109,9 +109,25 @@ POST	/api/v1/apps/{key}/enable	pkg/apps	h.handleEnable
 GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
 GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
 POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
+GET	/api/v1/ar/credit-holds	internal/account	wrap(guard, h.HandleListCreditHolds)
+POST	/api/v1/ar/credit-holds	internal/account	wrap(finance, h.HandlePlaceCreditHold)
+POST	/api/v1/ar/credit-holds/evaluate	internal/account	wrap(finance, h.HandleEvaluateCreditHolds)
+POST	/api/v1/ar/credit-holds/{id}/override	internal/account	wrap(finance, h.HandleOverrideCreditHold)
+POST	/api/v1/ar/credit-holds/{id}/release	internal/account	wrap(finance, h.HandleReleaseCreditHold)
+GET	/api/v1/ar/customers/{id}/credit-limit-changes	internal/account	wrap(guard, h.HandleListCreditLimitChanges)
+POST	/api/v1/ar/customers/{id}/credit-limit-changes	internal/account	wrap(finance, h.HandleRequestCreditLimitChange)
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
 POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
+GET	/api/v1/ar/finance-charges/rules	internal/account	wrap(guard, h.HandleGetFinanceChargeRules)
+PUT	/api/v1/ar/finance-charges/rules	internal/account	wrap(finance, h.HandleUpdateFinanceChargeRules)
+GET	/api/v1/ar/finance-charges/runs	internal/account	wrap(guard, h.HandleListFinanceChargeRuns)
+POST	/api/v1/ar/finance-charges/runs	internal/account	wrap(finance, h.HandleRunFinanceCharges)
+GET	/api/v1/ar/finance-charges/runs/{id}	internal/account	wrap(guard, h.HandleGetFinanceChargeRun)
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
+GET	/api/v1/ar/statements/runs	internal/account	wrap(guard, h.HandleListStatementRuns)
+POST	/api/v1/ar/statements/runs	internal/account	wrap(finance, h.HandleCreateStatementRun)
+GET	/api/v1/ar/statements/runs/{id}	internal/account	wrap(guard, h.HandleGetStatementRun)
+GET	/api/v1/ar/worklist	internal/account	wrap(guard, h.HandleWorklist)
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
