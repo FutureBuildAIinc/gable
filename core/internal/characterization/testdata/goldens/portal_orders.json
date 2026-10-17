@@ -653,16 +653,11 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 201,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-27>"
-        }
+        "message": "Order draft created successfully",
+        "order_id": "<id-27>"
       }
     }
   },

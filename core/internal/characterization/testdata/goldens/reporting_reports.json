@@ -10,15 +10,15 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
-          "CASH": 21.54,
+          "CASH": 15.68,
           "CHECK": 1986.03
         },
         "date": "<day+0>",
-        "net_collected": 1979.57,
-        "received": 2007.57,
+        "net_collected": 1973.71,
+        "received": 2001.71,
         "refunds": 28,
-        "total_collected": 1979.57,
-        "transaction_count": 4
+        "total_collected": 1973.71,
+        "transaction_count": 3
       }
     }
   },
