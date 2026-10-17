@@ -94,8 +94,8 @@ export class GableWorkShell extends LitElement {
   @state() private _leaveOutcome: FrameSignOutOutcome | 'ended-by-app' | '' = '';
 
   private _leaving = false;
-  private _devName = '';
-  private _devRole = 'owner';
+  @state() private _devName = '';
+  @state() private _devRole = 'owner';
   private _offTheme: (() => void) | null = null;
 
   private _onResize = () => {
@@ -367,19 +367,32 @@ export class GableWorkShell extends LitElement {
                   }}
                   class="w-full mb-4 rounded-lg border border-white/10 bg-deep-space px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-gable-green/50"
                 />
-                <label class="block text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1.5" for="door-role"
-                  >Role</label
-                >
-                <select
-                  id="door-role"
-                  .value=${this._devRole}
-                  @change=${(e: Event) => {
-                    this._devRole = (e.target as HTMLSelectElement).value;
-                  }}
-                  class="w-full mb-6 rounded-lg border border-white/10 bg-deep-space px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50"
-                >
-                  ${DEV_ROLES.map((r) => html`<option value=${r.id}>${r.label}</option>`)}
-                </select>
+                <span class="block text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1.5" id="door-role-label">
+                  Role
+                </span>
+                <div role="radiogroup" aria-labelledby="door-role-label" class="grid grid-cols-2 gap-2 mb-6">
+                  ${DEV_ROLES.map((r) => {
+                    const picked = r.id === this._devRole;
+                    return html`
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked=${picked ? 'true' : 'false'}
+                        data-role=${r.id}
+                        @click=${() => {
+                          this._devRole = r.id;
+                        }}
+                        class=${`rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                          picked
+                            ? 'border-gable-green/50 bg-gable-green/10 text-gable-green font-semibold'
+                            : 'border-white/10 bg-deep-space text-zinc-300 hover:border-white/20'
+                        }`}
+                      >
+                        ${r.label}
+                      </button>
+                    `;
+                  })}
+                </div>
                 <button
                   type="button"
                   data-testid="door-sign-in"
