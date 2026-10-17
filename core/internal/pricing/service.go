@@ -10,9 +10,6 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/gablelbm/gable/internal/customer"
-	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -32,7 +29,13 @@ type Service struct {
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	s := &Service{repo: repo}
+	if r, ok := repo.(*PostgresRepository); ok && r != nil && r.db != nil {
+		s.resolveRepo = NewResolveRepository(r.db)
+	} else if r, ok := repo.(ResolveRepository); ok {
+		s.resolveRepo = r
+	}
+	return s
 }
 
 // WithOutbox wires the recorder of the pricing rule events.
@@ -68,96 +71,10 @@ func (s *Service) WithCategoryPricing(catSvc *CategoryPricingService) {
 	s.catSvc = catSvc
 }
 
-// The compatibility entry points (ADR 0006 section 9.1): the signatures and
-// result shapes cycle 2 built against, answered over Resolve. The customer
-// argument is read for its id only; the float64 base price argument is
-// ignored (Resolve reads the reference itself, the value callers pass
-// today); the branch comes from the request's branch context. Under the
-// stocking unit hold every answer is per the stocking unit, and an answer
-// in any other unit is the adapters' assertion ErrPriceUnitNotStock,
-// unreachable through the database and proved by a test with a fake
-// repository.
-
-// CalculatePrice is the one quantity call.
-func (s *Service) CalculatePrice(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64) (CalculatedPrice, error) {
-	return s.CalculatePriceWithQty(ctx, cust, productID, basePrice, 1, nil)
-}
-
-// CalculatePriceWithQty prices one line of any quantity.
-func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64, quantity float64, jobID *uuid.UUID) (CalculatedPrice, error) {
-	scaled, err := s.CalculateScaled(ctx, cust, productID, basePrice, quantity, jobID)
-	if err != nil {
-		return CalculatedPrice{}, err
-	}
-	return CalculatedPrice{
-		ProductID:     productID,
-		OriginalPrice: basePrice,
-		FinalPrice:    scaled.Float64(),
-		DiscountPct:   discountPct(scaled.Reference, scaled.Price),
-		Source:        scaled.Source,
-		Details:       scaled.Details,
-	}, nil
-}
-
-// CalculateScaled is the same waterfall with the exact scale 4 answer.
-func (s *Service) CalculateScaled(ctx context.Context, cust *customer.Customer, productID uuid.UUID, basePrice float64, quantity float64, jobID *uuid.UUID) (ScaledPrice, error) {
-	if s.resolveRepo == nil {
-		return ScaledPrice{}, fmt.Errorf("the pricing engine has no resolve repository wired")
-	}
-	qrat, err := ratOfFloat(quantity)
-	if err != nil {
-		return ScaledPrice{}, fmt.Errorf("the quantity is not a number: %w", err)
-	}
-	qty, err := quantityOfRat(qrat)
-	if err != nil {
-		return ScaledPrice{}, err
-	}
-	req := Request{
-		ProductID: productID,
-		Quantity:  qty,
-		JobID:     jobID,
-		BranchID:  middleware.BranchIDForQuery(ctx),
-	}
-	if cust != nil {
-		req.CustomerID = cust.ID
-	}
-	res, err := s.Resolve(ctx, req)
-	if err != nil {
-		return ScaledPrice{}, err
-	}
-	// The hold: every price is per the stocking unit until C3-2B, so today's
-	// callers stay right. An answer in another unit never leaves here.
-	facts, err := s.resolveRepo.ProductPricingFacts(ctx, productID)
-	if err != nil {
-		return ScaledPrice{}, err
-	}
-	if res.PriceUOM != facts.StockUOM {
-		return ScaledPrice{}, ErrPriceUnitNotStock
-	}
-	return ScaledPrice{
-		Price:     res.UnitPrice,
-		Source:    res.PriceBasis,
-		Details:   res.Details,
-		Reference: res.ReferencePrice,
-	}, nil
-}
-
-// discountPct is the compatibility answer's display percentage: the exact
-// discount from the reference price to the answer, as a percentage rounded
-// to two places, half away from zero.
-func discountPct(reference, final httpx.Price) float64 {
-	ref := ratOfPrice(reference)
-	if ref.Sign() <= 0 {
-		return 0
-	}
-	pct := new(big.Rat).Sub(ref, ratOfPrice(final))
-	pct.Quo(pct, ref)
-	pct.Mul(pct, big.NewRat(100, 1))
-	// Round to two places of a percent: pct x 100, rounded, / 100.
-	scaled := roundHalfAway(new(big.Int).Mul(pct.Num(), big.NewInt(100)), pct.Denom())
-	f, _ := new(big.Rat).SetFrac(scaled, big.NewInt(100)).Float64()
-	return f
-}
+// The stocking unit hold of ADR 0006 section 9.1 is lifted as of C3-2B: a
+// price may name any price unit of the product, every caller reads Resolve's
+// answer with its unit and pair, and the compatibility entry points
+// (CalculatePrice, CalculatePriceWithQty, CalculateScaled) are gone with it.
 
 // applyRule computes the exact price `rule` produces for base, including
 // margin floor protection, and the human-readable detail string that goes
@@ -271,6 +188,67 @@ func selectRule(rules []PricingRule, base *big.Rat) (PricingRule, *big.Rat, stri
 	}
 
 	return best, bestPrice, bestDetails, true
+}
+
+// selectRuleResolved is selectRule as the engine runs it: the same band tie
+// among quantity break rules compares exact rationals per stocking unit
+// (ADR 0006 section 5.3), because two fixed prices may sit in different
+// units; the winner keeps its own value and unit.
+func (s *Service) selectRuleResolved(ctx context.Context, productID uuid.UUID, rules []PricingRule, base *big.Rat, refUOM string) (PricingRule, *big.Rat, string, bool) {
+	lead := -1
+	var bestPrice, bestPerStock *big.Rat
+	var bestDetails string
+	for i, r := range rules {
+		price, details, ok := applyRule(r, base)
+		if !ok {
+			continue // inert rule: no pricing action defined
+		}
+		ps, err := s.rulePerStock(ctx, productID, r, price, refUOM)
+		if err != nil {
+			return PricingRule{}, nil, "", false
+		}
+		lead, bestPrice, bestDetails, bestPerStock = i, price, details, ps
+		break
+	}
+	if lead < 0 {
+		return PricingRule{}, nil, "", false
+	}
+
+	best := rules[lead]
+	if best.RuleType != RuleTypeQuantityBreak {
+		return best, bestPrice, bestDetails, true
+	}
+
+	for _, r := range rules[lead+1:] {
+		if r.RuleType != RuleTypeQuantityBreak || r.Priority != best.Priority {
+			continue // different band: priority and the waterfall order decide
+		}
+		price, details, ok := applyRule(r, base)
+		if !ok {
+			continue
+		}
+		ps, err := s.rulePerStock(ctx, productID, r, price, refUOM)
+		if err != nil {
+			return PricingRule{}, nil, "", false
+		}
+		if c := ps.Cmp(bestPerStock); c < 0 ||
+			(c == 0 && r.MinQuantity > best.MinQuantity) {
+			best, bestPrice, bestDetails, bestPerStock = r, price, details, ps
+		}
+	}
+
+	return best, bestPrice, bestDetails, true
+}
+
+// rulePerStock is one candidate's price as an exact rational per the
+// product's stocking unit: a fixed price in its own unit, a derived price in
+// the reference's unit.
+func (s *Service) rulePerStock(ctx context.Context, productID uuid.UUID, r PricingRule, price *big.Rat, refUOM string) (*big.Rat, error) {
+	uom := refUOM
+	if r.FixedPrice != nil && r.PriceUOM != "" {
+		uom = r.PriceUOM
+	}
+	return s.perStock(ctx, productID, priceOfRat(price), uom)
 }
 
 // CreateRule writes a new pricing rule with its audit row and its

@@ -21799,9 +21799,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -21866,7 +21870,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -21882,6 +21886,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -21896,6 +21915,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -22307,9 +22331,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -22375,7 +22403,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -22391,6 +22419,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -22405,6 +22448,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -23192,9 +23240,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -23256,7 +23308,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -23272,6 +23324,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -23286,6 +23353,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -23359,9 +23431,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -23427,7 +23503,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -23443,6 +23519,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -23457,6 +23548,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -24911,7 +25007,7 @@ components:
           description: Float dollars.
     PortalCartItem:
       type: object
-      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available]
+      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available, uom, price_uom, uom_qty, price_uom_qty]
       properties:
         id:
           type: string
@@ -24934,6 +25030,14 @@ components:
           type: number
           description: Float dollars.
         available:
+          type: number
+        uom:
+          type: string
+        price_uom:
+          type: string
+        uom_qty:
+          type: number
+        price_uom_qty:
           type: number
     PortalAddToCartRequest:
       type: object
@@ -25475,7 +25579,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -25491,9 +25595,13 @@ components:
         price_uom: {type: [string, "null"], description: "The unit the price is per; equals uom unless the pair converts."}
         uom_qty: {type: [string, "null"], description: "The pair side in the sale unit; 1 and 1 when the units agree."}
         price_uom_qty: {type: [string, "null"]}
+        stock_uom: {type: [string, "null"]}
+        stock_quantity: {type: [string, "null"]}
+        tally: {oneOf: [{$ref: "#/components/schemas/Tally"}, {type: "null"}]}
         unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "Scale 4; null on a text line."}
         priced_unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "The price before an override or discount moved it."}
         price_source: {type: string, enum: [price_list, quote, override, manual, none]}
+        price_basis: {type: [string, "null"]}
         override_reason: {type: [string, "null"]}
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}

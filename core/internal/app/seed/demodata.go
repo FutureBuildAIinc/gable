@@ -1032,10 +1032,10 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	// statement per order, the product's own description, SKU and unit.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
-			description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+			description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, priced_unit_price, price_source, line_total, taxable,
 			quantity_allocated, quantity_fulfilled, created_at)
 		SELECT $1, l.product_id, l.qty, l.unit_tt::numeric / 10000, 'PRODUCT', l.pos,
-			COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1,
+			COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, l.qty,
 			l.unit_tt::numeric / 10000, 'PRICE_LIST', l.total_c::numeric / 100, TRUE, 0, l.qty, $7
 		FROM unnest($2::uuid[], $3::numeric[], $4::bigint[], $5::bigint[], $6::int[]) AS l(product_id, qty, unit_tt, total_c, pos)
 		JOIN products p ON p.id = l.product_id`,
@@ -1056,9 +1056,9 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
-			quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable, created_at)
+			quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, price_each, price_source, line_total, taxable, created_at)
 		SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
-			ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable, $3
+			ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.stock_uom, ol.stock_quantity, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable, $3
 		FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID, day); err != nil {
 		return seedInvoice{}, fmt.Errorf("invoice lines: %w", err)
 	}

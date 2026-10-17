@@ -240,6 +240,17 @@ func canonicalRatio(num, den *big.Int) (Pair, error) {
 	return integerTermsPair(num, den)
 }
 
+// CanonicalRatio is Canonical over an exact rational given as its positive
+// integer terms, for a ratio computed outside a pair's sides (a line's
+// stocking pair, derived from its stored pair and its two quantities). num
+// and den must be positive.
+func CanonicalRatio(num, den *big.Int) (Pair, error) {
+	if num.Sign() <= 0 || den.Sign() <= 0 {
+		return Pair{}, fmt.Errorf("a pair's sides are positive")
+	}
+	return canonicalRatio(num, den)
+}
+
 // One is the pair of two equal units, 1 and 1.
 func One() Pair { return Pair{A: 10_000, B: 10_000} }
 

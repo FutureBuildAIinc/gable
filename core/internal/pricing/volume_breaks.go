@@ -5,12 +5,17 @@ package pricing
 
 import (
 	"context"
+	"fmt"
+	"math/big"
 	"sort"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
+
+// OneQuantity is the quantity 1 at the wire scale, the ladder's baseline.
+const OneQuantity httpx.Quantity = 10_000
 
 // VolumeBreak is one rung of the "buy N and the unit price drops" ladder for a
 // (customer, product) pair.
@@ -68,20 +73,32 @@ func (s *Service) VolumeBreaks(ctx context.Context, cust *customer.Customer, pro
 
 	// The single-unit price is the baseline every rung has to beat. It is the
 	// same number the catalog already shows as customer_price.
-	unit, err := s.CalculateScaled(ctx, cust, productID, basePrice, 1, nil)
+	unit, err := s.resolveLine(ctx, cust.ID, productID, OneQuantity, "")
 	if err != nil {
 		return nil, err
 	}
 
 	sort.Slice(quantities, func(i, j int) bool { return quantities[i] < quantities[j] })
 
+	// The comparisons run per stocking unit (ADR 0006 section 5.3): two
+	// answers may sit in different units, and only the exact rational per
+	// stocking unit compares them; the winner keeps its own value and unit.
+	unitPerStock, err := s.perStock(ctx, productID, unit.UnitPrice, unit.PriceUOM)
+	if err != nil {
+		return nil, err
+	}
 	breaks := make([]VolumeBreak, 0, len(quantities))
-	prevPrice := unit.Price
+	prevPerStock := new(big.Rat).Set(unitPerStock)
+	prevPrice := unit.UnitPrice
 	for _, qty := range quantities {
 		if qty <= 1 {
 			continue
 		}
-		cp, err := s.CalculateScaled(ctx, cust, productID, basePrice, qtyFloat(qty), nil)
+		cp, err := s.resolveLine(ctx, cust.ID, productID, qty, "")
+		if err != nil {
+			return nil, err
+		}
+		cpPerStock, err := s.perStock(ctx, productID, cp.UnitPrice, cp.PriceUOM)
 		if err != nil {
 			return nil, err
 		}
@@ -90,21 +107,65 @@ func (s *Service) VolumeBreaks(ctx context.Context, cust *customer.Customer, pro
 		// Each side of the comparison is the engine's own answer, itself the
 		// one scale 4 rounding of the exact price, so the ladder advertises
 		// exactly what the engine bills.
-		if cp.Price >= unit.Price || cp.Price >= prevPrice {
+		if cpPerStock.Cmp(unitPerStock) >= 0 || cpPerStock.Cmp(prevPerStock) >= 0 {
 			continue
 		}
-		saves := unit.Price - cp.Price
+		saves := new(big.Rat).Sub(unitPerStock, cpPerStock)
+		savesCents := new(big.Int).Quo(new(big.Int).Add(new(big.Int).Mul(saves.Num(), big.NewInt(10_000)), new(big.Int).Div(saves.Denom(), big.NewInt(2))), saves.Denom())
 		breaks = append(breaks, VolumeBreak{
 			MinQuantity:  qtyFloat(qty),
-			UnitPrice:    cp.Float64(),
-			Source:       cp.Source,
+			UnitPrice:    priceFloat(cp.UnitPrice),
+			Source:       cp.PriceBasis,
 			Details:      cp.Details,
-			SavesPerUnit: float64(saves) / 10_000,
+			SavesPerUnit: priceFloatOfRatCents(savesCents),
 		})
-		prevPrice = cp.Price
+		prevPerStock = cpPerStock
+		prevPrice = cp.UnitPrice
 	}
+	_ = prevPrice
 
 	return breaks, nil
+}
+
+// resolveLine is VolumeBreaks' view of one Resolve answer.
+func (s *Service) resolveLine(ctx context.Context, customerID, productID uuid.UUID, qty httpx.Quantity, uom string) (Resolved, error) {
+	if s.resolveRepo == nil {
+		return Resolved{}, fmt.Errorf("the pricing engine has no resolve repository wired")
+	}
+	return s.Resolve(ctx, Request{CustomerID: customerID, ProductID: productID, Quantity: qty, UOM: uom})
+}
+
+// perStock converts a price in uom into an exact rational per the product's
+// stocking unit, for comparisons only (R3): the winner keeps its own value
+// and unit.
+func (s *Service) perStock(ctx context.Context, productID uuid.UUID, price httpx.Price, uom string) (*big.Rat, error) {
+	facts, err := s.resolveRepo.ProductPricingFacts(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	p := ratOfPrice(price)
+	if uom == "" || uom == facts.StockUOM {
+		return p, nil
+	}
+	row, err := s.resolveRepo.UnitSetRow(ctx, productID, uom)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("the unit %s is not a row of the product's unit set", uom)
+	}
+	// One unit is stock_qty / unit_qty stocking units, so a price per unit
+	// times that ratio is a price per stocking unit.
+	return p.Mul(p, new(big.Rat).SetFrac64(int64(row.StockQty), int64(row.UnitQty))), nil
+}
+
+// priceFloat renders a scale 4 price as the float the result shape carries.
+func priceFloat(p httpx.Price) float64 { return float64(p) / 10_000 }
+
+// priceFloatOfRatCents renders an exact rational of cents as a float.
+func priceFloatOfRatCents(c *big.Int) float64 {
+	f, _ := new(big.Rat).SetFrac(c, big.NewInt(10_000)).Float64()
+	return f
 }
 
 // qtyFloat renders a quantity as the float the result shape carries; the

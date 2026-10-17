@@ -56,8 +56,8 @@ func TestCreateFromSOLine_AReorderDraftIsNotReused(t *testing.T) {
 	}
 	exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'reorder r2 cust', $2, $3)`, cust, "RR-"+cust.String()[:8], s.branchA)
 	exec(`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency) VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`, ord, cust, s.branchA)
-	exec(`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description, is_special_order)
-	      VALUES ($1, $2, $3, 1, 'EA', 'EA', 1, 1, 1, 1, 'r2 special', TRUE)`, soLine, ord, s.product)
+	exec(`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, description, is_special_order)
+	      VALUES ($1, $2, $3, 1, 'EA', 'EA', 1, 1, 'EA', 1, 1, 1, 'r2 special', TRUE)`, soLine, ord, s.product)
 	t.Cleanup(func() {
 		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE id = $1`, soLine)
 		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM orders WHERE id = $1`, ord)

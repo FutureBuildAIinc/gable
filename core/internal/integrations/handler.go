@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -181,20 +182,34 @@ func (h *Handler) BulkCalculatePrice(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		calculated, err := h.pricingSvc.CalculateScaled(r.Context(), cust, productID, prod.BasePrice, float64(item.Quantity), nil)
+		// The engine's own answer (ADR 0006 sections 5.3 and 7.6): the price
+		// in its own unit, the line's pair for the unit the seam shows (the
+		// product's stocking unit), applied so the cents answer per that
+		// unit. The wire shape is frozen; only the arithmetic underneath
+		// changed with the units.
+		res, err := h.pricingSvc.Resolve(r.Context(), pricing.Request{
+			CustomerID: cust.ID,
+			ProductID:  productID,
+			Quantity:   httpx.Quantity(item.Quantity) * 10000,
+			UOM:        string(prod.UOMPrimary),
+		})
 		if err != nil {
 			continue
 		}
+		uq, pq := res.UOMQty, res.PriceUOMQty
+		if uq <= 0 || pq <= 0 {
+			uq, pq = 10000, 10000
+		}
 
-		// The cents the order will bill: the exact price rounded half away
-		// from zero in integers, never truncated; and the total is the
-		// order's own extension, the exact scale 4 price extended once
-		// (3 x 20.025 is 60.075 = 6008 cents), never the rounded unit
-		// price times the quantity (2003 x 3 = 6009, a cent above the
-		// bill for a half cent unit price).
-		unitPriceCents := pricing.CentsOf(calculated.Price)
-		one := httpx.Quantity(10000)
-		totalPriceCents, err := httpx.Extend(httpx.Quantity(item.Quantity)*10000, one, one, calculated.Price)
+		// The cents the order will bill: the exact price converted through
+		// the pair into the display unit, rounded half away from zero once
+		// in integers, never truncated; and the total is the order's own
+		// extension over the pair, exact until that one rounding.
+		per := new(big.Rat).SetInt64(int64(res.UnitPrice))
+		per.Mul(per, new(big.Rat).SetFrac64(int64(pq), int64(uq)))
+		perCents := new(big.Rat).Quo(per, big.NewRat(100, 1))
+		unitPriceCents := new(big.Int).Quo(new(big.Int).Add(perCents.Num(), new(big.Int).Quo(perCents.Denom(), big.NewInt(2))), perCents.Denom()).Int64()
+		totalPriceCents, err := httpx.Extend(httpx.Quantity(item.Quantity)*10000, uq, pq, res.UnitPrice)
 		if err != nil {
 			continue
 		}

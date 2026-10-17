@@ -40,6 +40,7 @@ type LineRequest struct {
 	IsSpecialOrder   *bool           `json:"is_special_order"`
 	VendorID         *string         `json:"vendor_id"`
 	SpecialOrderCost json.RawMessage `json:"special_order_unit_cost_ten_thousandths"`
+	Tally            *TallyRequest   `json:"tally"`
 }
 
 // ParsedLine is one validated request line: the numbers parsed, the defaults
@@ -67,6 +68,9 @@ type ParsedLine struct {
 	IsSpecialOrder   bool
 	VendorID         *uuid.UUID
 	SpecialOrderCost *httpx.Price
+	TallyRows        []TallyRow // nil when the request sent no tally
+	// HasQuantity is false when the quantity comes from the line's tally.
+	HasQuantity bool
 }
 
 // chargeCodePattern is a charge code: one to sixteen uppercase letters,
@@ -179,12 +183,14 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (ParsedLine, bool) 
 		v.Required(path+".description", d.Description)
 	}
 
-	qty, qtyOK := v.Quantity(path+".quantity", l.Quantity, true)
+	hasTally := l.Tally != nil
+	qty, qtyOK := v.Quantity(path+".quantity", l.Quantity, !hasTally)
 	if qtyOK {
 		httpx.CheckLineSign(v, path, qty, 0, false)
 		v.Check(qty > 0, path+".quantity", "must be greater than zero on a sales document")
 		d.Quantity = qty
 	}
+	d.HasQuantity = qtyOK
 
 	// The unit the quantity is in: a product line may leave it to the
 	// product's own unit; a charge line defaults EA below.
@@ -230,8 +236,17 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (ParsedLine, bool) 
 			missing = path + ".price_uom_qty"
 		}
 		v.Check(false, missing, "is required: the conversion is a pair, uom_qty and price_uom_qty together")
-	case d.UOM != "" && d.PriceUOM != d.UOM:
-		v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
+	}
+	// A pair the units' own standard sizes contradict is refused by the
+	// service's unit resolution, which runs once both units are known.
+
+	// The tally of a random length line (ADR 0006 section 4): the rows are
+	// parsed here; the random length, LF and linear feet rules run in the
+	// service's unit resolution, which has the product's set.
+	if hasTally {
+		if rows, ok := ParseTally(v, path, l.Tally); ok {
+			d.TallyRows = rows
+		}
 	}
 
 	// The price. Absent means the document prices the line (a stocked
@@ -339,6 +354,7 @@ func (l *LineRequest) parseText(v *httpx.Validator, path string, d ParsedLine, b
 		{"is_special_order", l.IsSpecialOrder != nil},
 		{"vendor_id", l.VendorID != nil},
 		{"special_order_unit_cost_ten_thousandths", !isAbsent(l.SpecialOrderCost)},
+		{"tally", l.Tally != nil},
 	} {
 		v.Check(!f.present, path+"."+f.name, "is a priced field: a text line carries only a description")
 	}

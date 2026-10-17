@@ -893,10 +893,10 @@ func Run() {
 				// the migration backfilled for history, so seeded rows and
 				// migrated rows agree.
 				db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
-						description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+						description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, priced_unit_price, price_source, line_total, taxable,
 						quantity_allocated, quantity_fulfilled)
 					SELECT $1, $2, $3, $4, 'PRODUCT', $5,
-						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
+						COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, $3, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
 						CASE WHEN $6 = 'CONFIRMED' THEN $3 ELSE 0 END,
 						CASE WHEN $6 = 'FULFILLED' THEN $3 ELSE 0 END
 					FROM products p WHERE p.id = $2`,
@@ -940,9 +940,9 @@ func Run() {
 					invoiceIDs = append(invoiceIDs, invID)
 					// the billed lines: the order's, in the shared line shape
 					db.Exec(`INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
-							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
+							quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, price_each, price_source, line_total, taxable)
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
-							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
+							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.stock_uom, ol.stock_quantity, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
 					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: invoiceDay,
 						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
@@ -1024,8 +1024,8 @@ func Run() {
 			price := prod.Price
 			lineTotal := float64(qty) * price
 			total += lineTotal
-			db.Exec(`INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, unit_price, line_total)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, quoteID, skuToID[prod.SKU], prod.SKU, prod.Desc, qty, prod.UOM, price, lineTotal)
+			db.Exec(`INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, stock_uom, stock_quantity, unit_price, line_total)
+				VALUES ($1,$2,$3,$4,$5,$6,$6,$5,$7,$8)`, quoteID, skuToID[prod.SKU], prod.SKU, prod.Desc, qty, prod.UOM, price, lineTotal)
 		}
 		db.Exec("UPDATE quotes SET total_amount=$1 WHERE id=$2", total, quoteID)
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -480,10 +481,11 @@ type FulfilBody struct {
 	DeliveryID *string         `json:"delivery_id"`
 }
 
-// FulfilEntry names one order line and the quantity to bill.
+// FulfilEntry names one order line and the quantity or sub-tally to bill.
 type FulfilEntry struct {
-	OrderLineID *string         `json:"order_line_id"`
-	Quantity    json.RawMessage `json:"quantity"`
+	OrderLineID *string                `json:"order_line_id"`
+	Quantity    json.RawMessage        `json:"quantity"`
+	Tally       *salesdoc.TallyRequest `json:"tally"`
 }
 
 // HandleFulfil bills the allocated quantities: 201 with the updated order (its
@@ -516,8 +518,17 @@ func (h *Handler) HandleFulfil(w http.ResponseWriter, r *http.Request) {
 		if lineID, ok := v.UUID(path+".order_line_id", e.OrderLineID, true); ok {
 			entry.OrderLineID = lineID
 		}
-		if q, ok := v.Quantity(path+".quantity", e.Quantity, true); ok {
+		if e.Tally != nil {
+			if rows, ok := salesdoc.ParseTally(v, path, e.Tally); ok {
+				entry.Tally = rows
+			}
+			if q, ok := v.Quantity(path+".quantity", e.Quantity, false); ok {
+				entry.Quantity = q
+				entry.HasQuantity = true
+			}
+		} else if q, ok := v.Quantity(path+".quantity", e.Quantity, true); ok {
 			entry.Quantity = q
+			entry.HasQuantity = true
 		}
 		req.Lines = append(req.Lines, entry)
 	}

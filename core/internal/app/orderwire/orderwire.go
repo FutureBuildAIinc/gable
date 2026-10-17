@@ -14,20 +14,20 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/config"
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -49,9 +49,9 @@ type Deps struct {
 	// Accounts is the AR core the fulfilment applies the order's deposits
 	// through (ADR 0005 5.6 step 7); nil leaves deposits unapplied.
 	Accounts *account.Service
-	// Pricing and Customers back the price engine adapter (ADR 0005 section 1).
-	Pricing   *pricing.Service
-	Customers *customer.Service
+	// Pricing backs the price engine seam (ADR 0006 section 7.5): the order
+	// prices through Resolve, the engine's one entry point.
+	Pricing *pricing.Service
 	// Escalators and QuoteLines back the exposure service behind the
 	// pre-ship gate's override route.
 	Escalators pricing.EscalatorRepository
@@ -85,7 +85,7 @@ func New(d Deps) *order.Service {
 		WithOutbox(outbox.NewWriter(d.DB, d.Config.EventsOrg)).
 		WithTxRunner(d.DB).
 		WithAuditLog(auditLog).
-		WithPriceEngine(&PriceEngineAdapter{Pricing: d.Pricing, Customers: d.Customers}).
+		WithPriceEngine(&PriceEngineAdapter{Pricing: d.Pricing}).
 		WithInventory(d.Inventory).
 		WithInvoices(d.Invoices).
 		WithTaxProvider(&TaxProviderAdapter{Svc: NewTaxService(d.DB, d.Config, logger)}).
@@ -117,25 +117,33 @@ func NewTaxService(db *database.DB, cfg *config.Config, logger *slog.Logger) *ta
 	return tax.NewService(tax.NewExemptionRepo(db), avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
 }
 
-// PriceEngineAdapter wraps today's pricing engine at the order boundary
-// (ADR 0005 section 1): the engine answers in dollars, and its result is
-// converted to a scale 4 price once, here, never inside the order module.
+// PriceEngineAdapter is the order boundary on pricing.Resolve (ADR 0006
+// sections 5.3 and 7.5): the engine's answer carries its own unit and the
+// line's conversion pair, exact, and nothing here converts a price.
 type PriceEngineAdapter struct {
-	Pricing   *pricing.Service
-	Customers *customer.Service
+	Pricing *pricing.Service
 }
 
-func (a *PriceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
-	cust, err := a.Customers.GetCustomer(ctx, customerID)
-	if err != nil {
-		return 0, fmt.Errorf("price engine: customer: %w", err)
+func (a *PriceEngineAdapter) PriceFor(ctx context.Context, customerID, productID uuid.UUID, quantity httpx.Quantity, uom string, jobID *uuid.UUID) (salesdoc.EngineAnswer, error) {
+	req := pricing.Request{
+		CustomerID: customerID,
+		ProductID:  productID,
+		Quantity:   quantity,
+		UOM:        uom,
+		JobID:      jobID,
+		BranchID:   middleware.BranchIDForQuery(ctx),
 	}
-	base := float64(basePrice) / 10000
-	cp, err := a.Pricing.CalculatePriceWithQty(ctx, cust, productID, base, float64(quantity)/10000, jobID)
+	res, err := a.Pricing.Resolve(ctx, req)
 	if err != nil {
-		return 0, fmt.Errorf("price engine: %w", err)
+		return salesdoc.EngineAnswer{}, fmt.Errorf("price engine: %w", err)
 	}
-	return httpx.Price(int64(math.Round(cp.FinalPrice * 10000))), nil
+	return salesdoc.EngineAnswer{
+		Price:       res.UnitPrice,
+		PriceUOM:    res.PriceUOM,
+		UOMQty:      res.UOMQty,
+		PriceUOMQty: res.PriceUOMQty,
+		Basis:       string(res.PriceBasis),
+	}, nil
 }
 
 // TaxProviderAdapter is the configured provider path behind the rate

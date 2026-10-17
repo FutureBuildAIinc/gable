@@ -138,6 +138,7 @@ type Store interface {
 	OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, jobID *uuid.UUID) (bool, bool, error)
 	TaxInputs(ctx context.Context, branchID uuid.UUID, shipToID *uuid.UUID) (shipRate, branchRate *string, err error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductRef, error)
+	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error)
 	ChargeCodeByCode(ctx context.Context, code string) (salesdoc.ChargeCode, bool, error)
 }
 

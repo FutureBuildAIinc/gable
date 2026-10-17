@@ -5,7 +5,6 @@ package pricing
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -14,14 +13,6 @@ import (
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
-
-// ErrPriceUnitNotStock is the adapters' assertion (ADR 0006 section 9.1):
-// from C3-2A-pricing until C3-2B every price is in the product's stocking
-// unit, so an answer in any other unit is unreachable through the database
-// (the hold's triggers refuse it) and the compatibility entry points refuse
-// it here. A fake repository proves the assertion, because the database
-// cannot hold such a price.
-var ErrPriceUnitNotStock = errors.New("a price unit other than the stocking unit arrives with C3-2B")
 
 // Request is one line's pricing question (ADR 0006 section 5.3): the
 // customer (zero for an anonymous read, which runs rungs 5 and 6), the
@@ -86,14 +77,16 @@ type resolveAnswer struct {
 // (the branch's base price row when it has one, else the product's base) and
 // the stocking quantity of the request.
 func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
+	if s == nil || s.resolveRepo == nil {
+		return Resolved{}, fmt.Errorf("pricing resolve repository is not wired")
+	}
 	facts, err := s.resolveRepo.ProductPricingFacts(ctx, req.ProductID)
 	if err != nil {
 		return Resolved{}, err
 	}
 
 	// The reference price: the product_prices row (level null, the branch)
-	// if present, else the product's base, each with its own unit. Under the
-	// stocking unit hold both units are the stocking unit.
+	// if present, else the product's base, each with its own unit.
 	ref := facts.BasePrice
 	refUOM := facts.PriceUOM
 	var refRow *ProductPrice
@@ -167,7 +160,10 @@ func (s *Service) Resolve(ctx context.Context, req Request) (Resolved, error) {
 	if err != nil {
 		rules = nil
 	}
-	if winner, priceRat, details, ok := selectRule(rules, refRat); ok {
+	// The tie among same band quantity break rules compares exact rationals
+	// per stocking unit (ADR 0006 section 5.3): two fixed prices may sit in
+	// different units, and only the per stocking unit rational compares them.
+	if winner, priceRat, details, ok := s.selectRuleResolved(ctx, req.ProductID, rules, refRat, refUOM); ok {
 		ans := resolveAnswer{uom: refUOM, details: details, winnerID: &winner.ID}
 		if winner.FixedPrice != nil {
 			ans.price = *winner.FixedPrice
@@ -291,9 +287,23 @@ func (s *Service) categoryAnswer(ctx context.Context, program *PricingProgram, o
 		ans.uom = refUOM
 	}
 	if rule.MarginFloorPct != nil && refRat.Sign() > 0 {
-		minPrice := applyMarkdown(refRat, ratOfQuantity(*rule.MarginFloorPct))
-		if price.Cmp(minPrice) < 0 {
-			price = minPrice
+		// The floor lives in the reference's unit and the price may not
+		// (a cost markup answers in the stocking unit, a fixed rule price
+		// in its own), so the comparison converts both to an exact rational
+		// per stocking unit; the winner keeps its own value and unit
+		// (ADR 0006 section 5.3).
+		floor := applyMarkdown(refRat, ratOfQuantity(*rule.MarginFloorPct))
+		pricePerStock, err := s.perStock(ctx, req.ProductID, priceOfRat(price), ans.uom)
+		if err != nil {
+			return resolveAnswer{}, false, err
+		}
+		floorPerStock, err := s.perStock(ctx, req.ProductID, priceOfRat(floor), refUOM)
+		if err != nil {
+			return resolveAnswer{}, false, err
+		}
+		if pricePerStock.Cmp(floorPerStock) < 0 {
+			price = floor
+			ans.uom = refUOM
 			ans.details = fmt.Sprintf("%s (margin floor applied)", ans.details)
 		}
 	}
@@ -344,11 +354,11 @@ func (s *Service) levelAnswer(ctx context.Context, program *PricingProgram, on t
 			if err != nil {
 				return resolveAnswer{}, false, err
 			}
-			// A replacement cost is readable only per the stocking unit
-			// while the hold stands; a vendor cost in any other purchase
-			// unit falls back to the average cost, named in the details.
-			if cost != nil && cost.PurchaseUOM == facts.StockUOM && cost.UnitCost > 0 {
-				return resolveAnswer{price: priceOfRat(applyMarkupPercent(ratOfPrice(cost.UnitCost), adjust)), uom: facts.StockUOM, basis: SourceLevel, details: details}, true, nil
+			// The hold is lifted (C3-2B): a replacement cost answers in the
+			// vendor cost's own purchase unit, whatever unit that is, and
+			// the line's pair carries the conversion.
+			if cost != nil && cost.UnitCost > 0 {
+				return resolveAnswer{price: priceOfRat(applyMarkupPercent(ratOfPrice(cost.UnitCost), adjust)), uom: cost.PurchaseUOM, basis: SourceLevel, details: details}, true, nil
 			}
 		}
 		// Falling back to the average cost, which the AVERAGE_COST arm

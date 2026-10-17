@@ -332,9 +332,9 @@
             "sku": "LUM-2412-PREM"
           },
           {
-            "avg_daily": 5.54,
-            "new_point": 59,
-            "new_qty": 167,
+            "avg_daily": 5.52,
+            "new_point": 58,
+            "new_qty": 166,
             "old_point": 200,
             "old_qty": 500,
             "product_id": "<id-32>",
@@ -966,9 +966,9 @@
             "sku": "LUM-2412-PREM"
           },
           {
-            "avg_daily": 16.63,
-            "new_point": 175,
-            "new_qty": 499,
+            "avg_daily": 16.57,
+            "new_point": 174,
+            "new_qty": 497,
             "old_point": 200,
             "old_qty": 500,
             "product_id": "<id-32>",
@@ -1597,9 +1597,9 @@
             "sku": "LUM-2412-PREM"
           },
           {
-            "avg_daily": 5.54,
-            "new_point": 59,
-            "new_qty": 167,
+            "avg_daily": 5.52,
+            "new_point": 58,
+            "new_qty": 166,
             "old_point": 200,
             "old_qty": 500,
             "product_id": "<id-32>",

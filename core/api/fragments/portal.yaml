@@ -1646,7 +1646,7 @@ components:
           description: Float dollars.
     PortalCartItem:
       type: object
-      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available]
+      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available, uom, price_uom, uom_qty, price_uom_qty]
       properties:
         id:
           type: string
@@ -1669,6 +1669,14 @@ components:
           type: number
           description: Float dollars.
         available:
+          type: number
+        uom:
+          type: string
+        price_uom:
+          type: string
+        uom_qty:
+          type: number
+        price_uom_qty:
           type: number
     PortalAddToCartRequest:
       type: object

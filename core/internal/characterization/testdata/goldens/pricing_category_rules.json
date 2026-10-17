@@ -666,6 +666,7 @@
             },
             "performed_at": "<ts+0d>",
             "performed_by": "system",
+            "price_level_id": "<id-2>",
             "rule_id": "<id-3>",
             "target_type": "LEVEL"
           },
@@ -684,6 +685,7 @@
             },
             "performed_at": "<ts+0d>",
             "performed_by": "system",
+            "price_level_id": "<id-2>",
             "rule_id": "<id-3>",
             "target_type": "LEVEL"
           }
@@ -746,12 +748,12 @@
       ]
     },
     "response": {
-      "status": 500,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "internal_error",
-          "message": "internal error"
+          "code": "duplicate",
+          "message": "an active rule already exists for this target and category"
         },
         "meta": {
           "request_id": "<id-21>"

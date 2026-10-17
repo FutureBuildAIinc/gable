@@ -1174,8 +1174,8 @@ func TestBranchWall_PORecommendationScoping(t *testing.T) {
 			t.Fatalf("seed order: %v", err)
 		}
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description)
-			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 1, $4, 'wall')`,
+			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, description)
+			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 'PCS', $4, 1, $4, 'wall')`,
 			uuid.New(), o.id, f.productID, o.qty); err != nil {
 			t.Fatalf("seed order line: %v", err)
 		}
@@ -1392,8 +1392,8 @@ func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 			t.Fatalf("seed order: %v", err)
 		}
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description)
-			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 1, $4, 'wall')`,
+			`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, description)
+			 VALUES ($1, $2, $3, $4, 'PCS', 'PCS', 1, 1, 'PCS', $4, 1, $4, 'wall')`,
 			uuid.New(), o.id, f.productID, o.qty); err != nil {
 			t.Fatalf("seed order line: %v", err)
 		}

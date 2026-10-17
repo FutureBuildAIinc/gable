@@ -328,8 +328,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		t.Fatalf("seed pos transactions: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, line_type, price_source)
-		VALUES ($1, $2, $4, 'pin', 1, 'EA', 'EA', 1, 1, 1, 1, 'PRODUCT', 'PRICE_LIST'), ($3, $5, $4, 'pin', 1, 'EA', 'EA', 1, 1, 1, 1, 'PRODUCT', 'PRICE_LIST')`,
+		`INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, line_type, price_source)
+		VALUES ($1, $2, $4, 'pin', 1, 'EA', 'EA', 1, 1, 'EA', 1, 1, 1, 'PRODUCT', 'PRICE_LIST'), ($3, $5, $4, 'pin', 1, 'EA', 'EA', 1, 1, 'EA', 1, 1, 1, 'PRODUCT', 'PRICE_LIST')`,
 		f.lineA, f.txnA, f.lineB, f.posProd, f.txnB); err != nil {
 		t.Fatalf("seed pos lines: %v", err)
 	}
@@ -536,8 +536,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	orderSvc := orderwire.New(orderwire.Deps{
 		DB: db, Config: &config.Config{}, Logger: slog.Default(), AuditLog: audit.NewLogger(db),
 		Inventory: inventory.NewService(inventory.NewRepository(db)), Invoices: invoiceSvc, Accounts: accountSvc,
-		Pricing:   pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db),
-		Customers: customerSvc, Escalators: escRepo, QuoteLines: quoteRepo,
+		Pricing:    pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db),
+		Escalators: escRepo, QuoteLines: quoteRepo,
 	})
 	quoteSvc.WithOrderCreator(orderSvc)
 	wall.orders(mux, orderSvc)
