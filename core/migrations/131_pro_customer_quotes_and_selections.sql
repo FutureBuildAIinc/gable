@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_lines (
     -- where the cost came from: the dealer's catalog price for this account, or
     -- a line of the dealer quote the contractor was given (source_quote_id)
     price_basis               TEXT          NOT NULL DEFAULT 'catalog' CHECK (price_basis IN ('catalog', 'dealer_quote')),
+    priced_at                 TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     option_group_id           UUID          NULL REFERENCES pro_customer_quote_option_groups (id) ON DELETE SET NULL,
     -- tier one: the line's own override, both or neither
     override_kind             TEXT          NULL CHECK (override_kind IN ('markup', 'margin')),

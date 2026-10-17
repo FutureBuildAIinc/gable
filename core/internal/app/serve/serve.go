@@ -96,6 +96,7 @@ var publicAPIPaths = []string{
 	"/api/portal/v1/login",
 	"/api/portal/v1/config",
 	"/api/portal/v1/",
+	"/api/public/v1/",
 	"/api/integration/",
 	"/api/v1/a2a/",
 }
@@ -1003,6 +1004,13 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(auditLog)
 	project.NewHandler(projectSvc).RegisterRoutes(mux, portalChain)
+
+	// Customer quotes: the contractor's quote to their own customer, the
+	// capability link and the dealer's shared project pipeline (wire_customer_quotes.go).
+	wireCustomerQuotes(mux, customerQuoteDeps{
+		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
+		Email: emailSvc, Docs: docSvc, PublicURL: cfg.PublicURL, Trusted: cfg.TrustedProxies,
+	}, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff

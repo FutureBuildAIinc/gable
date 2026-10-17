@@ -141,18 +141,7 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		DeliveryType: deliveryType,
 		Lines:        lines,
 	}
-	// The order is written at the customer's branch: the portal calls the
-	// order service in process, with no branch context of its own to inherit.
-	if cust, cErr := s.customerSvc.GetCustomer(ctx, customerID); cErr == nil && cust.PrimaryBranchID != uuid.Nil {
-		branch := cust.PrimaryBranchID
-		draft.BranchID = &branch
-	}
-
-	// The portal is a trusted in process caller naming the customer's own
-	// branch; it carries no branch context of its own, so the payload branch
-	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
-	// portal's own wall.
-	newOrder, err := s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
+	newOrder, err := s.createPortalOrder(ctx, customerID, draft)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
@@ -187,6 +176,55 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		OrderID: newOrder.ID,
 		Message: "Order placed successfully",
 	}, nil
+}
+
+// createPortalOrder writes a draft order for the customer through the order
+// service, the one call checkout and the customer quote confirmation share.
+func (s *Service) createPortalOrder(ctx context.Context, customerID uuid.UUID, draft *order.Draft) (*order.Order, error) {
+	// The order is written at the customer's branch: the portal calls the
+	// order service in process, with no branch context of its own to inherit.
+	if cust, cErr := s.customerSvc.GetCustomer(ctx, customerID); cErr == nil && cust.PrimaryBranchID != uuid.Nil {
+		branch := cust.PrimaryBranchID
+		draft.BranchID = &branch
+	}
+
+	// The portal is a trusted in process caller naming the customer's own
+	// branch; it carries no branch context of its own, so the payload branch
+	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
+	// portal's own wall.
+	return s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
+}
+
+// PlaceOrderFromLines places the dealer's order for product lines the
+// contractor has already agreed, on the contractor's project, priced by the
+// order service at the account's own prices (the lines carry no price). It is
+// the order half of confirming a customer quote, and it joins the transaction
+// the context carries. customerPO is the contractor's reference.
+func (s *Service) PlaceOrderFromLines(ctx context.Context, customerID, projectID uuid.UUID, customerPO string, lines []salesdoc.ParsedLine) (uuid.UUID, error) {
+	if len(lines) == 0 {
+		return uuid.Nil, fmt.Errorf("an order needs at least one line")
+	}
+	ok, err := s.repo.ProjectBelongsToCustomer(ctx, projectID, customerID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to verify project: %w", err)
+	}
+	if !ok {
+		return uuid.Nil, ErrProjectNotFound
+	}
+	draft := &order.Draft{
+		CustomerID:   customerID,
+		JobID:        &projectID,
+		DeliveryType: order.DeliveryDelivery,
+		Lines:        lines,
+	}
+	if customerPO != "" {
+		draft.CustomerPO = &customerPO
+	}
+	o, err := s.createPortalOrder(ctx, customerID, draft)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to create order: %w", err)
+	}
+	return o.ID, nil
 }
 
 // Ensure imported packages are used.

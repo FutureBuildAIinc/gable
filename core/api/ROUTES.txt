@@ -41,6 +41,24 @@ GET	/api/portal/v1/catalog/{id}	internal/portal	h.HandleGetCatalogProduct
 GET	/api/portal/v1/catalog/{id}/volume-breaks	internal/portal	h.HandleVolumeBreaks
 POST	/api/portal/v1/checkout	internal/portal	h.HandleCheckout
 GET	/api/portal/v1/config	internal/portal	h.HandleGetConfig
+GET	/api/portal/v1/customer-quotes	internal/customerquote	h.List
+POST	/api/portal/v1/customer-quotes	internal/customerquote	h.Create
+GET	/api/portal/v1/customer-quotes/export	internal/customerquote	h.Export
+GET	/api/portal/v1/customer-quotes/settings	internal/customerquote	h.GetSettings
+PUT	/api/portal/v1/customer-quotes/settings	internal/customerquote	h.PutSettings
+DELETE	/api/portal/v1/customer-quotes/settings/logo	internal/customerquote	h.DeleteLogo
+PUT	/api/portal/v1/customer-quotes/settings/logo	internal/customerquote	h.PutLogo
+GET	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Get
+PUT	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Update
+GET	/api/portal/v1/customer-quotes/{id}/approvals	internal/customerquote	h.Approvals
+POST	/api/portal/v1/customer-quotes/{id}/confirm	internal/customerquote	h.Confirm
+POST	/api/portal/v1/customer-quotes/{id}/link/revoke	internal/customerquote	h.Revoke
+POST	/api/portal/v1/customer-quotes/{id}/link/rotate	internal/customerquote	h.Rotate
+GET	/api/portal/v1/customer-quotes/{id}/pdf	internal/customerquote	h.PDF
+GET	/api/portal/v1/customer-quotes/{id}/preview	internal/customerquote	h.Preview
+POST	/api/portal/v1/customer-quotes/{id}/revise	internal/customerquote	h.Revise
+POST	/api/portal/v1/customer-quotes/{id}/send	internal/customerquote	h.Send
+POST	/api/portal/v1/customer-quotes/{id}/withdraw	internal/customerquote	h.Withdraw
 GET	/api/portal/v1/dashboard	internal/portal	h.HandleDashboard
 GET	/api/portal/v1/deliveries	internal/portal	h.HandleListDeliveries
 GET	/api/portal/v1/deliveries/{id}	internal/portal	h.HandleGetDelivery
@@ -69,6 +87,13 @@ POST	/api/portal/v1/quotes/{id}/decline	internal/portal	h.HandleDeclineQuote
 GET	/api/portal/v1/users	internal/portal	h.HandleListUsers
 PUT	/api/portal/v1/users/{id}/role	internal/portal	h.HandleUpdateUserRole
 PUT	/api/portal/v1/users/{id}/status	internal/portal	h.HandleUpdateUserStatus
+GET	/api/public/v1/customer-quotes/{token}	internal/customerquote	h.View
+POST	/api/public/v1/customer-quotes/{token}/accept	internal/customerquote	h.Accept
+POST	/api/public/v1/customer-quotes/{token}/code	internal/customerquote	h.Code
+POST	/api/public/v1/customer-quotes/{token}/decline	internal/customerquote	h.Decline
+GET	/api/public/v1/customer-quotes/{token}/logo	internal/customerquote	h.Logo
+GET	/api/public/v1/customer-quotes/{token}/pdf	internal/customerquote	h.PDF
+PUT	/api/public/v1/customer-quotes/{token}/selections	internal/customerquote	h.Selections
 POST	/api/v1/a2a/purchase-order	cmd/server	a2aReceiver.ReceiveWebhook
 GET	/api/v1/accounts/{id}	internal/account	wrap(guard, h.HandleSummary)
 GET	/api/v1/accounts/{id}/transactions	internal/account	wrap(guard, h.HandleTransactions)
@@ -353,6 +378,9 @@ POST	/api/v1/pricing/rebates/programs/{id}/claims/calculate	internal/pricing	h.H
 GET	/api/v1/pricing/resolve	internal/pricing	h.HandleResolvePreview
 GET	/api/v1/pricing/rules	internal/pricing	h.HandleListRules
 POST	/api/v1/pricing/rules	internal/pricing	h.HandleCreateRule
+GET	/api/v1/pro-projects	internal/customerquote	h.List
+GET	/api/v1/pro-projects/{id}	internal/customerquote	h.Get
+POST	/api/v1/pro-projects/{id}/accept	internal/customerquote	h.Accept
 GET	/api/v1/products	internal/product	h.HandleListProducts
 POST	/api/v1/products	internal/product	h.HandleCreateProduct
 GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts

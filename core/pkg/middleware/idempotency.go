@@ -132,7 +132,7 @@ func devAuthMode() bool {
 // layer inside their auth chain, where the principal that scopes their claims
 // is established. The global layer skips them so no request runs through
 // both.
-var idempotencyOwnedPrefixes = []string{"/api/portal/v1/", "/api/integration/"}
+var idempotencyOwnedPrefixes = []string{"/api/portal/v1/", "/api/integration/", "/api/public/v1/"}
 
 func skipIdempotencyOwnedPrefix(r *http.Request) bool {
 	for _, p := range idempotencyOwnedPrefixes {

@@ -332,17 +332,17 @@ type TotalsInput struct {
 // margin fields are the contractor's own and appear on no customer or dealer
 // surface.
 type Totals struct {
-	MaterialCostCents   int64
-	MaterialSellCents   int64
-	LabourCents         int64
-	OverheadCents       int64
-	SubtotalCents       int64
-	TaxCents            int64
-	TotalCents          int64
-	DepositCents        int64
-	ContractorCostCents int64
-	MarginCents         int64
-	MarginBPS           int64
+	MaterialCostCents   int64 `json:"material_cost_cents"`
+	MaterialSellCents   int64 `json:"material_sell_cents"`
+	LabourCents         int64 `json:"labour_cents"`
+	OverheadCents       int64 `json:"overhead_cents"`
+	SubtotalCents       int64 `json:"subtotal_cents"`
+	TaxCents            int64 `json:"tax_cents"`
+	TotalCents          int64 `json:"total_cents"`
+	DepositCents        int64 `json:"deposit_cents"`
+	ContractorCostCents int64 `json:"contractor_cost_cents"`
+	MarginCents         int64 `json:"margin_cents"`
+	MarginBPS           int64 `json:"margin_bps"`
 }
 
 // IncludedLines returns the material lines a total counts. A standalone line
