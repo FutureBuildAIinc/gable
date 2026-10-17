@@ -182,7 +182,7 @@ const summaryColumns = `
 	ROUND(o.total_amount * 100)::bigint,
 	ROUND(COALESCE((
 		SELECT SUM(cost_sum) FROM (
-			SELECT ROUND(l.quantity * COALESCE(p.average_unit_cost, 0), 2) AS cost_sum
+			SELECT ROUND(COALESCE(l.stock_quantity, l.quantity) * COALESCE(p.average_unit_cost, 0), 2) AS cost_sum
 			FROM order_lines l LEFT JOIN products p ON p.id = l.product_id
 			WHERE l.order_id = o.id
 			  AND l.line_type IN ('PRODUCT', 'COMPONENT') AND l.product_id IS NOT NULL
@@ -510,9 +510,7 @@ func tallyOf(thick, width *int64) *salesdoc.Tally {
 func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []OrderLine) error {
 	ids := make([]uuid.UUID, 0, len(lines))
 	for i := range lines {
-		if lines[i].Tally != nil {
-			ids = append(ids, lines[i].ID)
-		}
+		ids = append(ids, lines[i].ID)
 	}
 	if len(ids) == 0 {
 		return nil
@@ -534,7 +532,10 @@ func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []OrderL
 		}
 		row.LengthFT = httpx.Quantity(length)
 		for i := range lines {
-			if lines[i].ID == lineID && lines[i].Tally != nil {
+			if lines[i].ID == lineID {
+				if lines[i].Tally == nil {
+					lines[i].Tally = &salesdoc.Tally{Rows: []salesdoc.TallyRow{}}
+				}
 				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
 				break
 			}
@@ -546,6 +547,10 @@ func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []OrderL
 	for i := range lines {
 		t := lines[i].Tally
 		if t == nil {
+			continue
+		}
+		if len(t.Rows) == 0 {
+			lines[i].Tally = nil
 			continue
 		}
 		arrow := make([]units.TallyRow, 0, len(t.Rows))
@@ -1353,10 +1358,12 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 }
 
 // LiveBilled is what an order line's invoices not in void already carry: the
-// line totals and the discounts, in cents.
+// line totals and the discounts, in cents, and the billed tally pieces by
+// length.
 type LiveBilled struct {
 	TotalCents    httpx.Cents
 	DiscountCents httpx.Cents
+	TallyPieces   map[httpx.Quantity]int
 }
 
 // LiveBilledByLine reads it for every line of the order that has been billed.
@@ -1377,9 +1384,38 @@ func (r *PostgresRepository) LiveBilledByLine(ctx context.Context, orderID uuid.
 		if err := rows.Scan(&id, &t, &d); err != nil {
 			return nil, fmt.Errorf("failed to scan a live billed line: %w", err)
 		}
-		out[id] = LiveBilled{httpx.Cents(t), httpx.Cents(d)}
+		out[id] = LiveBilled{TotalCents: httpx.Cents(t), DiscountCents: httpx.Cents(d)}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	tallyRows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT il.order_line_id, ROUND(ltr.length_ft * 10000)::bigint, COALESCE(SUM(ltr.pieces), 0)::bigint
+		FROM line_tally_rows ltr
+		JOIN invoice_lines il ON il.id = ltr.invoice_line_id
+		JOIN invoices i ON i.id = il.invoice_id
+		WHERE i.order_id = $1 AND i.status <> 'VOID' AND il.order_line_id IS NOT NULL
+		GROUP BY il.order_line_id, ROUND(ltr.length_ft * 10000)::bigint`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the order's live invoice tallies carry: %w", err)
+	}
+	defer tallyRows.Close()
+	for tallyRows.Next() {
+		var id uuid.UUID
+		var length, pieces int64
+		if err := tallyRows.Scan(&id, &length, &pieces); err != nil {
+			return nil, fmt.Errorf("failed to scan a live billed tally row: %w", err)
+		}
+		lb := out[id]
+		if lb.TallyPieces == nil {
+			lb.TallyPieces = map[httpx.Quantity]int{}
+		}
+		lb.TallyPieces[httpx.Quantity(length)] += int(pieces)
+		out[id] = lb
+	}
+	return out, tallyRows.Err()
 }
 
 // UnbilledRemainderCents is the order's total less the totals of its invoices

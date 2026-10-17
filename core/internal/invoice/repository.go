@@ -359,26 +359,21 @@ func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]
 }
 
 // invoiceLinesOf collects the embedded lines for the tally read.
-func invoiceLinesOf(in []InvoiceLine) []salesdoc.Line {
-	out := make([]salesdoc.Line, len(in))
+func invoiceLinesOf(in []InvoiceLine) []*salesdoc.Line {
+	out := make([]*salesdoc.Line, len(in))
 	for i := range in {
-		out[i] = in[i].Line
+		out[i] = &in[i].Line
 	}
 	return out
 }
 
 // attachLineTallyRows reads the tally rows of a read line slice (ADR 0006
 // section 4.2) back into the slices' tallies by the line column named, and
-// completes the exact linear feet and display board feet. The lines must be
-// the same backing array's copies' sources when callers need the rows back:
-// this helper serves the InvoiceLine and CreditMemoLine reads, whose tally
-// rows ride the embedded Line's pointer.
-func (r *PostgresRepository) attachLineTallyRows(ctx context.Context, lines []salesdoc.Line, lineColumn string) error {
+// completes the exact linear feet and display board feet.
+func (r *PostgresRepository) attachLineTallyRows(ctx context.Context, lines []*salesdoc.Line, lineColumn string) error {
 	ids := make([]uuid.UUID, 0, len(lines))
 	for i := range lines {
-		if lines[i].Tally != nil {
-			ids = append(ids, lines[i].ID)
-		}
+		ids = append(ids, lines[i].ID)
 	}
 	if len(ids) == 0 {
 		return nil
@@ -399,7 +394,10 @@ func (r *PostgresRepository) attachLineTallyRows(ctx context.Context, lines []sa
 		}
 		row.LengthFT = httpx.Quantity(length)
 		for i := range lines {
-			if lines[i].ID == lineID && lines[i].Tally != nil {
+			if lines[i].ID == lineID {
+				if lines[i].Tally == nil {
+					lines[i].Tally = &salesdoc.Tally{Rows: []salesdoc.TallyRow{}}
+				}
 				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
 				break
 			}
@@ -411,6 +409,10 @@ func (r *PostgresRepository) attachLineTallyRows(ctx context.Context, lines []sa
 	for i := range lines {
 		t := lines[i].Tally
 		if t == nil {
+			continue
+		}
+		if len(t.Rows) == 0 {
+			lines[i].Tally = nil
 			continue
 		}
 		arrow := make([]units.TallyRow, 0, len(t.Rows))

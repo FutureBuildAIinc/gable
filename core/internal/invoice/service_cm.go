@@ -471,9 +471,11 @@ func (s *Service) postCredit(ctx context.Context, id uuid.UUID, pre Precondition
 // (not add) on hand, in (product id, line id) order (section 11 step 6).
 func (s *Service) restockLines(ctx context.Context, branchID uuid.UUID, lines []CreditLine, add bool) error {
 	var idx []int
+	var productIDs []uuid.UUID
 	for i := range lines {
 		if lines[i].Restock && lines[i].ProductID != nil && lines[i].Quantity != nil {
 			idx = append(idx, i)
+			productIDs = append(productIDs, *lines[i].ProductID)
 		}
 	}
 	if len(idx) == 0 {
@@ -481,6 +483,30 @@ func (s *Service) restockLines(ctx context.Context, branchID uuid.UUID, lines []
 	}
 	if s.inventory == nil {
 		return errors.New("invoice: the stock seam is not wired")
+	}
+	if st, err := s.store(); err == nil {
+		refs, err := st.LookupProducts(ctx, productIDs)
+		if err != nil {
+			return err
+		}
+		unitSets, err := st.LookupProductUnits(ctx, productIDs)
+		if err != nil {
+			return err
+		}
+		for _, i := range idx {
+			l := &lines[i]
+			if ref, ok := refs[*l.ProductID]; ok && ref.UOMPrimary != "" && l.StockUOM != nil && *l.StockUOM != "" {
+				var setPtr *salesdoc.ProductUnitSet
+				if set, hasSet := unitSets[*l.ProductID]; hasSet {
+					setPtr = &set
+				}
+				resolvedUOM, resolvedQty, err := salesdoc.ResolveStockMove(i, &l.Line, ref.UOMPrimary, setPtr)
+				if err != nil {
+					return err
+				}
+				l.StockUOM, l.StockQuantity = &resolvedUOM, &resolvedQty
+			}
+		}
 	}
 	sort.SliceStable(idx, func(a, b int) bool {
 		la, lb := &lines[idx[a]], &lines[idx[b]]

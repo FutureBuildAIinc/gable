@@ -83,9 +83,17 @@ func (s *Service) buildCredit(ctx context.Context, st Store, d *CreditInput, sou
 	for _, l := range d.Lines {
 		if l.ProductID != nil {
 			productIDs = append(productIDs, *l.ProductID)
+		} else if l.InvoiceLineID != nil {
+			if src, ok := srcLines[*l.InvoiceLineID]; ok && src.ProductID != nil {
+				productIDs = append(productIDs, *src.ProductID)
+			}
 		}
 	}
 	refs, err := st.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	unitSets, err := st.LookupProductUnits(ctx, productIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +125,21 @@ func (s *Service) buildCredit(ctx context.Context, st Store, d *CreditInput, sou
 			if err != nil {
 				return nil, err
 			}
+			if l.Restock && src.ProductID != nil {
+				if ref, ok := refs[*src.ProductID]; ok && ref.UOMPrimary != "" && cl.StockUOM != nil && *cl.StockUOM != "" {
+					var setPtr *salesdoc.ProductUnitSet
+					if set, hasSet := unitSets[*src.ProductID]; hasSet {
+						setPtr = &set
+					}
+					resolvedUOM, resolvedQty, err := salesdoc.ResolveStockMove(i, &cl.Line, ref.UOMPrimary, setPtr)
+					if err != nil {
+						return nil, err
+					}
+					cl.StockUOM, cl.StockQuantity = &resolvedUOM, &resolvedQty
+				}
+			}
 		} else {
-			cl, err = s.freeCreditLine(ctx, st, path, l, refs)
+			cl, err = s.freeCreditLine(ctx, st, path, l, refs, unitSets)
 			if err != nil {
 				return nil, err
 			}
@@ -253,7 +274,7 @@ func creditFromInvoiceLine(path string, d *CreditLineInput, src *InvoiceLine, am
 
 // freeCreditLine builds a credit line that names no invoice line: a price
 // adjustment, a fee given back, goods returned against no invoice, a note.
-func (s *Service) freeCreditLine(ctx context.Context, st Store, path string, d *CreditLineInput, refs map[uuid.UUID]salesdoc.ProductRef) (CreditLine, error) {
+func (s *Service) freeCreditLine(ctx context.Context, st Store, path string, d *CreditLineInput, refs map[uuid.UUID]salesdoc.ProductRef, unitSets map[uuid.UUID]salesdoc.ProductUnitSet) (CreditLine, error) {
 	var cl CreditLine
 	cl.LineType = d.LineType
 	cl.Description = d.Description
@@ -316,18 +337,50 @@ func (s *Service) freeCreditLine(ctx context.Context, st Store, path string, d *
 			sku := ref.SKU
 			cl.SKU = &sku
 			cl.Taxable = ref.Taxable
+			uSet := unitSets[*d.ProductID]
 			if uom == "" {
-				uom = ref.UOMPrimary
+				if uSet.SaleUOM != "" {
+					uom = uSet.SaleUOM
+				} else {
+					uom = ref.UOMPrimary
+				}
 			}
 			if cl.Description == "" {
 				cl.Description = ref.Description
 			}
+			stockUOM := ref.UOMPrimary
+			stockQty := -d.Quantity
+			if uom != stockUOM {
+				uRow, ok := uSet.Row(uom)
+				if !ok || !uRow.Sell {
+					return cl, validationFailed("one or more fields failed validation",
+						httpx.FieldError{Field: path + ".uom", Message: "is not a sale unit of this product"})
+				}
+				converted, err := units.ConvertStock(stockQty, uom, stockUOM, uRow.Pair())
+				if err != nil {
+					var inexact *units.InexactError
+					if errors.As(err, &inexact) {
+						return cl, validationFailed("one or more fields failed validation",
+							httpx.FieldError{Field: path + ".quantity", Message: inexact.Error()})
+					}
+					return cl, validationFailed("one or more fields failed validation",
+						httpx.FieldError{Field: path + ".quantity", Message: "does not convert exactly into the stocking unit " + stockUOM})
+				}
+				stockQty = converted
+			} else if d.UOM != "" && len(uSet.Rows) > 0 {
+				if uRow, ok := uSet.Row(uom); !ok || !uRow.Sell {
+					return cl, validationFailed("one or more fields failed validation",
+						httpx.FieldError{Field: path + ".uom", Message: "is not a sale unit of this product"})
+				}
+			}
+			negStock := -stockQty
+			cl.StockUOM, cl.StockQuantity = &stockUOM, &negStock
 			if d.Restock {
 				cost := ref.AverageCost
 				cl.Restock = true
 				if cost > 0 {
 					cl.UnitCost = &cost
-					cl.CostCents = httpx.Cents(-int64(salesdoc.CostOf(-d.Quantity, cost)))
+					cl.CostCents = httpx.Cents(-int64(salesdoc.CostOf(stockQty, cost)))
 				}
 			}
 		}

@@ -199,9 +199,9 @@ func (r *PostgresRepository) creditLines(ctx context.Context, id uuid.UUID) ([]C
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	plain := make([]salesdoc.Line, len(out))
+	plain := make([]*salesdoc.Line, len(out))
 	for i := range out {
-		plain[i] = out[i].Line
+		plain[i] = &out[i].Line
 	}
 	if err := r.attachLineTallyRows(ctx, plain, "credit_memo_line_id"); err != nil {
 		return nil, err
@@ -523,4 +523,63 @@ func (r *PostgresRepository) ChargeCodeByCode(ctx context.Context, code string) 
 	}
 	c.DefaultUnitPrice = salesdoc.PtrPrice(def)
 	return c, true, nil
+}
+
+// LookupProductUnits reads the unit set of every named product (ADR 0006
+// sections 3.1 and 3.4): the stocking unit and the set rows a free credit
+// line's unit resolves against.
+func (r *PostgresRepository) LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	exec := r.db.GetExecutor(ctx)
+	rows, err := exec.Query(ctx, `
+		SELECT id, uom_primary::text, sale_uom::text, price_uom::text, random_length,
+		       ROUND(COALESCE(board_thickness_in, 0) * 10000)::bigint,
+		       ROUND(COALESCE(board_width_in, 0) * 10000)::bigint,
+		       board_thickness_in IS NOT NULL
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up product unit sets: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var set salesdoc.ProductUnitSet
+		var thick, width int64
+		var hasSection bool
+		if err := rows.Scan(&id, &set.StockUOM, &set.SaleUOM, &set.PriceUOM, &set.RandomLength, &thick, &width, &hasSection); err != nil {
+			return nil, fmt.Errorf("failed to scan a product unit set: %w", err)
+		}
+		if hasSection {
+			t, w := httpx.Quantity(thick), httpx.Quantity(width)
+			set.BoardThick, set.BoardWidth = &t, &w
+		}
+		out[id] = set
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unitRows, err := exec.Query(ctx, `
+		SELECT product_id, uom, ROUND(unit_qty * 10000)::bigint, ROUND(stock_qty * 10000)::bigint,
+		       sell, purchase, price
+		FROM product_units WHERE product_id = ANY($1) ORDER BY uom`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up unit sets: %w", err)
+	}
+	defer unitRows.Close()
+	for unitRows.Next() {
+		var id uuid.UUID
+		var row salesdoc.UnitSetRow
+		var unitQty, stockQty int64
+		if err := unitRows.Scan(&id, &row.UOM, &unitQty, &stockQty, &row.Sell, &row.Purchase, &row.Price); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit set row: %w", err)
+		}
+		row.UnitQty, row.StockQty = httpx.Quantity(unitQty), httpx.Quantity(stockQty)
+		set := out[id]
+		set.Rows = append(set.Rows, row)
+		out[id] = set
+	}
+	return out, unitRows.Err()
 }

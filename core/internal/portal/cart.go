@@ -62,16 +62,16 @@ func (s *Service) AddToCart(ctx context.Context, customerID uuid.UUID, req AddTo
 	// pair resolved here and stored on the item. The engine did not answer:
 	// the base price stands per the product's own unit, pair 1 and 1.
 	units := CartItemUnits{UOM: string(prod.UOMPrimary), PriceUOM: string(prod.UOMPrimary), UOMQty: 1, PriceUOMQty: 1}
-	if res, rErr := s.pricingSvc.Resolve(ctx, pricing.Request{
-		CustomerID: customerID, ProductID: req.ProductID,
-		Quantity: httpx.Quantity(int64(req.Quantity*10000 + 0.5)), UOM: string(prod.UOMPrimary),
-	}); rErr == nil {
-		units = CartItemUnits{
-			UOM: res.UOM, PriceUOM: res.PriceUOM,
-			UOMQty: priceFloatOfQty(res.UOMQty), PriceUOMQty: priceFloatOfQty(res.PriceUOMQty),
-		}
-		if price, _, ok := s.resolveCustomerPrice(ctx, customerID, req.ProductID, string(prod.UOMPrimary), req.Quantity); ok {
-			unitPrice = price
+	if s.pricingSvc != nil {
+		if res, rErr := s.pricingSvc.Resolve(ctx, pricing.Request{
+			CustomerID: customerID, ProductID: req.ProductID,
+			Quantity: httpx.Quantity(int64(req.Quantity*10000 + 0.5)), UOM: string(prod.UOMPrimary),
+		}); rErr == nil {
+			units = CartItemUnits{
+				UOM: res.UOM, PriceUOM: res.PriceUOM,
+				UOMQty: priceFloatOfQty(res.UOMQty), PriceUOMQty: priceFloatOfQty(res.PriceUOMQty),
+			}
+			unitPrice = float64(res.UnitPrice) / 10000
 		}
 	}
 

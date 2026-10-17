@@ -143,6 +143,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if len(preLines) == 0 {
 		return nil, invalid("lines", "the sale has no lines to complete")
 	}
+	if err := s.checkLineStockUnits(ctx, preLines); err != nil {
+		return nil, err
+	}
 	// The tax, priced before the transaction with the same resolver the
 	// transaction uses (exemption first, then the provider or the branch
 	// rate), so the tender pre-check refuses the obvious cases before a card
@@ -475,6 +478,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 
 		// Stock out: each stocked line's stock quantity from on hand, in
 		// (product id, line id) order (section 11, step 6).
+		if err := s.checkLineStockUnits(ctx, lines); err != nil {
+			return err
+		}
 		stocked := stockedLines(lines)
 		for _, i := range stocked {
 			l := &lines[i]
@@ -770,6 +776,34 @@ func productLess(a, b *salesdoc.Line) bool {
 		return false
 	}
 	return a.ProductID.String() < b.ProductID.String()
+}
+
+// checkLineStockUnits verifies that every stocked line in lines still matches
+// its product's current stocking unit (ADR 0006 section 3.4).
+func (s *Service) checkLineStockUnits(ctx context.Context, lines []salesdoc.Line) error {
+	var ids []uuid.UUID
+	for i := range lines {
+		if lines[i].IsStocked() && lines[i].ProductID != nil && lines[i].StockUOM != nil && *lines[i].StockUOM != "" {
+			ids = append(ids, *lines[i].ProductID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	refs, err := s.repo.LookupProducts(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range lines {
+		l := &lines[i]
+		if !l.IsStocked() || l.ProductID == nil || l.StockUOM == nil || *l.StockUOM == "" {
+			continue
+		}
+		if ref, ok := refs[l.ProductID.String()]; ok && ref.UOMPrimary != "" && *l.StockUOM != ref.UOMPrimary {
+			return salesdoc.StockUnitChangedError(i, *l.StockUOM, ref.UOMPrimary)
+		}
+	}
+	return nil
 }
 
 // costRefs reads the products the billed lines name, for the cost of goods

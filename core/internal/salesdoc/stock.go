@@ -6,10 +6,58 @@ package salesdoc
 import (
 	"fmt"
 	"math/big"
+	"net/http"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
 )
+
+// StockUnitChangedError builds the 409 conflict of ADR 0006 section 3.4 when a
+// line's stock_uom no longer matches the product's current stocking unit and
+// cannot be converted through the product's current unit set.
+func StockUnitChangedError(lineIndex int, lineStockUOM, currentUOMPrimary string) *httpx.Error {
+	field := fmt.Sprintf("lines[%d]", lineIndex)
+	msg := fmt.Sprintf("%s carries stock_uom %s, which cannot convert into the product's current stocking unit %s", field, lineStockUOM, currentUOMPrimary)
+	return &httpx.Error{
+		Status:  http.StatusConflict,
+		Code:    httpx.CodeConflict,
+		Message: msg,
+		Details: []httpx.FieldError{
+			{Field: field, Code: "stock_unit_changed", Message: msg},
+		},
+	}
+}
+
+// ResolveStockMove compares a line's stored stock_uom against the product's
+// current stocking unit (ADR 0006 section 3.4). When they agree, it returns the
+// current stocking unit and StockQty(l). When they differ (the product's
+// stocking unit was changed after the line was written), it converts StockQty(l)
+// from the old stocking unit through the product's current unit set when the
+// old unit is still a row of the set (and the current stocking unit's row is
+// 1 and 1) and the result is exact at scale 4; otherwise it returns the 409
+// conflict with blocker stock_unit_changed naming lines[lineIndex].
+func ResolveStockMove(lineIndex int, l *Line, currentUOMPrimary string, set *ProductUnitSet) (string, httpx.Quantity, error) {
+	qty := StockQty(l)
+	if l.StockUOM == nil || *l.StockUOM == "" || currentUOMPrimary == "" || *l.StockUOM == currentUOMPrimary {
+		uom := currentUOMPrimary
+		if uom == "" && l.StockUOM != nil {
+			uom = *l.StockUOM
+		}
+		return uom, qty, nil
+	}
+	oldUOM := *l.StockUOM
+	if set != nil && set.StockUOM == currentUOMPrimary {
+		curRow, hasCur := set.Row(currentUOMPrimary)
+		oldRow, hasOld := set.Row(oldUOM)
+		if hasCur && curRow.UnitQty == One && curRow.StockQty == One && hasOld {
+			converted, err := units.ConvertStock(qty, oldUOM, currentUOMPrimary, oldRow.Pair())
+			if err == nil {
+				return currentUOMPrimary, converted, nil
+			}
+		}
+	}
+	return "", 0, StockUnitChangedError(lineIndex, oldUOM, currentUOMPrimary)
+}
 
 // StockQty is the line's quantity in the unit the product stocks in (ADR 0006
 // section 3.4): the stored stock quantity, or the line's own quantity when it

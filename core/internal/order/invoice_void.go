@@ -51,7 +51,7 @@ func (s *Service) ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []
 	// re-opened by its own transition first.
 	if cur.Status == StatusFulfilled {
 		for i := range cur.Lines {
-			if l := &cur.Lines[i]; l.Quantity != nil && l.LineType != salesdoc.LineText && l.QuantityFulfilled < *l.Quantity {
+			if l := &cur.Lines[i]; l.Quantity != nil && l.LineType != salesdoc.LineText && l.QuantityFulfilled < salesdoc.StockQty(&l.Line) {
 				return res, conflictBlocker("order_closed_short", "the invoice's order was closed short: voiding the invoice would reopen the closed remainder")
 			}
 		}
@@ -83,6 +83,15 @@ func (s *Service) ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []
 
 	// Step 6: the billed stock back on hand, then allocated again.
 	if s.inventory != nil {
+		var returnedIdx []int
+		for _, i := range stockedIndexes(cur.Lines) {
+			if scope[cur.Lines[i].ID] > 0 {
+				returnedIdx = append(returnedIdx, i)
+			}
+		}
+		if err := s.checkStockUnits(ctx, cur.Lines, returnedIdx); err != nil {
+			return res, err
+		}
 		for _, i := range stockedIndexes(cur.Lines) {
 			l := &cur.Lines[i]
 			if q := scope[l.ID]; q > 0 {

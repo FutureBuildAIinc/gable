@@ -382,6 +382,9 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 		}
 		mergeEffects(&fxAll, fx)
 		// The stock returns (step 6): each stocked line back on hand.
+		if err := s.checkLineStockUnits(ctx, lines); err != nil {
+			return err
+		}
 		for i := range lines {
 			l := &lines[i]
 			if !l.IsStocked() || l.Quantity == nil {

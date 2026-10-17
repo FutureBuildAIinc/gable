@@ -17,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -49,10 +50,12 @@ type DepositApplier interface {
 // WithDeposits wires the deposit application of a fulfilment.
 func (s *Service) WithDeposits(d DepositApplier) *Service { s.deposits = d; return s }
 
-// FulfilLineRequest names one order line and the quantity to bill.
+// FulfilLineRequest names one order line and the quantity or sub-tally to bill.
 type FulfilLineRequest struct {
 	OrderLineID uuid.UUID
 	Quantity    httpx.Quantity
+	HasQuantity bool
+	Tally       []salesdoc.TallyRow
 }
 
 // FulfilRequest is POST /orders/{id}/fulfillments (ADR 0005 5.6). Lines is
@@ -75,7 +78,7 @@ type Fulfilment struct {
 	InvoiceID uuid.UUID
 }
 
-// nothingToFulfil is the refusal when no line has anything left to bill.
+// nothingToFulfil is the refusal when no line has anything left to fulfil.
 func nothingToFulfil() *httpx.Error {
 	return conflictBlocker("nothing_to_fulfil", "the order has nothing left to fulfil")
 }
@@ -107,12 +110,41 @@ func i64PtrFromQty(q *httpx.Quantity) *int64 {
 }
 
 type fulfilItem struct {
-	idx int            // index into the order's lines
-	qty httpx.Quantity // the quantity billed now
+	idx   int                 // index into the order's lines
+	qty   httpx.Quantity      // the quantity billed now
+	tally []salesdoc.TallyRow // the sub-tally billed now, when the order line is tallied
 }
 
 type fulfilPlan struct {
 	items []fulfilItem // non text lines, in line order
+}
+
+// remainingTally computes the remaining unbilled pieces per length and the
+// remaining tally rows (in the order line's row order) after subtracting what
+// live invoices already billed.
+func remainingTally(l *OrderLine, billed map[httpx.Quantity]int) (map[httpx.Quantity]int, []salesdoc.TallyRow) {
+	if l.Tally == nil || len(l.Tally.Rows) == 0 {
+		return nil, nil
+	}
+	remByLen := map[httpx.Quantity]int{}
+	for _, r := range l.Tally.Rows {
+		remByLen[r.LengthFT] += r.Pieces
+	}
+	for length, n := range billed {
+		remByLen[length] -= n
+	}
+	var rows []salesdoc.TallyRow
+	seen := map[httpx.Quantity]bool{}
+	for _, r := range l.Tally.Rows {
+		if seen[r.LengthFT] {
+			continue
+		}
+		seen[r.LengthFT] = true
+		if rem := remByLen[r.LengthFT]; rem > 0 {
+			rows = append(rows, salesdoc.TallyRow{Pieces: rem, LengthFT: r.LengthFT})
+		}
+	}
+	return remByLen, rows
 }
 
 // kitPerComponent is a kit component's billed quantity for kitQty of its kit:
@@ -162,13 +194,14 @@ func (o *Order) componentsOf() map[uuid.UUID][]int {
 
 // planFulfilment decides what a fulfilment bills (ADR 0005 5.6). It reads the
 // order as locked and changes nothing.
-func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
+func planFulfilment(cur *Order, req FulfilRequest, live map[uuid.UUID]LiveBilled) (*fulfilPlan, error) {
 	comps := cur.componentsOf()
 	byID := map[uuid.UUID]int{}
 	for i := range cur.Lines {
 		byID[cur.Lines[i].ID] = i
 	}
 	billed := map[int]httpx.Quantity{}
+	billedTally := map[int][]salesdoc.TallyRow{}
 
 	addKit := func(kitAt int, kitQty httpx.Quantity) {
 		billed[kitAt] = kitQty
@@ -203,6 +236,10 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 				// conversion is not exact.
 				if l.QuantityAllocated > 0 {
 					billed[i] = l.QuantityAllocated
+					if l.Tally != nil && len(l.Tally.Rows) > 0 && l.QuantityAllocated == salesdoc.StockQty(&l.Line)-l.QuantityFulfilled {
+						_, remRows := remainingTally(l, live[l.ID].TallyPieces)
+						billedTally[i] = remRows
+					}
 				}
 			case l.LineType == salesdoc.LineProduct, l.LineType == salesdoc.LineCharge:
 				// a non stock product line bills its unbilled quantity; a charge
@@ -225,7 +262,50 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 			}
 			seen[e.OrderLineID] = true
 			l := &cur.Lines[at]
-			if e.Quantity <= 0 {
+			if len(e.Tally) > 0 {
+				if l.Tally == nil || len(l.Tally.Rows) == 0 {
+					return nil, validationErr(field+".tally", "the order line has no tally")
+				}
+				remByLen, _ := remainingTally(l, live[l.ID].TallyPieces)
+				used := map[httpx.Quantity]int{}
+				for j, row := range e.Tally {
+					used[row.LengthFT] += row.Pieces
+					if used[row.LengthFT] > remByLen[row.LengthFT] {
+						return nil, &httpx.Error{
+							Status:  http.StatusBadRequest,
+							Code:    httpx.CodeValidationFailed,
+							Message: "one or more fields failed validation",
+							Details: []httpx.FieldError{{
+								Field:   fmt.Sprintf("%s.tally.rows[%d].pieces", field, j),
+								Code:    "exceeds_unbilled",
+								Message: "exceeds_unbilled: asks for more pieces at this length than remain unbilled on the order line",
+							}},
+						}
+					}
+				}
+				uRows := make([]units.TallyRow, len(e.Tally))
+				for j, r := range e.Tally {
+					uRows[j] = units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT}
+				}
+				lf, err := units.LinearFeet(uRows)
+				if err != nil {
+					return nil, validationErr(field+".tally", "the tally's linear feet are beyond the quantity bound of 99999999.9999 linear feet")
+				}
+				derivedQty := lf
+				if l.Tally.LinearFeet > 0 && l.StockQuantity != nil && *l.StockQuantity != l.Tally.LinearFeet && l.StockUOM != nil {
+					pair := units.Pair{A: l.Tally.LinearFeet, B: *l.StockQuantity}
+					sq, err := units.ConvertStock(lf, "LF", *l.StockUOM, pair)
+					if err != nil {
+						return nil, validationErr(field+".tally", err.Error())
+					}
+					derivedQty = sq
+				}
+				if (e.HasQuantity || e.Quantity != 0) && e.Quantity != derivedQty {
+					return nil, validationErr(field+".quantity", "must equal the tally's linear feet, "+derivedQty.WireString())
+				}
+				e.Quantity = derivedQty
+				billedTally[at] = e.Tally
+			} else if e.Quantity <= 0 {
 				return nil, validationErr(field+".quantity", "must be greater than zero")
 			}
 			switch {
@@ -254,6 +334,10 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 					return nil, exceeds("exceeds_unbilled", fmt.Sprintf("%s asks for more than the %s left to fulfil", field, (salesdoc.StockQty(&l.Line)-l.QuantityFulfilled).DecimalString()))
 				}
 				billed[at] = e.Quantity
+				if len(e.Tally) == 0 && l.Tally != nil && len(l.Tally.Rows) > 0 && e.Quantity == salesdoc.StockQty(&l.Line)-l.QuantityFulfilled {
+					_, remRows := remainingTally(l, live[l.ID].TallyPieces)
+					billedTally[at] = remRows
+				}
 			default: // a non stock product line, a charge line
 				if e.Quantity > *l.Quantity-l.QuantityFulfilled {
 					return nil, exceeds("exceeds_unbilled", fmt.Sprintf("%s asks for more than the %s left to bill", field, (*l.Quantity-l.QuantityFulfilled).DecimalString()))
@@ -266,7 +350,7 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 	plan := &fulfilPlan{}
 	for i := range cur.Lines {
 		if q, ok := billed[i]; ok && q > 0 {
-			plan.items = append(plan.items, fulfilItem{idx: i, qty: q})
+			plan.items = append(plan.items, fulfilItem{idx: i, qty: q, tally: billedTally[i]})
 		}
 	}
 	if len(plan.items) == 0 {
@@ -385,11 +469,11 @@ func (s *Service) prepareFulfilTax(ctx context.Context, id uuid.UUID, req Fulfil
 	if exempt {
 		return nil, nil
 	}
-	plan, err := planFulfilment(cur, req)
+	live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
 	if err != nil {
 		return nil, nil
 	}
-	live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
+	plan, err := planFulfilment(cur, req, live)
 	if err != nil {
 		return nil, nil
 	}
@@ -491,11 +575,11 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			return err
 		}
 
-		plan, err := planFulfilment(cur, req)
+		live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
 		if err != nil {
 			return err
 		}
-		live, err := s.repo.LiveBilledByLine(ctx, cur.ID)
+		plan, err := planFulfilment(cur, req, live)
 		if err != nil {
 			return err
 		}
@@ -598,10 +682,12 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		}
 
 		// The invoice lines.
-		newID := map[uuid.UUID]uuid.UUID{}  // order line id -> invoice line id
-		planQty := map[int]httpx.Quantity{} // order line index -> the bill in stocking units
+		newID := map[uuid.UUID]uuid.UUID{}         // order line id -> invoice line id
+		planQty := map[int]httpx.Quantity{}        // order line index -> the bill in stocking units
+		planTally := map[int][]salesdoc.TallyRow{} // order line index -> the sub-tally billed now
 		for _, it := range plan.items {
 			planQty[it.idx] = it.qty
+			planTally[it.idx] = it.tally
 		}
 		for n := range bill {
 			b := &bill[n]
@@ -624,10 +710,10 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if stockQty, ok := planQty[src[n]]; ok && ol.StockQuantity != nil {
 				fl.StockQuantity = i64(int64(stockQty))
 			}
-			if ol.Tally != nil && len(ol.Tally.Rows) > 0 && b.Quantity != nil && *b.Quantity == ol.Tally.LinearFeet {
+			if tRows := planTally[src[n]]; len(tRows) > 0 {
 				fl.BoardThicknessIn, fl.BoardWidthIn = i64PtrFromQty(ol.TallyThickness()), i64PtrFromQty(ol.TallyWidth())
-				fl.TallyRows = make([]invoice.TallyRowInput, 0, len(ol.Tally.Rows))
-				for _, r := range ol.Tally.Rows {
+				fl.TallyRows = make([]invoice.TallyRowInput, 0, len(tRows))
+				for _, r := range tRows {
 					fl.TallyRows = append(fl.TallyRows, invoice.TallyRowInput{Pieces: r.Pieces, LengthFT: int64(r.LengthFT)})
 				}
 			}
@@ -884,6 +970,9 @@ func (s *Service) lineCosts(ctx context.Context, cur *Order, plan *fulfilPlan) (
 		}
 		var unit httpx.Price
 		if ref, ok := refs[l.ProductID.String()]; ok {
+			if l.IsStocked() && l.StockUOM != nil && *l.StockUOM != "" && ref.UOMPrimary != "" && *l.StockUOM != ref.UOMPrimary {
+				return nil, salesdoc.StockUnitChangedError(it.idx, *l.StockUOM, ref.UOMPrimary)
+			}
 			unit = ref.AverageCost
 		}
 		if unit <= 0 {

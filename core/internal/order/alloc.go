@@ -69,6 +69,37 @@ func unallocated(l *OrderLine) int64 {
 	return n
 }
 
+// checkStockUnits verifies that every stocked line in indexes still matches
+// its product's current stocking unit (ADR 0006 section 3.4).
+func (s *Service) checkStockUnits(ctx context.Context, lines []OrderLine, indexes []int) error {
+	var ids []uuid.UUID
+	for _, i := range indexes {
+		l := &lines[i]
+		if l.ProductID != nil && l.StockUOM != nil && *l.StockUOM != "" {
+			ids = append(ids, *l.ProductID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	refs, err := s.repo.LookupProducts(ctx, ids)
+	if err != nil {
+		return err
+	}
+	sorted := append([]int(nil), indexes...)
+	sort.Ints(sorted)
+	for _, i := range sorted {
+		l := &lines[i]
+		if l.ProductID == nil || l.StockUOM == nil || *l.StockUOM == "" {
+			continue
+		}
+		if ref, ok := refs[l.ProductID.String()]; ok && ref.UOMPrimary != "" && *l.StockUOM != ref.UOMPrimary {
+			return salesdoc.StockUnitChangedError(i, *l.StockUOM, ref.UOMPrimary)
+		}
+	}
+	return nil
+}
+
 // allocateLines allocates every stocked line of the order from the branch's
 // inventory (ADR 0005 5.4): min(available, needed) for a plain line, whole
 // kits for a kit's components, in (product id, line id) order, recording the
@@ -82,6 +113,9 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 	order := stockedIndexes(cur.Lines)
 	if len(order) == 0 {
 		return false, nil
+	}
+	if err := s.checkStockUnits(ctx, cur.Lines, order); err != nil {
+		return false, err
 	}
 
 	// Take every product's rows first, in product id order, and read what is
@@ -234,6 +268,15 @@ func floorRat(r *big.Rat) *big.Int {
 func (s *Service) releaseAllocations(ctx context.Context, cur *Order) error {
 	if s.inventory == nil {
 		return nil
+	}
+	var releasing []int
+	for _, i := range stockedIndexes(cur.Lines) {
+		if cur.Lines[i].QuantityAllocated > 0 {
+			releasing = append(releasing, i)
+		}
+	}
+	if err := s.checkStockUnits(ctx, cur.Lines, releasing); err != nil {
+		return err
 	}
 	for _, i := range stockedIndexes(cur.Lines) {
 		l := &cur.Lines[i]

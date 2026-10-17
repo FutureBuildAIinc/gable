@@ -57,6 +57,10 @@ func CompleteTallies(lines []Line) {
 		if t == nil {
 			continue
 		}
+		if len(t.Rows) == 0 {
+			lines[i].Tally = nil
+			continue
+		}
 		rows := make([]units.TallyRow, 0, len(t.Rows))
 		for _, r := range t.Rows {
 			rows = append(rows, units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT})

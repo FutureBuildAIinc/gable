@@ -1960,7 +1960,7 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 			productIDs = append(productIDs, *l.ProductID)
 		}
 	}
-	refs, _, kits, _, _, err := s.lookups(ctx, quoteParsedLines(src))
+	refs, _, kits, unitSets, _, err := s.lookups(ctx, quoteParsedLines(src))
 	if err != nil {
 		return nil, err
 	}
@@ -1983,8 +1983,10 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		if priceUOM == "" {
 			priceUOM = uom
 		}
+		var ref salesdoc.ProductRef
 		if ql.ProductID != nil {
-			ref, ok := refs[ql.ProductID.String()]
+			var ok bool
+			ref, ok = refs[ql.ProductID.String()]
 			if !ok {
 				return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
 					Message: "a referenced record does not exist",
@@ -2014,6 +2016,17 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		}
 		line.UOMQty, line.PriceUOMQty = &uomQty, &priceUomQty
 		line.StockUOM, line.StockQuantity = ql.StockUOM, ql.StockQuantity
+		if ql.ProductID != nil && !ref.IsKit && line.StockUOM != nil && *line.StockUOM != "" {
+			var setPtr *salesdoc.ProductUnitSet
+			if set, hasSet := unitSets[*ql.ProductID]; hasSet {
+				setPtr = &set
+			}
+			resolvedUOM, resolvedQty, err := salesdoc.ResolveStockMove(i, &line, ref.UOMPrimary, setPtr)
+			if err != nil {
+				return nil, err
+			}
+			line.StockUOM, line.StockQuantity = &resolvedUOM, &resolvedQty
+		}
 		if ql.Tally != nil {
 			// Rows are copied, never shared: editing one document's tally
 			// never moves another's (ADR 0006 section 4.3).

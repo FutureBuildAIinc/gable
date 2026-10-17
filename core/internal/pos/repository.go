@@ -615,9 +615,7 @@ func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]
 func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []salesdoc.Line) error {
 	ids := make([]uuid.UUID, 0, len(lines))
 	for i := range lines {
-		if lines[i].Tally != nil {
-			ids = append(ids, lines[i].ID)
-		}
+		ids = append(ids, lines[i].ID)
 	}
 	if len(ids) == 0 {
 		return nil
@@ -638,7 +636,10 @@ func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []salesd
 		}
 		row.LengthFT = httpx.Quantity(length)
 		for i := range lines {
-			if lines[i].ID == lineID && lines[i].Tally != nil {
+			if lines[i].ID == lineID {
+				if lines[i].Tally == nil {
+					lines[i].Tally = &salesdoc.Tally{Rows: []salesdoc.TallyRow{}}
+				}
 				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
 				break
 			}
@@ -730,10 +731,10 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				unit_price, line_total, restock, sale_line_id, created_at)
-			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
+				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, created_at)
+			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType)
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity))
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}

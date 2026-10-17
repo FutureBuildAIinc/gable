@@ -482,26 +482,51 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 		//    and kit components keep their own price.
 		_, err = r.db.GetExecutor(txCtx).Exec(txCtx, `
 			INSERT INTO order_lines (id, order_id, position, line_type, product_id, quantity, unit_price,
-				description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source,
+				description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity,
+				priced_unit_price, price_source,
 				line_total, taxable, is_special_order, vendor_id, special_order_cost)
 			SELECT gen_random_uuid(), $1,
 				c.position, c.line_type, c.product_id, c.quantity, c.unit_price,
-				c.description, c.sku, c.uom, c.price_uom, c.uom_qty, c.price_uom_qty, c.priced_unit_price, c.price_source,
-				ROUND(c.quantity * c.unit_price, 2), c.taxable, c.is_special_order, c.vendor_id, c.special_order_cost
+				c.description, c.sku, c.uom, c.price_uom, c.uom_qty, c.price_uom_qty, c.stock_uom, c.stock_quantity,
+				c.priced_unit_price, c.price_source,
+				ROUND(c.quantity * c.unit_price * c.price_uom_qty / c.uom_qty, 2), c.taxable, c.is_special_order, c.vendor_id, c.special_order_cost
 			FROM (
 				SELECT
 					ROW_NUMBER() OVER (ORDER BY ol.position, ol.id) - 1 AS position,
 					ol.line_type, ol.product_id, ol.quantity,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.unit_price END AS unit_price,
 					ol.description, ol.sku, ol.uom,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN ol.uom ELSE ol.price_uom END AS price_uom,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.uom_qty END AS uom_qty,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.price_uom_qty END AS price_uom_qty,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL THEN COALESCE(p.price_uom, p.uom_primary::text)
+						ELSE ol.price_uom
+					END AS price_uom,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.uom THEN 1
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.price_uom THEN ol.uom_qty
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND pu_u.unit_qty IS NOT NULL AND pu_p.unit_qty IS NOT NULL THEN ROUND(pu_u.unit_qty * pu_p.stock_qty / pu_u.stock_qty, 4)
+						ELSE ol.uom_qty
+					END AS uom_qty,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.uom THEN 1
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.price_uom THEN ol.price_uom_qty
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND pu_u.unit_qty IS NOT NULL AND pu_p.unit_qty IS NOT NULL THEN pu_p.unit_qty
+						ELSE ol.price_uom_qty
+					END AS price_uom_qty,
+					CASE
+						WHEN ol.product_id IS NOT NULL THEN COALESCE(ol.stock_uom, p.uom_primary::text)
+						ELSE NULL
+					END AS stock_uom,
+					CASE
+						WHEN ol.product_id IS NOT NULL THEN COALESCE(ol.stock_quantity, ROUND(ol.quantity * COALESCE(pu_u.stock_qty, 1) / COALESCE(pu_u.unit_qty, 1), 4))
+						ELSE NULL
+					END AS stock_quantity,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.priced_unit_price END AS priced_unit_price,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 'PRICE_LIST' ELSE ol.price_source END AS price_source,
 					ol.taxable, ol.is_special_order, ol.vendor_id, ol.special_order_cost
 				FROM order_lines ol
 				LEFT JOIN products p ON ol.product_id = p.id
+				LEFT JOIN product_units pu_u ON pu_u.product_id = p.id AND pu_u.uom = ol.uom
+				LEFT JOIN product_units pu_p ON pu_p.product_id = p.id AND pu_p.uom = COALESCE(p.price_uom, p.uom_primary::text)
 				WHERE ol.order_id = $2
 				  AND ol.line_type <> 'TEXT'
 			) c
