@@ -112,6 +112,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("DELETE /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.RemoveItem))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/complete", guard(h.CompleteTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/overrides", guard(h.ApproveOverrideHandler))
 
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
@@ -121,6 +122,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// naming the customer (and the account's purchase order and job) on an
 	// open sale.
 	mux.HandleFunc("GET /api/v1/pos/customers", guard(h.FindCustomers))
+	mux.HandleFunc("GET /api/v1/pos/customers/{id}/standing", guard(h.GetStanding))
 	mux.HandleFunc("PUT /api/v1/pos/transactions/{id}/customer", guard(h.AttachCustomer))
 
 	// The registers the caller may use (the counter opens on its yard's)
@@ -514,6 +516,51 @@ func (h *Handler) FindCustomers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, found)
+}
+
+// GetStanding is GET /pos/customers/{id}/standing: can a sale of amount_cents
+// go on this account, and what are the ways forward when it cannot. The
+// optional sale_id makes the verdict count the sale's live manager override.
+func (h *Handler) GetStanding(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	q, err := httpx.StrictQuery(r, "amount_cents", "sale_id")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var bad []httpx.FieldError
+	var amount int64
+	if q.Has("amount_cents") {
+		n, convErr := strconv.ParseInt(q.Get("amount_cents"), 10, 64)
+		if convErr != nil || n < 0 {
+			bad = append(bad, httpx.FieldError{Field: "amount_cents", Message: "must be a whole number of cents, zero or more"})
+		} else {
+			amount = n
+		}
+	}
+	var saleID *uuid.UUID
+	if q.Has("sale_id") {
+		sid, convErr := uuid.Parse(q.Get("sale_id"))
+		if convErr != nil {
+			bad = append(bad, httpx.FieldError{Field: "sale_id", Message: "must be a UUID"})
+		} else {
+			saleID = &sid
+		}
+	}
+	if len(bad) > 0 {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", bad...))
+		return
+	}
+	out, err := h.service.Standing(r.Context(), id, amount, saleID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // AttachCustomer is PUT /pos/transactions/{id}/customer: the sale's customer,

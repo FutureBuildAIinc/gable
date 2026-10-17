@@ -188,6 +188,18 @@ type Repository interface {
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
 	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	// The counter's account sale reads and writes (migration 126): the open
+	// store credit, the database wide check limit, the buyer roster and the
+	// sale's buyer, and the manager override (one live per sale and kind,
+	// spent by a single statement).
+	OpenCreditMemoCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
+	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
+	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
+	InsertOverride(ctx context.Context, o *AccountOverride) error
+	LiveOverride(ctx context.Context, saleID uuid.UUID, kind string) (*AccountOverride, error)
+	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
 
@@ -204,6 +216,15 @@ type CustomerFacts struct {
 	Name             string
 	Currency         string
 	PORequired       bool
+	// TermsKind is the terms master's kind of the customer's payment terms
+	// (NET_DAYS, DAY_OF_MONTH, DUE_ON_RECEIPT), read from the master and never
+	// from a text.
+	TermsKind string
+	// NamedBuyerRequired asks every on account sale to name a roster buyer.
+	NamedBuyerRequired bool
+	// CheckLimitCents is the customer's own check limit; null defers to the
+	// database wide setting.
+	CheckLimitCents *int64
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -361,14 +382,14 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 
 // saleCols is the full sale's columns: the list item's head and the purchase
 // order and job a charge sale names.
-const saleCols = saleHeadCols + `, t.customer_po, t.job_id`
+const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
 	var created time.Time
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
-		&completed, &created, &s.CustomerPO, &s.JobID); err != nil {
+		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID); err != nil {
 		return err
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -1718,10 +1739,13 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	var f CustomerFacts
 	var limit *int64
 	err := r.ex(ctx).QueryRow(ctx, `
-		SELECT name, ROUND(credit_limit * 100)::bigint,
-			COALESCE(currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-			COALESCE(po_required, FALSE)
-		FROM customers WHERE id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired)
+		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
+			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
+			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
+			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END
+		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
+		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
+		&f.NamedBuyerRequired, &f.CheckLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}

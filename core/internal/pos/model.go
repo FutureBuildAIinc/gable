@@ -105,6 +105,14 @@ type Sale struct {
 	CustomerPO *string    `json:"customer_po"`
 	JobID      *uuid.UUID `json:"job_id"`
 
+	// BuyerContactID is the roster buyer an on account sale names when the
+	// account asks for one; PrintCount is how many times the receipt has been
+	// printed; ExchangeReturnID is the return an exchange's replacement sale
+	// stands against.
+	BuyerContactID   *uuid.UUID `json:"buyer_contact_id"`
+	PrintCount       int        `json:"print_count"`
+	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
+
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`
 

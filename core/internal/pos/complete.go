@@ -195,9 +195,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 				"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
 		}
 	}
-	// The credit check an ACCOUNT tender owes, read before the card is
-	// charged (a refusal must never move money at the terminal); the
-	// transaction repeats it under the customer's credit lock.
+	// The check an ACCOUNT tender owes, read before the card is charged (a
+	// refusal must never move money at the terminal); the transaction repeats
+	// it under the customer's credit lock and spends the manager override.
 	if accountPortion > 0 {
 		facts, err := s.repo.CustomerFacts(ctx, realCustomerID)
 		if err != nil {
@@ -209,7 +209,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("po_required",
 				"the customer requires a purchase order number: name it on the sale before charging it to the account")
 		}
-		if err := s.checkAccountCredit(ctx, realCustomerID, accountPortion); err != nil {
+		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, false, actor); err != nil {
 			return nil, err
 		}
 	}
@@ -278,43 +278,6 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		return nil, err
 	}
 	return out, nil
-}
-
-// refuseHeldAccount refuses every account charge to a customer whose credit
-// limit is zero ("no credit", the account on hold), whatever unapplied cash
-// the account holds: the standing the counter shows is the rule the server
-// keeps.
-func refuseHeldAccount(facts CustomerFacts) error {
-	if facts.CreditLimitCents != nil && *facts.CreditLimitCents <= 0 {
-		return conflict("credit_hold",
-			"this account is on hold: it has no credit, so nothing can be charged to it")
-	}
-	return nil
-}
-
-// checkAccountCredit refuses an ACCOUNT portion that would take the customer
-// over its credit limit (ADR 0005 14.2 C2-5). Caller-side lock-free read; the
-// authoritative check runs inside the transaction under the customer's
-// credit lock.
-func (s *Service) checkAccountCredit(ctx context.Context, customerID uuid.UUID, accountPortion int64) error {
-	facts, err := s.repo.CustomerFacts(ctx, customerID)
-	if err != nil {
-		return err
-	}
-	if err := refuseHeldAccount(facts); err != nil {
-		return err
-	}
-	if facts.CreditLimitCents != nil {
-		open, err := s.repo.OpenReceivableCents(ctx, customerID)
-		if err != nil {
-			return err
-		}
-		if open+accountPortion > int64(*facts.CreditLimitCents) {
-			return conflict("credit_limit",
-				fmt.Sprintf("the customer's open receivable plus the %d cents on account is over the credit limit", accountPortion))
-		}
-	}
-	return nil
 }
 
 // completeSaleTx runs the completion's one transaction (ADR 0005 14.2 C2-5):
@@ -441,11 +404,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
 
-		// The credit check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under
-		// the customer's credit advisory lock (section 11, step 1a, taken
-		// right after the sale row): without it two concurrent ACCOUNT sales
-		// each read an exposure that does not yet count the other and both
-		// pass.
+		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
+		// customer's credit advisory lock (section 11, step 1a, taken right
+		// after the sale row): without it two concurrent ACCOUNT sales each
+		// read an exposure that does not yet count the other and both pass.
+		// The verdict is the one the standing read states; a manager override
+		// the sale holds is spent here, once.
 		if accountPortion > 0 {
 			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
 				return err
@@ -454,22 +418,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if err != nil {
 				return err
 			}
-			if err := refuseHeldAccount(facts); err != nil {
-				return err
-			}
 			if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
 				return conflict("po_required",
 					"the customer requires a purchase order number: name it on the sale before charging it to the account")
 			}
-			if facts.CreditLimitCents != nil {
-				open, err := s.repo.OpenReceivableCents(ctx, customerID)
-				if err != nil {
-					return err
-				}
-				if open+accountPortion > int64(*facts.CreditLimitCents) {
-					return conflict("credit_limit",
-						fmt.Sprintf("the customer's open receivable plus the %d cents on account is over the credit limit", accountPortion))
-				}
+			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, true, actor); err != nil {
+				return err
 			}
 		}
 
