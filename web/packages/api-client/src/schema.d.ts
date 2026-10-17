@@ -164,6 +164,246 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ar/credit-holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credit holds
+         * @description The credit holds, newest first by (placed_at, id) in the cursor list envelope, each with the account's standing beside it (the limit, null for no limit, the balance, and the open invoice cents past due). status selects standing (the default: active and overridden), released or all. A customer named outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditHoldsList"];
+        put?: never;
+        /**
+         * Place a manual credit hold
+         * @description Roles admin, owner, finance. Places a hold of type manual (the default), over_limit or past_due with a required reason, and writes customers.credit_hold in the same transaction. Idempotent: an account that already carries a standing hold answers it with 200 and placed false; a new hold answers 201 with placed true. The standing hold carries the answer either way.
+         */
+        post: operations["arCreditHoldPlace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the credit hold sweep
+         * @description Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
+         */
+        post: operations["arCreditHoldsEvaluate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a credit hold
+         * @description Roles admin, owner, finance; a reason is required. Ends a standing hold (active or overridden) with who and why, and clears customers.credit_hold in the same transaction. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a time-bounded override on a credit hold
+         * @description Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/credit-limit-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's credit limit changes
+         * @description The credit limit history, newest first by (created_at, id) in the cursor list envelope: what the limit was, what it became, who asked, who approved, and when it was decided. A customer outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditLimitChangesList"];
+        put?: never;
+        /**
+         * Record (and optionally apply) a credit limit change
+         * @description Roles admin, owner, finance. Records one change with the old limit, the new one, a required reason and who asked, as pending. With approve true the same act applies the new limit to the customer, stamps who approved it and when, and answers 200; a recorded request answers 201.
+         */
+        post: operations["arCreditLimitChangeRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The controller's collections and credit worklist
+         * @description The overdue and over-limit accounts, worst first, one row per customer with any past due bucket or any balance. The severity score weighs the over 90 bucket four times, the 61 to 90 bucket twice, the 31 to 60 bucket and the over-limit amount once each, and a standing hold adds a bump that outranks any plain overdue account. Every row carries the aging buckets, the credit limit (null for no limit), the utilisation percent, the hold state and the recommended action: hold for a held, over limit or 90 day account, finance_charge for 61 to 90, call for 31 to 60, send_statement for the rest. The aging carries the caller's branch wall; limit is 10 to 500 rows.
+         */
+        get: operations["arWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List batch statement runs
+         * @description The batch statement runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arStatementRunsList"];
+        put?: never;
+        /**
+         * Generate a batch statement run
+         * @description Roles admin, owner, finance. Records one run over the customers the period names: every customer with a non-zero balance, or exactly the customers customer_ids names. Each item carries the opening balance (the subledger rows before period_start), the invoices, the payments and the finance charges of the period, the closing balance and the aging buckets of period_end, taken as of that day and never re-derived. A run writes no balance, no document and no subledger row: two runs of one period answer the same numbers. With queue_email true, every item whose closing balance is positive is marked queued with the id of its statement.queued outbox event; a zero balance is skipped. period_end defaults to today and period_start to a month before it; neither may end after today. Answers 201 with the completed run and its items.
+         */
+        post: operations["arStatementRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one batch statement run
+         * @description The run with its items, customers by name.
+         */
+        get: operations["arStatementRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the finance charge rules
+         * @description The tenant's finance charge rules: the monthly rate in basis points, the grace days, the minimum charge and the minimum overdue balance, whether the charges compound, and the income account the charge credits. Migration 124 seeds the row charges off.
+         */
+        get: operations["arFinanceChargeRulesGet"];
+        /**
+         * Write the finance charge rules
+         * @description Roles admin, owner, finance. Writes the whole policy in one act: the rate (at most 100000 basis points, 100 percent a month), the grace days (0 to 365), the two minimums, the compound flag, and an income account the chart of accounts must hold.
+         */
+        put: operations["arFinanceChargeRulesUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List finance charge runs
+         * @description The finance charge runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arFinanceChargeRunsList"];
+        put?: never;
+        /**
+         * Preview or execute a finance charge run
+         * @description Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+         */
+        post: operations["arFinanceChargeRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one finance charge run
+         * @description The run with its items, customers by name, each naming the invoice and the entry it generated when executed.
+         */
+        get: operations["arFinanceChargeRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customerId}/activities": {
         parameters: {
             query?: never;
@@ -7674,6 +7914,370 @@ export interface components {
             customers: components["schemas"]["ArDriftRow"][];
             currencies: components["schemas"]["ArLedgerRow"][];
         };
+        CreditStanding: {
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** Format: int64 */
+            current_balance_cents: number;
+            /**
+             * Format: int64
+             * @description The open invoice cents past their due date.
+             */
+            past_due_cents: number;
+        };
+        CreditHold: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            reason: string;
+            /** @enum {string} */
+            hold_type: "manual" | "over_limit" | "past_due";
+            /** @enum {string} */
+            status: "active" | "released" | "overridden";
+            /** @description null on a hold the sweep placed. */
+            placed_by: string | null;
+            /** Format: date-time */
+            placed_at: string;
+            released_by: string | null;
+            /** Format: date-time */
+            released_at: string | null;
+            release_reason: string | null;
+            /** Format: date-time */
+            override_until: string | null;
+            override_by: string | null;
+            override_reason: string | null;
+            /**
+             * Format: int64
+             * @description The order size the override window allows.
+             */
+            max_order_cents: number | null;
+            credit?: components["schemas"]["CreditStanding"];
+        };
+        CreditHoldPage: {
+            items: components["schemas"]["CreditHold"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditHoldPlaceRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            hold_type: "manual" | "over_limit" | "past_due";
+        };
+        CreditHoldReleaseRequest: {
+            reason: string;
+        };
+        CreditHoldOverrideRequest: {
+            override_reason: string;
+            /**
+             * Format: date-time
+             * @description A future instant: the window the override buys.
+             */
+            override_until: string;
+            /** Format: int64 */
+            max_order_cents?: number | null;
+        };
+        CreditHoldEvaluateRequest: {
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every active credit account; present, exactly these. */
+            customer_ids?: string[];
+        };
+        CreditHoldPlacement: {
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            hold_type: "over_limit" | "past_due";
+            reason: string;
+            /**
+             * Format: uuid
+             * @description Set on an executed sweep; empty on a dry run.
+             */
+            hold_id?: string;
+        };
+        CreditHoldReleaseRecord: {
+            /** Format: uuid */
+            hold_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+        };
+        CreditHoldEvaluation: {
+            dry_run: boolean;
+            /** @description The accounts the sweep read. */
+            evaluated: number;
+            would_place: components["schemas"]["CreditHoldPlacement"][];
+            would_release: components["schemas"]["CreditHoldReleaseRecord"][];
+            /** @description Zero on a dry run. */
+            placed: number;
+            /** @description Zero on a dry run. */
+            released: number;
+        };
+        CreditLimitChange: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: int64 */
+            old_limit_cents: number;
+            /** Format: int64 */
+            new_limit_cents: number;
+            requested_by: string | null;
+            approved_by: string | null;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            decided_at: string | null;
+        };
+        CreditLimitChangePage: {
+            items: components["schemas"]["CreditLimitChange"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditLimitChangeRequest: {
+            /** Format: int64 */
+            new_limit_cents: number;
+            reason: string;
+            /**
+             * @description true applies the limit in the same act.
+             * @default false
+             */
+            approve: boolean;
+        };
+        ArWorklistRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            past_due_cents: number;
+            /** Format: int64 */
+            over_limit_cents: number;
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** @description The balance over the limit, percent; null for no limit. */
+            credit_utilization_pct: number | null;
+            /** @enum {string} */
+            hold_status: "none" | "active" | "overridden";
+            /** Format: uuid */
+            hold_id?: string;
+            /** Format: date-time */
+            override_until?: string | null;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "hold" | "call" | "send_statement" | "finance_charge";
+        };
+        ArWorklist: {
+            /** Format: date */
+            as_of: string;
+            rows: components["schemas"]["ArWorklistRow"][];
+        };
+        ArStatementRunItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The subledger before period_start.
+             */
+            opening_balance_cents: number;
+            /** Format: int64 */
+            invoices_cents: number;
+            /** Format: int64 */
+            payments_cents: number;
+            /** Format: int64 */
+            finance_charges_cents: number;
+            /** Format: int64 */
+            closing_balance_cents: number;
+            /** @enum {string} */
+            delivery_status: "not_queued" | "queued" | "sent" | "failed" | "skipped";
+            /**
+             * Format: uuid
+             * @description The statement.queued event of a queued item.
+             */
+            outbox_id: string | null;
+            /** @description The aging as of period_end: current, days_1_30, days_31_60, days_61_90 and over_90, in cents. */
+            aging_buckets: {
+                [key: string]: number;
+            };
+        };
+        ArStatementRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            period_start: string;
+            /** Format: date */
+            period_end: string;
+            /** Format: date */
+            as_of_date: string;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed";
+            total_customers: number;
+            queued_count: number;
+            sent_count: number;
+            /** Format: int64 */
+            total_balance_cents: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @description On the by-id read and the create answer; the list read carries none. */
+            items?: components["schemas"]["ArStatementRunItem"][];
+        };
+        ArStatementRunPage: {
+            items: components["schemas"]["ArStatementRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        ArStatementRunRequest: {
+            /**
+             * Format: date
+             * @description Default a month before period_end.
+             */
+            period_start?: string;
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            period_end?: string;
+            /** @description Absent, every customer with a non-zero balance; present, exactly these. */
+            customer_ids?: string[];
+            /** @default false */
+            queue_email: boolean;
+        };
+        ArFinanceChargeRunRequest: {
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            as_of_date?: string;
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every eligible customer; present, exactly these. */
+            customer_ids?: string[];
+        };
+        ArFinanceChargeRules: {
+            /**
+             * Format: int64
+             * @description 10000 basis points is 100 percent a month.
+             */
+            monthly_rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** Format: int64 */
+            min_balance_cents: number;
+            /** @description false, the default, never charges on a finance charge invoice. */
+            compound: boolean;
+            /** @description The chart account the charge credits; 4060 by default. */
+            income_account_code: string;
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ArFinanceChargeItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The basis the charge was taken on.
+             */
+            overdue_cents: number;
+            /** Format: int64 */
+            charge_cents: number;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            invoice_id: string | null;
+            invoice_number: string | null;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            journal_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ArFinanceChargeRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            as_of_date: string;
+            /** Format: int64 */
+            rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed" | "dry_run";
+            /** Format: int64 */
+            total_charged_cents: number;
+            customer_count: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description null on a dry run: a preview never completes.
+             */
+            completed_at: string | null;
+            /** @description On the by-id read and the run answer; the list read carries none. */
+            items?: components["schemas"]["ArFinanceChargeItem"][];
+        };
+        ArFinanceChargeRunPage: {
+            items: components["schemas"]["ArFinanceChargeRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         /**
          * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
          * @enum {string}
@@ -10292,7 +10896,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -10300,6 +10904,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -10311,6 +10921,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -10553,7 +11165,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -10561,6 +11173,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -10572,6 +11190,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -11091,7 +11711,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11099,6 +11719,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11110,6 +11736,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -11172,7 +11800,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11180,6 +11808,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11191,6 +11825,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -12165,6 +12801,10 @@ export interface components {
             /** @description Float dollars. */
             line_total: number;
             available: number;
+            uom: string;
+            price_uom: string;
+            uom_qty: number;
+            price_uom_qty: number;
         };
         PortalAddToCartRequest: {
             /** Format: uuid */
@@ -12724,6 +13364,9 @@ export interface components {
             /** @description The pair side in the sale unit; 1 and 1 when the units agree. */
             uom_qty: string | null;
             price_uom_qty: string | null;
+            stock_uom: string | null;
+            stock_quantity: string | null;
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description Scale 4; null on a text line.
@@ -12736,6 +13379,7 @@ export interface components {
             priced_unit_price_ten_thousandths: number | null;
             /** @enum {string} */
             price_source: "price_list" | "quote" | "override" | "manual" | "none";
+            price_basis: string | null;
             override_reason: string | null;
             /** @description A percent or a cents amount, never both. */
             discount_percent: string | null;
@@ -15847,6 +16491,546 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    arCreditHoldsList: {
+        parameters: {
+            query?: {
+                status?: "standing" | "released" | "all";
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditHoldPlace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldPlaceRequest"];
+            };
+        };
+        responses: {
+            /** @description The standing hold, already in place. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            /** @description The hold, placed. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldsEvaluate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldEvaluateRequest"];
+            };
+        };
+        responses: {
+            /** @description The sweep's answer, placed and lifted counts included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldEvaluation"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldRelease: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldReleaseRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, released. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldOverride: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, overridden until the window ends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditLimitChangesList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit limit changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChangePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditLimitChangeRequest: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditLimitChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The change, approved and applied. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            /** @description The change, recorded as pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arWorklist: {
+        parameters: {
+            query?: {
+                as_of?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArWorklist"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArStatementRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, completed, with its items. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arStatementRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRules"];
+            };
+        };
+        responses: {
+            /** @description The rules, written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arFinanceChargeRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, executed or previewed, with its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     activityList: {
