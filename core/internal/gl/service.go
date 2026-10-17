@@ -105,6 +105,9 @@ func (s *Service) UpdateAccount(ctx context.Context, acct *GLAccount) error {
 
 // CreateJournalEntry creates a new journal entry, validating that it balances.
 func (s *Service) CreateJournalEntry(ctx context.Context, entry *JournalEntry) error {
+	if entry.BranchID == uuid.Nil {
+		return ErrNoBranch
+	}
 	if len(entry.Lines) < 2 {
 		return fmt.Errorf("journal entry must have at least 2 lines")
 	}
@@ -219,6 +222,7 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 		Memo:            memo,
 		Source:          SourceReversal,
 		SourceRefID:     &orig.ID,
+		BranchID:        orig.BranchID,
 		Status:          StatusPosted,
 		PostedBy:        "system",
 		ReversesEntryID: &orig.ID,
@@ -227,6 +231,7 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 	for _, l := range orig.Lines {
 		rev.Lines = append(rev.Lines, JournalLine{
 			AccountID:   l.AccountID,
+			BranchID:    l.BranchID,
 			Description: "Reversal: " + l.Description,
 			Debit:       l.Credit, // swap
 			Credit:      l.Debit,
@@ -451,7 +456,7 @@ func (s *Service) CloseFiscalPeriod(ctx context.Context, id uuid.UUID) error {
 
 // SyncInvoice creates a journal entry: DR Accounts Receivable / CR Sales Revenue.
 // This replaces the old stub that only forwarded to external GL.
-func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int64) error {
+func (s *Service) SyncInvoice(ctx context.Context, branchID uuid.UUID, invoiceID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(invoiceID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeAR, AccountCodeRevenue)
@@ -463,7 +468,7 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Invoice %s", invoiceID),
 		Source:      SourceInvoice,
-		SourceRefID: &sourceRefID,
+		SourceRefID: &sourceRefID, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -501,7 +506,7 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 }
 
 // SyncPayment creates a journal entry: DR Cash / CR Accounts Receivable.
-func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int64) error {
+func (s *Service) SyncPayment(ctx context.Context, branchID uuid.UUID, paymentID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(paymentID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeAR)
@@ -513,7 +518,7 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int6
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Payment %s", paymentID),
 		Source:      SourcePayment,
-		SourceRefID: &sourceRefID,
+		SourceRefID: &sourceRefID, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -533,7 +538,7 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int6
 // Unlike an on-account sale there is no AR leg — the sale is paid at the till.
 // Tagged with the PAYMENT source (cash received) to satisfy the source CHECK
 // constraint. The amount is the full sale total in cents.
-func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64) error {
+func (s *Service) SyncCashSale(ctx context.Context, branchID uuid.UUID, posTxID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(posTxID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeRevenue)
@@ -545,7 +550,7 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Sale %s", posTxID),
 		Source:      SourcePayment,
-		SourceRefID: &sourceRefID,
+		SourceRefID: &sourceRefID, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -565,7 +570,7 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 // revenue and pays cash back out of the drawer. amount is the refunded total
 // in cents (positive). Tagged RETURN so refunds are filterable in the ledger.
 // Returns the journal entry ID so the return row can link back to its entry.
-func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncCashReturn(ctx context.Context, branchID uuid.UUID, refID string, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("cash return amount must be positive, got %d", amount)
 	}
@@ -580,7 +585,7 @@ func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Return %s", refID),
 		Source:      SourceReturn,
-		SourceRefID: &sourceRefID,
+		SourceRefID: &sourceRefID, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -600,7 +605,7 @@ func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64
 // of an on-account sale. No cash leaves the drawer; the customer simply owes
 // less. The balance-due subledger effect is posted separately by the caller.
 // Returns the journal entry ID so the return row can link back to its entry.
-func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncAccountReturn(ctx context.Context, branchID uuid.UUID, refID string, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("account return amount must be positive, got %d", amount)
 	}
@@ -615,7 +620,7 @@ func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount in
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Return (account credit) %s", refID),
 		Source:      SourceReturn,
-		SourceRefID: &sourceRefID,
+		SourceRefID: &sourceRefID, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -634,7 +639,7 @@ func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount in
 // DR Cash / CR Customer Deposits. The deposit is a liability we hold until it
 // is applied against the customer's AR (see ApplyCustomerDeposit). Returns the
 // journal entry ID so the deposit row can link back to its ledger entry.
-func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncCustomerDeposit(ctx context.Context, branchID uuid.UUID, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("deposit amount must be positive, got %d", amount)
 	}
@@ -648,7 +653,7 @@ func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, 
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Customer deposit %s", depositID),
 		Source:      SourceDeposit,
-		SourceRefID: &ref,
+		SourceRefID: &ref, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -667,7 +672,7 @@ func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, 
 // and reduces the receivable (the balance-due subledger effect is posted
 // separately by the deposit service via account.PostTransaction). Returns the
 // journal entry ID so each application can link back to its ledger entry.
-func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+func (s *Service) ApplyCustomerDeposit(ctx context.Context, branchID uuid.UUID, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("applied amount must be positive, got %d", amount)
 	}
@@ -681,7 +686,7 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Customer deposit %s applied to AR", depositID),
 		Source:      SourceDeposit,
-		SourceRefID: &ref,
+		SourceRefID: &ref, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
@@ -703,7 +708,7 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 //     overage is a credit against the expense)
 //
 // A zero variance posts nothing and returns uuid.Nil.
-func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
+func (s *Service) PostTillOverShort(ctx context.Context, branchID uuid.UUID, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
 	if overShortCents == 0 {
 		return uuid.Nil, nil
 	}
@@ -735,7 +740,7 @@ func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, ov
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Till over/short — session %s", sessionID),
 		Source:      SourceAdjustment,
-		SourceRefID: &ref,
+		SourceRefID: &ref, BranchID: branchID,
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines:       lines,

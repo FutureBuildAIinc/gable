@@ -186,21 +186,21 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 		ex := r.db.GetExecutor(ctx)
 
 		queryHeader := `
-			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-				COALESCE(NULLIF($11::text, ''), (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'))
+			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+				COALESCE(NULLIF($12::text, ''), (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'))
 			RETURNING entry_number
 		`
 		if err := ex.QueryRow(ctx, queryHeader,
-			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
+			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID, entry.BranchID,
 			entry.Status, entry.PostedBy, entry.ReversesEntryID, entry.CreatedAt, entry.UpdatedAt, entry.Currency,
 		).Scan(&entry.EntryNumber); err != nil {
 			return fmt.Errorf("failed to insert journal entry: %w", err)
 		}
 
 		queryLine := `
-			INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 		`
 		for i := range entry.Lines {
 			line := &entry.Lines[i]
@@ -208,12 +208,16 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 				line.ID = uuid.New()
 			}
 			line.EntryID = entry.ID
+			lineBranch := line.BranchID
+			if lineBranch == uuid.Nil {
+				lineBranch = entry.BranchID
+			}
 
 			debitFloat := float64(line.Debit) / 100.0
 			creditFloat := float64(line.Credit) / 100.0
 
 			if _, err := ex.Exec(ctx, queryLine,
-				line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat,
+				line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat, lineBranch,
 			); err != nil {
 				return fmt.Errorf("failed to insert journal line: %w", err)
 			}
@@ -225,14 +229,14 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 
 func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error) {
 	queryHeader := `
-		SELECT id, entry_number, entry_date, memo, source, source_ref_id, status, COALESCE(posted_by, ''), created_at, updated_at, currency
+		SELECT id, entry_number, entry_date, memo, source, source_ref_id, branch_id, status, COALESCE(posted_by, ''), created_at, updated_at, currency
 		FROM gl_journal_entries
 		WHERE id = $1
 	`
 	var e JournalEntry
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source,
-		&e.SourceRefID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
+		&e.SourceRefID, &e.BranchID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -243,7 +247,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 
 	queryLines := `
 		SELECT l.id, l.journal_entry_id, l.account_id, COALESCE(a.code, ''), COALESCE(a.name, ''),
-		       COALESCE(l.description, ''), l.debit, l.credit
+		       COALESCE(l.description, ''), l.branch_id, l.debit, l.credit
 		FROM gl_journal_lines l
 		LEFT JOIN gl_accounts a ON a.id = l.account_id
 		WHERE l.journal_entry_id = $1
@@ -259,7 +263,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 	for rows.Next() {
 		var l JournalLine
 		var debitFloat, creditFloat float64
-		if err := rows.Scan(&l.ID, &l.EntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.Description, &debitFloat, &creditFloat); err != nil {
+		if err := rows.Scan(&l.ID, &l.EntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.Description, &l.BranchID, &debitFloat, &creditFloat); err != nil {
 			return nil, fmt.Errorf("failed to scan journal line: %w", err)
 		}
 		l.Debit = money.DollarsToCents(debitFloat)
@@ -276,7 +280,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 
 func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalEntry, error) {
 	query := `
-		SELECT e.id, e.entry_number, e.entry_date, e.memo, e.source, e.source_ref_id,
+		SELECT e.id, e.entry_number, e.entry_date, e.memo, e.source, e.source_ref_id, e.branch_id,
 		       e.status, COALESCE(e.posted_by, ''),
 		       COALESCE((SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_debit,
 		       COALESCE((SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_credit,
@@ -295,7 +299,7 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 		var e JournalEntry
 		var totalDebitFloat, totalCreditFloat float64
 		if err := rows.Scan(
-			&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source, &e.SourceRefID,
+			&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source, &e.SourceRefID, &e.BranchID,
 			&e.Status, &e.PostedBy,
 			&totalDebitFloat, &totalCreditFloat,
 			&e.CreatedAt, &e.UpdatedAt,

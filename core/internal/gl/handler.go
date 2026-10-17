@@ -214,6 +214,7 @@ func (h *Handler) HandleGetJournalEntry(w http.ResponseWriter, r *http.Request) 
 type createJournalEntryRequest struct {
 	EntryDate string           `json:"entry_date"` // YYYY-MM-DD
 	Memo      string           `json:"memo"`
+	BranchID  string           `json:"branch_id"`
 	Lines     []journalLineReq `json:"lines"`
 }
 
@@ -260,10 +261,17 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 		})
 	}
 
+	branchID, err := uuid.Parse(req.BranchID)
+	if err != nil {
+		httputil.RespondError(w, r, "a manual journal entry names its branch (branch_id)", http.StatusBadRequest, err)
+		return
+	}
+
 	entry := &JournalEntry{
 		EntryDate: entryDate,
 		Memo:      req.Memo,
 		Source:    SourceManual,
+		BranchID:  branchID,
 		Status:    StatusDraft,
 		Lines:     lines,
 	}

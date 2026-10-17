@@ -37,12 +37,12 @@ func (s *Service) PostInvoice(ctx context.Context, in PostInvoiceIn) (*Effects, 
 		return nil, err
 	}
 	fx := &Effects{}
-	if in.Number == "" || in.Currency == "" {
-		// The counter's account charge (until C2-5) leaves the number and the
-		// currency to the invoice's column defaults: read them.
-		if err := s.ex(ctx).QueryRow(ctx, `SELECT number, currency FROM invoices WHERE id = $1`, in.InvoiceID).Scan(&in.Number, &in.Currency); err != nil {
-			return nil, httpx.NotFound("invoice not found")
-		}
+	// The counter's account charge (until C2-5) leaves the number and the
+	// currency to the invoice's column defaults: read them, and the branch the
+	// entry belongs to beside them (every posting carries its branch).
+	var branch uuid.UUID
+	if err := s.ex(ctx).QueryRow(ctx, `SELECT number, currency, branch_id FROM invoices WHERE id = $1`, in.InvoiceID).Scan(&in.Number, &in.Currency, &branch); err != nil {
+		return nil, httpx.NotFound("invoice not found")
 	}
 	legs := append([]gl.Leg{{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.TotalCents}}, in.Legs...)
 	if _, err := s.lockCustomer(ctx, in.CustomerID); err != nil {
@@ -50,7 +50,7 @@ func (s *Service) PostInvoice(ctx context.Context, in PostInvoiceIn) (*Effects, 
 	}
 	id := in.InvoiceID
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Invoice " + in.Number, Source: gl.SourceInvoice,
-		SourceRefID: &id, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
+		SourceRefID: &id, BranchID: branch, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func (s *Service) PostCreditMemo(ctx context.Context, in PostCreditMemoIn) (*Eff
 	legs := append([]gl.Leg{{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: -in.TotalCents}}, in.Legs...)
 	id := in.MemoID
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.MemoDate, Memo: "Credit memo " + in.Number, Source: gl.SourceCreditMemo,
-		SourceRefID: &id, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
+		SourceRefID: &id, BranchID: m.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return nil, err
 	}

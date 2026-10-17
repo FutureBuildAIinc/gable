@@ -177,7 +177,10 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		// The over/short entry, inside the close's transaction, linked back
 		// onto the session.
 		if s.ledger != nil && overShort != 0 {
-			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
+			if session.BranchID == nil {
+			return fmt.Errorf("the till session names no branch: its over/short cannot post")
+		}
+		glID, err := s.ledger.PostTillOverShort(ctx, *session.BranchID, sessionID, overShort)
 			if err != nil {
 				return fmt.Errorf("failed to post the drawer variance: %w", err)
 			}

@@ -505,7 +505,7 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 	legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Credit: int64(inv.TotalCents)})
 	entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
 		EntryDate: mustDate(inv.InvoiceDate), Memo: "Vendor invoice " + inv.Number,
-		Source: gl.SourceVendorInv, SourceRefID: &inv.ID, Currency: inv.Currency, PostedBy: actor, Legs: legs,
+		Source: gl.SourceVendorInv, SourceRefID: &inv.ID, BranchID: inv.BranchID, Currency: inv.Currency, PostedBy: actor, Legs: legs,
 	})
 	if err != nil {
 		if errors.Is(err, gl.ErrPeriodClosed) {
@@ -774,6 +774,9 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 		}
 
 		var events []outbox.Event
+		// The payment's entry belongs to the first named bill's branch, the
+		// branch the money leaves (a payment has no branch of its own).
+		paymentBranch := locked[lockedIDs[0]].BranchID
 		remaining := in.AmountCents
 		for _, id := range in.InvoiceIDs {
 			inv := locked[id]
@@ -819,7 +822,7 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 			ref := p.ID
 			entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
 				EntryDate: mustDate(in.PaymentDate), Memo: "Vendor payment " + p.ID.String(),
-				Source: gl.SourceVendorPmt, SourceRefID: &ref, Currency: currency, PostedBy: who.Actor,
+				Source: gl.SourceVendorPmt, SourceRefID: &ref, BranchID: paymentBranch, Currency: currency, PostedBy: who.Actor,
 				Legs: []gl.Leg{
 					{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Debit: in.AmountCents - remaining},
 					{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents - remaining},

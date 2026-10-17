@@ -10,6 +10,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// testBranchID is the branch the mock based tests post under.
+var testBranchID = uuid.MustParse("7f5e0e8a-1111-4d1c-9a1e-000000000001")
+
 // acctID returns the seeded account UUID for a code (test helper).
 func acctID(repo *MockRepository, code string) uuid.UUID {
 	for _, a := range repo.accounts {
@@ -50,7 +53,7 @@ func assertLeg(t *testing.T, repo *MockRepository, entry JournalEntry, drCode, c
 func TestSyncCashReturn_ReversesCashSale(t *testing.T) {
 	svc, repo := newTestService()
 
-	id, err := svc.SyncCashReturn(context.Background(), uuid.New().String(), 7500) // $75.00
+	id, err := svc.SyncCashReturn(context.Background(), testBranchID, uuid.New().String(), 7500) // $75.00
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +74,7 @@ func TestSyncCashReturn_ReversesCashSale(t *testing.T) {
 func TestSyncAccountReturn_CreditsAR(t *testing.T) {
 	svc, repo := newTestService()
 
-	id, err := svc.SyncAccountReturn(context.Background(), uuid.New().String(), 4200)
+	id, err := svc.SyncAccountReturn(context.Background(), testBranchID, uuid.New().String(), 4200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +93,7 @@ func TestSyncCustomerDeposit_BooksLiability(t *testing.T) {
 	svc, repo := newTestService()
 
 	depID := uuid.New()
-	glID, err := svc.SyncCustomerDeposit(context.Background(), depID, 50000) // $500.00
+	glID, err := svc.SyncCustomerDeposit(context.Background(), testBranchID, depID, 50000) // $500.00
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +112,7 @@ func TestApplyCustomerDeposit_RelievesLiabilityAgainstAR(t *testing.T) {
 	svc, repo := newTestService()
 
 	depID := uuid.New()
-	glID, err := svc.ApplyCustomerDeposit(context.Background(), depID, 30000) // $300.00
+	glID, err := svc.ApplyCustomerDeposit(context.Background(), testBranchID, depID, 30000) // $300.00
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -129,16 +132,16 @@ func TestReturnsDeposits_RejectNonPositiveAmounts(t *testing.T) {
 	ctx := context.Background()
 	ref := uuid.New()
 
-	if _, err := svc.SyncCashReturn(ctx, ref.String(), 0); err == nil {
+	if _, err := svc.SyncCashReturn(ctx, testBranchID, ref.String(), 0); err == nil {
 		t.Error("SyncCashReturn should reject a zero amount")
 	}
-	if _, err := svc.SyncAccountReturn(ctx, ref.String(), -100); err == nil {
+	if _, err := svc.SyncAccountReturn(ctx, testBranchID, ref.String(), -100); err == nil {
 		t.Error("SyncAccountReturn should reject a negative amount")
 	}
-	if _, err := svc.SyncCustomerDeposit(ctx, ref, 0); err == nil {
+	if _, err := svc.SyncCustomerDeposit(ctx, testBranchID, ref, 0); err == nil {
 		t.Error("SyncCustomerDeposit should reject a zero amount")
 	}
-	if _, err := svc.ApplyCustomerDeposit(ctx, ref, -1); err == nil {
+	if _, err := svc.ApplyCustomerDeposit(ctx, testBranchID, ref, -1); err == nil {
 		t.Error("ApplyCustomerDeposit should reject a negative amount")
 	}
 }

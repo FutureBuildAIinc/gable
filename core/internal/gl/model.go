@@ -72,6 +72,7 @@ type JournalEntry struct {
 	Memo            string        `json:"memo"`
 	Source          string        `json:"source"`
 	SourceRefID     *uuid.UUID    `json:"source_ref_id,omitempty"`
+	BranchID        uuid.UUID     `json:"branch_id"` // the branch the entry belongs to (migration 125)
 	Status          string        `json:"status"`
 	PostedBy        string        `json:"posted_by"`
 	ReversesEntryID *uuid.UUID    `json:"reverses_entry_id,omitempty"` // set on a reversal entry
@@ -91,8 +92,9 @@ type JournalLine struct {
 	AccountCode string    `json:"account_code,omitempty"`
 	AccountName string    `json:"account_name,omitempty"`
 	Description string    `json:"description"`
-	Debit       int64     `json:"debit"`  // Cents
-	Credit      int64     `json:"credit"` // Cents
+	BranchID    uuid.UUID `json:"branch_id,omitempty"` // the line's branch, normally its entry's
+	Debit       int64     `json:"debit"`               // Cents
+	Credit      int64     `json:"credit"`              // Cents
 }
 
 // FiscalPeriod represents an accounting period that can be opened or closed.

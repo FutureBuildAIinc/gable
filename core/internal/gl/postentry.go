@@ -43,15 +43,22 @@ var (
 	// ErrAccountMissing names a code the chart of accounts does not hold, so
 	// the act can answer a 409 telling the operator what to mend.
 	ErrAccountMissing = errors.New("gl: a required account is missing from the chart of accounts")
+	// ErrNoBranch is PostEntry's refusal of a posting that names no branch:
+	// every entry belongs to a branch (migration 125), and a writer that has
+	// none fails here rather than posting silently on the default.
+	ErrNoBranch = errors.New("gl: a journal entry names no branch")
 )
 
 // Leg is one leg of a posting, by stable account code. A leg with a zero
-// amount is left out of the entry.
+// amount is left out of the entry. A leg may name its own BranchID when the
+// line belongs to another branch than the entry (an inter-branch leg); nil
+// takes the entry's branch.
 type Leg struct {
 	AccountCode string
 	Description string
 	Debit       int64
 	Credit      int64
+	BranchID    *uuid.UUID
 }
 
 // PostingInput is one balanced journal entry to post (ADR 0005 section 8.2).
@@ -63,6 +70,7 @@ type PostingInput struct {
 	ReversesEntryID *uuid.UUID
 	Currency        string
 	PostedBy        string
+	BranchID        uuid.UUID // the branch the entry belongs to (required)
 	Legs            []Leg
 }
 
@@ -74,6 +82,9 @@ type PostingInput struct {
 func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry, error) {
 	if !database.InTx(ctx) {
 		return nil, ErrNoTransaction
+	}
+	if in.BranchID == uuid.Nil {
+		return nil, ErrNoBranch
 	}
 	var debit, credit int64
 	legs := make([]Leg, 0, len(in.Legs))
@@ -111,11 +122,15 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 	entry := &JournalEntry{
 		EntryDate: in.EntryDate, Memo: in.Memo, Source: source, SourceRefID: in.SourceRefID,
 		ReversesEntryID: in.ReversesEntryID, Currency: in.Currency,
-		Status: StatusPosted, PostedBy: postedBy,
+		Status: StatusPosted, PostedBy: postedBy, BranchID: in.BranchID,
 		TotalDebit: debit, TotalCredit: credit,
 	}
 	for _, l := range legs {
-		entry.Lines = append(entry.Lines, JournalLine{AccountID: ids[l.AccountCode], Description: l.Description, Debit: l.Debit, Credit: l.Credit})
+		line := JournalLine{AccountID: ids[l.AccountCode], Description: l.Description, Debit: l.Debit, Credit: l.Credit, BranchID: in.BranchID}
+		if l.BranchID != nil {
+			line.BranchID = *l.BranchID
+		}
+		entry.Lines = append(entry.Lines, line)
 	}
 	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
 		if strings.Contains(err.Error(), closedPeriodMessagePart) {
@@ -194,8 +209,13 @@ func (s *Service) PostReversal(ctx context.Context, in ReversalInput) (*JournalE
 	}
 	legs := make([]Leg, 0, len(orig.Lines))
 	for _, l := range orig.Lines {
-		legs = append(legs, Leg{AccountCode: l.AccountCode, Description: "Reversal: " + l.Description,
-			Debit: l.Credit, Credit: l.Debit})
+		leg := Leg{AccountCode: l.AccountCode, Description: "Reversal: " + l.Description,
+			Debit: l.Credit, Credit: l.Debit}
+		if l.BranchID != uuid.Nil && l.BranchID != orig.BranchID {
+			branch := l.BranchID
+			leg.BranchID = &branch
+		}
+		legs = append(legs, leg)
 	}
 	origID := orig.ID
 	currency := orig.Currency
@@ -204,6 +224,6 @@ func (s *Service) PostReversal(ctx context.Context, in ReversalInput) (*JournalE
 	}
 	return s.PostEntry(ctx, PostingInput{
 		EntryDate: in.EntryDate, Memo: memo, Source: SourceReversal, SourceRefID: &origID,
-		ReversesEntryID: &origID, Currency: currency, PostedBy: in.PostedBy, Legs: legs,
+		ReversesEntryID: &origID, Currency: currency, PostedBy: in.PostedBy, BranchID: orig.BranchID, Legs: legs,
 	})
 }

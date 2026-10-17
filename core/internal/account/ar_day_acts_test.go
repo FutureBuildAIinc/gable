@@ -190,6 +190,8 @@ func TestARBusinessDayIsTheBranchsOwnDay(t *testing.T) {
 			t.Cleanup(func() {
 				// the world's own cleanup removes the payment; the branch goes after
 				w.exec(`UPDATE payments SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
+				w.exec(`UPDATE gl_journal_lines SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
+				w.exec(`UPDATE gl_journal_entries SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
 				w.exec(`DELETE FROM locations WHERE id = $1`, branch)
 			})
 			today, err := w.svc.LocalDate(context.Background(), branch, w.svc.Now())

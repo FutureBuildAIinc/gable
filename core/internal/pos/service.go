@@ -59,7 +59,7 @@ type InvoiceWriter interface {
 // LedgerPoster posts the till drawer's over/short inside the close's
 // transaction (gl.Service).
 type LedgerPoster interface {
-	PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error)
+	PostTillOverShort(ctx context.Context, branchID uuid.UUID, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error)
 }
 
 // EventRecorder writes the act's events, last, in its transaction.

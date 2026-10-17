@@ -1543,11 +1543,11 @@ func TestWire_VoidRefusesDoublePostedBill(t *testing.T) {
 	// for the bill, beside the linked one.
 	entry := f.glEntryOf(id)
 	dup := uuid.New()
-	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, currency)
-		SELECT $2, entry_date, memo || ' (duplicate)', source, source_ref_id, status, posted_by, currency
+	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, currency)
+		SELECT $2, entry_date, memo || ' (duplicate)', source, source_ref_id, branch_id, status, posted_by, currency
 		FROM gl_journal_entries WHERE id = $1`, entry, dup)
-	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-		SELECT gen_random_uuid(), $2, account_id, description, debit, credit
+	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
+		SELECT gen_random_uuid(), $2, account_id, description, debit, credit, branch_id
 		FROM gl_journal_lines WHERE journal_entry_id = $1`, entry, dup)
 	control, open := f.controlBalance(), f.openSum()
 	if control != 4000 || open != 2000 {
@@ -2128,10 +2128,12 @@ func TestWire_VoidRefusesCrossCurrencyChainBuiltInTheLedger(t *testing.T) {
 	handReversal := func(entry uuid.UUID, currency string) {
 		t.Helper()
 		id := uuid.New()
-		mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
-			VALUES ($1, now(), 'hand built wrong currency reversal', 'REVERSAL', $2, 'POSTED', 'test', $2, now(), now(), $3)`, id, entry, currency)
-		mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-			SELECT gen_random_uuid(), $1, l.account_id, 'hand built reversal: ' || l.description, l.credit, l.debit
+		mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, now(), 'hand built wrong currency reversal', 'REVERSAL', $2,
+				(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), 'POSTED', 'test', $2, now(), now(), $3)`, id, entry, currency)
+		mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
+			SELECT gen_random_uuid(), $1, l.account_id, 'hand built reversal: ' || l.description, l.credit, l.debit,
+				(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')
 			FROM gl_journal_lines l WHERE l.journal_entry_id = $2`, id, entry)
 	}
 	chainNetIn := func(entry, currency string) int64 {
@@ -2226,11 +2228,11 @@ func TestWire_VoidRefusesCrossCurrencyChainBuiltInTheLedger(t *testing.T) {
 	}
 	id2 := str(t, c2.body, "id")
 	e2 := uuid.New()
-	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at, currency)
-		VALUES ($1, now(), 'hand built bill entry', 'VENDOR_INVOICE', $2, 'POSTED', 'test', now(), now(), 'CAD')`, e2, id2)
-	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-		VALUES (gen_random_uuid(), $1, $2, 'hand built bill line', 20.00, 0),
-		       (gen_random_uuid(), $1, (SELECT id FROM gl_accounts WHERE code = '2010'), 'hand built bill line', 0, 20.00)`, e2, f.expense)
+	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, created_at, updated_at, currency)
+		VALUES ($1, now(), 'hand built bill entry', 'VENDOR_INVOICE', $2, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), 'POSTED', 'test', now(), now(), 'CAD')`, e2, id2)
+	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
+		VALUES (gen_random_uuid(), $1, $2, 'hand built bill line', 20.00, 0, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')),
+		       (gen_random_uuid(), $1, (SELECT id FROM gl_accounts WHERE code = '2010'), 'hand built bill line', 0, 20.00, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`, e2, f.expense)
 	handReversal(e2, "USD")
 	a2 := f.approve(id2, 1)
 	if a2.status != http.StatusConflict {
@@ -2403,6 +2405,8 @@ func TestWire_BranchWall(t *testing.T) {
 	mustExec(t, f.db, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, other, "C41B-"+other.String()[:8])
 	t.Cleanup(func() {
 		mustExec(t, f.db, `UPDATE vendor_invoices SET branch_id = `+defaultBranch+` WHERE branch_id = $1`, other)
+		mustExec(t, f.db, `UPDATE gl_journal_lines SET branch_id = `+defaultBranch+` WHERE branch_id = $1`, other)
+		mustExec(t, f.db, `UPDATE gl_journal_entries SET branch_id = `+defaultBranch+` WHERE branch_id = $1`, other)
 		mustExec(t, f.db, `DELETE FROM locations WHERE id = $1`, other)
 	})
 	id, _ := f.enter("V-WALL", "1", 100000)
