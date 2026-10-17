@@ -199,14 +199,11 @@ func TestStandingStatesTheHoldTheCounterHasToday(t *testing.T) {
 // override and the payment shapes the server enumerates for it.
 func TestStandingBlocksACashOnlyAccountByTheTermsKind(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	db := testutil.RequireDB(t)
 	// a terms row whose code and name say nothing of cash: only its kind does
-	mustExec(t, f.db, `INSERT INTO payment_terms (code, name, kind) VALUES ('ZZ-PAYNOW', 'Pay now', 'DUE_ON_RECEIPT') ON CONFLICT (code) DO NOTHING`)
-	t.Cleanup(func() {
-		mustExec(t, f.db, `UPDATE customers SET payment_terms_id = payment_terms_default_id() WHERE id = $1`, f.customerID)
-		mustExec(t, f.db, `DELETE FROM payment_terms WHERE code = 'ZZ-PAYNOW'`)
-	})
-	mustExec(t, f.db, `UPDATE customers SET payment_terms_id = (SELECT id FROM payment_terms WHERE code = 'ZZ-PAYNOW') WHERE id = $1`, f.customerID)
+	addTerms(t, db, "ZZ-PAYNOW", "Pay now", "DUE_ON_RECEIPT", nil)
+	f := newFixture(t, db)
+	f.setTerms("ZZ-PAYNOW")
 
 	r := f.standing(f.customerID, "")
 	v := verdictOf(t, r)
@@ -385,13 +382,10 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // manager's to waive) and a walk-in sale has no account to override.
 func TestAnOverrideDoesNotWaiveCashOnlyTermsOrAWalkIn(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
-	mustExec(t, f.db, `INSERT INTO payment_terms (code, name, kind) VALUES ('ZZ-PAYNOW2', 'Pay now', 'DUE_ON_RECEIPT') ON CONFLICT (code) DO NOTHING`)
-	t.Cleanup(func() {
-		mustExec(t, f.db, `UPDATE customers SET payment_terms_id = payment_terms_default_id() WHERE id = $1`, f.customerID)
-		mustExec(t, f.db, `DELETE FROM payment_terms WHERE code = 'ZZ-PAYNOW2'`)
-	})
-	mustExec(t, f.db, `UPDATE customers SET payment_terms_id = (SELECT id FROM payment_terms WHERE code = 'ZZ-PAYNOW2') WHERE id = $1`, f.customerID)
+	db := testutil.RequireDB(t)
+	addTerms(t, db, "ZZ-PAYNOW2", "Pay now", "DUE_ON_RECEIPT", nil)
+	f := newFixture(t, db)
+	f.setTerms("ZZ-PAYNOW2")
 	manager := uuid.NewString()
 	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
 	if r := f.addLine(sale, f.productLine("1")); r.status != http.StatusOK {
