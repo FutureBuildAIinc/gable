@@ -241,9 +241,12 @@ jobs:
       - name: App Shape check
         run: bash scripts/check-shape.sh
 
-  # The Tauri desktop shell (R1-9, tauri/gable-desk): builds the front door,
-  # runs the shell's unit tests, builds a Linux debug bundle and smoke-tests
-  # the binary under a virtual display (it must load the door and exit 0).
+  # The Tauri workspace (tauri/): the shared core and the work, field and
+  # pro profile shells, plus the desk shell until the work profile replaces
+  # it. The job builds the front door (every shell embeds it), runs the
+  # workspace's unit tests, builds a Linux debug bundle of the desk shell and
+  # smoke-tests the binary under a virtual display (it must load the door and
+  # exit 0).
   tauri:
     name: Tauri shell
     if: github.event_name != 'schedule'
@@ -258,7 +261,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # The shell embeds web/apps/front-door/dist, so the door is built first.
+      # The shells embed web/apps/front-door/dist, so the door is built first.
       - name: Build the front door
         working-directory: web
         run: |
@@ -284,8 +287,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            tauri/gable-desk/target
-          key: tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('tauri/gable-desk/Cargo.lock') }}
+            tauri/target
+          key: tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('tauri/Cargo.lock') }}
           restore-keys: tauri-${{ runner.os }}-${{ env.RUST_VERSION }}-
 
       - uses: actions/cache@v4
@@ -299,11 +302,11 @@ jobs:
         run: cargo install tauri-cli --version "${TAURI_CLI_VERSION}" --locked
 
       - name: Format
-        working-directory: tauri/gable-desk
+        working-directory: tauri
         run: cargo fmt --check
 
       - name: Unit tests
-        working-directory: tauri/gable-desk
+        working-directory: tauri
         run: cargo test --locked
 
       - name: Build the debug bundle
