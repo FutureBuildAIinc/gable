@@ -75,6 +75,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -1333,7 +1334,7 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 		next.ServeHTTP(sw, r)
 		logger.Info("request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", httputil.SafePath(r.URL.Path),
 			"status", sw.status,
 			"bytes", sw.bytesWritten,
 			"duration_ms", time.Since(start).Milliseconds(),

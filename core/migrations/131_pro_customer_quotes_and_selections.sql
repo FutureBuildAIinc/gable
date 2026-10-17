@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_lines (
     quantity                  NUMERIC(19,4) NOT NULL CHECK (quantity > 0),
     unit_cost_ten_thousandths BIGINT        NOT NULL CHECK (unit_cost_ten_thousandths >= 0),
     cost_cents                BIGINT        NOT NULL CHECK (cost_cents >= 0),
+    -- where the cost came from: the dealer's catalog price for this account, or
+    -- a line of the dealer quote the contractor was given (source_quote_id)
+    price_basis               TEXT          NOT NULL DEFAULT 'catalog' CHECK (price_basis IN ('catalog', 'dealer_quote')),
     option_group_id           UUID          NULL REFERENCES pro_customer_quote_option_groups (id) ON DELETE SET NULL,
     -- tier one: the line's own override, both or neither
     override_kind             TEXT          NULL CHECK (override_kind IN ('markup', 'margin')),
@@ -148,7 +151,6 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_labour_lines (
     rate_type       TEXT          NOT NULL CHECK (rate_type IN ('flat', 'hourly')),
     rate_cents      BIGINT        NOT NULL CHECK (rate_cents >= 0),
     hours           NUMERIC(19,4) NULL CHECK (hours IS NULL OR hours > 0),
-    total_cents     BIGINT        NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
     contractor_only BOOLEAN       NOT NULL DEFAULT FALSE,
     CHECK ((rate_type = 'hourly') = (hours IS NOT NULL))
 );
@@ -163,7 +165,6 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_overhead_lines (
     amount_type     TEXT    NOT NULL CHECK (amount_type IN ('flat', 'percent')),
     -- cents when flat, basis points when percent
     value           BIGINT  NOT NULL CHECK (value >= 0),
-    total_cents     BIGINT  NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
     contractor_only BOOLEAN NOT NULL DEFAULT FALSE,
     CHECK (amount_type = 'flat' OR value <= 1000000)
 );

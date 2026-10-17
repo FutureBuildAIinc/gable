@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
@@ -43,7 +45,7 @@ func HTTPMetrics(next http.Handler) http.Handler {
 		next.ServeHTTP(sw, r)
 
 		duration := time.Since(start).Seconds()
-		path := normalizePath(r.URL.Path)
+		path := normalizePath(httputil.SafePath(r.URL.Path))
 
 		HTTPRequestDuration.WithLabelValues(r.Method, path).Observe(duration)
 		HTTPRequestsTotal.WithLabelValues(r.Method, path, fmt.Sprintf("%d", sw.status)).Inc()
