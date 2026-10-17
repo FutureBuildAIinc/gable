@@ -44,7 +44,7 @@ func TestVolumeBreaks_BuildsTheLadder(t *testing.T) {
 			breakRule("20+", prod, 20, 10, 20), // higher priority, shallower discount
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 	cust := &customer.Customer{ID: uuid.New()}
 
 	breaks, err := svc.VolumeBreaks(context.Background(), cust, prod, 10.00)
@@ -77,14 +77,12 @@ func TestVolumeBreaks_DropsRungsThatDoNotBeatTheUnitPrice(t *testing.T) {
 	custID := uuid.New()
 
 	// A contract price wins the waterfall at every quantity, so no quantity
-	// break can ever improve on it.
-	repo := &MockRepository{
-		contracts: map[string]CustomerContract{
-			custID.String() + ":" + prod.String(): {CustomerID: custID, ProductID: prod, ContractPrice: 4.00},
-		},
-		rules: []PricingRule{breakRule("50+", prod, 50, 15, 0)},
-	}
-	svc := NewService(repo)
+	// break can ever improve on it. The contract lives in the resolve
+	// repository now: the adapters read it there.
+	fake := newFakeResolveRepo().withProduct(prod, 10.00, "EA")
+	fake.setContract(custID, prod, nil, 4.00, "EA")
+	repo := &MockRepository{rules: []PricingRule{breakRule("50+", prod, 50, 15, 0)}}
+	svc := NewService(repo).WithRepository(fake)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: custID}, prod, 10.00)
 	if err != nil {
@@ -112,7 +110,7 @@ func TestVolumeBreaks_RespectsProductAndCustomerScope(t *testing.T) {
 			otherCustRule,
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: custID}, prod, 10.00)
 	if err != nil {
@@ -126,7 +124,7 @@ func TestVolumeBreaks_RespectsProductAndCustomerScope(t *testing.T) {
 // CORRECTNESS: no customer, no ladder. Returning a retail ladder for a nil
 // customer would show one contractor a price that is not theirs.
 func TestVolumeBreaks_NilCustomerReturnsNothing(t *testing.T) {
-	svc := NewService(&MockRepository{contracts: map[string]CustomerContract{}})
+	svc := wiredService(&MockRepository{}, 10.00)
 	breaks, err := svc.VolumeBreaks(context.Background(), nil, uuid.New(), 10.00)
 	if err != nil {
 		t.Fatalf("VolumeBreaks: %v", err)
@@ -147,7 +145,7 @@ func TestVolumeBreaks_LadderIsMonotonic(t *testing.T) {
 			breakRule("20+", prod, 20, 5, 10),
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00)
 	if err != nil {
@@ -196,7 +194,7 @@ func TestCalculatePriceWithQty_DeepestBreakShouldWin(t *testing.T) {
 			breakRule("100+", prod, 100, 12, 10), // same priority — the tie
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 	cust := &customer.Customer{ID: uuid.New()}
 
 	got, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 100, nil)
@@ -233,7 +231,7 @@ func TestCalculatePriceWithQty_PriorityStillOverridesADeeperBreak(t *testing.T) 
 			breakRule("100+ deeper", prod, 100, 12, 10), // deeper AND cheaper, but outranked
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
 	if err != nil {
@@ -265,7 +263,7 @@ func TestCalculatePriceWithQty_PromoOutranksABreakAtTheSamePriority(t *testing.T
 		contracts: map[string]CustomerContract{},
 		rules:     []PricingRule{promo, breakRule("100+", prod, 100, 12, 10)},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
 	if err != nil {
@@ -291,7 +289,7 @@ func TestCalculatePriceWithQty_MisconfiguredLadderNeverPunishesTheBiggerBuyer(t 
 			breakRule("100+ (typo: shallower discount)", prod, 100, 5, 10),
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 	cust := &customer.Customer{ID: uuid.New()}
 
 	at20, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 20, nil)
@@ -337,7 +335,7 @@ func TestGetMatchingRules_ShouldHonourCategoryScope(t *testing.T) {
 		IsActive:    true,
 	}
 	repo := &MockRepository{contracts: map[string]CustomerContract{}, rules: []PricingRule{roofingOnly}}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	// prod is not a roofing product. The rule must not reach it.
 	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 1, nil)
@@ -374,7 +372,7 @@ func TestGetMatchingRules_CategoryScopeReachesItsOwnCategory(t *testing.T) {
 			lumberProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 	cust := &customer.Customer{ID: uuid.New()}
 
 	onRoofing, err := svc.CalculatePriceWithQty(context.Background(), cust, roofProd, 10.00, 1, nil)
@@ -411,7 +409,7 @@ func TestGetMatchingRules_ParentCategoryRuleCoversDescendants(t *testing.T) {
 			framingProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, framingProd, 10.00, 100, nil)
 	if err != nil {

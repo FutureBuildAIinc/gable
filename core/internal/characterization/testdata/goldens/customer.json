@@ -11,8 +11,7 @@
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
         "phone": "250-555-0199",
-        "primary_branch_id": "<id-1>",
-        "tier": "gold"
+        "primary_branch_id": "<id-1>"
       }
     },
     "response": {
@@ -41,13 +40,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": false,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 1,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -84,13 +81,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": false,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 1,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -133,13 +128,11 @@
             "payment_terms_id": "<id-3>",
             "phone": "250-555-0199",
             "po_required": false,
-            "price_level": null,
-            "price_level_id": null,
+            "price_profile_id": "<id-4>",
             "primary_branch_id": "<id-1>",
             "revision": 1,
             "salesperson_id": null,
             "salesperson_name": null,
-            "tier": "gold",
             "updated_at": "<ts+0d>"
           },
           {
@@ -147,14 +140,14 @@
             "address": "610 Plywood Ct, West Kelowna BC",
             "balance_cents": 999999,
             "branch_ids": [
-              "<id-4>"
+              "<id-5>"
             ],
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
             "email": "billing@quillfieldformwork.example",
-            "id": "<id-5>",
+            "id": "<id-6>",
             "is_active": true,
             "name": "Quillfield Formwork Ltd",
             "payment_terms": {
@@ -165,19 +158,11 @@
             "payment_terms_id": "<id-3>",
             "phone": "250-555-3300",
             "po_required": false,
-            "price_level": {
-              "created_at": "<ts+0d>",
-              "id": "<id-6>",
-              "multiplier": 0.85,
-              "name": "Contractor",
-              "updated_at": "<ts+0d>"
-            },
-            "price_level_id": "<id-6>",
-            "primary_branch_id": "<id-4>",
+            "price_profile_id": "<id-7>",
+            "primary_branch_id": "<id-5>",
             "revision": 1,
             "salesperson_id": null,
             "salesperson_name": null,
-            "tier": "silver",
             "updated_at": "<ts+0d>"
           },
           {
@@ -185,37 +170,29 @@
             "address": "45 Sawhorse Ln, Lake Country BC",
             "balance_cents": 999999,
             "branch_ids": [
-              "<id-7>"
+              "<id-8>"
             ],
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
             "email": "okanagan.diy@example.com",
-            "id": "<id-8>",
+            "id": "<id-9>",
             "is_active": true,
             "name": "Okanagan DIY Owner",
             "payment_terms": {
               "code": "COD",
-              "id": "<id-9>",
+              "id": "<id-10>",
               "name": "Cash on delivery"
             },
-            "payment_terms_id": "<id-9>",
+            "payment_terms_id": "<id-10>",
             "phone": "250-555-2310",
             "po_required": false,
-            "price_level": {
-              "created_at": "<ts+0d>",
-              "id": "<id-10>",
-              "multiplier": 1,
-              "name": "Retail",
-              "updated_at": "<ts+0d>"
-            },
-            "price_level_id": "<id-10>",
-            "primary_branch_id": "<id-7>",
+            "price_profile_id": "<id-11>",
+            "primary_branch_id": "<id-8>",
             "revision": 1,
-            "salesperson_id": "<id-11>",
+            "salesperson_id": "<id-12>",
             "salesperson_name": "Lucas Pelletier",
-            "tier": "retail",
             "updated_at": "<ts+0d>"
           }
         ],
@@ -228,7 +205,7 @@
     "name": "customer.list.search",
     "request": {
       "method": "GET",
-      "path": "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"
+      "path": "/api/v1/customers?q=GOLD-001&is_active=true&include=total"
     },
     "response": {
       "status": 200,
@@ -258,13 +235,11 @@
             "payment_terms_id": "<id-3>",
             "phone": "250-555-0199",
             "po_required": false,
-            "price_level": null,
-            "price_level_id": null,
+            "price_profile_id": "<id-4>",
             "primary_branch_id": "<id-1>",
             "revision": 1,
             "salesperson_id": null,
             "salesperson_name": null,
-            "tier": "gold",
             "updated_at": "<ts+0d>"
           }
         ],
@@ -295,7 +270,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -311,17 +286,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "validation_failed",
+          "code": "unsupported_query_parameter",
           "details": [
             {
               "field": "tier",
-              "message": "must be one of: retail, silver, gold, platinum"
+              "message": "unsupported query parameter"
             }
           ],
-          "message": "one or more fields failed validation"
+          "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -347,61 +322,24 @@
           "message": "cursor is malformed"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-15>"
         }
       }
     }
   },
   {
-    "name": "price_level.list",
+    "name": "pricing.level.list",
     "request": {
       "method": "GET",
-      "path": "/api/v1/price_levels?limit=2"
+      "path": "/api/v1/pricing/levels?limit=2"
     },
     "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "items": [
-          {
-            "created_at": "<ts+0d>",
-            "id": "<id-15>",
-            "multiplier": 0.75,
-            "name": "VIP Builder",
-            "updated_at": "<ts+0d>"
-          },
-          {
-            "created_at": "<ts+0d>",
-            "id": "<id-6>",
-            "multiplier": 0.85,
-            "name": "Contractor",
-            "updated_at": "<ts+0d>"
-          }
-        ],
-        "limit": 2,
-        "next_cursor": "<cursor>"
-      }
-    }
-  },
-  {
-    "name": "price_level.list.unsupported_parameter",
-    "request": {
-      "method": "GET",
-      "path": "/api/v1/price_levels?offset=1"
-    },
-    "response": {
-      "status": 400,
+      "status": 500,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "unsupported_query_parameter",
-          "details": [
-            {
-              "field": "offset",
-              "message": "unsupported query parameter"
-            }
-          ],
-          "message": "one or more query parameters are not supported by this route"
+          "code": "internal_error",
+          "message": "internal error"
         },
         "meta": {
           "request_id": "<id-16>"
@@ -410,10 +348,30 @@
     }
   },
   {
+    "name": "pricing.level.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pricing/levels?offset=1"
+    },
+    "response": {
+      "status": 500,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "internal_error",
+          "message": "internal error"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
     "name": "customer.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/customers/<id-17>"
+      "path": "/api/v1/customers/<id-18>"
     },
     "response": {
       "status": 404,
@@ -424,7 +382,7 @@
           "message": "customer not found"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -450,7 +408,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -463,8 +421,7 @@
       "body": {
         "credit_limit_cents": -1,
         "currency": "usd",
-        "email": "not an email",
-        "tier": "GOLD"
+        "email": "not an email"
       }
     },
     "response": {
@@ -487,10 +444,6 @@
               "message": "must be an email address"
             },
             {
-              "field": "tier",
-              "message": "must be one of: retail, silver, gold, platinum"
-            },
-            {
               "field": "credit_limit_cents",
               "message": "must not be negative; send null for no limit"
             },
@@ -502,7 +455,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -518,8 +471,7 @@
         "balance_due": 5,
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
-        "phone": "250-555-0199",
-        "tier": "gold"
+        "phone": "250-555-0199"
       }
     },
     "response": {
@@ -537,7 +489,7 @@
           "message": "request body has a field this route does not accept"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -552,8 +504,7 @@
         "address": "1 Golden Way, Kelowna BC",
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
-        "phone": "250-555-0199",
-        "tier": "gold"
+        "phone": "250-555-0199"
       }
     },
     "response": {
@@ -571,7 +522,7 @@
           "message": "a customer with this account number already exists"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -588,8 +539,7 @@
         "name": "Golden Harness Co",
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
-        "po_required": false,
-        "tier": "gold"
+        "po_required": false
       }
     },
     "response": {
@@ -601,7 +551,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -622,8 +572,7 @@
         "name": "Golden Harness Co",
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
-        "po_required": true,
-        "tier": "gold"
+        "po_required": true
       }
     },
     "response": {
@@ -652,13 +601,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": true,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 2,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -678,8 +625,7 @@
         "name": "Golden Harness Co",
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
-        "po_required": false,
-        "tier": "gold"
+        "po_required": false
       }
     },
     "response": {
@@ -691,7 +637,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-24>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -709,8 +655,7 @@
         "address": "1 Golden Way, Kelowna BC",
         "email": "goldens@example.com",
         "name": "Golden Harness Co",
-        "phone": "250-555-0199",
-        "tier": "gold"
+        "phone": "250-555-0199"
       }
     },
     "response": {
@@ -732,7 +677,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-25>"
+          "request_id": "<id-26>"
         }
       }
     }
@@ -753,8 +698,7 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": false,
-        "primary_branch_id": "<id-1>",
-        "tier": "gold"
+        "primary_branch_id": "<id-1>"
       }
     },
     "response": {
@@ -772,7 +716,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-26>"
+          "request_id": "<id-27>"
         }
       }
     }
@@ -793,8 +737,7 @@
         "name": "Golden Harness Co",
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
-        "po_required": false,
-        "tier": "gold"
+        "po_required": false
       }
     },
     "response": {
@@ -812,7 +755,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-27>"
+          "request_id": "<id-28>"
         }
       }
     }
@@ -849,13 +792,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0199",
         "po_required": true,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 2,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }

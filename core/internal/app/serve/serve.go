@@ -395,12 +395,29 @@ func Run() {
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
+	pricingResolveRepo := pricing.NewResolveRepository(db)
 	pricingSvc := pricing.NewService(pricingRepo).
+		WithRepository(pricingResolveRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
-	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc).
+		WithBranchGuard(wall.guard)
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, wall.mw, db, "admin", "owner"))
+
+	// The pricing catalogue: levels, profiles, product price lists, vendor
+	// levels and costs, contracts and the cost read (ADR 0006 section 5.6).
+	// Price writes are admin, owner and finance; the reads add sales; the
+	// calculate read is open to every role the counter routes admit, since
+	// the counter prices through it.
+	catalogSvc := pricing.NewCatalogService(pricing.NewCatalogRepository(db)).
+		WithTxRunner(db).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithAudit(pricingAuditAdapter{l: auditLog})
+	catalogHandler := pricing.NewCatalogHandler(catalogSvc).
+		WithEngine(pricingSvc).
+		WithBranchGuard(wall.guard)
+	catalogHandler.RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, wall.mw, db))
 
 	// Market check: our prices against a live store through an FB Connect
 	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
@@ -408,7 +425,7 @@ func Run() {
 	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
 		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
 		WithAudit(marketcheck.AuditRecorder{L: auditLog})
-	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, db)
+	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, wall.mw, db)
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -418,7 +435,8 @@ func Run() {
 			WithAudit(pricingAuditAdapter{l: auditLog})
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
-		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
+		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc).
+			WithProgramReader(pricingResolveRepo.CustomerProgram)
 		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
@@ -1397,8 +1415,8 @@ func rowOrNone(r links.Row, ok bool) links.Row {
 // walls: the settings behind the admin and owner role guard, the run behind
 // the pricing rules' wall. One function, so serve and the wire test mount the
 // same guards.
-func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, db *database.DB) {
+func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB) {
 	marketcheck.NewHandler(svc).RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner"),
-		pricingRulesCustomerWall(keyWall, db, "admin", "owner"))
+		pricingRulesCustomerWall(keyWall, mw, db, "admin", "owner"))
 }

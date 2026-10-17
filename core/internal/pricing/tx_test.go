@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,7 +36,8 @@ func txCategoryID(t *testing.T, db *database.DB) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	if err := db.Pool.QueryRow(context.Background(),
-		`INSERT INTO product_categories (name, slug, path) VALUES ('C3-1 tx test', 'c31_tx_test', 'c31_tx_test')
+		`INSERT INTO product_categories (name, slug, path)
+		 SELECT 'C3-1 tx test', 'c31_tx_' || substr(md5(random()::text), 1, 8), ('c31_tx_' || substr(md5(random()::text), 1, 8))::ltree
 		 RETURNING id`).Scan(&id); err != nil {
 		t.Fatalf("seed category: %v", err)
 	}
@@ -55,6 +55,18 @@ func pctOf(f float64) *httpx.Quantity {
 	return &q
 }
 
+// txTestLevelID reads the migration's default level, the one every database
+// carries once 122 is applied, for the target of a LEVEL rule.
+func txTestLevelID(t *testing.T, db *database.DB) uuid.UUID {
+	t.Helper()
+	var v string
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT value FROM system_settings WHERE key = 'pricing.default_price_level_id'`).Scan(&v); err != nil {
+		t.Fatalf("the default price level: %v", err)
+	}
+	return uuid.MustParse(v)
+}
+
 // TestBulkUpsert_FailingStatementRollsTheBatchBack: one rule row that cannot
 // be written (a category that does not exist) refuses the whole batch, and
 // the rules that would have been created are not there.
@@ -63,18 +75,18 @@ func TestBulkUpsert_FailingStatementRollsTheBatchBack(t *testing.T) {
 	svc := pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db)
 	ctx := context.Background()
 	catID := txCategoryID(t, db)
+	levelID := txTestLevelID(t, db)
 
 	good := pricing.CategoryPricingRule{
-		ID: uuid.New(), TargetType: pricing.TargetTypeTier, Tier: "GOLD",
+		ID: uuid.New(), TargetType: pricing.TargetTypeLevel, PriceLevelID: &levelID,
 		CategoryID: catID, RuleType: pricing.CategoryRuleMarkdown,
 		ValuePct: pctOf(10), IsActive: true,
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE tier = 'GOLD' AND category_id = $1`, catID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE price_level_id = $1 AND category_id = $2`, levelID, catID)
 	})
 	broken := good
 	broken.ID = uuid.New()
-	broken.Tier = "SILVER"
 	broken.CategoryID = uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff") // no such category
 
 	if err := svc.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{good, broken}, nil); err == nil {
@@ -116,6 +128,16 @@ func (g *gatedRunner) RunInTx(ctx context.Context, fn func(ctx context.Context) 
 	})
 }
 
+// txCategoryIDs seeds n categories of their own and answers their ids.
+func txCategoryIDs(t *testing.T, db *database.DB, n int) []uuid.UUID {
+	t.Helper()
+	ids := make([]uuid.UUID, n)
+	for i := range ids {
+		ids[i] = txCategoryID(t, db)
+	}
+	return ids
+}
+
 // TestBulkUpsert_SaturationNeedsNoSecondConnection: four contenders at pool
 // size 4, each held inside its transaction at a gate before its first
 // statement. A statement that reached for the pool would leave four holders
@@ -125,23 +147,25 @@ func TestBulkUpsert_SaturationNeedsNoSecondConnection(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	catID := txCategoryID(t, db)
+	catIDs := txCategoryIDs(t, db, 4)
+	txSatLevel = txTestLevelID(t, db)
 
 	const contenders = 4
 	svc := pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(newGatedRunner(db, contenders))
 	rules := make([]pricing.CategoryPricingRule, contenders)
 	for i := range rules {
-		// Each contender its own tier: the table's partial unique index
-		// refuses two active rules for one (tier, category).
+		// Each contender its own (level, category) cell: the table's partial
+		// unique index refuses two active rules for one cell, and the
+		// contenders never touch the same row.
 		rules[i] = pricing.CategoryPricingRule{
-			ID: uuid.New(), TargetType: pricing.TargetTypeTier,
-			Tier: "SATURATION-" + strconv.Itoa(i), CategoryID: catID, RuleType: pricing.CategoryRuleMarkdown,
+			ID: uuid.New(), TargetType: pricing.TargetTypeLevel,
+			PriceLevelID: &txSatLevel, CategoryID: catIDs[i], RuleType: pricing.CategoryRuleMarkdown,
 			ValuePct: pctOf(float64(5 + i)), IsActive: true,
 		}
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(context.Background(),
-			`DELETE FROM category_pricing_rules WHERE tier LIKE 'SATURATION-%'`)
+			`DELETE FROM category_pricing_rules WHERE price_level_id = $1 AND category_id = ANY($2)`, txSatLevel, catIDs)
 	})
 
 	var wg sync.WaitGroup
@@ -175,9 +199,13 @@ func (failingAudit) CreateAuditEntry(context.Context, *pricing.CategoryPricingAu
 	return errors.New("audit write failed")
 }
 
-func newTierRule(catID uuid.UUID, tier string, pct float64) pricing.CategoryPricingRule {
+// txSatLevel is the default level the tx tests' LEVEL rules target.
+var txSatLevel = uuid.Nil
+
+// newLevelRule is one active LEVEL markdown rule on the default level.
+func newLevelRule(catID uuid.UUID, pct float64) pricing.CategoryPricingRule {
 	return pricing.CategoryPricingRule{
-		ID: uuid.New(), TargetType: pricing.TargetTypeTier, Tier: tier,
+		ID: uuid.New(), TargetType: pricing.TargetTypeLevel, PriceLevelID: &txSatLevel,
 		CategoryID: catID, RuleType: pricing.CategoryRuleMarkdown,
 		ValuePct: pctOf(pct), IsActive: true,
 	}
@@ -208,7 +236,12 @@ func TestRuleWrites_FailingAuditRollsTheWriteBack(t *testing.T) {
 	})
 
 	// create
-	rule := newTierRule(catID, "TXA", 10)
+	txSatLevel = txTestLevelID(t, db)
+	rule := pricing.CategoryPricingRule{
+		ID: uuid.New(), TargetType: pricing.TargetTypeLevel, PriceLevelID: &txSatLevel,
+		CategoryID: catID, RuleType: pricing.CategoryRuleMarkdown,
+		ValuePct: pctOf(10), IsActive: true,
+	}
 	if err := bad.CreateCategoryRule(ctx, &rule); err == nil {
 		t.Fatal("create with a failing audit write succeeded")
 	}
@@ -217,7 +250,7 @@ func TestRuleWrites_FailingAuditRollsTheWriteBack(t *testing.T) {
 	}
 
 	// update and delete act on a rule that exists
-	rule = newTierRule(catID, "TXB", 10)
+	rule = newLevelRule(catID, 10)
 	if err := good.CreateCategoryRule(ctx, &rule); err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +276,7 @@ func TestRuleWrites_FailingAuditRollsTheWriteBack(t *testing.T) {
 	}
 
 	// bulk upsert and bulk delete
-	a, b := newTierRule(catID, "TXC", 5), newTierRule(catID, "TXD", 6)
+	a, b := newLevelRule(catID, 5), newLevelRule(catID, 6)
 	if err := bad.BulkUpsertRules(ctx, []pricing.CategoryPricingRule{a, b}, nil); err == nil {
 		t.Fatal("bulk upsert with a failing audit write succeeded")
 	}
@@ -267,7 +300,7 @@ func TestRuleUpdate_ThreeRacersOneWinner(t *testing.T) {
 	defer cancel()
 	catID := txCategoryID(t, db)
 	svc := pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db)
-	rule := newTierRule(catID, "RACE", 10)
+	rule := newLevelRule(catID, 10)
 	if err := svc.CreateCategoryRule(ctx, &rule); err != nil {
 		t.Fatal(err)
 	}
@@ -323,12 +356,12 @@ func TestRuleWrites_SaturationNeedsNoSecondConnection(t *testing.T) {
 			db := testutil.RequireDBMaxConns(t, 4)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			catID := txCategoryID(t, db)
+			catIDs := txCategoryIDs(t, db, 5)
 			plain := pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db)
 			const contenders = 4
 			rules := make([]pricing.CategoryPricingRule, contenders)
 			for i := range rules {
-				rules[i] = newTierRule(catID, "SAT-"+strings.ReplaceAll(kind, " ", "-")+"-"+strconv.Itoa(i), float64(5+i))
+				rules[i] = newLevelRule(catIDs[i], float64(5+i))
 				if kind != "create" {
 					if err := plain.CreateCategoryRule(ctx, &rules[i]); err != nil {
 						t.Fatal(err)
@@ -336,8 +369,8 @@ func TestRuleWrites_SaturationNeedsNoSecondConnection(t *testing.T) {
 				}
 			}
 			t.Cleanup(func() {
-				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM category_pricing_audit WHERE category_id = $1`, catID)
-				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM category_pricing_rules WHERE category_id = $1`, catID)
+				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM category_pricing_audit WHERE category_id = ANY($1)`, catIDs)
+				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM category_pricing_rules WHERE category_id = ANY($1)`, catIDs)
 			})
 
 			gated := pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(newGatedRunner(db, contenders))

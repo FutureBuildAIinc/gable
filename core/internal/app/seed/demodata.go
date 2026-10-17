@@ -143,9 +143,8 @@ type customerRow struct {
 	AddressLine1     string   `json:"address_line1"`
 	City             string   `json:"city"`
 	Region           string   `json:"region"`
-	Tier             string   `json:"tier"`
 	PaymentTermsCode string   `json:"payment_terms_code"`
-	PriceLevel       string   `json:"price_level"`
+	PriceLevel       string   `json:"price_level"` // the level whose profile the customer lands on
 	CreditLimitCAD   *float64 `json:"credit_limit_cad"`
 	PSTExempt        bool     `json:"pst_exempt"`
 	HomeYard         string   `json:"home_yard"`
@@ -611,7 +610,6 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 		if err := db.QueryRowContext(ctx, `SELECT id FROM payment_terms WHERE code = $1`, row.PaymentTermsCode).Scan(&termsID); err != nil {
 			db.QueryRowContext(ctx, `SELECT id FROM payment_terms WHERE code = 'NET30'`).Scan(&termsID)
 		}
-		priceLevelID := priceLevelIDs[row.PriceLevel]
 		var creditLimit interface{} = nil
 		if row.CreditLimitCAD != nil {
 			creditLimit = *row.CreditLimitCAD
@@ -642,19 +640,24 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 		// fields so a fresh deploy adopts new names/emails; ON CONFLICT
 		// preserves a row the rest of the seed wrote for the same account.
 		var id string
+		// The import maps the row's level name to that level's profile: the
+		// customer's pricing program is a profile id now.
+		var profileID interface{} = nil
+		if levelID, ok := priceLevelIDs[row.PriceLevel]; ok && levelID != uuid.Nil {
+			_ = db.QueryRowContext(ctx, `SELECT id FROM price_profiles WHERE price_level_id = $1 LIMIT 1`, levelID).Scan(&profileID)
+		}
 		err := db.QueryRowContext(ctx, `INSERT INTO customers
-			(account_number, name, email, phone, address, tier,
-				price_level_id, salesperson_id, primary_branch_id,
+			(account_number, name, email, phone, address,
+				price_profile_id, salesperson_id, primary_branch_id,
 				currency, credit_limit, payment_terms_id, is_active)
-			VALUES ($1,$2,$3,$4,$5,$6::customer_tier,$7,$8,$9,
-				(SELECT value FROM system_settings WHERE key = 'currency.default'),$10,$11,TRUE)
+			VALUES ($1,$2,$3,$4,$5,COALESCE($6, price_profile_default_id()),$7,$8,
+				(SELECT value FROM system_settings WHERE key = 'currency.default'),$9,$10,TRUE)
 			ON CONFLICT (account_number) DO UPDATE SET
 				name = EXCLUDED.name,
 				email = EXCLUDED.email,
 				phone = EXCLUDED.phone,
 				address = EXCLUDED.address,
-				tier = EXCLUDED.tier,
-				price_level_id = EXCLUDED.price_level_id,
+				price_profile_id = COALESCE(EXCLUDED.price_profile_id, price_profile_default_id()),
 				salesperson_id = EXCLUDED.salesperson_id,
 				primary_branch_id = EXCLUDED.primary_branch_id,
 				currency = EXCLUDED.currency,
@@ -664,7 +667,7 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 				updated_at = NOW()
 			RETURNING id`,
 			row.AccountNumber, row.Name, row.Email, row.Phone, row.AddressLine1,
-			row.Tier, priceLevelID, salespersonID, branchID,
+			profileID, salespersonID, branchID,
 			creditLimit, termsID,
 		).Scan(&id)
 		if err != nil || id == "" {

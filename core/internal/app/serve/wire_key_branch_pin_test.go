@@ -231,11 +231,19 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		}
 	}
 	// A user granted both branches: the read narrowing keeps the pin's branch
-	// only for the bound key and both for everyone else.
+	// only for the bound key and both for everyone else. A sub's home grant
+	// is unique, so a run's rows go first and the insert is idempotent.
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'pin-both'`); err != nil {
+		t.Fatalf("clear stale grants: %v", err)
+	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by)
-		VALUES ('pin-both', $1, TRUE, 'test'), ('pin-both', $2, FALSE, 'test')`, f.branchA, f.branchB); err != nil {
+		VALUES ('pin-both', $1, TRUE, 'test'), ('pin-both', $2, FALSE, 'test')
+		ON CONFLICT (user_sub, branch_id) DO NOTHING`, f.branchA, f.branchB); err != nil {
 		t.Fatalf("seed grants: %v", err)
 	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM user_locations WHERE user_sub = 'pin-both'`)
+	})
 	// The customer confinement rows: a customer per branch with its
 	// customer_branches row, a product category, one priced category rule per
 	// customer, and a tax exemption of the foreign customer.
@@ -259,12 +267,14 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 			t.Fatalf("seed category rule: %v", err)
 		}
 	}
-	// A tier rule names no customer: it prices every branch's customers, so it
-	// is a dealer wide write a bound key is refused.
+	// A level rule names no customer: it prices the customers of that level
+	// across every branch, so it is a dealer wide write a bound key is
+	// refused.
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO category_pricing_rules (id, target_type, tier, category_id, rule_type, rule_value, created_by)
-		VALUES ($1, 'TIER', 'CONTRACTOR', $2, 'MARKUP', 10, 'test')`, f.catRuleT, f.category); err != nil {
-		t.Fatalf("seed tier rule: %v", err)
+		`INSERT INTO category_pricing_rules (id, target_type, price_level_id, category_id, rule_type, rule_value, created_by)
+		VALUES ($1, 'LEVEL', (SELECT value::uuid FROM system_settings WHERE key = 'pricing.default_price_level_id'), $2, 'MARKUP', 10, 'test')`,
+		f.catRuleT, f.category); err != nil {
+		t.Fatalf("seed level rule: %v", err)
 	}
 	// A project (a job) belongs to exactly one customer: a pricing rule that
 	// names a job prices that customer, so the job resolves to its customer.
@@ -430,10 +440,14 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	productSvc := product.NewService(product.NewRepository(db))
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
 		RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
-	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db), customerSvc, productSvc).
-		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db), customerSvc, productSvc).
+		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, wall.mw, db, "admin", "owner"))
+	pricing.NewCatalogHandler(pricing.NewCatalogService(pricing.NewCatalogRepository(db)).WithTxRunner(db)).
+		WithEngine(pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db))).
+		WithBranchGuard(wall.guard).
+		RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, wall.mw, db))
 	registerMarketCheck(mux, marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
-		WithTxRunner(db), wall.keyWall, db)
+		WithTxRunner(db), wall.keyWall, wall.mw, db)
 	pricing.NewCategoryHandler(
 		pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db).
 			WithOutbox(outbox.NewWriter(db, "")).
@@ -522,7 +536,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	orderSvc := orderwire.New(orderwire.Deps{
 		DB: db, Config: &config.Config{}, Logger: slog.Default(), AuditLog: audit.NewLogger(db),
 		Inventory: inventory.NewService(inventory.NewRepository(db)), Invoices: invoiceSvc, Accounts: accountSvc,
-		Pricing:   pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db),
+		Pricing:   pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)).WithTxRunner(db),
 		Customers: customerSvc, Escalators: escRepo, QuoteLines: quoteRepo,
 	})
 	quoteSvc.WithOrderCreator(orderSvc)

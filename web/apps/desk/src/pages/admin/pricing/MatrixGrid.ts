@@ -54,10 +54,10 @@ export class GableMatrixGrid extends LitElement {
   render() {
     const flatCats = flattenCategories(this.categories);
 
-    // Build a lookup: categoryID:tier -> cell
+    // Build a lookup: categoryID:level -> cell
     const cellMap = new Map<string, MatrixCell>();
     for (const cell of this.cells) {
-      cellMap.set(`${cell.category_id}:${cell.tier}`, cell);
+      cellMap.set(`${cell.category_id}:${cell.level}`, cell);
     }
 
     return html`

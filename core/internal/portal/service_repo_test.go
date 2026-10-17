@@ -736,10 +736,10 @@ func newPortalRig(t *testing.T) *portalRig {
 	return rig
 }
 
-// withCustomer registers a customer so the pricing waterfall has a tier to
-// resolve against.
-func (r *portalRig) withCustomer(id uuid.UUID, tier customer.CustomerTier) *customer.Customer {
-	c := &customer.Customer{ID: id, Name: "Acme Framing", Tier: tier, IsActive: true}
+// withCustomer registers a customer so the pricing waterfall has a customer
+// id to resolve against.
+func (r *portalRig) withCustomer(id uuid.UUID) *customer.Customer {
+	c := &customer.Customer{ID: id, Name: "Acme Framing", IsActive: true}
 	r.customers.customers[id] = c
 	return c
 }
@@ -874,7 +874,7 @@ func TestAddToCart_RejectsNonPositiveQuantityBeforeAnyIO(t *testing.T) {
 func TestAddToCart_WritesTheCustomerPriceNotTheBasePrice(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 	rig.prices.contracts[productID] = portalPrice(3.95) // negotiated
 
@@ -907,7 +907,7 @@ func TestAddToCart_WritesTheCustomerPriceNotTheBasePrice(t *testing.T) {
 func TestAddToCart_AppliesTheTierDiscount(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierGold)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 
 	if _, err := rig.svc.AddToCart(context.Background(), me,
@@ -944,7 +944,7 @@ func TestAddToCart_UnknownCustomerFallsBackToBasePriceNotZero(t *testing.T) {
 func TestAddToCart_PricingFailureFallsBackToBasePrice(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierGold)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 	rig.prices.err = errors.New("pricing rules table is unavailable")
 
@@ -961,7 +961,7 @@ func TestAddToCart_PricingFailureFallsBackToBasePrice(t *testing.T) {
 func TestAddToCart_UnknownProductIsRefusedWithoutAWrite(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 
 	_, err := rig.svc.AddToCart(context.Background(), me,
 		AddToCartRequest{ProductID: uuid.New(), Quantity: 1})
@@ -1084,7 +1084,7 @@ func cartWith(lines ...[2]float64) *CartDTO {
 func TestCheckout_PricesTheOrderFromTheCatalog(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	stud := uuid.New()
 	screw := uuid.New()
 	rig.withProduct(stud, "P-STUD", 8.20)
@@ -1131,7 +1131,7 @@ func TestCheckout_PricesTheOrderFromTheCatalog(t *testing.T) {
 func TestCheckout_FilesAgainstTheSessionCustomerAndClearsTheCart(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	cartID := rig.repo.cart.ID
 
@@ -1174,7 +1174,7 @@ func TestCheckout_EmptyCartIsRefusedBeforeTheOrder(t *testing.T) {
 func TestCheckout_ForeignProjectIsRefusedBeforeTheOrderExists(t *testing.T) {
 	rig := newPortalRig(t)
 	me, theirProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.projectOwned = false
 
@@ -1201,7 +1201,7 @@ func TestCheckout_ForeignProjectIsRefusedBeforeTheOrderExists(t *testing.T) {
 func TestCheckout_OwnedProjectIsAttachedToTheNewOrder(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{ProjectID: &myProject})
@@ -1229,7 +1229,7 @@ func TestCheckout_OwnedProjectIsAttachedToTheNewOrder(t *testing.T) {
 func TestCheckout_ProjectAttachFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.setProjErr = errors.New("failed to set order project")
 
@@ -1251,7 +1251,7 @@ func TestCheckout_ProjectAttachFailureIsNotFatal(t *testing.T) {
 func TestCheckout_ClearFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.clearErr = errors.New("failed to clear cart")
 
@@ -1269,7 +1269,7 @@ func TestCheckout_ClearFailureIsNotFatal(t *testing.T) {
 func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	// The cart's product is not in the rig's catalog (plain cartWith), so the
 	// order service cannot look it up and the create fails before any row is
 	// written: the failure the ERP-refusal path models.
@@ -1292,7 +1292,7 @@ func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 func TestCheckout_DeliveryAndPaymentFieldsAreNotPersisted(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{

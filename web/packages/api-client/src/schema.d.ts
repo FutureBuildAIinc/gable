@@ -954,13 +954,13 @@ export interface paths {
         };
         /**
          * List customers
-         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); tier, is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a tier outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["customerList"];
         put?: never;
         /**
          * Create a customer
-         * @description Creates a customer. account_number and name are required; the terms default to NET30, the tier to retail. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
+         * @description Creates a customer. account_number and name are required; the terms default to NET30, the pricing program to the default profile. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
          */
         post: operations["customerCreate"];
         delete?: never;
@@ -1165,26 +1165,6 @@ export interface paths {
          * @description On the client's revision, carried by If-Match (a DELETE has no body). Writes customer.updated (part contact).
          */
         delete: operations["contactDelete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/price_levels": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List price levels
-         * @description The cursor list envelope, newest first.
-         */
-        get: operations["customerListPriceLevels"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5626,6 +5606,273 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price levels
+         * @description Guarded admin, owner or finance. The cursor list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
+         */
+        get: operations["pricingLevelList"];
+        put?: never;
+        /**
+         * Create a price level
+         * @description Guarded admin, owner or finance. code (uppercase, at most 16 characters of A-Z, 0-9 and underscore) and name are required; basis defaults to base; adjust_percent is a decimal string, a level at -100 or above. The response is 201 with Location and the revision ETag.
+         */
+        post: operations["pricingLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price level */
+        get: operations["pricingLevelGet"];
+        /**
+         * Update a price level
+         * @description Guarded admin, owner or finance, at the level's revision (428 without, 409 stale behind it).
+         */
+        put: operations["pricingLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price profiles
+         * @description The cursor list envelope, newest first.
+         */
+        get: operations["pricingProfileList"];
+        put?: never;
+        /**
+         * Create a price profile
+         * @description Guarded admin, owner or finance. code and name are required; price_level_id names the level the program prices from.
+         */
+        post: operations["pricingProfileCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price profile */
+        get: operations["pricingProfileGet"];
+        /**
+         * Update a price profile
+         * @description Guarded admin, owner or finance, at the profile's revision.
+         */
+        put: operations["pricingProfileUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/products/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a product's prices
+         * @description Guarded admin, owner, finance or sales. The rows of the branch named in branch_id and the caller's context branch rows and the every branch rows; a caller with no context branch sees every row.
+         */
+        get: operations["pricingProductPriceList"];
+        /**
+         * Replace one branch slice of a product's price list
+         * @description Guarded admin, owner or finance. The PUT replaces the branch_id slice of the product's price list (its branch base and its level prices for that branch) at the product's revision, and touches no other branch's rows. Without branch_id it replaces the every branch slice, admitted only to a caller who may reach every branch. The rows carry no branch_id. While the stocking unit hold of ADR 0006 section 9.1 stands, every row's price unit is the product's stocking unit; a row naming another unit is a 400 naming price_uom. A replace at a stale product revision is a 409 stale_revision.
+         */
+        put: operations["pricingProductPriceReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List vendor price levels */
+        get: operations["pricingVendorLevelList"];
+        put?: never;
+        /**
+         * Create a vendor price level
+         * @description Guarded admin, owner or finance; vendor_id, code and name are required.
+         */
+        post: operations["pricingVendorLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor price level */
+        get: operations["pricingVendorLevelGet"];
+        /** Update a vendor price level */
+        put: operations["pricingVendorLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List vendor costs
+         * @description Guarded admin, owner, finance or sales, under the filters vendor_id, product_id and branch_id, and the branch wall of the caller's context.
+         */
+        get: operations["pricingVendorCostList"];
+        put?: never;
+        /**
+         * Create a vendor cost
+         * @description Guarded admin, owner or finance. vendor_id, vendor_price_level_id (of the same vendor), product_id, purchase_uom, unit_cost_ten_thousandths and effective_from are required; the purchase unit must be a row of the product's unit set, and while the stocking unit hold stands the price unit hold refuses a cost the product cannot read. The payload branch rule holds a branch_id the body names.
+         */
+        post: operations["pricingVendorCostCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor cost */
+        get: operations["pricingVendorCostGet"];
+        /**
+         * Update a vendor cost
+         * @description Guarded admin, owner or finance, at the row's revision. The update checks the payload branch rule on the row's stored branch and on the new one: a move out of the caller's reach is a 403.
+         */
+        put: operations["pricingVendorCostUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customer contracts
+         * @description Under the filters customer_id, product_id and branch_id, and the branch wall.
+         */
+        get: operations["pricingContractList"];
+        put?: never;
+        /**
+         * Create a customer contract
+         * @description Guarded admin, owner or finance. customer_id, product_id and contract_price_ten_thousandths are required; the price unit is the product's stocking unit while the hold stands, and a body naming another unit is a 400 naming price_uom. The create does not upsert: a second contract for the same customer, product and branch is a 409 duplicate naming the existing row. The payload branch rule holds the branch the body names; a null branch is the every branch reach. Writes contract.created in the same transaction.
+         */
+        post: operations["pricingContractCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one contract */
+        get: operations["pricingContractGet"];
+        /**
+         * Update a contract
+         * @description Guarded admin, owner or finance, at the row's revision. Writes contract.updated in the same transaction, with its audit row.
+         */
+        put: operations["pricingContractUpdate"];
+        post?: never;
+        /**
+         * Delete a contract
+         * @description Guarded admin, owner or finance, at the row's revision in the body. A contract is an agreement, not a document: it is deleted outright, with an audit row carrying the deleted values and contract.deleted in the same transaction.
+         */
+        delete: operations["pricingContractDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a vendor cost
+         * @description ResolveCost on the wire (ADR 0006 section 5.5): rows at the requested level, or the vendor's default level when none is named, in effect on the date, the branch's row before the all branch row, the latest effective_from first. The answer carries the cost and its purchase unit, the pair between the uom named and the purchase unit, the level's code and the row's id. No cost in effect is a 404: the purchase line takes a manual cost.
+         */
+        get: operations["pricingCost"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products": {
         parameters: {
             query?: never;
@@ -8163,33 +8410,8 @@ export interface components {
             sku: string;
             description: string;
         };
-        /**
-         * @description The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
-         * @enum {string}
-         */
-        CustomerTier: "retail" | "silver" | "gold" | "platinum";
         /** @enum {string} */
         TermsKind: "net_days" | "day_of_month" | "due_on_receipt";
-        PriceLevel: {
-            /** Format: uuid */
-            id: string;
-            name: string;
-            /** @description A price multiplier, a rate and not money. */
-            multiplier: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
-        PriceLevelPage: {
-            items: components["schemas"]["PriceLevel"][];
-            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
-            next_cursor: string | null;
-            limit: number;
-            /** Format: int64 */
-            total?: number;
-        };
         PaymentTermsRef: {
             /** Format: uuid */
             id: string;
@@ -8205,7 +8427,6 @@ export interface components {
             phone: string | null;
             /** @description The free text billing address; delivery addresses are ship-tos. */
             address: string | null;
-            tier: components["schemas"]["CustomerTier"];
             is_active: boolean;
             /**
              * Format: uuid
@@ -8214,9 +8435,11 @@ export interface components {
             primary_branch_id: string;
             /** @description The yards the customer trades at, home yard included, in id order. Customers are dealer wide accounts (ruling A): the first document at a yard the customer is not yet linked to adds the yard here. */
             branch_ids: string[];
-            /** Format: uuid */
-            price_level_id: string | null;
-            price_level: components["schemas"]["PriceLevel"] | null;
+            /**
+             * Format: uuid
+             * @description The customer's pricing program (ADR 0006 section 5.2); the create takes the default profile.
+             */
+            price_profile_id: string | null;
             /** Format: uuid */
             salesperson_id: string | null;
             salesperson_name: string | null;
@@ -8265,15 +8488,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -8302,15 +8527,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -12742,7 +12969,7 @@ export interface components {
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
          * @enum {string}
          */
-        PricingSource: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account";
+        PricingSource: "contract" | "quantity_break" | "job_override" | "promotional" | "category_account" | "category_profile" | "category_level" | "level" | "branch" | "base";
         /** @enum {string} */
         PricingRuleType: "quantity_break" | "job_override" | "promotional";
         /** @description The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule. */
@@ -12763,6 +12990,17 @@ export interface components {
             price_basis: components["schemas"]["PricingSource"];
             /** @description Free text such as "Gold Tier (15%)". */
             details: string;
+            /**
+             * Format: uuid
+             * @description The branch the price answers at; null when the read named none and the caller carries no branch.
+             */
+            branch_id: string | null;
+            /**
+             * Format: int64
+             * @description The reference price (the branch base when the branch has one, else the product's base), the price a percent or markup rule acts on.
+             */
+            reference_price_ten_thousandths: number;
+            reference_price_uom: string;
         };
         PricingRule: {
             /** Format: uuid */
@@ -12796,6 +13034,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The unit a fixed price is per (the product's stocking unit while the hold stands); a percent or markup rule carries none. */
+            price_uom: string | null;
         };
         PricingRulePage: {
             items: components["schemas"]["PricingRule"][];
@@ -12893,11 +13133,13 @@ export interface components {
         PricingCategoryRule: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            target_type: "account" | "tier";
+            /**
+             * @description The customer scope the rule prices: one account, one profile's customers, or one level's customers.
+             * @enum {string}
+             */
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id: string | null;
-            tier: string;
             /** Format: uuid */
             category_id: string;
             /** @enum {string} */
@@ -12925,6 +13167,20 @@ export interface components {
             category_path?: string;
             /** @description Joined on reads. */
             customer_name?: string;
+            /**
+             * Format: uuid
+             * @description A profile rule's target.
+             */
+            price_profile_id: string | null;
+            /**
+             * Format: uuid
+             * @description A level rule's target.
+             */
+            price_level_id: string | null;
+            /** @description The target level's code, on the matrix's rows. */
+            level_code?: string | null;
+            /** @description The target profile's code, when joined. */
+            profile_code?: string | null;
         };
         PricingCategoryRulePage: {
             items: components["schemas"]["PricingCategoryRule"][];
@@ -12951,10 +13207,13 @@ export interface components {
         /** @description The create body; a field not listed is a 400. */
         PricingCategoryRuleCreateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
             /** @enum {string} */
-            target_type: "account" | "tier";
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id?: string | null;
-            tier?: string | null;
+            /** Format: uuid */
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
             /** Format: uuid */
             category_id: string;
         };
@@ -12988,9 +13247,14 @@ export interface components {
             /** Format: uuid */
             category_id?: string;
             target_type?: string;
-            tier?: string;
+            /** @description A legacy rule's tier */
+            tier?: string | null;
             /** Format: uuid */
-            customer_id?: string;
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
+            /** Format: uuid */
+            customer_id?: string | null;
         };
         PricingCategoryRuleAuditList: {
             items: components["schemas"]["PricingCategoryRuleAudit"][];
@@ -13008,14 +13272,15 @@ export interface components {
             category_id: string;
             category_name: string;
             category_path: string;
-            tier: string;
+            level: string | null;
             rule?: components["schemas"]["PricingCategoryRule"];
             inherited: boolean;
             source_path?: string;
         };
         PricingMatrix: {
             categories: components["schemas"]["PricingProductCategory"][] | null;
-            tiers: string[] | null;
+            /** @description The level codes the grid's columns answer, in place of tiers. */
+            levels: string[] | null;
             cells: components["schemas"]["PricingMatrixCell"][] | null;
         };
         PricingResolvedCategoryPrice: {
@@ -13174,6 +13439,237 @@ export interface components {
             affected_customer_count: number;
             estimated_exposure_dollars: number;
             top_customers: components["schemas"]["MarketIndexRefreshTopCustomer"][] | null;
+        };
+        PricingLevel: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @enum {string} */
+            basis: "base" | "average_cost" | "replacement_cost";
+            /** @description A decimal string; -10 is ten percent off the basis. */
+            adjust_percent: string;
+            position: number;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingLevelWrite: {
+            code?: string;
+            name?: string;
+            basis?: string;
+            adjust_percent?: string;
+            position?: number;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingLevelPage: {
+            items: components["schemas"]["PricingLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProfile: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** Format: uuid */
+            price_level_id: string;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingProfileWrite: {
+            code?: string;
+            name?: string;
+            /** Format: uuid */
+            price_level_id?: string;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingProfilePage: {
+            items: components["schemas"]["PricingProfile"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProductPrice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /**
+             * Format: uuid
+             * @description Null on the branch's base price row.
+             */
+            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Null on an every branch row.
+             */
+            branch_id?: string | null;
+            price_uom: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            revision: number;
+        };
+        PricingProductPriceList: {
+            items: components["schemas"]["PricingProductPrice"];
+        };
+        PricingProductPriceReplace: {
+            /**
+             * Format: int64
+             * @description The product revision the list was read at.
+             */
+            revision: number;
+            /** @description The slice's rows; each carries its own revision for reads. */
+            prices: {
+                /** Format: uuid */
+                price_level_id?: string | null;
+                price_uom?: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths?: number;
+            }[];
+        };
+        PricingVendorLevel: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            code: string;
+            name: string;
+            is_default: boolean;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorLevelWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            code?: string;
+            name?: string;
+            is_default?: boolean;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorLevelPage: {
+            items: components["schemas"]["PricingVendorLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingVendorCost: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            /** Format: uuid */
+            vendor_price_level_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            vendor_sku?: string | null;
+            effective_from: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorCostWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            /** Format: uuid */
+            vendor_price_level_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom?: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths?: number;
+            vendor_sku?: string | null;
+            effective_from?: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorCostPage: {
+            items: components["schemas"]["PricingVendorCost"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingContract: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: int64 */
+            contract_price_ten_thousandths: number;
+            price_uom: string;
+            /**
+             * Format: uuid
+             * @description Null is the every branch row.
+             */
+            branch_id?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingContractWrite: {
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** Format: int64 */
+            contract_price_ten_thousandths?: number;
+            price_uom?: string;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingContractPage: {
+            items: components["schemas"]["PricingContract"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingResolvedCost: {
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            purchase_uom: string;
+            uom_qty: string;
+            purchase_uom_qty: string;
+            vendor_level_code: string;
+            /** Format: uuid */
+            vendor_level_id: string;
+            /** Format: uuid */
+            vendor_cost_id: string;
         };
         KitComponent: {
             /** Format: uuid */
@@ -17097,8 +17593,6 @@ export interface operations {
             query?: {
                 /** @description Search term for name, account_number and email, at most 100 characters. */
                 q?: string;
-                /** @description One lowercase tier. */
-                tier?: "retail" | "silver" | "gold" | "platinum";
                 is_active?: boolean;
                 /** @description Customers assigned to this salesperson. */
                 salesperson_id?: string;
@@ -17863,40 +18357,6 @@ export interface operations {
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["WireConflict"];
             428: components["responses"]["WirePreconditionRequired"];
-            500: components["responses"]["InternalErrorEither"];
-        };
-    };
-    customerListPriceLevels: {
-        parameters: {
-            query?: {
-                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
-                limit?: components["parameters"]["PageLimit"];
-                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
-                include?: components["parameters"]["Include"];
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The page of price levels. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PriceLevelPage"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -26656,6 +27116,763 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    pricingLevelList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The created profile. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceList: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product's price rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceReplace: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProductPriceReplace"];
+            };
+        };
+        responses: {
+            /** @description The slice as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor costs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor cost. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractList: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of contracts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The created contract. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The contract is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingCost: {
+        parameters: {
+            query: {
+                vendor_id: string;
+                product_id: string;
+                branch_id?: string;
+                vendor_level_id?: string;
+                /** @description A calendar date (YYYY-MM-DD); default today. */
+                on?: string;
+                /** @description The purchase line's unit, for the answer's pair. */
+                uom?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolved cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     productList: {

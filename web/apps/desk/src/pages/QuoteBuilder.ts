@@ -534,7 +534,7 @@ export class GableQuoteBuilder extends LitElement {
                     </div>
                 </dl>
                 <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
-                    <span>Price level <span class="text-gable-green">${c.price_level?.name || 'Retail'}</span></span>
+                    <span>Price level <span class="text-gable-green">the customer's program</span></span>
                     ${c.salesperson_name ? html`<span>Salesperson <span class="text-zinc-200">${c.salesperson_name}</span></span>` : nothing}
                     ${c.po_required ? html`<span class="text-amber-400">Customer PO required</span>` : nothing}
                 </div>

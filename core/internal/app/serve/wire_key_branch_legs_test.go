@@ -31,7 +31,7 @@ import (
 )
 
 // walledLegDrivers are the tests whose legs the coverage test needs.
-var walledLegDrivers = []string{"sweep", "pos", "body"}
+var walledLegDrivers = []string{"sweep", "pos", "body", "catalog"}
 
 var walledLegs = struct {
 	sync.Mutex
@@ -153,8 +153,8 @@ func (f *keyPinFixture) customerReplaceAs(t *testing.T, role string, id uuid.UUI
 	t.Helper()
 	cur := f.readJSONAs(t, role, "/api/v1/customers/"+id.String())
 	body := map[string]any{"revision": cur["revision"]}
-	for _, k := range []string{"account_number", "name", "email", "phone", "address", "tier", "is_active",
-		"price_level_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
+	for _, k := range []string{"account_number", "name", "email", "phone", "address", "is_active",
+		"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
 		body[k] = cur[k]
 	}
 	for k, v := range change {

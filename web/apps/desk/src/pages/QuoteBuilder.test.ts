@@ -190,7 +190,7 @@ const SPF_ITEM: ParsedItem = { ...ITEM, quantity: 4 }
 function priced(productId: string, tt: number, uom = 'PCS'): CalculatedPrice {
   return {
     customer_id: CUSTOMER.id, product_id: productId, quantity: '1', uom, unit_price_ten_thousandths: tt,
-    price_uom: uom, uom_qty: '1', price_uom_qty: '1', line_total_cents: 0, price_basis: 'tier', details: 'Contractor 0.85',
+    price_uom: uom, uom_qty: '1', price_uom_qty: '1', line_total_cents: 0, price_basis: 'level', details: 'Contractor (Level)',
   } as CalculatedPrice
 }
 

@@ -77,8 +77,9 @@ func TestKeyBranchPin_JobOfAnotherCustomer(t *testing.T) {
 	// document that takes the job is priced by it: without the refusal the
 	// leak shows as the other customer's price.
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO pricing_rules (name, rule_type, product_id, job_id, fixed_price)
-		 VALUES ('pin job override', 'JOB_OVERRIDE', $1, $2, 0.42)`, f.posProd, f.jobB); err != nil {
+		`INSERT INTO pricing_rules (name, rule_type, product_id, job_id, fixed_price, price_uom)
+		 SELECT 'pin job override', 'JOB_OVERRIDE', $1, $2, 0.42, p.uom_primary FROM products p WHERE p.id = $1`,
+		f.posProd, f.jobB); err != nil {
 		t.Fatalf("seed the job rule: %v", err)
 	}
 	A := f.custID.String()

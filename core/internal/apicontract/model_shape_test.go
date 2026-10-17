@@ -79,7 +79,6 @@ var modelBoundSchemas = []struct {
 	{"QuoteAnalyticsTrend", quote.QuoteAnalyticsTrend{}},
 	// customer
 	{"Customer", customer.Customer{}},
-	{"PriceLevel", customer.PriceLevel{}},
 	{"PaymentTermsRef", customer.PaymentTermsRef{}},
 	{"EscalationPolicy", customer.EscalationPolicy{}},
 	{"Contact", customer.Contact{}},

@@ -10,15 +10,15 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
-          "CASH": 14.03,
+          "CASH": 21.54,
           "CHECK": 1986.03
         },
         "date": "<day+0>",
-        "net_collected": 1972.06,
-        "received": 2000.06,
+        "net_collected": 1979.57,
+        "received": 2007.57,
         "refunds": 28,
-        "total_collected": 1972.06,
-        "transaction_count": 3
+        "total_collected": 1979.57,
+        "transaction_count": 4
       }
     }
   },
@@ -32,21 +32,21 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": 1.42,
+        "close_balance": 6.96,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+0>",
         "lines": [
           {
-            "balance": 31.42,
+            "balance": 36.96,
             "credit": 0,
             "date": "<day+0>",
-            "debit": 31.42,
+            "debit": 36.96,
             "description": "Invoice IN-000052",
             "type": "INVOICE"
           },
           {
-            "balance": 30.67,
+            "balance": 36.21,
             "credit": 0.75,
             "date": "<day+0>",
             "debit": 0,
@@ -54,7 +54,7 @@
             "type": "CREDIT_MEMO"
           },
           {
-            "balance": 31.42,
+            "balance": 36.96,
             "credit": 0,
             "date": "<day+0>",
             "debit": 0.75,
@@ -62,7 +62,7 @@
             "type": "REVERSAL"
           },
           {
-            "balance": 11.42,
+            "balance": 16.96,
             "credit": 20,
             "date": "<day+0>",
             "debit": 0,
@@ -70,15 +70,23 @@
             "type": "PAYMENT"
           },
           {
-            "balance": 0,
-            "credit": 11.42,
+            "balance": 5.53,
+            "credit": 11.43,
             "date": "<day+0>",
             "debit": 0,
             "description": "Payment PAY-000045 applied to IN-000052",
             "type": "PAYMENT"
           },
           {
-            "balance": 20,
+            "balance": 5.52,
+            "credit": 0.01,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Payment PAY-000045 applied to IN-000052",
+            "type": "PAYMENT"
+          },
+          {
+            "balance": 25.52,
             "credit": 0,
             "date": "<day+0>",
             "debit": 20,
@@ -86,31 +94,39 @@
             "type": "REVERSAL"
           },
           {
-            "balance": 31.42,
+            "balance": 36.95,
             "credit": 0,
             "date": "<day+0>",
-            "debit": 11.42,
+            "debit": 11.43,
             "description": "Reversal of an application to IN-000052",
             "type": "REVERSAL"
           },
           {
-            "balance": 45.45,
+            "balance": 36.96,
             "credit": 0,
             "date": "<day+0>",
-            "debit": 14.03,
+            "debit": 0.01,
+            "description": "Reversal of an application to IN-000052",
+            "type": "REVERSAL"
+          },
+          {
+            "balance": 52.64,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 15.68,
             "description": "Invoice IN-000054",
             "type": "INVOICE"
           },
           {
-            "balance": 31.42,
-            "credit": 14.03,
+            "balance": 36.96,
+            "credit": 15.68,
             "date": "<day+0>",
             "debit": 0,
             "description": "Payment PAY-000048 applied to IN-000054",
             "type": "PAYMENT"
           },
           {
-            "balance": 1.42,
+            "balance": 6.96,
             "credit": 30,
             "date": "<day+0>",
             "debit": 0,
@@ -133,12 +149,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "close_balance": 1.42,
+        "close_balance": 6.96,
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "end_date": "<day+401>",
         "lines": null,
-        "open_balance": 1.42,
+        "open_balance": 6.96,
         "start_date": "<day+400>"
       }
     }
