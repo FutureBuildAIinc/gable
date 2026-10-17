@@ -34,6 +34,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
+	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
@@ -97,6 +98,8 @@ var publicAPIPaths = []string{
 	"/api/portal/v1/",
 	"/api/integration/",
 	"/api/v1/a2a/",
+	"/api/v1/auth/config",
+	"/api/v1/auth/start/",
 }
 
 // machineKeyValidator adapts the techadmin service to the machine-key auth
@@ -633,6 +636,23 @@ func Run() {
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
 	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	// Sign in method allowlist (S9): the dealer's allowed sign in methods,
+	// discovered by the front door through the public config route. The
+	// allowlist's admin routes are the dealer's admin roles alone; the
+	// config and start routes are on the public path list above.
+	signinRepo, err := signinmethods.NewRepository(db)
+	if err != nil {
+		logger.Error("Sign in methods repository error", "error", err)
+		os.Exit(1)
+	}
+	signinSvc, err := signinmethods.NewService(signinRepo, db, auditLog)
+	if err != nil {
+		logger.Error("Sign in methods service error", "error", err)
+		os.Exit(1)
+	}
+	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
+		Admin: middleware.RequireRole("admin", "owner"),
+	})
 	docStore := document.NewStore(db)
 	docSvc := document.NewService(productRepo).
 		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
@@ -943,7 +963,8 @@ func Run() {
 	// state machine — and the same auto-PO and price-protection side effects —
 	// as a counter salesperson closing the quote from the ERP.
 	portalSvc.WithQuoteService(quoteSvc)
-	portalHandler := portal.NewHandler(portalSvc)
+	portalHandler := portal.NewHandler(portalSvc).
+		WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
