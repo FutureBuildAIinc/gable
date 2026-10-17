@@ -95,6 +95,12 @@ type Repository interface {
 	ListTillMovements(ctx context.Context, sessionID uuid.UUID) ([]TillMovement, error)
 	ListTillMovementsPage(ctx context.Context, sessionID uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillMovement, bool, error)
 	TillMovementTotals(ctx context.Context, sessionID uuid.UUID) (map[string]int64, error)
+	// The variance threshold and the sign off queue (CP-08).
+	VarianceThreshold(ctx context.Context, branch *uuid.UUID) (int64, bool, error)
+	SignOffTillSession(ctx context.Context, s *TillSession) error
+	ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error)
+	GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error)
+	SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error
 	// BranchToday is the branch's business date now in its own zone.
 	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 

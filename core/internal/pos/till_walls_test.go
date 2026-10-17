@@ -86,3 +86,56 @@ func TestTheMovementRoutesCarryTheBranchWall(t *testing.T) {
 		t.Errorf("unscoped movement list = %d: %s, want the one movement", r.status, r.raw)
 	}
 }
+
+// RULE: the sign off routes carry the branch wall: another branch's pending
+// drawer is a missing record to a caller held to branch B, a caller with no
+// header and a grant on B alone is refused by name, the queue holds only the
+// caller's reach, and the policy of a branch outside it is refused.
+func TestTheSignOffRoutesCarryTheBranchWall(t *testing.T) {
+	w := newWallFixture(t)
+	sessionID := w.openDrawerA()
+	// the default threshold is 500 and the drawer holds 5000: count it short
+	if r := w.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 1000}}); r.status != http.StatusOK {
+		t.Fatalf("close = %d: %s", r.status, r.raw)
+	}
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_sessions WHERE id = $1 AND status = 'PENDING_SIGNOFF'`, sessionID); got != 1 {
+		t.Fatalf("the close did not wait for sign off")
+	}
+	scoped := append([]string{}, w.scoped...)
+	scoped[1] = "finance"
+	noHdr := append([]string{}, w.noHdr...)
+	noHdr[1] = "finance"
+
+	if r := w.do("POST", "/api/v1/pos/till/"+sessionID+"/signoff", map[string]any{"reason": "wall"}, scoped...); r.status != http.StatusNotFound {
+		t.Errorf("another branch's sign off, naming branch B = %d, want 404: %s", r.status, r.raw)
+	}
+	if r := w.do("POST", "/api/v1/pos/till/"+sessionID+"/signoff", map[string]any{"reason": "wall"}, noHdr...); r.status != http.StatusForbidden {
+		t.Errorf("another branch's sign off, naming no branch = %d, want the 403 record rule: %s", r.status, r.raw)
+	}
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_sessions WHERE id = $1 AND status = 'PENDING_SIGNOFF'`, sessionID); got != 1 {
+		t.Errorf("the session was signed off through the wall")
+	}
+	if r := w.do("GET", "/api/v1/pos/till/signoffs", nil, scoped...); r.status != http.StatusOK || len(r.body["items"].([]any)) != 0 {
+		t.Errorf("branch B's queue = %d: %s, want it empty of branch A's drawer", r.status, r.raw)
+	}
+	if r := w.do("GET", "/api/v1/pos/till/signoffs?branch_id="+w.branchID.String(), nil, scoped...); r.status != http.StatusForbidden {
+		t.Errorf("the queue narrowed to branch A by a branch B caller = %d, want 403: %s", r.status, r.raw)
+	}
+	if r := w.do("GET", "/api/v1/pos/till/policy?branch_id="+w.branchID.String(), nil, scoped...); r.status != http.StatusForbidden {
+		t.Errorf("branch A's policy read by a branch B caller = %d, want 403: %s", r.status, r.raw)
+	}
+	if r := w.do("PUT", "/api/v1/pos/till/policy", map[string]any{"branch_id": w.branchID.String(), "variance_threshold_cents": 1}, scoped...); r.status != http.StatusForbidden {
+		t.Errorf("branch A's policy written by a branch B caller = %d, want 403: %s", r.status, r.raw)
+	}
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_variance_policy WHERE branch_id = $1`, w.branchID); got != 0 {
+		t.Errorf("a policy row written through the wall")
+	}
+	// a caller with no claims (the dev fallback, no branch context) reaches
+	// every branch: it sees and releases the drawer
+	if r := w.do("GET", "/api/v1/pos/till/signoffs", nil); r.status != http.StatusOK || len(r.body["items"].([]any)) != 1 {
+		t.Errorf("the unscoped queue = %d: %s, want the one drawer", r.status, r.raw)
+	}
+	if r := w.do("POST", "/api/v1/pos/till/"+sessionID+"/signoff", map[string]any{"reason": "own branch"}); r.status != http.StatusOK {
+		t.Errorf("the unscoped sign off = %d, want 200: %s", r.status, r.raw)
+	}
+}

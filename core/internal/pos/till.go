@@ -174,9 +174,26 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 					strings.Join(ids, ", ")))
 		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
+		// A count whose over or short passes the branch's variance threshold
+		// is held for a manager (CP-08): the drawer is counted and out of
+		// use, its variance is not on the ledger yet, and the sign off posts
+		// it. Inside the threshold the close posts as ever.
+		threshold, thresholdSet, err := s.repo.VarianceThreshold(ctx, report.Session.BranchID)
+		if err != nil {
+			return err
+		}
+		hold := thresholdSet && abs64(overShort) > threshold
 		now := time.Now()
 		session := report.Session
 		session.Status = TillClosed
+		if hold {
+			session.Status = TillPendingSignoff
+		}
+		session.ClosedBy = actorPtr(actor)
+		if thresholdSet {
+			t := httpx.Cents(threshold)
+			session.VarianceThreshold = &t
+		}
 		session.ClosedAt = httpx.PtrTimestamp(&now)
 		session.ExpectedByMethod = report.ExpectedByMethod
 		session.CountedByMethod = countedByMethod
@@ -185,7 +202,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		session.Notes = notes
 		// The over/short entry, inside the close's transaction, linked back
 		// onto the session.
-		if s.ledger != nil && overShort != 0 {
+		if s.ledger != nil && overShort != 0 && !hold {
 			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
 			if err != nil {
 				return fmt.Errorf("failed to post the drawer variance: %w", err)
@@ -198,6 +215,14 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 			return err
 		}
 		report.Session = session
+		if hold {
+			// the Z snapshot waits for the sign off, which freezes it
+			if err := s.recordHeldClose(ctx, report, overShort, threshold, actor); err != nil {
+				return err
+			}
+			out = report
+			return nil
+		}
 		// The frozen Z snapshot, in the same transaction.
 		if err := s.generateZReport(ctx, report); err != nil {
 			return err
@@ -233,6 +258,13 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 }
 
 func aggSales(r *TillReport) int64 { return int64(r.SalesTotalCents) }
+
+func abs64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 // GetZReport returns the frozen Z snapshot for a session.
 func (s *Service) GetZReport(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {

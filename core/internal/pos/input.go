@@ -562,3 +562,33 @@ func (r *movementRequest) parse() (MovementIn, error) {
 	}
 	return in, nil
 }
+
+// signOffRequest is POST /pos/till/{id}/signoff.
+type signOffRequest struct {
+	Reason *string `json:"reason"`
+}
+
+// variancePolicyRequest is PUT /pos/till/policy: the branch and its own
+// threshold in cents, null to fall back to the database wide default.
+type variancePolicyRequest struct {
+	BranchID       *string         `json:"branch_id"`
+	ThresholdCents json.RawMessage `json:"variance_threshold_cents"`
+}
+
+func (r *variancePolicyRequest) parse() (uuid.UUID, *int64, error) {
+	v := &httpx.Validator{}
+	branch, _ := v.UUID("branch_id", r.BranchID, true)
+	var cents *int64
+	if isAbsentRaw(r.ThresholdCents) {
+		// null clears the override, but the key must be sent: an empty body
+		// is not an instruction
+		v.Check(r.ThresholdCents != nil, "variance_threshold_cents", "is required (null clears the branch override)")
+	} else if n, ok := v.Int("variance_threshold_cents", r.ThresholdCents, true); ok {
+		v.Check(n >= 0, "variance_threshold_cents", "must not be negative")
+		cents = &n
+	}
+	if err := v.Err(); err != nil {
+		return uuid.Nil, nil, err
+	}
+	return branch, cents, nil
+}

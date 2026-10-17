@@ -139,6 +139,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
+	// The variance sign off (CP-08): the queue and the release are the
+	// managers' (finance and owner, as the resolve route), the policy read is
+	// the counter's own and its write the managers'.
+	mux.HandleFunc("GET /api/v1/pos/till/signoffs", resolveMount(h.ListPendingSignoffs))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", resolveMount(h.SignOffTill))
+	mux.HandleFunc("GET /api/v1/pos/till/policy", guard(h.GetVariancePolicy))
+	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))

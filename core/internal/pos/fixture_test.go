@@ -270,6 +270,7 @@ func (f *fixture) cleanup() {
 	}
 
 	exec(`DELETE FROM pos_sync_log`)
+	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
 	exec(`DELETE FROM till_sessions`)
 	exec(`DELETE FROM inventory WHERE location_id = $1`, f.yardID)
@@ -493,6 +494,15 @@ func (f *fixture) ensureTillOn(register string) {
 	if open == 0 {
 		f.openTillOn(register, 0)
 	}
+}
+
+// allowAnyVariance lifts the fixture branch's variance threshold out of reach,
+// for the tests whose subject is not the sign off and whose count is off by
+// design: the close then posts its variance as it did before the threshold.
+func (f *fixture) allowAnyVariance() {
+	f.t.Helper()
+	mustExec(f.t, f.db, `INSERT INTO till_variance_policy (branch_id, threshold_cents) VALUES ($1, 100000000)
+		ON CONFLICT (branch_id) DO UPDATE SET threshold_cents = EXCLUDED.threshold_cents`, f.branchID)
 }
 
 // seedTill opens the register's drawer straight in the table, for the tests

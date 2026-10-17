@@ -149,6 +149,8 @@ func TestFailingEventWriteRollsTheTillCloseBack(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.events.fail = "till.closed"
 	})
+	// the count below is off by design: the variance is not the subject
+	f.allowAnyVariance()
 	sessionID := f.openTill(1000)
 	f.saleOf("1", tender("cash", 599))
 	r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{

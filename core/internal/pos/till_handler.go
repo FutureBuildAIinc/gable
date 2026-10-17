@@ -118,3 +118,109 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 		return m.CreatedAt.Time, m.ID
 	}, limit)
 }
+
+// SignOffTill is POST /pos/till/{id}/signoff: a manager's release of a
+// counted drawer whose variance passed the threshold.
+func (h *Handler) SignOffTill(w http.ResponseWriter, r *http.Request) {
+	// a sign off is a person's act, never a machine key's
+	if _, ok := cashierOf(w, r); !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req signOffRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+	report, err := h.service.SignOffTill(r.Context(), id, reason, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+const signoffsOrdering = "pos.till_signoffs.closed_at_id_asc"
+
+// ListPendingSignoffs is GET /pos/till/signoffs: the counted drawers waiting
+// for a manager.
+func (h *Handler) ListPendingSignoffs(w http.ResponseWriter, r *http.Request) {
+	after, afterID, limit, err := keysetPage(r, signoffsOrdering, "branch_id")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var branch *uuid.UUID
+	if raw := r.URL.Query().Get("branch_id"); raw != "" {
+		b, perr := uuid.Parse(raw)
+		if perr != nil {
+			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "branch_id", Message: "must be a UUID"}))
+			return
+		}
+		branch = &b
+	}
+	items, more, err := h.service.PendingSignoffs(r.Context(), branch, after, afterID, limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeKeysetList(w, r, items, more, signoffsOrdering, func(s TillSession) (time.Time, uuid.UUID) {
+		closed := time.Time{}
+		if s.ClosedAt != nil {
+			closed = s.ClosedAt.Time
+		}
+		return closed, s.ID
+	}, limit)
+}
+
+// GetVariancePolicy is GET /pos/till/policy?branch_id=.
+func (h *Handler) GetVariancePolicy(w http.ResponseWriter, r *http.Request) {
+	q, err := httpx.StrictQuery(r, "branch_id")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	branch, perr := uuid.Parse(q.Get("branch_id"))
+	if perr != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "branch_id", Message: "is required and must be a UUID"}))
+		return
+	}
+	p, err := h.service.GetVariancePolicy(r.Context(), branch)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// PutVariancePolicy is PUT /pos/till/policy: a branch's own threshold.
+func (h *Handler) PutVariancePolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := cashierOf(w, r); !ok {
+		return
+	}
+	var req variancePolicyRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	branch, cents, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	p, err := h.service.SetVariancePolicy(r.Context(), branch, cents, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
