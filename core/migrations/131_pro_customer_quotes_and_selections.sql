@@ -221,6 +221,8 @@ CREATE INDEX IF NOT EXISTS pro_portal_verification_codes_token_idx ON pro_portal
 -- The approval record: every step, who and when. Append only, enforced here.
 CREATE TABLE IF NOT EXISTS pro_customer_quote_approval_log (
     id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- the order the steps were taken in, whatever the clocks say
+    seq             BIGINT      GENERATED ALWAYS AS IDENTITY,
     quote_id        UUID        NOT NULL REFERENCES pro_customer_quotes (id) ON DELETE RESTRICT,
     quote_revision  BIGINT      NOT NULL,
     step            TEXT        NOT NULL CHECK (step IN ('customer_approved', 'customer_declined', 'contractor_confirmed', 'dealer_accepted')),
@@ -241,7 +243,7 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_approval_log (
     note            TEXT        NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS pro_customer_quote_approval_log_quote_idx ON pro_customer_quote_approval_log (quote_id, occurred_at, id);
+CREATE INDEX IF NOT EXISTS pro_customer_quote_approval_log_quote_idx ON pro_customer_quote_approval_log (quote_id, seq);
 
 -- One customer decision, one contractor confirmation and one dealer
 -- acceptance per revision of a quote.

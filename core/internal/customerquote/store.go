@@ -685,7 +685,7 @@ func (s *Store) ListLog(ctx context.Context, quoteID uuid.UUID) ([]ApprovalEntry
 		SELECT id, quote_id, quote_revision, step, actor_kind, actor_name, actor_contact, actor_ref, occurred_at,
 			COALESCE(token_hash, ''), COALESCE(signature_kind, ''), COALESCE(signature_data, ''), source_address, user_agent,
 			code_verified, COALESCE(snapshot, ''), COALESCE(snapshot_sha256, ''), total_cents, note
-		FROM pro_customer_quote_approval_log WHERE quote_id = $1 ORDER BY occurred_at, id`, quoteID)
+		FROM pro_customer_quote_approval_log WHERE quote_id = $1 ORDER BY seq`, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("read approval log: %w", err)
 	}

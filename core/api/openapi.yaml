@@ -28,6 +28,7 @@ tags:
   - name: configurator
   - name: credit-memo
   - name: customer
+  - name: customerquote
   - name: dashboard
   - name: dealer-profile
   - name: delivery
@@ -3085,6 +3086,975 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes:
+    get:
+      operationId: customerQuoteList
+      tags: [customerquote]
+      summary: The contractor's customer quotes
+      description: >-
+        The cursor list envelope, newest first on (created_at, id), with an optional lowercase status filter. A role without the quoting and see-money capabilities is a 403.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, sent, approved, declined, confirmed, withdrawn]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: The page of quotes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: customerQuoteCreate
+      tags: [customerquote]
+      summary: Build a customer quote
+      description: >-
+        The server prices every line from the dealer for the contractor's account and captures the cost; no cost, sell price or total is an input. The three tier markup resolves per line: the line's own override, then the quote's rule for the line's product category, then the quote default, each either a markup on cost or a target gross margin (a margin of 100 percent or more is a 400). valid_until is bounded by the source dealer quote's expiry and, for lines priced from the catalog, by the dealer's configured price protection horizon. The quote starts as a draft.
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteInput"
+      responses:
+        "201":
+          description: The created draft, with its ETag and a Location header.
+          headers:
+            ETag:
+              description: The quote's revision in quotes. Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/export:
+    get:
+      operationId: customerQuoteExport
+      tags: [customerquote]
+      summary: One click export of the contractor's own customers, projects and quotes
+      description: >-
+        JSON carries all three tables; CSV carries the one named by kind. The contractor's own markup and margin are part of their own record. A CSV cell that starts with a formula character is prefixed with a quote.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+        - name: kind
+          in: query
+          description: Which table a CSV carries.
+          schema:
+            type: string
+            enum: [quotes, customers, projects]
+            default: quotes
+      responses:
+        "200":
+          description: The export, as an attachment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteExport"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/settings:
+    get:
+      operationId: customerQuoteSettingsGet
+      tags: [customerquote]
+      summary: The contractor's defaults for new quotes
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The defaults (zero values when none were saved).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteSettings"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: customerQuoteSettingsPut
+      tags: [customerquote]
+      summary: Save the contractor's defaults
+      description: >-
+        Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteSettingsInput"
+      responses:
+        "200":
+          description: The saved defaults.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/settings/logo:
+    put:
+      operationId: customerQuoteLogoPut
+      tags: [customerquote]
+      summary: Set the contractor's logo
+      description: >-
+        The image is the raw request body: PNG or JPEG, held to the dealer logo's size and pixel limits; a JPEG is stored re-encoded.
+      security:
+        - PortalSession: []
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: The logo is stored.
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/CustomerQuoteUnsupported"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: customerQuoteLogoDelete
+      tags: [customerquote]
+      summary: Remove the contractor's logo
+      security:
+        - PortalSession: []
+      responses:
+        "204":
+          description: The logo is removed.
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}:
+    get:
+      operationId: customerQuoteGet
+      tags: [customerquote]
+      summary: One customer quote with its costs, markups and margin
+      description: >-
+        The contractor's own view. The raw link token is never readable again; link only says when the live link ends.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote.
+          headers:
+            ETag:
+              description: The quote's revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: customerQuoteUpdate
+      tags: [customerquote]
+      summary: Replace a draft
+      description: >-
+        The whole draft is replaced on the client's revision (If-Match; neither is 428, a stale one 409 stale_revision). A line that names its id keeps the cost it captured while its product and quantity are unchanged. Only a draft is editable; a sent quote is revised first.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteInput"
+      responses:
+        "200":
+          description: The updated draft.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/preview:
+    get:
+      operationId: customerQuotePreview
+      tags: [customerquote]
+      summary: The customer's page, as the customer would see it now
+      description: The strict public allowlist shape, built from the stored quote.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The customer's view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePublicView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/pdf:
+    get:
+      operationId: customerQuotePdf
+      tags: [customerquote]
+      summary: The customer PDF under the contractor's mark
+      description: Built from the public allowlist view alone (price wall 2).
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/approvals:
+    get:
+      operationId: customerQuoteApprovals
+      tags: [customerquote]
+      summary: The approval record of a quote
+      description: >-
+        Every step, in order, with who and when: the customer's approval or decline (name, contact, signature kind, source address, user agent, link token hash, the SHA-256 of the snapshot and the total), the contractor's confirmation and the dealer's acceptance. Append only.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteApprovalList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/send:
+    post:
+      operationId: customerQuoteSend
+      tags: [customerquote]
+      summary: Send the quote, freezing it and issuing the capability link
+      description: >-
+        Needs a project (the dealer sees it), a job site address and an email or phone for the customer. valid_until is bounded again. Mints a 256 bit token from the secure random source, stores only its SHA-256 hash and returns the link here, once (Cache-Control: no-store); the link is emailed when a real email sender is configured, link.delivered says whether anything was sent. The link expires at valid_until, bounded by the configured maximum lifetime.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: The sent quote and its link.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteLinkResult"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/link/rotate:
+    post:
+      operationId: customerQuoteLinkRotate
+      tags: [customerquote]
+      summary: Kill the live link and issue a new one
+      description: The old link is refused from this moment. Only a sent quote has a link.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The new link, shown once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteLinkResult"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/link/revoke:
+    post:
+      operationId: customerQuoteLinkRevoke
+      tags: [customerquote]
+      summary: Kill the live link
+      description: The quote stays sent; rotate issues a new link.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The link is revoked.
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/withdraw:
+    post:
+      operationId: customerQuoteWithdraw
+      tags: [customerquote]
+      summary: Withdraw a draft or sent quote
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The withdrawn quote; its link is dead.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/revise:
+    post:
+      operationId: customerQuoteRevise
+      tags: [customerquote]
+      summary: Take a sent or declined quote back to a draft
+      description: >-
+        The link dies and the selections reset; the earlier decisions stay in the approval record under their revision.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/confirm:
+    post:
+      operationId: customerQuoteConfirm
+      tags: [customerquote]
+      summary: Confirm the customer's approval into the dealer's order
+      description: >-
+        Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. The markup, labour, overhead and the customer's prices never reach the order.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The confirmed quote with its order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}:
+    get:
+      operationId: customerQuotePublicView
+      tags: [customerquote]
+      summary: The customer's page (capability link, no account)
+      description: >-
+        No session and no cookie. An unknown or malformed token is a bare 404; a token that existed and is expired, revoked or rotated away is 410. Rate limited per link and per source address (429). Every answer is Cache-Control: no-store with Referrer-Policy: no-referrer. The body is the strict allowlist shape (price wall 2).
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      responses:
+        "200":
+          description: The customer's view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePublicView"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}/pdf:
+    get:
+      operationId: customerQuotePublicPdf
+      tags: [customerquote]
+      summary: The customer PDF
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      responses:
+        "200":
+          description: The PDF, built from the public allowlist view alone.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}/logo:
+    get:
+      operationId: customerQuotePublicLogo
+      tags: [customerquote]
+      summary: The contractor's logo
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      responses:
+        "200":
+          description: The image.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}/selections:
+    put:
+      operationId: customerQuotePublicSelections
+      tags: [customerquote]
+      summary: Approve or decline selections
+      description: >-
+        Each material line is approved or declined. In an option group the customer chooses one: approving a line declines the group's others. Only while the quote is open (sent and not expired).
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteChoices"
+      responses:
+        "200":
+          description: The customer's view under the new choices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePublicView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}/code:
+    post:
+      operationId: customerQuotePublicCode
+      tags: [customerquote]
+      summary: Send a six digit verification code
+      description: >-
+        Only when the contractor requires a code. The code goes to the email or phone the contractor put on the quote, never to an address the caller names. Hashed with a per row salt, single use, valid for ten minutes, five wrong guesses lock it; at most three requests in ten minutes. SMS has no live carrier at this base (a stub).
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel:
+                  type: string
+                  enum: [email, sms]
+      responses:
+        "202":
+          description: The code was sent.
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/public/v1/customer-quotes/{token}/accept:
+    post:
+      operationId: customerQuotePublicAccept
+      tags: [customerquote]
+      summary: Sign off
+      description: >-
+        Every selection must be decided and something approved. The sign off is a typed full name, an email or a phone, and a typed or drawn (PNG) signature; with the contractor's code toggle on, a valid code too. The server records the time, the source address and the user agent and an immutable SHA-256 snapshot of the chosen selections and the total, in one transaction with the status change. Two acceptances of one link at once give exactly one approval; the loser is a 409. A wrong code is a 400 code_invalid and counts against the code's attempts.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteAcceptRequest"
+      responses:
+        "200":
+          description: The approved view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePublicView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/customer-quotes/{token}/decline:
+    post:
+      operationId: customerQuotePublicDecline
+      tags: [customerquote]
+      summary: Decline the quote
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: >-
+            The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteDeclineRequest"
+      responses:
+        "200":
+          description: The declined view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuotePublicView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pro-projects:
+    get:
+      operationId: proProjectList
+      tags: [customerquote]
+      summary: The contractors' shared project pipeline
+      description: >-
+        Quotes from the moment they are sent (a draft is the contractor's own work and is not shared), most recently moved first. Price wall 1: the project, job site, customer and site contact, selection status and the material pipeline at the dealer's own prices, and nothing of the contractor's markup rules, basis points, labour or overhead lines or the customer's sell prices.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pro-projects/{id}:
+    get:
+      operationId: proProjectGet
+      tags: [customerquote]
+      summary: One shared project with its approval record
+      description: >-
+        The approval record shows who and when for each step and the hash of what the customer decided, never the decision's own figures.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerProjectDetail"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pro-projects/{id}/accept:
+    post:
+      operationId: proProjectAccept
+      tags: [customerquote]
+      summary: Record the dealer's acceptance
+      description: >-
+        Once, for a confirmed project. Appends the dealer_accepted step to the approval record with the desk user.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The project with the acceptance recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerProjectDetail"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/dashboard/summary:
@@ -16021,6 +16991,32 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/AppsDisabledError"
+    CustomerQuoteForbidden:
+      description: >-
+        The portal role holds neither the quote customers nor the see money capability.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    CustomerQuoteUnsupported:
+      description: The logo is neither image/png nor image/jpeg.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    CustomerQuoteRateLimited:
+      description: Too many requests for this link or from this address (code rate_limited).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    CustomerQuoteLinkGone:
+      description: >-
+        The link existed and is expired, revoked or rotated away (code link_unavailable). The same bare answer whichever it is.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CustomerQuoteGone"
     IntegrationBadRequest:
       description: The body or a parameter is malformed.
       content:
@@ -18310,6 +19306,973 @@ components:
           type: integer
           format: int64
           description: PUT only, beside If-Match.
+    CustomerQuoteGone:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [link_unavailable]
+            message:
+              type: string
+        meta:
+          type: object
+          required: [request_id]
+          properties:
+            request_id:
+              type: string
+    CustomerQuoteMarkup:
+      type: object
+      required: [kind, bps]
+      description: >-
+        A markup on cost (sell = cost x (10000 + bps) / 10000) or a target gross margin (sell = cost x 10000 / (10000 - bps); under 10000).
+      properties:
+        kind:
+          type: string
+          enum: [markup, margin]
+        bps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+    CustomerQuoteContact:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+    CustomerQuoteTax:
+      type: object
+      required: [mode, rate_bps]
+      properties:
+        mode:
+          type: string
+          enum: [site_rate, included, at_checkout]
+        rate_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 5000
+    CustomerQuoteInput:
+      type: object
+      required: [title, end_customer]
+      description: >-
+        Unknown fields are a 400. markup, tax, payment_terms, deposit_bps and require_code default to the contractor's saved defaults.
+      properties:
+        title:
+          type: string
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        source_quote_id:
+          type: [string, "null"]
+          format: uuid
+        job_site_address:
+          type: string
+        end_customer:
+          $ref: "#/components/schemas/CustomerQuoteContact"
+        site_contact:
+          $ref: "#/components/schemas/CustomerQuoteContact"
+        markup:
+          oneOf:
+            - $ref: "#/components/schemas/CustomerQuoteMarkup"
+            - type: "null"
+        hide_line_prices:
+          type: boolean
+        tax:
+          oneOf:
+            - $ref: "#/components/schemas/CustomerQuoteTax"
+            - type: "null"
+        payment_terms:
+          type: [string, "null"]
+        deposit_bps:
+          type: [integer, "null"]
+          format: int64
+        customer_note:
+          type: string
+        require_code:
+          type: [boolean, "null"]
+        valid_until:
+          type: [string, "null"]
+          format: date-time
+        groups:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+        lines:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity]
+            properties:
+              id:
+                type: [string, "null"]
+                format: uuid
+              product_id:
+                type: string
+                format: uuid
+              source_line_id:
+                type: [string, "null"]
+                format: uuid
+              quantity:
+                type: string
+              group_key:
+                type: [string, "null"]
+              markup:
+                oneOf:
+                  - $ref: "#/components/schemas/CustomerQuoteMarkup"
+                  - type: "null"
+              note:
+                type: string
+        category_rules:
+          type: array
+          items:
+            type: object
+            required: [category_id, markup]
+            properties:
+              category_id:
+                type: string
+                format: uuid
+              markup:
+                $ref: "#/components/schemas/CustomerQuoteMarkup"
+        labour:
+          type: array
+          items:
+            type: object
+            required: [description, rate_type, rate_cents]
+            properties:
+              description:
+                type: string
+              rate_type:
+                type: string
+                enum: [flat, hourly]
+              rate_cents:
+                type: integer
+                format: int64
+              hours:
+                type: string
+              contractor_only:
+                type: boolean
+        overhead:
+          type: array
+          items:
+            type: object
+            required: [label, amount_type, value]
+            properties:
+              label:
+                type: string
+              amount_type:
+                type: string
+                enum: [flat, percent]
+              value:
+                type: integer
+                format: int64
+                description: Cents when flat, basis points when percent.
+              contractor_only:
+                type: boolean
+    CustomerQuoteLine:
+      type: object
+      required: [id, position, product_id, category_id, sku, description, uom, quantity, unit_cost_ten_thousandths, cost_cents, price_basis, group_id, markup, applied, sell_cents, note, selection]
+      properties:
+        id:
+          type: string
+          format: uuid
+        position:
+          type: integer
+        product_id:
+          type: string
+          format: uuid
+        category_id:
+          type: [string, "null"]
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        uom:
+          type: string
+        quantity:
+          type: string
+        unit_cost_ten_thousandths:
+          type: integer
+          format: int64
+        cost_cents:
+          type: integer
+          format: int64
+        price_basis:
+          type: string
+          enum: [catalog, dealer_quote]
+        group_id:
+          type: [string, "null"]
+          format: uuid
+        markup:
+          oneOf:
+            - $ref: "#/components/schemas/CustomerQuoteMarkup"
+            - type: "null"
+        applied:
+          type: object
+          required: [tier, kind, bps]
+          properties:
+            tier:
+              type: string
+              enum: [line, category, quote]
+            kind:
+              type: string
+              enum: [markup, margin]
+            bps:
+              type: integer
+              format: int64
+        sell_cents:
+          type: integer
+          format: int64
+        note:
+          type: string
+        selection:
+          type: string
+          enum: [pending, approved, declined]
+    CustomerQuoteTotals:
+      type: object
+      required: [material_cost_cents, material_sell_cents, labour_cents, overhead_cents, subtotal_cents, tax_cents, total_cents, deposit_cents, contractor_cost_cents, margin_cents, margin_bps]
+      description: >-
+        Every figure is a sum of rounded lines. labour_cents and overhead_cents are the customer facing lines; contractor_cost_cents is the contractor only lines, counted against margin_cents and in no price.
+      properties:
+        material_cost_cents:
+          type: integer
+          format: int64
+        material_sell_cents:
+          type: integer
+          format: int64
+        labour_cents:
+          type: integer
+          format: int64
+        overhead_cents:
+          type: integer
+          format: int64
+        subtotal_cents:
+          type: integer
+          format: int64
+        tax_cents:
+          type: integer
+          format: int64
+        total_cents:
+          type: integer
+          format: int64
+        deposit_cents:
+          type: integer
+          format: int64
+        contractor_cost_cents:
+          type: integer
+          format: int64
+        margin_cents:
+          type: integer
+          format: int64
+        margin_bps:
+          type: integer
+          format: int64
+    CustomerQuoteView:
+      type: object
+      required: [id, reference, title, status, effective_status, project_id, source_quote_id, job_site_address, end_customer, site_contact, markup, hide_line_prices, tax, payment_terms, deposit_bps, customer_note, require_code, valid_until, revision, sent_at, approved_at, declined_at, confirmed_at, dealer_accepted_at, groups, lines, category_rules, labour, overhead, totals, link, order, created_at, updated_at]
+      description: >-
+        The contractor's own view of a quote: cost, markup, labour, overhead and margin included. It never reaches the customer or the dealer.
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [draft, sent, approved, declined, confirmed, withdrawn]
+        effective_status:
+          type: string
+          description: status, or expired for a sent quote past valid_until.
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        source_quote_id:
+          type: [string, "null"]
+          format: uuid
+        job_site_address:
+          type: string
+        end_customer:
+          $ref: "#/components/schemas/CustomerQuoteContact"
+        site_contact:
+          $ref: "#/components/schemas/CustomerQuoteContact"
+        markup:
+          $ref: "#/components/schemas/CustomerQuoteMarkup"
+        hide_line_prices:
+          type: boolean
+        tax:
+          $ref: "#/components/schemas/CustomerQuoteTax"
+        payment_terms:
+          type: string
+        deposit_bps:
+          type: integer
+          format: int64
+        customer_note:
+          type: string
+        require_code:
+          type: boolean
+        valid_until:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          format: int64
+        sent_at:
+          type: [string, "null"]
+          format: date-time
+        approved_at:
+          type: [string, "null"]
+          format: date-time
+        declined_at:
+          type: [string, "null"]
+          format: date-time
+        confirmed_at:
+          type: [string, "null"]
+          format: date-time
+        dealer_accepted_at:
+          type: [string, "null"]
+          format: date-time
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, label, position]
+            properties:
+              id:
+                type: string
+                format: uuid
+              label:
+                type: string
+              position:
+                type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerQuoteLine"
+        category_rules:
+          type: array
+          items:
+            type: object
+            required: [category_id, markup]
+            properties:
+              category_id:
+                type: string
+                format: uuid
+              markup:
+                $ref: "#/components/schemas/CustomerQuoteMarkup"
+        labour:
+          type: array
+          items:
+            type: object
+            required: [id, position, description, rate_type, rate_cents, contractor_only, total_cents]
+            properties:
+              id:
+                type: string
+                format: uuid
+              position:
+                type: integer
+              description:
+                type: string
+              rate_type:
+                type: string
+                enum: [flat, hourly]
+              rate_cents:
+                type: integer
+                format: int64
+              hours:
+                type: string
+              contractor_only:
+                type: boolean
+              total_cents:
+                type: integer
+                format: int64
+        overhead:
+          type: array
+          items:
+            type: object
+            required: [id, position, label, amount_type, value, contractor_only, total_cents]
+            properties:
+              id:
+                type: string
+                format: uuid
+              position:
+                type: integer
+              label:
+                type: string
+              amount_type:
+                type: string
+                enum: [flat, percent]
+              value:
+                type: integer
+                format: int64
+              contractor_only:
+                type: boolean
+              total_cents:
+                type: integer
+                format: int64
+        totals:
+          $ref: "#/components/schemas/CustomerQuoteTotals"
+        link:
+          type: [object, "null"]
+          required: [expires_at]
+          properties:
+            expires_at:
+              type: string
+              format: date-time
+        order:
+          type: [object, "null"]
+          required: [id, number, status, fulfilment, total_cents]
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            status:
+              type: string
+            fulfilment:
+              type: string
+              enum: [ordered, being_prepared, fulfilled, cancelled]
+            total_cents:
+              type: integer
+              format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerQuoteSummary:
+      type: object
+      required: [id, reference, title, status, effective_status, end_customer_name, project_id, valid_until, total_cents, margin_cents, revision, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        effective_status:
+          type: string
+        end_customer_name:
+          type: string
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        valid_until:
+          type: string
+          format: date-time
+        total_cents:
+          type: integer
+          format: int64
+        margin_cents:
+          type: integer
+          format: int64
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerQuotePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerQuoteSummary"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+    CustomerQuoteLinkResult:
+      type: object
+      required: [quote, link]
+      properties:
+        quote:
+          $ref: "#/components/schemas/CustomerQuoteView"
+        link:
+          type: object
+          required: [path, expires_at, delivered]
+          description: >-
+            The raw token appears here and nowhere else, once. delivered is false when nothing real was emailed (no real sender, or no address): the contractor shares the link themselves.
+          properties:
+            path:
+              type: string
+              description: The customer page path, /q/ then the token.
+            url:
+              type: string
+              description: The absolute URL, when the deployment has a public URL.
+            expires_at:
+              type: string
+              format: date-time
+            delivered:
+              type: boolean
+    CustomerQuoteSettings:
+      type: object
+      required: [display_name, has_logo, payment_terms, deposit_bps, tax, markup, require_code]
+      properties:
+        display_name:
+          type: string
+        has_logo:
+          type: boolean
+        payment_terms:
+          type: string
+        deposit_bps:
+          type: integer
+          format: int64
+        tax:
+          $ref: "#/components/schemas/CustomerQuoteTax"
+        markup:
+          $ref: "#/components/schemas/CustomerQuoteMarkup"
+        require_code:
+          type: boolean
+    CustomerQuoteSettingsInput:
+      type: object
+      required: [tax, markup]
+      properties:
+        display_name:
+          type: string
+        payment_terms:
+          type: string
+        deposit_bps:
+          type: integer
+          format: int64
+        tax:
+          $ref: "#/components/schemas/CustomerQuoteTax"
+        markup:
+          $ref: "#/components/schemas/CustomerQuoteMarkup"
+        require_code:
+          type: boolean
+    CustomerQuoteApprovalList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [step, quote_revision, actor_kind, actor_name, actor_contact, occurred_at, code_verified]
+            properties:
+              step:
+                type: string
+                enum: [customer_approved, customer_declined, contractor_confirmed, dealer_accepted]
+              quote_revision:
+                type: integer
+                format: int64
+              actor_kind:
+                type: string
+                enum: [customer, contractor, dealer]
+              actor_name:
+                type: string
+              actor_contact:
+                type: string
+              occurred_at:
+                type: string
+                format: date-time
+              token_hash:
+                type: string
+              signature_kind:
+                type: string
+                enum: [typed, drawn]
+              source_address:
+                type: string
+              user_agent:
+                type: string
+              code_verified:
+                type: boolean
+              snapshot_sha256:
+                type: string
+              total_cents:
+                type: integer
+                format: int64
+              note:
+                type: string
+    CustomerQuoteExport:
+      type: object
+      required: [customers, projects, quotes]
+      properties:
+        customers:
+          type: array
+          items:
+            type: object
+            required: [name, email, phone, quote_count, last_quote_reference]
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+              phone:
+                type: string
+              quote_count:
+                type: integer
+              last_quote_reference:
+                type: string
+        projects:
+          type: array
+          items:
+            type: object
+            required: [id, name, status, created_at]
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              status:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+        quotes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerQuoteView"
+    CustomerQuotePublicView:
+      type: object
+      required: [reference, title, status, contractor, customer_name, job_site_address, valid_until, note, payment_terms, hide_line_prices, groups, lines, extras, totals, requires_code, can_decide]
+      description: >-
+        The strict allowlist of price wall 2. There is no field for the dealer's cost, a markup, basis points (the customer site tax rate excepted), a margin or a contractor only line. With hide_line_prices no line or extra carries a price and the totals are the lump sum.
+      properties:
+        reference:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [open, expired, approved, declined, confirmed, withdrawn]
+        contractor:
+          type: object
+          required: [name, has_logo]
+          properties:
+            name:
+              type: string
+            has_logo:
+              type: boolean
+        customer_name:
+          type: string
+        job_site_address:
+          type: string
+        valid_until:
+          type: string
+          format: date-time
+        note:
+          type: string
+        payment_terms:
+          type: string
+        hide_line_prices:
+          type: boolean
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, label]
+            properties:
+              id:
+                type: string
+                format: uuid
+              label:
+                type: string
+        lines:
+          type: array
+          items:
+            type: object
+            required: [id, description, quantity, uom, selection]
+            properties:
+              id:
+                type: string
+                format: uuid
+              group_id:
+                type: string
+                format: uuid
+              description:
+                type: string
+              quantity:
+                type: string
+              uom:
+                type: string
+              note:
+                type: string
+              price_cents:
+                type: integer
+                format: int64
+              selection:
+                type: string
+                enum: [pending, approved, declined]
+        extras:
+          type: array
+          items:
+            type: object
+            required: [id, kind, description]
+            properties:
+              id:
+                type: string
+                format: uuid
+              kind:
+                type: string
+                enum: [labour, overhead]
+              description:
+                type: string
+              price_cents:
+                type: integer
+                format: int64
+        totals:
+          type: object
+          required: [subtotal_cents, tax_cents, total_cents, deposit_cents, tax_mode, tax_note]
+          properties:
+            subtotal_cents:
+              type: integer
+              format: int64
+            tax_cents:
+              type: integer
+              format: int64
+            total_cents:
+              type: integer
+              format: int64
+            deposit_cents:
+              type: integer
+              format: int64
+            tax_mode:
+              type: string
+              enum: [site_rate, included, at_checkout]
+            tax_rate_bps:
+              type: integer
+              format: int64
+            tax_note:
+              type: string
+        requires_code:
+          type: boolean
+        can_decide:
+          type: boolean
+        approval:
+          type: object
+          required: [decision, signed_by, at]
+          properties:
+            decision:
+              type: string
+              enum: [approved, declined]
+            signed_by:
+              type: string
+            at:
+              type: string
+              format: date-time
+        fulfilment:
+          type: string
+          enum: [ordered, being_prepared, fulfilled, cancelled]
+    CustomerQuoteChoices:
+      type: object
+      required: [choices]
+      properties:
+        choices:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [line_id, state]
+            properties:
+              line_id:
+                type: string
+                format: uuid
+              state:
+                type: string
+                enum: [pending, approved, declined]
+    CustomerQuoteAcceptRequest:
+      type: object
+      required: [full_name, signature]
+      properties:
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        email:
+          type: string
+        phone:
+          type: string
+        signature:
+          type: object
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [typed, drawn]
+            text:
+              type: string
+            png_base64:
+              type: string
+              description: A PNG of at most 128 KB, base64 encoded, for a drawn signature.
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+    CustomerQuoteDeclineRequest:
+      type: object
+      required: [full_name]
+      properties:
+        full_name:
+          type: string
+        reason:
+          type: string
+    CustomerQuoteDealerProject:
+      type: object
+      required: [id, reference, contractor, project, job_site_address, customer, site_contact, status, selections, materials, material_cents, order, dealer_accepted_at, updated_at]
+      description: >-
+        The strict allowlist of price wall 1. The materials are at the dealer's own prices; there is no field for the contractor's markup, basis points, labour, overhead, margin or the customer's sell prices.
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        contractor:
+          type: object
+          required: [customer_id, name]
+          properties:
+            customer_id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        project:
+          type: [object, "null"]
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        job_site_address:
+          type: string
+        customer:
+          $ref: "#/components/schemas/CustomerQuoteContact"
+        site_contact:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+            phone:
+              type: string
+        status:
+          type: string
+          enum: [sent, approved, declined, confirmed, withdrawn]
+        selections:
+          type: object
+          required: [approved, declined, pending]
+          properties:
+            approved:
+              type: integer
+            declined:
+              type: integer
+            pending:
+              type: integer
+        materials:
+          type: array
+          items:
+            type: object
+            required: [sku, description, quantity, uom, dealer_cost_cents, selection]
+            properties:
+              sku:
+                type: string
+              description:
+                type: string
+              quantity:
+                type: string
+              uom:
+                type: string
+              dealer_cost_cents:
+                type: integer
+                format: int64
+              selection:
+                type: string
+                enum: [pending, approved, declined]
+        material_cents:
+          type: integer
+          format: int64
+          description: The counted material at the dealer's prices under the customer's decisions.
+        order:
+          type: [object, "null"]
+          required: [id, number, status, total_cents]
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+            status:
+              type: string
+              description: The order's lowercase status.
+            total_cents:
+              type: integer
+              format: int64
+        dealer_accepted_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CustomerQuoteDealerProjectDetail:
+      allOf:
+        - $ref: "#/components/schemas/CustomerQuoteDealerProject"
+        - type: object
+          required: [approvals]
+          properties:
+            approvals:
+              type: array
+              items:
+                type: object
+                required: [step, actor_kind, actor_name, occurred_at]
+                properties:
+                  step:
+                    type: string
+                    enum: [customer_approved, customer_declined, contractor_confirmed, dealer_accepted]
+                  actor_kind:
+                    type: string
+                    enum: [customer, contractor, dealer]
+                  actor_name:
+                    type: string
+                  occurred_at:
+                    type: string
+                    format: date-time
+                  snapshot_sha256:
+                    type: string
+    CustomerQuoteDealerPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerQuoteDealerProject"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     DashboardSummary:
       type: object
       description: dashboard.DashboardSummary. Money is int64 cents.

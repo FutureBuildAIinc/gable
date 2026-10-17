@@ -208,7 +208,10 @@ func TestValidUntil_BoundedByTheSourceDealerQuote(t *testing.T) {
 	if _, err := w.db.Pool.Exec(ctx, `INSERT INTO quotes (id, customer_id, state, branch_id) VALUES ($1, $2, 'SENT', $3)`, srcID, w.a.CustomerID, w.branch); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = w.db.Pool.Exec(ctx, `DELETE FROM pro_customer_quotes WHERE source_quote_id = $1`, srcID); _, _ = w.db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id = $1`, srcID) })
+	t.Cleanup(func() {
+		_, _ = w.db.Pool.Exec(ctx, `DELETE FROM pro_customer_quotes WHERE source_quote_id = $1`, srcID)
+		_, _ = w.db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id = $1`, srcID)
+	})
 	exp := w.now.Add(36 * time.Hour)
 	w.costs.source[srcID] = &customerquote.SourceQuote{ID: srcID, ExpiresAt: &exp, Lines: []customerquote.SourceQuoteLine{
 		{ID: uuid.New(), ProductID: w.stud, SKU: "S", Description: "2x4 stud", UOM: "EA", Quantity: qty(t, "100"), UnitCostTenThousandths: 50000},
