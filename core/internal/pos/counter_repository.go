@@ -193,3 +193,60 @@ func (r *PostgresRepository) LockOpenCreditMemos(ctx context.Context, customerID
 	}
 	return out, rows.Err()
 }
+
+// InsertSignature seals one signature to a sale; a sale already signed
+// answers 409 signature_exists (the row never changes once written).
+func (r *PostgresRepository) InsertSignature(ctx context.Context, sig *storedSignature) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		INSERT INTO pos_signatures (sale_id, signer_name, image, image_sha256, total_cents, signed_at, seal, captured_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		sig.SaleID, sig.SignerName, sig.Image, sig.ImageSHA256, int64(sig.TotalCents), sig.SignedAt.Time, sig.Seal, sig.CapturedBy)
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
+		return conflict("signature_exists", "this sale is already signed: a sealed signature never changes")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to seal the signature: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// GetSignature reads a sale's sealed signature with its image; false when the
+// sale has none.
+func (r *PostgresRepository) GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error) {
+	var sig storedSignature
+	var signed time.Time
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT sale_id, signer_name, image, image_sha256, total_cents, signed_at, seal, captured_by
+		FROM pos_signatures WHERE sale_id = $1`, saleID).
+		Scan(&sig.SaleID, &sig.SignerName, &sig.Image, &sig.ImageSHA256, &sig.TotalCents, &signed, &sig.Seal, &sig.CapturedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read the signature: %w", err)
+	}
+	sig.SignedAt = httpx.TimestampOf(signed)
+	return &sig, true, nil
+}
+
+// BumpPrintCount counts one more print of the sale's receipt and answers the
+// new count. The statement is the guard: racing prints are numbered apart.
+func (r *PostgresRepository) BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error) {
+	var n int
+	err := r.ex(ctx).QueryRow(ctx, `UPDATE pos_transactions SET print_count = print_count + 1 WHERE id = $1
+		RETURNING print_count`, saleID).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, httpx.NotFound("sale not found")
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to count the print: %w", err)
+	}
+	return n, nil
+}
+
+// UnbumpPrintCount gives one print back (a render that failed).
+func (r *PostgresRepository) UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET print_count = GREATEST(print_count - 1, 0) WHERE id = $1`, saleID)
+	return err
+}

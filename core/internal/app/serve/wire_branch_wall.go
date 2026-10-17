@@ -310,6 +310,9 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 // answers. The document handler renders and sends; the POS service names the
 // sale's invoice.
 func (w *branchWall) posReceipts(mux *http.ServeMux, h *document.Handler, sales document.SaleInvoices, roles ...string) {
+	if prints, ok := sales.(document.ReceiptPrints); ok {
+		h.WithReceiptPrints(prints)
+	}
 	h.WithSaleReceipts(sales).RegisterReceiptRoutes(mux, w.scoped(roles...))
 }
 

@@ -42,6 +42,8 @@ type Handler struct {
 	poSvc      *purchase_order.Service // optional; see WithPurchaseOrders
 	deliveries emaildelivery.Recorder  // optional; see WithDeliveries
 	sales      SaleInvoices            // optional; see WithSaleReceipts
+	prints     ReceiptPrints           // optional; see WithReceiptPrints
+	thermal    ThermalRenderer         // optional; see WithThermalReceipt
 	sends      sync.WaitGroup
 
 	sendTimeout time.Duration // zero means the package's sendTimeout; tests shorten it

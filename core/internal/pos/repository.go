@@ -198,6 +198,10 @@ type Repository interface {
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
 	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
+	InsertSignature(ctx context.Context, sig *storedSignature) error
+	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)
+	BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error)
+	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
 	InsertOverride(ctx context.Context, o *AccountOverride) error
 	LiveOverride(ctx context.Context, saleID uuid.UUID, kind string) (*AccountOverride, error)
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
