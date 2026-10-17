@@ -363,15 +363,18 @@ func TestOrderCreateEqualUnitsPairMustBeOneAndOne(t *testing.T) {
 			"quantity": "187.5", "price_uom": "PCS", "uom_qty": "187.5", "price_uom_qty": "1"}},
 		{"uom and price_uom omitted, pair not 1 and 1", map[string]any{
 			"quantity": "10", "uom_qty": "12", "price_uom_qty": "1"}},
-		// Probe 2: a different price unit with no pair (a 201 at 5500).
-		{"uom omitted, price_uom differs, no pair", map[string]any{
-			"quantity": "10", "price_uom": "MBF"}},
-		{"uom named, price_uom differs, no pair", map[string]any{
-			"quantity": "10", "uom": "PCS", "price_uom": "MBF"}},
+		// A non stock line carries the client's pair (ADR 0006 section 3.3):
+		// when price_uom differs from uom across dimensions, omitting the pair
+		// is a 400 on lines[0].uom_qty.
+		{"non-stock line, price_uom differs, no pair", map[string]any{
+			"sku": "SPECIAL-1", "description": "Special lumber",
+			"quantity": "10", "uom": "PCS", "price_uom": "MBF", "unit_price_ten_thousandths": 5000000}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			line := c.line
-			line["product_id"] = f.productID.String()
+			if _, hasSKU := line["sku"]; !hasSKU {
+				line["product_id"] = f.productID.String()
+			}
 			body := map[string]any{"customer_id": f.customerID.String(), "delivery_type": "pickup", "lines": []map[string]any{line}}
 			r := f.do("POST", "/api/v1/orders", body)
 			if r.status != 400 {
@@ -390,32 +393,34 @@ func TestOrderCreateEqualUnitsPairMustBeOneAndOne(t *testing.T) {
 			}
 		})
 	}
-	// A pair beside a different price unit still passes, with the unit
-	// omitted: 187.5 PCS to 1 MBF.
+	// A pair beside a different price unit on a non stock line passes:
+	// 187.5 PCS to 1 MBF.
 	ok := f.do("POST", "/api/v1/orders", f.createBody(map[string]any{
-		"product_id": f.productID.String(), "quantity": "187.5", "price_uom": "MBF",
-		"uom_qty": "187.5", "price_uom_qty": "1", "unit_price_ten_thousandths": 5000000, "override_reason": "per MBF"}))
+		"sku": "SPECIAL-MBF", "description": "Special lumber",
+		"quantity": "187.5", "uom": "PCS", "price_uom": "MBF",
+		"uom_qty": "187.5", "price_uom_qty": "1", "unit_price_ten_thousandths": 5000000}))
 	if ok.status != 201 {
-		t.Fatalf("a real pair with the unit omitted = %d: %s", ok.status, ok.raw)
+		t.Fatalf("a real pair on a non stock line = %d: %s", ok.status, ok.raw)
 	}
 }
 
-// RULE (ADR 0005 5.1 and section 1): a stocked line is sold in its product's
-// stocking unit; another unit is refused with unit_not_stock_unit until
-// cycle 3.
+// RULE (ADR 0006 sections 3.3 and 7.5): a stocked line may be sold in any
+// sale unit of its product's unit set, and a unit not in the product's sale
+// units is refused with a 400 naming lines[0].uom.
 func TestOrderCreateStockingUnitRule(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
 		"customer_id": f.customerID.String(), "delivery_type": "pickup",
 		"lines": []map[string]any{{"product_id": f.productID.String(), "quantity": "10", "uom": "MBF"}},
 	})
-	if r.status != 409 {
+	if r.status != 400 {
 		t.Fatalf("create = %d: %s", r.status, r.raw)
 	}
 	code, _, details := errorOf(t, r)
-	if code != "conflict" || len(details) != 1 || details[0]["code"] != "unit_not_stock_unit" {
-		t.Errorf("code=%q details=%v, want conflict with unit_not_stock_unit", code, details)
+	if code != "validation_failed" || len(details) != 1 || details[0]["field"] != "lines[0].uom" {
+		t.Errorf("code=%q details=%v, want validation_failed on lines[0].uom", code, details)
 	}
 }
 

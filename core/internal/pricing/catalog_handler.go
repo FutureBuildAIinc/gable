@@ -52,7 +52,7 @@ func catalogWriteErr(err error, what string) error {
 			return httpx.Duplicate("a " + what + " with this key already exists")
 		case "23503":
 			field := "id"
-			for _, f := range []string{"price_level_id", "price_profile_id", "vendor_id", "vendor_price_level_id", "customer_id", "product_id", "branch_id"} {
+			for _, f := range []string{"price_uom", "purchase_uom", "price_level_id", "price_profile_id", "vendor_id", "vendor_price_level_id", "customer_id", "product_id", "branch_id"} {
 				if strings.Contains(pgErr.ConstraintName, f) {
 					field = f
 					break
@@ -607,13 +607,17 @@ func (h *CatalogHandler) HandleReplaceProductPrices(w http.ResponseWriter, r *ht
 		httpx.WriteError(w, r, ferr)
 		return
 	}
+	defaultPriceUOM := facts.PriceUOM
+	if defaultPriceUOM == "" {
+		defaultPriceUOM = facts.StockUOM
+	}
 	rows := make([]ProductPrice, 0, len(req.Prices))
 	for i, row := range req.Prices {
 		if row.BranchID != nil {
 			v.Check(false, "prices["+string(rune('0'+i))+"].branch_id", "a row carries no branch: the slice is the query's branch")
 			continue
 		}
-		p := ProductPrice{ProductID: productID, BranchID: branch, PriceUOM: facts.PriceUOM}
+		p := ProductPrice{ProductID: productID, BranchID: branch, PriceUOM: defaultPriceUOM}
 		if row.PriceLevelID != nil {
 			if id, ok := v.UUID("prices["+itoa(i)+"].price_level_id", row.PriceLevelID, false); ok {
 				lid := id
@@ -621,7 +625,17 @@ func (h *CatalogHandler) HandleReplaceProductPrices(w http.ResponseWriter, r *ht
 			}
 		}
 		if row.PriceUOM != nil {
-			p.PriceUOM = strings.ToUpper(strings.TrimSpace(*row.PriceUOM))
+			if u := strings.ToUpper(strings.TrimSpace(*row.PriceUOM)); u != "" {
+				p.PriceUOM = u
+				if u != facts.StockUOM && u != facts.PriceUOM {
+					uRow, uerr := h.service.repo.UnitSetRow(r.Context(), productID, u)
+					if uerr != nil {
+						httpx.WriteError(w, r, uerr)
+						return
+					}
+					v.Check(uRow != nil, "prices["+itoa(i)+"].price_uom", "must be a unit in the product's unit set")
+				}
+			}
 		}
 		if row.UnitPriceTenThousandths != nil {
 			if n, ok := v.Int("prices["+itoa(i)+"].unit_price_ten_thousandths", *row.UnitPriceTenThousandths, true); ok {
@@ -630,10 +644,6 @@ func (h *CatalogHandler) HandleReplaceProductPrices(w http.ResponseWriter, r *ht
 			}
 		} else {
 			v.Check(false, "prices["+itoa(i)+"].unit_price_ten_thousandths", "is required")
-		}
-		// The stocking unit hold: a price in another unit arrives with C3-2B.
-		if p.PriceUOM != facts.StockUOM {
-			v.Check(false, "prices["+itoa(i)+"].price_uom", "a price unit other than the stocking unit arrives with C3-2B")
 		}
 		rows = append(rows, p)
 	}
@@ -1181,19 +1191,34 @@ func (h *CatalogHandler) HandleCreateContract(w http.ResponseWriter, r *http.Req
 		httpx.WriteError(w, r, err)
 		return
 	}
-	// The price unit is the product's stocking unit (the hold): a body that
-	// names another is a 400 naming price_uom.
+	// The price unit defaults to the product's price unit (or its stocking
+	// unit when none is set); the product_units foreign key refuses a unit
+	// outside the product's set with a 400 naming price_uom.
 	facts, err := h.service.repo.ProductPricingFacts(r.Context(), c.ProductID)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	c.PriceUOM = facts.StockUOM
+	c.PriceUOM = facts.PriceUOM
+	if c.PriceUOM == "" {
+		c.PriceUOM = facts.StockUOM
+	}
 	if req.PriceUOM != nil {
-		if strings.ToUpper(strings.TrimSpace(*req.PriceUOM)) != facts.StockUOM {
-			httpx.WriteError(w, r, httpx.BadRequest("price_uom: a price unit other than the stocking unit arrives with C3-2B",
-				httpx.FieldError{Field: "price_uom", Message: "is not the product's stocking unit"}))
-			return
+		if u := strings.ToUpper(strings.TrimSpace(*req.PriceUOM)); u != "" {
+			c.PriceUOM = u
+			if u != facts.StockUOM && u != facts.PriceUOM {
+				uRow, uerr := h.service.repo.UnitSetRow(r.Context(), c.ProductID, u)
+				if uerr != nil {
+					httpx.WriteError(w, r, uerr)
+					return
+				}
+				if uRow == nil {
+					httpx.WriteError(w, r, httpx.BadRequest(
+						"price_uom: the unit is not in the product's unit set",
+						httpx.FieldError{Field: "price_uom", Message: "must be a unit in the product's unit set"}))
+					return
+				}
+			}
 		}
 	}
 	if err := h.checkPayloadBranch(r.Context(), c.BranchID); err != nil {

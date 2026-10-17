@@ -196,7 +196,17 @@ func (r *PostgresRepository) creditLines(ctx context.Context, id uuid.UUID) ([]C
 		l.CostCents = httpx.Cents(cost)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	plain := make([]*salesdoc.Line, len(out))
+	for i := range out {
+		plain[i] = &out[i].Line
+	}
+	if err := r.attachLineTallyRows(ctx, plain, "credit_memo_line_id"); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // CreditHeader is the stored header of a credit memo for a write. Totals are
@@ -297,21 +307,42 @@ func (r *PostgresRepository) ReplaceCreditLines(ctx context.Context, memoID uuid
 		}
 		_, err := exec.Exec(ctx, `
 			INSERT INTO credit_memo_lines (id, credit_memo_id, position, line_type, parent_line_id, product_id, charge_code_id,
-				invoice_line_id, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price,
-				priced_unit_price, price_source, override_reason, discount_percent, discount_amount, discount_reason,
-				price_adjusted_by, line_total, taxable, revenue_account_code, restock, unit_cost, cost, created_at)
+				invoice_line_id, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in, unit_price,
+				priced_unit_price, price_source, price_basis, override_reason, discount_percent, discount_amount, discount_reason,
+				price_adjusted_by, line_total, taxable, revenue_account_code, restock, cost_source, unit_cost, cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric / 10000, $12, $13, $14::numeric / 10000,
-				$15::numeric / 10000, $16::numeric / 10000, $17::numeric / 10000, $18, $19, $20::numeric / 10000,
-				$21::numeric / 100, $22, $23, $24::numeric / 100, $25, $26, $27, $28::numeric / 10000, $29::numeric / 100, NOW())`,
+				$15::numeric / 10000, $16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000,
+				$20::numeric / 10000, $21::numeric / 10000, $22, $23, $24,
+				$25::numeric / 10000, $26::numeric / 100, $27, $28,
+				$29::numeric / 100, $30, $31, $32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
 			l.ID, memoID, l.Position, string(l.LineType), l.ParentLineID, l.ProductID, l.ChargeCodeID,
-			l.InvoiceLineID, l.SKU, l.Description, qty, l.UOM, l.PriceUOM, uomQty, priceQty, price,
-			priced, string(l.PriceSource), l.OverrideReason, discPct,
-			discAmt, l.DiscountReason, l.PriceAdjustedBy, total, l.Taxable, l.RevenueAccountCode, l.Restock, unitCost, int64(l.CostCents))
+			l.InvoiceLineID, l.SKU, l.Description, qty, l.UOM, l.PriceUOM, uomQty, priceQty,
+			l.StockUOM, qtyArg2(l.StockQuantity), qtyArg2(l.TallyThickness()), qtyArg2(l.TallyWidth()), price,
+			priced, string(l.PriceSource), l.PriceBasis, l.OverrideReason, discPct,
+			discAmt, l.DiscountReason, l.PriceAdjustedBy, total, l.Taxable, l.RevenueAccountCode, l.Restock, l.CostSource, unitCost, int64(l.CostCents))
 		if err != nil {
 			return mapWriteError(err, "failed to insert credit memo line")
 		}
+		if l.Tally != nil {
+			for j, row := range l.Tally.Rows {
+				if _, err := exec.Exec(ctx, `
+					INSERT INTO line_tally_rows (credit_memo_line_id, position, pieces, length_ft)
+					VALUES ($1, $2, $3, $4::numeric / 10000)`,
+					l.ID, j, row.Pieces, int64(row.LengthFT)); err != nil {
+					return mapWriteError(err, "failed to insert a tally row")
+				}
+			}
+		}
 	}
 	return nil
+}
+
+func qtyArg2(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return int64(*q)
 }
 
 func i64p(v int64) *int64 { return &v }
@@ -492,4 +523,63 @@ func (r *PostgresRepository) ChargeCodeByCode(ctx context.Context, code string) 
 	}
 	c.DefaultUnitPrice = salesdoc.PtrPrice(def)
 	return c, true, nil
+}
+
+// LookupProductUnits reads the unit set of every named product (ADR 0006
+// sections 3.1 and 3.4): the stocking unit and the set rows a free credit
+// line's unit resolves against.
+func (r *PostgresRepository) LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	exec := r.db.GetExecutor(ctx)
+	rows, err := exec.Query(ctx, `
+		SELECT id, uom_primary::text, sale_uom::text, price_uom::text, random_length,
+		       ROUND(COALESCE(board_thickness_in, 0) * 10000)::bigint,
+		       ROUND(COALESCE(board_width_in, 0) * 10000)::bigint,
+		       board_thickness_in IS NOT NULL
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up product unit sets: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var set salesdoc.ProductUnitSet
+		var thick, width int64
+		var hasSection bool
+		if err := rows.Scan(&id, &set.StockUOM, &set.SaleUOM, &set.PriceUOM, &set.RandomLength, &thick, &width, &hasSection); err != nil {
+			return nil, fmt.Errorf("failed to scan a product unit set: %w", err)
+		}
+		if hasSection {
+			t, w := httpx.Quantity(thick), httpx.Quantity(width)
+			set.BoardThick, set.BoardWidth = &t, &w
+		}
+		out[id] = set
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unitRows, err := exec.Query(ctx, `
+		SELECT product_id, uom, ROUND(unit_qty * 10000)::bigint, ROUND(stock_qty * 10000)::bigint,
+		       sell, purchase, price
+		FROM product_units WHERE product_id = ANY($1) ORDER BY uom`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up unit sets: %w", err)
+	}
+	defer unitRows.Close()
+	for unitRows.Next() {
+		var id uuid.UUID
+		var row salesdoc.UnitSetRow
+		var unitQty, stockQty int64
+		if err := unitRows.Scan(&id, &row.UOM, &unitQty, &stockQty, &row.Sell, &row.Purchase, &row.Price); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit set row: %w", err)
+		}
+		row.UnitQty, row.StockQty = httpx.Quantity(unitQty), httpx.Quantity(stockQty)
+		set := out[id]
+		set.Rows = append(set.Rows, row)
+		out[id] = set
+	}
+	return out, unitRows.Err()
 }

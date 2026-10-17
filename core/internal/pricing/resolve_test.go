@@ -17,9 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -400,12 +398,24 @@ func TestResolveLevelBases(t *testing.T) {
 		}
 	})
 
-	t.Run("replacement cost in another purchase unit falls back to average cost", func(t *testing.T) {
-		// The ADR's own case: a vendor cost per MBF on a product stocked in
-		// PCS is not readable for a stocking unit price, so the level falls
-		// back to the average cost and the details say why.
-		repo := newFakeResolveRepo().withProduct(fxProd, 10, "PCS").withCost(fxProd, 6).withVendor(fxProd, fxVendor)
+	t.Run("replacement cost in another purchase unit answers in that purchase unit with the pair", func(t *testing.T) {
+		repo := newFakeResolveRepo().withProduct(fxProd, 10, "PCS").withUnit(fxProd, "MBF", 1, 187.5).withCost(fxProd, 6).withVendor(fxProd, fxVendor)
 		repo.setVendorCost(fxVendor, fxProd, nil, 500, "MBF", true, fxVndLevel, "LIST")
+		repo.setProgram(fxCust, PricingProgram{LevelID: level, LevelBasis: "REPLACEMENT_COST", LevelAdjust: qtyOf(20), LevelActive: true})
+		res, err := newResolveService(repo).Resolve(context.Background(), resolveReq(fxCust, fxProd, &branch, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.UnitPrice != priceOf(600) || res.PriceUOM != "MBF" {
+			t.Errorf("REPLACEMENT_COST per MBF: %d per %s, want 600.0000 per MBF (500 plus 20 percent)", res.UnitPrice, res.PriceUOM)
+		}
+		if res.UOMQty != qtyOf(187.5) || res.PriceUOMQty != qtyOf(1) {
+			t.Errorf("PCS to MBF pair: %d to %d, want 187.5 to 1", res.UOMQty, res.PriceUOMQty)
+		}
+	})
+
+	t.Run("replacement cost with no vendor cost falls back to average cost", func(t *testing.T) {
+		repo := newFakeResolveRepo().withProduct(fxProd, 10, "PCS").withCost(fxProd, 6).withVendor(fxProd, fxVendor)
 		repo.setProgram(fxCust, PricingProgram{LevelID: level, LevelBasis: "REPLACEMENT_COST", LevelAdjust: qtyOf(20), LevelActive: true})
 		res, err := newResolveService(repo).Resolve(context.Background(), resolveReq(fxCust, fxProd, &branch, 1))
 		if err != nil {
@@ -477,62 +487,72 @@ func TestResolvePairForTheRequestUnit(t *testing.T) {
 	}
 }
 
-// fakeOtherUnitRepo answers a level price in a unit that is not the stocking
-// unit: the price the database cannot hold while the hold stands.
-type fakeOtherUnitRepo struct {
-	*fakeResolveRepo
-}
-
-func (f *fakeOtherUnitRepo) ProductPrice(_ context.Context, productID uuid.UUID, levelID, branch *uuid.UUID) (*ProductPrice, error) {
-	if levelID != nil {
-		return &ProductPrice{ID: uuid.New(), ProductID: productID, PriceLevelID: levelID, PriceUOM: "MBF", UnitPrice: priceOf(500)}, nil
-	}
-	return f.fakeResolveRepo.ProductPrice(context.Background(), productID, levelID, branch)
-}
-
-func TestAdaptersAssertErrPriceUnitNotStock(t *testing.T) {
+func TestResolveOtherUnitsAndLineExtension(t *testing.T) {
 	branch := fxBranch
-	repo := newFakeResolveRepo().withProduct(fxProd, 10, "PCS")
-	repo.withUnit(fxProd, "MBF", 1, 187.5)
-	repo.setProgram(fxCust, PricingProgram{LevelID: fxLevel, LevelBasis: "BASE", LevelAdjust: qtyOf(0), LevelActive: true})
-	// Wrap the fake so its explicit level price answers per MBF: the answer
-	// the hold's triggers make impossible in the database.
-	other := &fakeOtherUnitRepo{repo}
-	svc := NewService(&MockRepository{}).WithRepository(other)
 
-	cust := &customer.Customer{ID: fxCust}
-	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &branch})
-	_, err := svc.CalculateScaled(ctx, cust, fxProd, 10, 1, nil)
-	if err == nil {
-		t.Fatalf("an answer in MBF on a product stocked in PCS left the adapters")
-	}
-	if err != ErrPriceUnitNotStock {
-		t.Errorf("the adapters' assertion is %v, want ErrPriceUnitNotStock", err)
-	}
-	if _, err := svc.CalculatePriceWithQty(ctx, cust, fxProd, 10, 1, nil); err != ErrPriceUnitNotStock {
-		t.Errorf("CalculatePriceWithQty: %v, want ErrPriceUnitNotStock", err)
-	}
-}
+	t.Run("299 PC of 2x4x8 at 485.00 per MBF extends to 77341 cents", func(t *testing.T) {
+		// ADR 0006 section 1 worked case: 299 PC of 2x4x8 (187.5 PC = 1 MBF)
+		// at $485.00/MBF extends to $773.41 (77341 cents), never $773.42.
+		repo := newFakeResolveRepo().withProduct(fxProd, 485, "PC")
+		repo.facts[fxProd].PriceUOM = "MBF"
+		repo.withUnit(fxProd, "MBF", 1, 187.5)
+		req := resolveReq(fxCust, fxProd, &branch, 299)
+		req.UOM = "PC"
+		res, err := newResolveService(repo).Resolve(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.PriceUOM != "MBF" || res.UnitPrice != priceOf(485) {
+			t.Fatalf("got %d per %s, want 485.0000 per MBF", res.UnitPrice, res.PriceUOM)
+		}
+		if res.UOMQty != qtyOf(187.5) || res.PriceUOMQty != qtyOf(1) {
+			t.Fatalf("got pair %d/%d, want 187.5/1", res.UOMQty, res.PriceUOMQty)
+		}
+		cents, err := httpx.Extend(req.Quantity, res.UOMQty, res.PriceUOMQty, res.UnitPrice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cents != 77341 {
+			t.Fatalf("299 PC at $485.00/MBF extended to %d cents, want 77341 ($773.41)", cents)
+		}
+	})
 
-func TestAdaptersIgnoreTheBasePriceArgument(t *testing.T) {
-	branch := fxBranch
-	// The caller passes 99 as the base price; the engine reads the
-	// reference itself, so a branch base of 9.25 answers and a retail
-	// customer without a program gets the base.
-	repo := newFakeResolveRepo().withProduct(fxProd, 10, "EA")
-	repo.setPrice(fxProd, nil, &branch, 9.25, "EA")
-	svc := newResolveService(repo)
-	cust := &customer.Customer{ID: fxCust}
-	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &branch})
+	t.Run("sheet goods per MSF, steel per CWT, and aggregate per TON", func(t *testing.T) {
+		// Sheet goods: 4x8 sheet (32 SF), 31.25 SHT = 1 MSF, priced at $640/MSF.
+		shtProd := uuid.New()
+		repo := newFakeResolveRepo().withProduct(shtProd, 640, "SHT")
+		repo.facts[shtProd].PriceUOM = "MSF"
+		repo.withUnit(shtProd, "MSF", 1, 31.25)
+		res, err := newResolveService(repo).Resolve(context.Background(), resolveReq(fxCust, shtProd, &branch, 10))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.PriceUOM != "MSF" || res.UOMQty != qtyOf(31.25) || res.PriceUOMQty != qtyOf(1) {
+			t.Fatalf("MSF: got %s (%d/%d), want MSF (31.25/1)", res.PriceUOM, res.UOMQty, res.PriceUOMQty)
+		}
 
-	res, err := svc.CalculatePrice(ctx, cust, fxProd, 99)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.FinalPrice != 9.25 {
-		t.Errorf("the adapter answered %v, want the reference 9.25 (the base argument is ignored)", res.FinalPrice)
-	}
-	if res.Source != SourceBranch {
-		t.Errorf("source %s, want branch", res.Source)
-	}
+		// Steel: stocked in LB, priced per CWT (1 CWT = 100 LB) at $85/CWT.
+		steelProd := uuid.New()
+		repo.withProduct(steelProd, 85, "LB").withUnit(steelProd, "CWT", 1, 100)
+		repo.facts[steelProd].PriceUOM = "CWT"
+		res, err = newResolveService(repo).Resolve(context.Background(), resolveReq(fxCust, steelProd, &branch, 250))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.PriceUOM != "CWT" || res.UOMQty != qtyOf(100) || res.PriceUOMQty != qtyOf(1) {
+			t.Fatalf("CWT: got %s (%d/%d), want CWT (100/1)", res.PriceUOM, res.UOMQty, res.PriceUOMQty)
+		}
+
+		// Aggregate: stocked in LB, priced per TON (1 TON = 2000 LB) at $42/TON.
+		aggProd := uuid.New()
+		repo.withProduct(aggProd, 42, "LB").withUnit(aggProd, "TON", 1, 2000)
+		repo.facts[aggProd].PriceUOM = "TON"
+		res, err = newResolveService(repo).Resolve(context.Background(), resolveReq(fxCust, aggProd, &branch, 4000))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.PriceUOM != "TON" || res.UOMQty != qtyOf(2000) || res.PriceUOMQty != qtyOf(1) {
+			t.Fatalf("TON: got %s (%d/%d), want TON (2000/1)", res.PriceUOM, res.UOMQty, res.PriceUOMQty)
+		}
+	})
 }

@@ -121,6 +121,7 @@ type addedItem struct {
 	cartID, productID uuid.UUID
 	quantity          float64
 	unitPrice         float64
+	units             CartItemUnits
 }
 
 type qtyUpdate struct {
@@ -278,8 +279,8 @@ func (f *fakePortalRepo) CreateCart(_ context.Context, customerID uuid.UUID) (uu
 	return f.newCartID, nil
 }
 
-func (f *fakePortalRepo) AddCartItem(_ context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error {
-	f.addedItems = append(f.addedItems, addedItem{cartID, productID, quantity, unitPrice})
+func (f *fakePortalRepo) AddCartItem(_ context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64, units CartItemUnits) error {
+	f.addedItems = append(f.addedItems, addedItem{cartID, productID, quantity, unitPrice, units})
 	return f.addItemErr
 }
 
@@ -452,10 +453,13 @@ func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64
 
 type fakePricingRepo struct {
 	contracts map[uuid.UUID]httpx.Price // productID -> contract price
+	products  map[uuid.UUID]*product.Product
+	customers map[uuid.UUID]*customer.Customer
 	err       error
 }
 
 var _ pricing.Repository = (*fakePricingRepo)(nil)
+var _ pricing.ResolveRepository = (*fakePricingRepo)(nil)
 
 // portalPrice parses a fixture price the way the wire would.
 func portalPrice(f float64) httpx.Price {
@@ -474,7 +478,7 @@ func (f *fakePricingRepo) GetContract(_ context.Context, customerID, productID u
 	if !ok {
 		return nil, nil // no contract
 	}
-	return &pricing.CustomerContract{CustomerID: customerID, ProductID: productID, ContractPrice: price}, nil
+	return &pricing.CustomerContract{CustomerID: customerID, ProductID: productID, PriceUOM: "EA", ContractPrice: price}, nil
 }
 func (f *fakePricingRepo) CreateContract(context.Context, *pricing.CustomerContract) error {
 	return nil
@@ -491,6 +495,60 @@ func (f *fakePricingRepo) ListRulesPage(context.Context, *pricing.RuleCursor, in
 }
 func (f *fakePricingRepo) CountRules(context.Context) (int64, error)              { return 0, nil }
 func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error { return nil }
+
+func (f *fakePricingRepo) ProductPricingFacts(_ context.Context, productID uuid.UUID) (*pricing.ProductPricingFacts, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	p, ok := f.products[productID]
+	if !ok {
+		return nil, errors.New("product not found")
+	}
+	uom := string(p.UOMPrimary)
+	if uom == "" {
+		uom = "EA"
+	}
+	return &pricing.ProductPricingFacts{
+		BasePrice: portalPrice(p.BasePrice),
+		PriceUOM:  uom,
+		StockUOM:  uom,
+		SaleUOM:   uom,
+	}, nil
+}
+
+func (f *fakePricingRepo) UnitSetRow(_ context.Context, _ uuid.UUID, uom string) (*pricing.UnitSetRowFact, error) {
+	if uom == "" {
+		uom = "EA"
+	}
+	return &pricing.UnitSetRowFact{UOM: uom, UnitQty: 10000, StockQty: 10000}, nil
+}
+
+func (f *fakePricingRepo) ContractForBranch(ctx context.Context, customerID, productID uuid.UUID, _ *uuid.UUID) (*pricing.CustomerContract, error) {
+	return f.GetContract(ctx, customerID, productID)
+}
+
+func (f *fakePricingRepo) ProductPrice(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) (*pricing.ProductPrice, error) {
+	return nil, nil
+}
+
+func (f *fakePricingRepo) CustomerProgram(_ context.Context, customerID uuid.UUID) (*pricing.PricingProgram, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if _, ok := f.customers[customerID]; !ok {
+		return nil, errors.New("customer not found")
+	}
+	return &pricing.PricingProgram{
+		LevelName:   "Gold",
+		LevelBasis:  "BASE",
+		LevelAdjust: -150000,
+		LevelActive: true,
+	}, nil
+}
+
+func (f *fakePricingRepo) VendorCost(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID, time.Time) (*pricing.VendorCostRow, error) {
+	return nil, nil
+}
 
 type fakeInventoryRepo struct {
 	byProduct map[uuid.UUID][]inventory.Inventory
@@ -653,6 +711,31 @@ func (f *fakeOrderRepo) LookupKitComponents(context.Context, []uuid.UUID) (map[s
 func (f *fakeOrderRepo) LookupChargeCodes(context.Context, []string) (map[string]salesdoc.ChargeCode, error) {
 	return map[string]salesdoc.ChargeCode{}, nil
 }
+func (f *fakeOrderRepo) LookupProductUnits(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	for _, id := range ids {
+		uom := "EA"
+		if p, ok := f.products[id]; ok && p.UOMPrimary != "" {
+			uom = string(p.UOMPrimary)
+		}
+		out[id] = salesdoc.ProductUnitSet{
+			StockUOM: uom,
+			SaleUOM:  uom,
+			PriceUOM: uom,
+			Rows: []salesdoc.UnitSetRow{
+				{UOM: uom, UnitQty: 10000, StockQty: 10000, Sell: true, Purchase: true, Price: true},
+			},
+		}
+	}
+	return out, nil
+}
+func (f *fakeOrderRepo) LookupCatalogue(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
 func (f *fakeOrderRepo) CustomerFacts(_ context.Context, customerID uuid.UUID) (order.CustomerFacts, error) {
 	facts := order.CustomerFacts{Exists: true, Name: "Acme", Currency: "USD"}
 	if c, ok := f.customers[customerID]; ok {
@@ -713,6 +796,8 @@ func newPortalRig(t *testing.T) *portalRig {
 		prices:    &fakePricingRepo{contracts: map[uuid.UUID]httpx.Price{}},
 		stock:     &fakeInventoryRepo{byProduct: map[uuid.UUID][]inventory.Inventory{}},
 	}
+	rig.prices.products = rig.products.products
+	rig.prices.customers = rig.customers.customers
 	rig.orders = &fakeOrderRepo{
 		orders:   map[uuid.UUID]*order.Order{},
 		products: rig.products.products,

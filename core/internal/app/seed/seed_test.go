@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/config"
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -32,9 +31,9 @@ import (
 // about units without a red test.
 
 // oneRuleRepo is a pricing.Repository holding exactly one rule and no
-// contracts, so a CalculatePriceWithQty call resolves to that rule or to
-// retail. Category scope is not modelled here: it belongs to the repository
-// layer and is tested in internal/pricing against Postgres.
+// contracts, so a Resolve call resolves to that rule or to retail. Category
+// scope is not modelled here: it belongs to the repository layer and is
+// tested in internal/pricing against Postgres.
 type oneRuleRepo struct{ rule pricing.PricingRule }
 
 func (r *oneRuleRepo) GetContract(ctx context.Context, customerID, productID uuid.UUID) (*pricing.CustomerContract, error) {
@@ -84,12 +83,24 @@ func priceWithSeededRule(t *testing.T, r pricingRule, basePrice, quantity float6
 		rule.MarginFloorPct = &q
 	}
 	svc := pricing.NewService(&oneRuleRepo{rule: rule}).WithRepository(seedResolveRepo{basePrice: basePrice})
-	got, err := svc.CalculatePriceWithQty(context.Background(),
-		&customer.Customer{ID: uuid.New()}, uuid.New(), basePrice, quantity, nil)
+	custID := uuid.New()
+	prodID := uuid.New()
+	qty := seedQty(t, quantity)
+	res, err := svc.Resolve(context.Background(), pricing.Request{
+		CustomerID: custID,
+		ProductID:  prodID,
+		Quantity:   qty,
+	})
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(%s): %v", r.Name, err)
+		t.Fatalf("Resolve(%s): %v", r.Name, err)
 	}
-	return got
+	return pricing.CalculatedPrice{
+		ProductID:     prodID,
+		OriginalPrice: float64(res.ReferencePrice) / 10_000,
+		FinalPrice:    float64(res.UnitPrice) / 10_000,
+		Source:        res.PriceBasis,
+		Details:       res.Details,
+	}
 }
 
 // seedQty parses one of the seed's decimal numbers into the engine's exact
