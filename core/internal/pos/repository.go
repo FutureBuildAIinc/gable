@@ -90,6 +90,13 @@ type Repository interface {
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
 	CloseTillSession(ctx context.Context, s *TillSession) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
+	// The till's movements (CP-08).
+	CreateTillMovement(ctx context.Context, m *TillMovement) error
+	ListTillMovements(ctx context.Context, sessionID uuid.UUID) ([]TillMovement, error)
+	ListTillMovementsPage(ctx context.Context, sessionID uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillMovement, bool, error)
+	TillMovementTotals(ctx context.Context, sessionID uuid.UUID) (map[string]int64, error)
+	// BranchToday is the branch's business date now in its own zone.
+	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 
 	// Z-reports
 	CreateZReport(ctx context.Context, z *ZReport) error
@@ -219,6 +226,8 @@ type TillAggregate struct {
 	TenderedByMethod map[string]int64
 	CashRefundsCents int64
 	CardRefundsCents int64
+	// MovementTotals sums the session's movements by kind (CP-08).
+	MovementTotals map[string]int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so

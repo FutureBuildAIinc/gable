@@ -219,6 +219,8 @@ func (f *fixture) cleanup() {
 		OR e.source_ref_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_movements)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_sessions)
 		OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN
 			((SELECT id::text FROM invoices WHERE id IN `+invs+`)
 			UNION (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
@@ -237,10 +239,13 @@ func (f *fixture) cleanup() {
 		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
 		OR entity_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
-		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id = $1`, f.customerID)
+		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes) OR entity_id = $1`, f.customerID)
 	exec(`DELETE FROM audit_log WHERE entity_id::text IN (SELECT id::text FROM invoices WHERE id IN `+invs+`)
 		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
-		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)`, f.customerID)
+		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
+		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes)`, f.customerID)
 	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM customer_transactions WHERE customer_id IN ($1, `+walkIn+`)`, f.customerID)
@@ -255,6 +260,10 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.customerID)
 	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
 	exec(`DELETE FROM invoices WHERE id IN `+invs, f.customerID)
+	// the entries the drawer's own acts posted (movements, variances) are named
+	// by their rows: release them before the entries go
+	exec(`DELETE FROM till_movements`)
+	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE gl_entry_id IS NOT NULL`)
 	if len(entryIDs) > 0 {
 		exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id = ANY($1::uuid[])`, entryIDs)
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)

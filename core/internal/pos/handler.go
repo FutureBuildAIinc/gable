@@ -137,6 +137,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/zreport", guard(h.GetZReport))
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))

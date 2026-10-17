@@ -23,13 +23,15 @@ import (
 // completed sales' card tenders less the void refunds a resolution booked
 // (r12 P3-2), the same net the CASH figure carries for returns; the other
 // methods are the pass-through of what the session's sales collected (ADR
-// 0005 section 14.2 C2-5). Pure function for testability.
-func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds int64) map[string]int64 {
+// 0005 section 14.2 C2-5). The session's movements move the CASH figure: paid
+// in raises it, paid out, drops and pickups lower it (movementNet, CP-08).
+// Pure function for testability.
+func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds, movementNet int64) map[string]int64 {
 	expected := make(map[string]int64, len(tendered)+1)
 	for m, v := range tendered {
 		expected[m] = v
 	}
-	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds
+	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds + movementNet
 	// The CARD figure is written only where the session collected on cards:
 	// a cash only session's report carries no card figure, as before (a
 	// booked card refund always implies the tender that was collected).
@@ -108,6 +110,10 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 	if err != nil {
 		return nil, err
 	}
+	movements, err := s.repo.ListTillMovements(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	return &TillReport{
 		Session:          *session,
 		SaleCount:        agg.SaleCount,
@@ -115,7 +121,10 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TaxTotalCents:    httpx.Cents(agg.TaxTotalCents),
 		ChangeCents:      httpx.Cents(agg.ChangeCents),
 		TenderedByMethod: agg.TenderedByMethod,
-		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents),
+		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents,
+			movementNetCash(agg.MovementTotals)),
+		Movements:            movements,
+		MovementTotalsByKind: agg.MovementTotals,
 	}, nil
 }
 

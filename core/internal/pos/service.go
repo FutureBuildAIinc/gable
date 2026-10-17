@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -57,9 +58,10 @@ type InvoiceWriter interface {
 }
 
 // LedgerPoster posts the till drawer's over/short inside the close's
-// transaction (gl.Service).
+// transaction and a movement's entry inside its own (gl.Service).
 type LedgerPoster interface {
 	PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error)
+	PostEntry(ctx context.Context, in gl.PostingInput) (*gl.JournalEntry, error)
 }
 
 // EventRecorder writes the act's events, last, in its transaction.

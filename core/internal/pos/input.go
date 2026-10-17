@@ -504,3 +504,61 @@ func (r *paybackIntentRequest) parse() (*PaybackIntentIn, error) {
 	}
 	return &out, nil
 }
+
+// movementRequest is POST /pos/till/{id}/movements.
+type movementRequest struct {
+	Kind        *string         `json:"kind"`
+	AmountCents json.RawMessage `json:"amount_cents"`
+	ReasonCode  *string         `json:"reason_code"`
+	Note        *string         `json:"note"`
+	TakenBy     *string         `json:"taken_by"`
+}
+
+func (r *movementRequest) parse() (MovementIn, error) {
+	v := &httpx.Validator{}
+	var in MovementIn
+	kind := ""
+	if r.Kind != nil {
+		kind = *r.Kind
+	}
+	v.Enum("kind", kind, string(MovementSafeDrop), string(MovementPickup), string(MovementPaidIn), string(MovementPaidOut))
+	in.Kind = MovementKind(kind)
+	if n, ok := v.Int("amount_cents", r.AmountCents, true); ok {
+		v.Check(n > 0, "amount_cents", "must be more than zero")
+		in.AmountCents = httpx.Cents(n)
+	}
+	if r.ReasonCode != nil {
+		in.ReasonCode = *r.ReasonCode
+	}
+	if r.Note != nil {
+		in.Note = strings.TrimSpace(*r.Note)
+	}
+	if r.TakenBy != nil {
+		in.TakenBy = strings.TrimSpace(*r.TakenBy)
+	}
+	paid := in.Kind == MovementPaidIn || in.Kind == MovementPaidOut
+	switch {
+	case paid && in.ReasonCode == "":
+		v.Check(false, "reason_code", "is required for a paid in or paid out")
+	case paid:
+		reason, known := movementReasons[in.ReasonCode]
+		account := reason.paidOutAccount
+		if in.Kind == MovementPaidIn {
+			account = reason.paidInAccount
+		}
+		v.Check(known && account != "", "reason_code",
+			"must be one of: "+strings.Join(MovementReasonCodes(in.Kind), ", "))
+	case kind != "":
+		v.Check(in.ReasonCode == "", "reason_code", "a drop or pickup carries no reason code")
+	}
+	v.Check(in.ReasonCode != "other" || in.Note != "", "note", "is required when the reason code is other")
+	if in.Kind == MovementPickup {
+		v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+	} else if kind != "" {
+		v.Check(in.TakenBy == "", "taken_by", "only a pickup names the person taking the cash")
+	}
+	if err := v.Err(); err != nil {
+		return MovementIn{}, err
+	}
+	return in, nil
+}

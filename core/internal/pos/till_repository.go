@@ -241,6 +241,13 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 		return nil, fmt.Errorf("failed to aggregate the session's card return refunds: %w", err)
 	}
 	agg.CardRefundsCents += cardReturnRefunds
+	// The session's movements, by kind: paid in, paid out, drops and pickups
+	// move the cash the drawer should hold (CP-08).
+	totals, err := r.TillMovementTotals(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	agg.MovementTotals = totals
 	return agg, nil
 }
 
