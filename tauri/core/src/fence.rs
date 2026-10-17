@@ -33,22 +33,16 @@ fn origin_of(raw: &str) -> Option<String> {
     }
     let host = url.host_str()?;
     if url.username().is_empty() && url.password().is_none() {
-        let port = match url.port_or_known_default() {
+        // The url crate folds a scheme's default port away at parse time,
+        // so port() is Some only when an explicit non default port is
+        // present, and that origin stays its own.
+        let port = match url.port() {
             None => String::new(),
-            Some(p) if p == known_default(url.scheme()) => String::new(),
             Some(p) => format!(":{p}"),
         };
         return Some(format!("{}://{host}{port}", url.scheme()));
     }
     None
-}
-
-fn known_default(scheme: &str) -> u16 {
-    match scheme {
-        "http" => 80,
-        "https" => 443,
-        _ => u16::MAX,
-    }
 }
 
 /// The set of origins the app's own commands answer to.
@@ -142,6 +136,19 @@ mod tests {
         let f = OriginFence::from_starts(&["https://desk.example.test"]).unwrap();
         assert!(f.allows("https://desk.example.test:443/index.html"));
         assert!(!f.allows("https://desk.example.test:8443/index.html"));
+    }
+
+    #[test]
+    fn an_explicit_non_default_port_on_the_tauri_scheme_stays_distinct() {
+        // The tauri scheme has no known default port, so any explicit port
+        // is non default: an origin that carries one never folds into the
+        // portless bundled origin, in either direction.
+        let f = fence();
+        assert!(!f.allows("tauri://localhost:65535/"));
+        let f = OriginFence::from_starts(&["tauri://localhost:65535"]).unwrap();
+        assert_eq!(f.origins(), ["tauri://localhost:65535"]);
+        assert!(f.allows("tauri://localhost:65535/index.html"));
+        assert!(!f.allows("tauri://localhost/"));
     }
 
     #[test]
