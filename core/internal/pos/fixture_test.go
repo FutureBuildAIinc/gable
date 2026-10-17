@@ -56,7 +56,15 @@ type fixture struct {
 	// paymentGateway, when an opt sets it, wires the payment route's card
 	// refunds at a terminal too, the way serve wires Run Payments.
 	paymentGateway payment.PaymentGateway
+	// noAutoTill, when an opt sets it, stops startSale from opening the
+	// register's drawer: the API refuses a sale at a register with no open
+	// till (CP-08), so the helper opens one with no float, as a cashier would,
+	// unless the test is proving that refusal.
+	noAutoTill bool
 }
+
+// withoutTill is the opt of a test that proves the open till rule itself.
+func withoutTill() func(*fixture) { return func(f *fixture) { f.noAutoTill = true } }
 
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
 
@@ -385,6 +393,7 @@ func errorOf(t *testing.T, r resp) (code string, blockers []string, fields []str
 // startSale opens a cart on the fixture's register.
 func (f *fixture) startSale(customer *uuid.UUID) string {
 	f.t.Helper()
+	f.ensureTill()
 	body := map[string]any{"register_id": f.register}
 	if customer != nil {
 		body["customer_id"] = customer.String()
@@ -457,10 +466,44 @@ func (f *fixture) cashFor(qty string) map[string]any {
 	return tender("cash", total)
 }
 
+// ensureTill opens the register's drawer with no float when none is open, the
+// way a cashier opens the day before the first sale.
+func (f *fixture) ensureTill() { f.t.Helper(); f.ensureTillOn(f.register) }
+
+// ensureTillOn is ensureTill for another register of the fixture.
+func (f *fixture) ensureTillOn(register string) {
+	f.t.Helper()
+	if f.noAutoTill {
+		return
+	}
+	var open int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM till_sessions WHERE register_id = $1 AND status = 'OPEN'`, register).Scan(&open); err != nil {
+		f.t.Fatal(err)
+	}
+	if open == 0 {
+		f.openTillOn(register, 0)
+	}
+}
+
+// seedTill opens the register's drawer straight in the table, for the tests
+// that run with the branch wall on and no header to open it through the route.
+func (f *fixture) seedTill() {
+	f.t.Helper()
+	mustExec(f.t, f.db, `INSERT INTO till_sessions (register_id, branch_id, cashier_id, status, opening_float)
+		VALUES ($1, $2, $3, 'OPEN', 0)`, f.register, f.branchID, uuid.New())
+}
+
 // openTill opens the fixture register's drawer with a float.
 func (f *fixture) openTill(floatCents int64) string {
 	f.t.Helper()
-	r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": floatCents},
+	return f.openTillOn(f.register, floatCents)
+}
+
+// openTillOn opens a register's drawer with a float.
+func (f *fixture) openTillOn(register string, floatCents int64) string {
+	f.t.Helper()
+	r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": register, "opening_float_cents": floatCents},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 	if r.status != http.StatusCreated {
 		f.t.Fatalf("open till = %d: %s", r.status, r.raw)

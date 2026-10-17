@@ -33,6 +33,8 @@ type Repository interface {
 	CreateSale(ctx context.Context, s *Sale) error
 	LockSale(ctx context.Context, id uuid.UUID) error
 	BumpSaleRevision(ctx context.Context, id uuid.UUID) error
+	// AttachSaleToTill puts a cart that has no drawer into one.
+	AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error
 	GetSale(ctx context.Context, id uuid.UUID) (*Sale, error)
 	UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error
 	CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error
@@ -351,6 +353,16 @@ func (r *PostgresRepository) BumpSaleRevision(ctx context.Context, id uuid.UUID)
 	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to move the sale's revision: %w", err)
+	}
+	return nil
+}
+
+// AttachSaleToTill puts a cart made before the open till rule into the
+// register's open drawer, inside the completion's transaction.
+func (r *PostgresRepository) AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error {
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET till_session_id = $2 WHERE id = $1 AND till_session_id IS NULL`,
+		saleID, sessionID); err != nil {
+		return fmt.Errorf("failed to put the sale into the drawer: %w", err)
 	}
 	return nil
 }

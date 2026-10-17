@@ -102,6 +102,7 @@ func TestTwoSalesOfTheLastUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 2 WHERE product_id = $1`, f.productID)
+	f.ensureTill()
 	var wg sync.WaitGroup
 	results := make([]int, 2)
 	for i := 0; i < 2; i++ {
@@ -285,6 +286,7 @@ const httpOK = 200
 // startSaleOn opens a cart on a named register.
 func (f *fixture) startSaleOn(register string) string {
 	f.t.Helper()
+	f.ensureTillOn(register)
 	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": register},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 	if r.status != 201 {

@@ -260,6 +260,26 @@ func (s *Service) recordEvent(ctx context.Context, ev outbox.Event) error {
 	return s.events.Write(ctx, ev)
 }
 
+// openDrawer answers the register's open till session, or the till_not_open
+// refusal: a counter sale starts and completes only into an open drawer, so
+// its money is in a count (CP-08).
+func (s *Service) openDrawer(ctx context.Context, registerID string) (*TillSession, error) {
+	// The register is held to the caller's wall first: a register of another
+	// branch answers its own refusal, never the missing drawer.
+	if _, err := s.repo.GetRegisterBranch(ctx, registerID); err != nil {
+		return nil, err
+	}
+	session, err := s.repo.GetOpenTillSession(ctx, registerID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, conflict("till_not_open",
+			fmt.Sprintf("register %s has no open till session: open the drawer before selling", registerID))
+	}
+	return session, nil
+}
+
 // StartSale opens a cart on a register, numbered POS- through the sequence
 // and attached to the register's open till session when one exists. A sale
 // without a customer is a walk-in sale: the walk-in customer is resolved at
@@ -282,9 +302,11 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
 			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
-		if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
-			sale.TillSessionID = &session.ID
+		session, err := s.openDrawer(ctx, in.RegisterID)
+		if err != nil {
+			return err
 		}
+		sale.TillSessionID = &session.ID
 		if err := s.repo.CreateSale(ctx, sale); err != nil {
 			return err
 		}

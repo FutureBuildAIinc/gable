@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSession) error {
@@ -27,6 +28,12 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 		RETURNING opened_at`,
 		s.ID, s.RegisterID, s.BranchID, s.CashierID, string(s.Status), int64(s.OpeningFloat)).Scan(&opened)
 	if err != nil {
+		// two openers racing for one register: the second meets the one open
+		// drawer index and answers the same refusal the pre-check does
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "idx_till_sessions_open_register" {
+			return conflict("till_open", fmt.Sprintf("register %s already has an open till session", s.RegisterID))
+		}
 		return fmt.Errorf("failed to open the till session: %w", mapWriteError(err))
 	}
 	s.OpenedAt = httpx.TimestampOf(opened)
