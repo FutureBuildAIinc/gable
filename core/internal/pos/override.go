@@ -212,3 +212,30 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusCreated, o)
 }
+
+// checkBuyer is the roster rule of CP-02: an account that asks for a named
+// buyer is refused, in words naming the account, a sale on account that
+// names none; a named buyer must be on the roster still and the sale's
+// account portion must fit the buyer's own cap.
+func (s *Service) checkBuyer(ctx context.Context, customerID uuid.UUID, facts CustomerFacts, buyerID *uuid.UUID, amount int64) error {
+	if buyerID == nil {
+		if facts.NamedBuyerRequired {
+			return conflict("buyer_required", fmt.Sprintf(
+				"%s asks for a named buyer on every sale on account: name one from the account's buyer roster before charging it", facts.Name))
+		}
+		return nil
+	}
+	b, ok, err := s.repo.BuyerOf(ctx, customerID, *buyerID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return conflict("buyer_not_authorized", fmt.Sprintf(
+			"the buyer named on the sale is not an authorized buyer of %s: pick one from the account's buyer roster", facts.Name))
+	}
+	if b.CapCents != nil && amount > int64(*b.CapCents) {
+		return conflict("buyer_cap", fmt.Sprintf("%s may put at most %s on %s's account in one sale and this sale puts %s",
+			b.Name, moneyWords(facts.Currency, int64(*b.CapCents)), facts.Name, moneyWords(facts.Currency, amount)))
+	}
+	return nil
+}

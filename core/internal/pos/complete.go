@@ -209,6 +209,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("po_required",
 				"the customer requires a purchase order number: name it on the sale before charging it to the account")
 		}
+		if err := s.checkBuyer(ctx, realCustomerID, facts, pre.BuyerContactID, accountPortion); err != nil {
+			return nil, err
+		}
 		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, false, actor); err != nil {
 			return nil, err
 		}
@@ -421,6 +424,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
 				return conflict("po_required",
 					"the customer requires a purchase order number: name it on the sale before charging it to the account")
+			}
+			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
+				return err
 			}
 			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, true, actor); err != nil {
 				return err

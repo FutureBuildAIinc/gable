@@ -74,6 +74,9 @@ type AttachCustomerIn struct {
 	CustomerID *uuid.UUID
 	CustomerPO string
 	JobID      *uuid.UUID
+	// BuyerContactID is the roster buyer the sale is for; the account may
+	// ask for one on every sale on account.
+	BuyerContactID *uuid.UUID
 }
 
 // namedCustomer is the counter's one rule for which customers a caller may
@@ -108,8 +111,8 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 	if len(in.CustomerPO) > 100 {
 		return nil, invalid("customer_po", "must be at most 100 characters")
 	}
-	if in.CustomerID == nil && (in.CustomerPO != "" || in.JobID != nil) {
-		return nil, invalid("customer_id", "name the customer before a purchase order or a job")
+	if in.CustomerID == nil && (in.CustomerPO != "" || in.JobID != nil || in.BuyerContactID != nil) {
+		return nil, invalid("customer_id", "name the customer before a purchase order, a job or a buyer")
 	}
 	currency := ""
 	if in.CustomerID != nil {
@@ -126,6 +129,14 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 			}
 			if !ok {
 				return nil, invalid("job_id", "is not an open job of this customer")
+			}
+		}
+		if in.BuyerContactID != nil {
+			if _, ok, err := s.repo.BuyerOf(ctx, *in.CustomerID, *in.BuyerContactID); err != nil {
+				return nil, err
+			} else if !ok {
+				return nil, invalid("buyer_contact_id",
+					fmt.Sprintf("is not an authorized buyer of %s: pick one from the account's buyer roster", facts.Name))
 			}
 		}
 		currency = facts.Currency
@@ -168,10 +179,14 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		if err := s.repo.SetSaleAccount(ctx, saleID, in.CustomerID, currency, po, in.JobID); err != nil {
 			return err
 		}
+		if err := s.repo.SetSaleBuyer(ctx, saleID, in.BuyerContactID); err != nil {
+			return err
+		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{
 				Action: "pos.sale.customer_attached", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
-				Changes: map[string]any{"customer_id": in.CustomerID, "customer_po": in.CustomerPO, "job_id": in.JobID},
+				Changes: map[string]any{"customer_id": in.CustomerID, "customer_po": in.CustomerPO, "job_id": in.JobID,
+					"buyer_contact_id": in.BuyerContactID},
 			}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}

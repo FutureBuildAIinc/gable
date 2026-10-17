@@ -99,6 +99,8 @@ type attachCustomerRequest struct {
 	CustomerID *string `json:"customer_id"`
 	CustomerPO *string `json:"customer_po"`
 	JobID      *string `json:"job_id"`
+	// BuyerContactID names the roster buyer an on account sale is for.
+	BuyerContactID *string `json:"buyer_contact_id"`
 }
 
 func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
@@ -109,6 +111,9 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 	}
 	if id, ok := v.UUID("job_id", r.JobID, false); ok {
 		out.JobID = &id
+	}
+	if id, ok := v.UUID("buyer_contact_id", r.BuyerContactID, false); ok {
+		out.BuyerContactID = &id
 	}
 	if r.CustomerPO != nil {
 		out.CustomerPO = strings.TrimSpace(*r.CustomerPO)

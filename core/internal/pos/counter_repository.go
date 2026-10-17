@@ -99,11 +99,10 @@ func (r *PostgresRepository) BuyerOf(ctx context.Context, customerID, contactID 
 	return &b, true, nil
 }
 
-// SetSaleBuyer names (or clears) the roster buyer of an open sale and moves
-// its revision.
+// SetSaleBuyer names (or clears) the roster buyer of an open sale. It does not
+// move the revision: the attach that calls it has just moved it once.
 func (r *PostgresRepository) SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error {
-	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET buyer_contact_id = $2, updated_at = NOW(),
-		revision = revision + 1 WHERE id = $1`, saleID, contactID)
+	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET buyer_contact_id = $2 WHERE id = $1`, saleID, contactID)
 	if err != nil {
 		return fmt.Errorf("failed to name the sale's buyer: %w", mapWriteError(err))
 	}
