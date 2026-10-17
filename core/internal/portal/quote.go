@@ -481,9 +481,23 @@ func scanPortalQuote(row pgx.Row) (*PortalQuoteDTO, error) {
 
 // ListPortalQuotes returns the calling customer's quotes, newest first.
 func (r *PostgresRepository) ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error) {
-	rows, err := r.db.GetExecutor(ctx).Query(ctx,
-		portalQuoteSelect+` WHERE q.customer_id = $1 ORDER BY q.created_at DESC LIMIT 100`,
-		customerID)
+	return r.ListPortalQuotesFiltered(ctx, customerID, nil)
+}
+
+// ListPortalQuotesFiltered narrows the quote list by the change feed cursor
+// (Part 7): without a cursor the display list, newest created first; with one
+// the feed page, updated_at ascending and tie-completed, the same shape the
+// order feed uses so the cursor cannot lose a row.
+func (r *PostgresRepository) ListPortalQuotesFiltered(ctx context.Context, customerID uuid.UUID, since *time.Time) ([]PortalQuoteDTO, error) {
+	query := portalQuoteSelect + ` WHERE q.customer_id = $1`
+	args := []interface{}{customerID}
+	if since != nil {
+		query += ` AND q.updated_at > $2 ORDER BY q.updated_at ASC FETCH FIRST 100 ROWS WITH TIES`
+		args = append(args, *since)
+	} else {
+		query += ` ORDER BY q.created_at DESC LIMIT 100`
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}

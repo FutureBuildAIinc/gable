@@ -138,19 +138,24 @@ type PortalLineDTO struct {
 // PortalInvoiceDTO is a customer-facing invoice summary.
 // TODO: align with int64 cents — TotalAmount, Subtotal, TaxAmount are float64 dollars
 type PortalInvoiceDTO struct {
-	ID           uuid.UUID       `json:"id"`
-	Number       string          `json:"number"`
-	IsOverdue    bool            `json:"is_overdue"`
-	OrderID      uuid.UUID       `json:"order_id"`
-	Status       string          `json:"status"`
-	TotalAmount  float64         `json:"total_amount"`
-	Subtotal     float64         `json:"subtotal"`
-	TaxAmount    float64         `json:"tax_amount"`
-	PaymentTerms string          `json:"payment_terms"`
-	DueDate      *time.Time      `json:"due_date"`
-	PaidAt       *time.Time      `json:"paid_at"`
-	CreatedAt    time.Time       `json:"created_at"`
-	Lines        []PortalLineDTO `json:"lines"`
+	ID           uuid.UUID  `json:"id"`
+	Number       string     `json:"number"`
+	IsOverdue    bool       `json:"is_overdue"`
+	OrderID      uuid.UUID  `json:"order_id"`
+	Status       string     `json:"status"`
+	TotalAmount  float64    `json:"total_amount"`
+	Subtotal     float64    `json:"subtotal"`
+	TaxAmount    float64    `json:"tax_amount"`
+	PaymentTerms string     `json:"payment_terms"`
+	DueDate      *time.Time `json:"due_date"`
+	PaidAt       *time.Time `json:"paid_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+
+	// UpdatedAt is the invoice change feed's cursor (Part 7): the ERP stamps
+	// it on every status write, and GET /invoices?since=<it> returns what has
+	// moved since.
+	UpdatedAt time.Time       `json:"updated_at"`
+	Lines     []PortalLineDTO `json:"lines"`
 }
 
 // PortalDeliveryDTO is a customer-facing delivery with POD info and tracking.
@@ -174,6 +179,10 @@ type PortalDeliveryDTO struct {
 	StopSequence         *int       `json:"stop_sequence"`
 	TotalStops           *int       `json:"total_stops"`
 	DeliveryInstructions *string    `json:"delivery_instructions"`
+
+	// UpdatedAt is the delivery change feed's cursor (Part 7), the same pair
+	// the order feed carries.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ReorderRequest tells which historical order to duplicate.

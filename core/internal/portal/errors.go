@@ -59,6 +59,15 @@ var (
 	// portal's error codes stay stable across the order module's conversion.
 	ErrOrderAlreadyCancelled = errors.New("order is already cancelled")
 	ErrOrderNotCancellable   = errors.New("fulfilled order cannot be cancelled")
+
+	// Scheduling (PE-08). The 404s stay 404s for the same reason as above:
+	// a yard, a window or a hold that is not the caller's is indistinguishable
+	// from one that does not exist.
+	ErrYardNotFound   = errors.New("yard not found")
+	ErrWindowNotFound = errors.New("schedule window not found")
+	ErrHoldNotFound   = errors.New("schedule hold not found")
+	ErrSlotFull       = errors.New("this window is fully booked for that day")
+	ErrCutoffPassed   = errors.New("the booking cutoff for this window has passed")
 )
 
 // refusalReasons maps a sentinel onto a short, customer-safe explanation.
@@ -86,6 +95,10 @@ var refusalReasons = map[error]struct {
 		"This order has already been cancelled."},
 	ErrOrderNotCancellable: {"ORDER_NOT_CANCELLABLE",
 		"A fulfilled order cannot be cancelled. Ask the dealer for a credit."},
+	ErrSlotFull: {"SCHEDULE_WINDOW_FULL",
+		"This window is fully booked for that day. Pick another day or window."},
+	ErrCutoffPassed: {"SCHEDULE_CUTOFF_PASSED",
+		"The yard's booking cutoff for this window has passed. Call the dealer or pick a later day."},
 }
 
 // portalRefusal is the 409 envelope. It keeps httputil.ErrorResponse's shape —
@@ -143,7 +156,10 @@ func statusForPortalError(err error, fallback int) int {
 	case errors.Is(err, ErrQuoteNotFound),
 		errors.Is(err, ErrOrderNotFound),
 		errors.Is(err, ErrProjectNotFound),
-		errors.Is(err, ErrDeliveryNotFound):
+		errors.Is(err, ErrDeliveryNotFound),
+		errors.Is(err, ErrYardNotFound),
+		errors.Is(err, ErrWindowNotFound),
+		errors.Is(err, ErrHoldNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, ErrQuoteNotDecidable),
 		errors.Is(err, ErrRescheduleRefused),
@@ -153,7 +169,9 @@ func statusForPortalError(err error, fallback int) int {
 		// reasonable question, not server faults, and a client needs to know
 		// that retrying will never help.
 		errors.Is(err, ErrOrderAlreadyCancelled),
-		errors.Is(err, ErrOrderNotCancellable):
+		errors.Is(err, ErrOrderNotCancellable),
+		errors.Is(err, ErrSlotFull),
+		errors.Is(err, ErrCutoffPassed):
 		return http.StatusConflict
 	case errors.Is(err, ErrInvalidRequest):
 		return http.StatusBadRequest

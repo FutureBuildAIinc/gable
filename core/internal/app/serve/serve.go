@@ -66,6 +66,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/unit"
@@ -815,6 +816,10 @@ func Run() {
 
 	wall.delivery(mux, delivery.NewHandler(deliverySvc), "admin", "owner", "warehouse", "driver")
 
+	// The dealer side of the pro portal's scheduling (PE-08): the per yard
+	// delivery windows and pickup slots a yard manager defines.
+	wall.scheduling(mux, scheduling.NewHandler(scheduling.NewService(scheduling.NewRepository(db))))
+
 	// Lumber index-aware quote price protection (the exposure module).
 	// Snapshots a baseline index when a quote is sent, detects moves past the
 	// per-customer threshold, applies the snapshotted policy, and gates order
@@ -968,14 +973,10 @@ func Run() {
 					CustomerID: demoCustomerID,
 					Email:      "demo@tarnwick.example",
 					Name:       "Sam Tarnwick",
-					// Role is load-bearing and was previously left empty, so
-					// getPortalUserRole returned "" and requireAdmin refused
-					// every request: GET /users, GET/POST /invites and the
-					// role/status endpoints all returned 403 in dev mode, which
-					// is the only mode the demo runs in. Team management looked
-					// broken rather than bypassed. "Admin" matches the
-					// vocabulary internal/portal enforces.
-					Role: "Admin",
+					// Role is load-bearing: the capability checks resolve it
+					// server side (internal/portal/capabilities.go), and the
+					// demo account is the seeded owner.
+					Role: "owner",
 				}
 				ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
