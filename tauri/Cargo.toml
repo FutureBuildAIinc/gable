@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+# One Tauri 2 cargo workspace: a shared Rust core and three thin profile
+# shells over it (work, field, pro), beside the desk shell until the work
+# profile replaces it. One lock file serves every member; the profiles differ
+# in identifier, capability set and start app, never in a private core.
+
+[workspace]
+resolver = "2"
+members = ["core", "gable-desk", "gable-field", "gable-pro", "gable-work"]
+
+[workspace.package]
+# One source of the version for every crate and the Tauri configs.
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "LicenseRef-OpenLBM-Surface-1.0"
+publish = false
+
+# A debug build carries no debug info: the bundle the CI smoke runs is
+# smaller and the target directory stays off the disk it would otherwise eat.
+[profile.dev]
+debug = 0
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
