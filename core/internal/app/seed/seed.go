@@ -1388,19 +1388,14 @@ func Run() {
 	portalUsers := []struct {
 		Customer, Email, Name, Role string
 	}{
-		// Roles MUST be one of "Admin", "Buyer", "View-Only" — the vocabulary
-		// internal/portal enforces in InviteUser and UpdateUserRole, and pinned
-		// by service_test.go, which asserts lowercase "admin" is REJECTED.
-		//
-		// This previously seeded "admin"/"member". Neither is valid, so
-		// requireAdmin (handler.go:287, comparing against "Admin") could never
-		// pass for a seeded user: the whole team-management surface —
-		// GET /users, GET/POST /invites, PUT /users/{id}/role and /status —
-		// returned 403 to every demo login, and the role-update endpoint would
-		// have refused to set the role back to anything it recognised.
-		{"Tarnwick Construction", "demo@tarnwick.example", "Sam Tarnwick", "Admin"},
-		{"Thornmere Homes Ltd", "thornmere@thornmerehomes.example", "Olivia Marchand", "Admin"},
-		{"Pellmoor Custom", "pellmoor@pellmoorcustom.example", "Marc Dufresne", "Buyer"},
+		// Roles are the five contractor roles of migration 130 (the
+		// capability vocabulary core/internal/portal resolves them to):
+		// owner, estimator, project_manager, site_super, ap_clerk. The
+		// legacy Admin/Buyer/View-Only trio was mapped in place by the
+		// migration; every new row uses the new spelling.
+		{"Tarnwick Construction", "demo@tarnwick.example", "Sam Tarnwick", "owner"},
+		{"Thornmere Homes Ltd", "thornmere@thornmerehomes.example", "Olivia Marchand", "owner"},
+		{"Pellmoor Custom", "pellmoor@pellmoorcustom.example", "Marc Dufresne", "project_manager"},
 	}
 	for _, pu := range portalUsers {
 		cid, ok := customerIDs[pu.Customer]
