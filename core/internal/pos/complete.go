@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -25,6 +27,8 @@ type TenderIn struct {
 	AmountCents httpx.Cents
 	Reference   string
 	TokenID     string
+	IDChecked   bool
+	IDType      string
 }
 
 // ErrTaxProviderUnavailable is the 503 the counter answers when the tax
@@ -167,16 +171,10 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	// The tender plan: what the drawer keeps per tender and what walks out
 	// as change (only cash makes change; an ACCOUNT tender needs a named
 	// customer and passes the credit check).
-	var totalTendered, cashTendered, accountPortion int64
-	for i := range tenders {
-		t := &tenders[i]
-		totalTendered += int64(t.AmountCents)
-		if t.Method == TenderCash {
-			cashTendered += int64(t.AmountCents)
-		}
-		if t.Method == TenderAccount {
-			accountPortion += int64(t.AmountCents)
-		}
+	sums := sumTenders(tenders)
+	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
+	if err := sums.legsRefusal(); err != nil {
+		return nil, err
 	}
 	totals := salesdoc.SumTotals(preLines)
 	total := int64(totals.SubtotalCents) + int64(estimate.taxCents)
@@ -215,6 +213,25 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, false, actor); err != nil {
 			return nil, err
 		}
+	}
+	// Store credit is the named account's own open credit memos, and the
+	// checks a customer may write are held to its check limit, both read
+	// before any card is charged; the transaction repeats them under locks.
+	if sums.storeCredit > 0 {
+		if pre.CustomerID == nil {
+			return nil, conflict("walk_in_store_credit",
+				"store credit belongs to a named account: the walk-in customer holds none")
+		}
+		avail, err := s.repo.OpenCreditMemoCents(ctx, realCustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if sums.storeCredit > avail {
+			return nil, conflict("store_credit_short", storeCreditShort(pre.Currency, avail, sums.storeCredit))
+		}
+	}
+	if err := s.checkTenderLimits(ctx, saleID, realCustomerID, tenders, false, actor); err != nil {
+		return nil, err
 	}
 	// Card charges: outside the transaction, with the sale's own currency
 	// (the hard coded USD of the base commit is the bug this fixes). Every
@@ -292,17 +309,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
 	charges []*chargeResult, priced *providerTax) (*Sale, error) {
-	var totalTendered, cashTendered, accountPortion int64
-	for i := range tenders {
-		t := &tenders[i]
-		totalTendered += int64(t.AmountCents)
-		if t.Method == TenderCash {
-			cashTendered += int64(t.AmountCents)
-		}
-		if t.Method == TenderAccount {
-			accountPortion += int64(t.AmountCents)
-		}
-	}
+	sums := sumTenders(tenders)
+	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		// Section 11, step 1: the counter sale row.
@@ -406,6 +414,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			return conflict("change_from_cash",
 				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
+		// The legs the sale keeps, change taken out of the cash, sum exactly to
+		// the total; the two checks above make it so and this holds it.
+		if totalTendered-change != total {
+			return conflict("legs_do_not_sum",
+				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", totalTendered-change, total))
+		}
 
 		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
 		// customer's credit advisory lock (section 11, step 1a, taken right
@@ -430,6 +444,30 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, true, actor); err != nil {
 				return err
+			}
+		}
+
+		// The checks held to the customer's check limit, and the customer's
+		// open credit memos locked in id order (section 11, step 3) when the
+		// sale pays with store credit: both before the stock moves.
+		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+			return err
+		}
+		var storeMemos []openMemo
+		if sums.storeCredit > 0 {
+			if sale.CustomerID == nil {
+				return conflict("walk_in_store_credit",
+					"store credit belongs to a named account: the walk-in customer holds none")
+			}
+			if storeMemos, err = s.repo.LockOpenCreditMemos(ctx, customerID, sale.Currency); err != nil {
+				return err
+			}
+			var held int64
+			for _, m := range storeMemos {
+				held += m.OpenCents
+			}
+			if sums.storeCredit > held {
+				return conflict("store_credit_short", storeCreditShort(sale.Currency, held, sums.storeCredit))
 			}
 		}
 
@@ -541,10 +579,33 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// from the live total above.
 		cashChangeLeft := change
 		var fxAll *account.Effects
+		// The store credit leg first: the customer's open credit memos, oldest
+		// first, applied to the invoice through the AR core (the one writer of
+		// the subledger), so the invoice's open amount is what the payments
+		// then apply against.
+		var storeRefs []string
+		if sums.storeCredit > 0 {
+			fx, refs, err := s.applyStoreCredit(ctx, storeMemos, inv.ID, sums.storeCredit, date, actor)
+			if err != nil {
+				return err
+			}
+			mergeEffects(&fxAll, fx)
+			storeRefs = refs
+		}
 		for i := range tenders {
 			t := &tenders[i]
+			if t.Method == TenderStoreCredit {
+				tender := &Tender{SaleID: saleID, Method: t.Method, AmountCents: t.AmountCents}
+				ref := strings.Join(storeRefs, ",")
+				tender.Reference = &ref
+				if err := s.repo.AddTender(ctx, tender); err != nil {
+					return err
+				}
+				continue
+			}
 			if t.Method == TenderAccount {
 				tender := &Tender{SaleID: saleID, Method: t.Method, AmountCents: t.AmountCents}
+				withID(tender, t)
 				if t.Reference != "" {
 					r := t.Reference
 					tender.Reference = &r
@@ -564,6 +625,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				// the whole tender walked out as change: no payment, but
 				// the tender row keeps what was tendered
 				tender := &Tender{SaleID: saleID, Method: t.Method, AmountCents: t.AmountCents}
+				withID(tender, t)
 				if t.Reference != "" {
 					r := t.Reference
 					tender.Reference = &r
@@ -590,6 +652,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			mergeEffects(&fxAll, fx)
 			tender := &Tender{SaleID: saleID, Method: t.Method, AmountCents: httpx.Cents(amount),
 				PaymentID: &payID}
+			withID(tender, t)
 			if t.Reference != "" {
 				r := t.Reference
 				tender.Reference = &r
@@ -725,4 +788,150 @@ func (s *Service) costRefs(ctx context.Context, lines []salesdoc.Line) (map[stri
 // payment.recorded event.
 func (s *Service) paymentNumber(ctx context.Context, id uuid.UUID) (string, error) {
 	return paymentNumberOf(ctx, s, id)
+}
+
+// tenderSums are the sale's tenders added up by kind.
+type tenderSums struct {
+	total, cash, account, storeCredit int64
+	accountLegs, storeLegs            int
+}
+
+func sumTenders(tenders []TenderIn) tenderSums {
+	var s tenderSums
+	for i := range tenders {
+		t := &tenders[i]
+		s.total += int64(t.AmountCents)
+		switch t.Method {
+		case TenderCash:
+			s.cash += int64(t.AmountCents)
+		case TenderAccount:
+			s.account += int64(t.AmountCents)
+			s.accountLegs++
+		case TenderStoreCredit:
+			s.storeCredit += int64(t.AmountCents)
+			s.storeLegs++
+		}
+	}
+	return s
+}
+
+// legsRefusal holds the shape of the legs: at most one account leg and one
+// store credit leg a sale (change only ever comes out of cash, so the legs
+// that stay sum exactly to the total).
+func (s tenderSums) legsRefusal() error {
+	if s.accountLegs > 1 {
+		return conflict("one_account_leg", "a sale takes at most one account tender: put the whole account amount on one")
+	}
+	if s.storeLegs > 1 {
+		return conflict("one_store_credit_leg", "a sale takes at most one store credit tender: put the whole amount on one")
+	}
+	return nil
+}
+
+// withID copies the "ID checked" facts of a tender request onto the stored
+// tender: the kind of ID looked at, never its number.
+func withID(t *Tender, in *TenderIn) {
+	t.IDChecked = in.IDChecked
+	if in.IDType != "" {
+		kind := in.IDType
+		t.IDType = &kind
+	}
+}
+
+func storeCreditShort(currency string, held, asked int64) string {
+	return fmt.Sprintf("the account holds %s of store credit and the sale asks for %s",
+		moneyWords(currency, held), moneyWords(currency, asked))
+}
+
+// openMemo is one of the customer's open credit memos, locked for the sale.
+type openMemo struct {
+	ID        uuid.UUID
+	Number    string
+	MemoDate  time.Time
+	OpenCents int64
+}
+
+// applyStoreCredit applies the sale's store credit leg to its invoice: the
+// locked memos, oldest first, each as far as it goes, through the AR core's
+// ApplyCreditMemo. It answers the memo numbers it used.
+func (s *Service) applyStoreCredit(ctx context.Context, memos []openMemo, invoiceID uuid.UUID, need int64, on time.Time, actor string) (*account.Effects, []string, error) {
+	ordered := append([]openMemo(nil), memos...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !ordered[i].MemoDate.Equal(ordered[j].MemoDate) {
+			return ordered[i].MemoDate.Before(ordered[j].MemoDate)
+		}
+		return ordered[i].ID.String() < ordered[j].ID.String()
+	})
+	var fxAll *account.Effects
+	var refs []string
+	left := need
+	for _, m := range ordered {
+		if left <= 0 {
+			break
+		}
+		use := min64(m.OpenCents, left)
+		if use <= 0 {
+			continue
+		}
+		fx, err := s.ar.ApplyCreditMemo(ctx, account.ApplyCreditMemoIn{
+			MemoID: m.ID, Lines: []account.ApplyLine{{InvoiceID: invoiceID, AmountCents: use}}, On: on, Actor: actor})
+		if err != nil {
+			return nil, nil, err
+		}
+		mergeEffects(&fxAll, fx)
+		refs = append(refs, m.Number)
+		left -= use
+	}
+	if left > 0 {
+		return nil, nil, conflict("store_credit_short", "the account's store credit changed under the sale: ring it again")
+	}
+	return fxAll, refs, nil
+}
+
+// checkTenderLimits holds each check tender to the customer's check limit
+// (its own, else the database wide default; none is no limit). A check over
+// the limit is refused 409 check_over_limit unless the sale holds a manager
+// override of kind check whose cap covers it: consume false reads it before
+// any card is charged, consume true spends it inside the transaction.
+func (s *Service) checkTenderLimits(ctx context.Context, saleID, customerID uuid.UUID, tenders []TenderIn, consume bool, actor string) error {
+	var biggest int64
+	for i := range tenders {
+		if tenders[i].Method == TenderCheck && int64(tenders[i].AmountCents) > biggest {
+			biggest = int64(tenders[i].AmountCents)
+		}
+	}
+	if biggest == 0 {
+		return nil
+	}
+	facts, err := s.repo.CustomerFacts(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	limit, err := s.checkLimitOf(ctx, facts)
+	if err != nil {
+		return err
+	}
+	if limit == nil || biggest <= *limit {
+		return nil
+	}
+	if consume {
+		spent, err := s.consumeOverride(ctx, saleID, OverrideCheck, biggest, actor)
+		if err != nil {
+			return err
+		}
+		if spent {
+			return nil
+		}
+	} else {
+		o, err := s.repo.LiveOverride(ctx, saleID, OverrideCheck)
+		if err != nil {
+			return err
+		}
+		if o != nil && biggest <= o.CapCents {
+			return nil
+		}
+	}
+	return conflict("check_over_limit", fmt.Sprintf(
+		"a check of %s is over this customer's check limit of %s: take another payment, or ask a manager to approve the check",
+		moneyWords(facts.Currency, biggest), moneyWords(facts.Currency, *limit)))
 }

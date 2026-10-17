@@ -101,6 +101,7 @@ type ARCore interface {
 	RefundPayment(ctx context.Context, in account.RefundPaymentIn) (uuid.UUID, *account.Effects, error)
 	PostCreditMemo(ctx context.Context, in account.PostCreditMemoIn) (*account.Effects, error)
 	RefundCreditMemo(ctx context.Context, in account.RefundCreditMemoIn) (uuid.UUID, *account.Effects, error)
+	ApplyCreditMemo(ctx context.Context, in account.ApplyCreditMemoIn) (*account.Effects, error)
 	VoidInvoice(ctx context.Context, in account.VoidInvoiceIn) (*account.Effects, error)
 }
 

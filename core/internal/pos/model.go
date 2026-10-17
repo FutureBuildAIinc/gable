@@ -39,7 +39,14 @@ const (
 	TenderCheck   TenderMethod = "CHECK"
 	TenderCard    TenderMethod = "CARD"
 	TenderAccount TenderMethod = "ACCOUNT"
+	// TenderStoreCredit pays with the customer's open credit memos, applied to
+	// the sale's invoice through the AR core. It is no drawer money.
+	TenderStoreCredit TenderMethod = "STORE_CREDIT"
 )
+
+// The closed list of ID types a counter may record beside "ID checked": the
+// kind of ID looked at, never its number.
+var idTypes = []string{"drivers_license", "state_id", "passport", "military_id", "other"}
 
 // Status returns the wire spelling.
 func (m TenderMethod) Status() string { return strings.ToLower(string(m)) }
@@ -58,6 +65,8 @@ func ParseTenderMethod(name string) (TenderMethod, bool) {
 		return TenderCard, true
 	case "account":
 		return TenderAccount, true
+	case "store_credit":
+		return TenderStoreCredit, true
 	}
 	return "", false
 }
@@ -144,17 +153,22 @@ type SaleSummary struct {
 // amount less any change given from it, so the payment it became is the
 // money kept (ADR 0005 section 14.2 C2-5).
 type Tender struct {
-	ID          uuid.UUID       `json:"id"`
-	SaleID      uuid.UUID       `json:"sale_id"`
-	Method      TenderMethod    `json:"method"`
-	AmountCents httpx.Cents     `json:"amount_cents"`
-	PaymentID   *uuid.UUID      `json:"payment_id"`
-	Reference   *string         `json:"reference"`
-	CardLast4   *string         `json:"card_last4"`
-	CardBrand   *string         `json:"card_brand"`
-	GatewayTxID *string         `json:"gateway_tx_id"`
-	AuthCode    *string         `json:"auth_code"`
-	CreatedAt   httpx.Timestamp `json:"created_at"`
+	ID          uuid.UUID    `json:"id"`
+	SaleID      uuid.UUID    `json:"sale_id"`
+	Method      TenderMethod `json:"method"`
+	AmountCents httpx.Cents  `json:"amount_cents"`
+	PaymentID   *uuid.UUID   `json:"payment_id"`
+	Reference   *string      `json:"reference"`
+	CardLast4   *string      `json:"card_last4"`
+	CardBrand   *string      `json:"card_brand"`
+	GatewayTxID *string      `json:"gateway_tx_id"`
+	AuthCode    *string      `json:"auth_code"`
+	// IDChecked and IDType record that the cashier looked at the payer's ID
+	// (a check or an account charge) and what kind it was; the number is
+	// never taken.
+	IDChecked bool            `json:"id_checked"`
+	IDType    *string         `json:"id_type"`
+	CreatedAt httpx.Timestamp `json:"created_at"`
 }
 
 // Return is one counter return: a credit memo created and posted in one act

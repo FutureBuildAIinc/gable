@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -367,6 +368,13 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 				mergeEffects(&fxAll, rfx)
 			}
 		}
+		// The store credit the sale paid with goes back to its credit memos
+		// (their applications reverse), so the invoice stands unused.
+		if fx, err := s.reverseStoreCredit(ctx, *sale.InvoiceID, tenders, reason, actor, date); err != nil {
+			return err
+		} else {
+			mergeEffects(&fxAll, fx)
+		}
 		// The invoice void (step 4): reverses its whole entry, writes the
 		// opposite subledger row, ends VOID.
 		var entryID *uuid.UUID
@@ -475,4 +483,47 @@ func cardApplicationLive(ctx context.Context, s *Service, paymentID uuid.UUID) (
 		return uuid.Nil, false, fmt.Errorf("failed to read the card payment's application: %w", err)
 	}
 	return id, true, nil
+}
+
+// reverseStoreCredit reverses the credit memo applications a sale's store
+// credit tender made on its invoice, in id order, so each memo's credit is
+// open again. A sale that paid with no store credit reverses nothing.
+func (s *Service) reverseStoreCredit(ctx context.Context, invoiceID uuid.UUID, tenders []Tender, reason, actor string, on time.Time) (*account.Effects, error) {
+	has := false
+	for i := range tenders {
+		if tenders[i].Method == TenderStoreCredit {
+			has = true
+		}
+	}
+	if !has {
+		return nil, nil
+	}
+	rows, err := s.db.GetExecutor(ctx).Query(ctx, `
+		SELECT id FROM ar_applications WHERE invoice_id = $1 AND credit_memo_id IS NOT NULL AND reversed_at IS NULL
+		ORDER BY id`, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the store credit applications: %w", err)
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var fxAll *account.Effects
+	for _, id := range ids {
+		fx, err := s.ar.Reverse(ctx, account.ReverseIn{ApplicationID: id, Reason: reason, Actor: actor, On: on})
+		if err != nil {
+			return nil, err
+		}
+		mergeEffects(&fxAll, fx)
+	}
+	return fxAll, nil
 }

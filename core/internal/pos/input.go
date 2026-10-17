@@ -137,6 +137,8 @@ type tenderRequest struct {
 	AmountCents json.RawMessage `json:"amount_cents"`
 	Reference   *string         `json:"reference"`
 	TokenID     *string         `json:"token_id"`
+	IDChecked   *bool           `json:"id_checked"`
+	IDType      *string         `json:"id_type"`
 }
 
 func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []TenderIn {
@@ -154,8 +156,10 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 			in.Method = TenderCard
 		case "account":
 			in.Method = TenderAccount
+		case "store_credit":
+			in.Method = TenderStoreCredit
 		default:
-			v.Check(false, field("method"), "must be cash, check, card or account")
+			v.Check(false, field("method"), "must be cash, check, card, account or store_credit")
 		}
 		if n, ok := v.Int(field("amount_cents"), t.AmountCents, true); ok {
 			v.Check(n > 0, field("amount_cents"), "must be greater than zero")
@@ -166,6 +170,22 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 		}
 		if t.TokenID != nil {
 			in.TokenID = *t.TokenID
+		}
+		// "ID checked" and its type ride on a check or an account charge; the
+		// ID's number is never taken (the body has no field for it).
+		if t.IDChecked != nil {
+			in.IDChecked = *t.IDChecked
+		}
+		if t.IDType != nil {
+			in.IDType = *t.IDType
+		}
+		if in.IDChecked || in.IDType != "" {
+			v.Check(in.Method == TenderCheck || in.Method == TenderAccount, field("id_checked"),
+				"ID is recorded on a check or an account tender only")
+			v.Check(in.IDChecked, field("id_checked"), "must be true when an ID type is named")
+			if in.IDType != "" {
+				v.Enum(field("id_type"), in.IDType, idTypes...)
+			}
 		}
 		out = append(out, in)
 	}
@@ -360,13 +380,14 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 	for m, raw := range r.CountedByMethod {
 		method, ok := ParseTenderMethod(m)
 		if !ok {
-			v.Check(false, "counted_by_method."+m, "must be cash, check, card or account")
+			v.Check(false, "counted_by_method."+m, "must be cash, check, card, account or store_credit")
 			continue
 		}
-		if method == TenderAccount {
-			// an account charge is not money in the drawer: counted less
-			// expected over it would post the whole charge as a shortage
-			v.Check(false, "counted_by_method."+m, "an account charge is not in the drawer, so it is not counted")
+		if method == TenderAccount || method == TenderStoreCredit {
+			// an account charge or store credit is not money in the drawer:
+			// counted less expected over it would post the whole amount as a
+			// shortage
+			v.Check(false, "counted_by_method."+m, "an account charge or store credit is not in the drawer, so it is not counted")
 			continue
 		}
 		if isAbsentRaw(raw) {

@@ -193,6 +193,7 @@ type Repository interface {
 	// sale's buyer, and the manager override (one live per sale and kind,
 	// spent by a single statement).
 	OpenCreditMemoCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	LockOpenCreditMemos(ctx context.Context, customerID uuid.UUID, currency string) ([]openMemo, error)
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
@@ -597,11 +598,12 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 	var created time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_tenders (id, transaction_id, method, amount, payment_id, reference, card_last4, card_brand,
-			gateway_tx_id, auth_code, created_at)
-		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NOW())
+			gateway_tx_id, auth_code, id_checked, id_type, created_at)
+		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''),
+			$11, $12, NOW())
 		RETURNING created_at`,
 		t.ID, t.SaleID, string(t.Method), int64(t.AmountCents), t.PaymentID, t.Reference, t.CardLast4, t.CardBrand,
-		t.GatewayTxID, t.AuthCode).Scan(&created)
+		t.GatewayTxID, t.AuthCode, t.IDChecked, t.IDType).Scan(&created)
 	t.CreatedAt = httpx.TimestampOf(created)
 	if err != nil {
 		return fmt.Errorf("failed to record the tender: %w", mapWriteError(err))
@@ -612,7 +614,7 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, method, ROUND(amount * 100)::bigint, payment_id, reference, card_last4, card_brand, gateway_tx_id,
-			auth_code, created_at
+			auth_code, id_checked, id_type, created_at
 		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, method, id`, saleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the tenders: %w", err)
@@ -624,7 +626,7 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) (
 		var method string
 		var createdAt time.Time
 		if err := rows.Scan(&t.ID, &method, &t.AmountCents, &t.PaymentID, &t.Reference, &t.CardLast4, &t.CardBrand,
-			&t.GatewayTxID, &t.AuthCode, &createdAt); err != nil {
+			&t.GatewayTxID, &t.AuthCode, &t.IDChecked, &t.IDType, &createdAt); err != nil {
 			return nil, err
 		}
 		t.Method = TenderMethod(method)

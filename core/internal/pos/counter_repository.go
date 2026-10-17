@@ -169,3 +169,27 @@ func (r *PostgresRepository) ConsumeOverride(ctx context.Context, saleID uuid.UU
 	o.CreatedAt = httpx.TimestampOf(created)
 	return &o, true, nil
 }
+
+// LockOpenCreditMemos locks the customer's open and partly used credit memos
+// in id order (ADR 0005 section 11, step 3) and answers them with their open
+// cents as positive figures.
+func (r *PostgresRepository) LockOpenCreditMemos(ctx context.Context, customerID uuid.UUID, currency string) ([]openMemo, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT m.id, COALESCE(m.number, ''), m.memo_date, -ROUND(m.amount_open * 100)::bigint
+		FROM credit_memos m
+		WHERE m.customer_id = $1 AND m.currency = $2 AND m.status IN ('OPEN', 'PARTIAL') AND m.amount_open < 0
+		ORDER BY m.id FOR UPDATE`, customerID, currency)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock the open credit memos: %w", err)
+	}
+	defer rows.Close()
+	var out []openMemo
+	for rows.Next() {
+		var m openMemo
+		if err := rows.Scan(&m.ID, &m.Number, &m.MemoDate, &m.OpenCents); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
