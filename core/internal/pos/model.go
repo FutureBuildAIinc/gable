@@ -192,6 +192,12 @@ type Return struct {
 	Reason         string          `json:"reason"`
 	CreditMemoID   *uuid.UUID      `json:"credit_memo_id"`
 	CreatedAt      httpx.Timestamp `json:"created_at"`
+	// RestockingFeeCents is the fee withheld from the refund, shown on the
+	// credit memo as its own line; the subtotal and total already carry it.
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+	// ExchangeSaleID is the sale that replaced the goods when the return was
+	// one half of an exchange.
+	ExchangeSaleID *uuid.UUID `json:"exchange_sale_id"`
 
 	Lines []ReturnLine `json:"lines"`
 }
@@ -208,6 +214,10 @@ type ReturnLine struct {
 	UnitPrice   *httpx.Price    `json:"unit_price_ten_thousandths"`
 	LineTotal   *httpx.Cents    `json:"line_total_cents"`
 	Restock     bool            `json:"restock"`
+	// ReasonCode is the line's reason from the closed list; the fee is what
+	// its reason withheld from the line's refund.
+	ReasonCode         string      `json:"reason_code"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
 
 	// The pair and price unit the sale line carried, read by the memo line's
 	// insert; internal, never on the wire.

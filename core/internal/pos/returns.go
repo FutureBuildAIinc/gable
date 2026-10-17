@@ -37,6 +37,8 @@ type ReturnLineIn struct {
 	Quantity    httpx.Quantity
 	UnitPrice   *httpx.Price
 	Restock     bool
+	// ReasonCode is the line's reason from the closed list; absent is other.
+	ReasonCode string
 }
 
 // returnLinePriced is a returned line with its money resolved.
@@ -53,6 +55,9 @@ type returnLinePriced struct {
 	// chargeCodeID and lineType carry a linked charge line's own shape.
 	chargeCodeID *uuid.UUID
 	lineType     string
+	// feeCents is the restocking fee withheld from this line's refund, set
+	// with the totals (resolveReturnMoney).
+	feeCents int64
 }
 
 // returnState is a priced, guarded return ready for its money transaction:
@@ -82,6 +87,14 @@ type returnState struct {
 	taxCents         int64
 	total            int64
 	taxRate          *string
+	// feeBps is the restocking fee of each reason, read once with the pricing;
+	// feeCents is the whole fee withheld, a positive figure that lowers the
+	// credit (subtotal and total carry it).
+	feeBps   map[string]int
+	feeCents int64
+	// restock is the RESTOCK charge code the fee line of the memo is booked
+	// to, resolved when a fee is withheld.
+	restock *salesdoc.ChargeCode
 }
 
 // refundClaim is the committed intent a card refund stands on: what it
@@ -346,9 +359,13 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			}
 		}
 	}
+	feeBps, err := s.repo.RestockingFeeBps(ctx)
+	if err != nil {
+		return nil, err
+	}
 	st := &returnState{in: in, branchID: branchID, customerID: customerID, currency: facts.Currency,
 		saleLines: saleLines, byID: byID, legacyBearer: legacyBearer, refs: refs, priced: priced,
-		saleTaxCents: saleTaxCents, saleTaxable: saleTaxable}
+		saleTaxCents: saleTaxCents, saleTaxable: saleTaxable, feeBps: feeBps}
 	if err := s.applyReturnRemainders(ctx, st); err != nil {
 		return nil, err
 	}
@@ -515,7 +532,21 @@ func (s *Service) resolveReturnMoney(ctx context.Context, st *returnState) error
 			st.taxRate = &rate
 		}
 	}
-	st.total = -(st.subtotal + st.taxCents)
+	// The restocking fee each line's reason carries, taken from the line's own
+	// refund (the figure the remainder rule left it), half even to the cent. It
+	// lowers the credit: the subtotal the memo states and the total both carry
+	// it, and the tax refunded stays whole.
+	st.feeCents = 0
+	for i := range st.priced {
+		p := &st.priced[i]
+		code := p.in.ReasonCode
+		if code == "" {
+			code = ReasonOther
+		}
+		p.feeCents = restockingFee(p.lineTotal, st.feeBps[code])
+		st.feeCents += p.feeCents
+	}
+	st.total = -(st.subtotal + st.taxCents - st.feeCents)
 	return nil
 }
 
@@ -942,6 +973,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
 				Quantity: &qty, UOM: &uom, PriceUOM: &priceUOM, UOMQty: &uomQty, PriceUOMQty: &priceUOMQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
+				ReasonCode: reasonOf(p.in.ReasonCode), RestockingFeeCents: httpx.Cents(p.feeCents),
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 				LineType: lineType, ChargeCodeID: p.chargeCodeID,
 			})
@@ -1038,6 +1070,30 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
 		}
+		// The restocking fee, as its own line of the memo (a charge that lowers
+		// the credit) booked to the RESTOCK charge code's income account.
+		var feeAccount string
+		if st.feeCents > 0 {
+			codes, err := s.repo.LookupChargeCodes(ctx, []string{"RESTOCK"})
+			if err != nil {
+				return err
+			}
+			code, ok := codes["RESTOCK"]
+			if !ok {
+				return conflict("restock_charge_missing",
+					"a restocking fee is configured but the RESTOCK charge code is missing: add it before returning goods that carry a fee")
+			}
+			feeAccount = code.RevenueAccountCode
+			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
+				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, charge_code_id, description, quantity,
+					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code,
+					restock, created_at)
+				VALUES ($1, $2, 'CHARGE', $3, 'Restocking fee', 1, 'EA', 'EA', 1, 1, $4::numeric / 100, 'MANUAL',
+					$4::numeric / 100, FALSE, $5, FALSE, NOW())`,
+				memoID, len(lines), code.ID, st.feeCents, feeAccount); err != nil {
+				return fmt.Errorf("failed to create the restocking fee line: %w", mapWriteError(err))
+			}
+		}
 		// The gapless CM number, minted late: after every other row lock,
 		// before the posting (ADR 0005 section 4.1).
 		memoNumber, err := httpx.NextGaplessNumber(ctx, s.db.GetExecutor(ctx), "credit_memo", "CM", httpx.DefaultDocNumberWidth)
@@ -1063,6 +1119,9 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		if st.taxCents > 0 {
 			legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: st.taxCents})
 		}
+		if st.feeCents > 0 {
+			legs = append(legs, gl.Leg{AccountCode: feeAccount, Description: "Restocking fee", Credit: st.feeCents})
+		}
 		if restockCost > 0 {
 			legs = append(legs,
 				gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Debit: restockCost},
@@ -1070,7 +1129,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		}
 		fxPost, err := s.ar.PostCreditMemo(ctx, account.PostCreditMemoIn{
 			MemoID: memoID, CustomerID: *customerID, Number: memoNumber, Currency: st.currency, MemoDate: date,
-			SubtotalCents: -st.subtotal, TaxCents: -st.taxCents, TotalCents: st.total, TaxRate: st.taxRate, Actor: st.actor, Legs: legs})
+			SubtotalCents: -(st.subtotal - st.feeCents), TaxCents: -st.taxCents, TotalCents: st.total, TaxRate: st.taxRate, Actor: st.actor, Legs: legs})
 		if err != nil {
 			return err
 		}
@@ -1098,8 +1157,9 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		ret := &Return{
 			RegisterID: in.RegisterID, TillSessionID: tillSessionID, OriginalSaleID: in.OriginalSaleID,
 			CustomerID: customerID, BranchID: branchID, CashierID: st.cashierID, Currency: st.currency,
-			SubtotalCents: httpx.Cents(-st.subtotal), TaxCents: httpx.Cents(-st.taxCents), TotalCents: httpx.Cents(st.total),
-			RefundMethod: in.RefundMethod, Reason: in.Reason, CreditMemoID: &memoID, Lines: lines,
+			SubtotalCents: httpx.Cents(-(st.subtotal - st.feeCents)), TaxCents: httpx.Cents(-st.taxCents), TotalCents: httpx.Cents(st.total),
+			RestockingFeeCents: httpx.Cents(st.feeCents),
+			RefundMethod:       in.RefundMethod, Reason: in.Reason, CreditMemoID: &memoID, Lines: lines,
 		}
 		if err := s.repo.CreateReturn(ctx, ret, lines); err != nil {
 			return err
@@ -1182,6 +1242,7 @@ type storedReturnLine struct {
 	Description string     `json:"description"`
 	Quantity    int64      `json:"quantity"`
 	Restock     bool       `json:"restock"`
+	ReasonCode  string     `json:"reason_code,omitempty"`
 }
 
 // storedReturnRequest is a return claim's own request, carried on the intent
@@ -1201,7 +1262,7 @@ func storeReturnRequest(in *ReturnIn) []byte {
 	for i := range in.Lines {
 		l := in.Lines[i]
 		out.Lines = append(out.Lines, storedReturnLine{SaleLineID: l.SaleLineID, ProductID: l.ProductID,
-			Description: l.Description, Quantity: int64(l.Quantity), Restock: l.Restock})
+			Description: l.Description, Quantity: int64(l.Quantity), Restock: l.Restock, ReasonCode: l.ReasonCode})
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
@@ -1218,7 +1279,7 @@ func (r *storedReturnRequest) toReturnIn() *ReturnIn {
 	for i := range r.Lines {
 		l := r.Lines[i]
 		in.Lines = append(in.Lines, ReturnLineIn{ProductID: l.ProductID, SaleLineID: l.SaleLineID,
-			Description: l.Description, Quantity: httpx.Quantity(l.Quantity), Restock: l.Restock})
+			Description: l.Description, Quantity: httpx.Quantity(l.Quantity), Restock: l.Restock, ReasonCode: l.ReasonCode})
 	}
 	return in
 }
@@ -1336,4 +1397,12 @@ func revenueAccountOf(p returnLinePriced) *string {
 		return p.saleLine.RevenueAccountCode
 	}
 	return nil
+}
+
+// reasonOf is a line's reason code, other when none was named.
+func reasonOf(code string) string {
+	if code == "" {
+		return ReasonOther
+	}
+	return code
 }

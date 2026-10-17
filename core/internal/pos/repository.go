@@ -202,6 +202,7 @@ type Repository interface {
 	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)
 	BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error)
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
+	RestockingFeeBps(ctx context.Context) (map[string]int, error)
 	InsertOverride(ctx context.Context, o *AccountOverride) error
 	LiveOverride(ctx context.Context, saleID uuid.UUID, kind string) (*AccountOverride, error)
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
@@ -653,13 +654,14 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 	var createdAt time.Time
 	err = r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_returns (id, number, register_id, till_session_id, original_transaction_id, customer_id, branch_id,
-			cashier_id, currency, subtotal, tax_amount, total, refund_method, reason, status, credit_memo_id, created_at, updated_at, revision)
+			cashier_id, currency, subtotal, tax_amount, total, refund_method, reason, status, credit_memo_id, restocking_fee,
+			created_at, updated_at, revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 100, $11::numeric / 100, $12::numeric / 100, $13, $14,
-			'COMPLETED', $15, NOW(), NOW(), 1)
+			'COMPLETED', $15, $16::numeric / 100, NOW(), NOW(), 1)
 		RETURNING created_at`,
 		ret.ID, ret.Number, ret.RegisterID, ret.TillSessionID, ret.OriginalSaleID, ret.CustomerID, ret.BranchID,
 		ret.CashierID, ret.Currency, int64(ret.SubtotalCents), int64(ret.TaxCents), int64(ret.TotalCents),
-		string(ret.RefundMethod), ret.Reason, ret.CreditMemoID).Scan(&createdAt)
+		string(ret.RefundMethod), ret.Reason, ret.CreditMemoID, int64(ret.RestockingFeeCents)).Scan(&createdAt)
 	ret.CreatedAt = httpx.TimestampOf(createdAt)
 	if err != nil {
 		return fmt.Errorf("failed to record the return: %w", mapWriteError(err))
@@ -675,10 +677,11 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				unit_price, line_total, restock, sale_line_id, created_at)
-			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
+				unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee, created_at)
+			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11,
+				$13, $14::numeric / 100, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType)
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, reasonOf(l.ReasonCode), int64(l.RestockingFeeCents))
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
@@ -1392,11 +1395,11 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
 			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
-			refund_method, reason, credit_memo_id, created_at
+			refund_method, reason, credit_memo_id, created_at, ROUND(restocking_fee * 100)::bigint, exchange_sale_id
 		FROM pos_returns WHERE id = $1 AND `+middleware.Wall("", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
 		Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID, &ret.OriginalSaleID,
 			&ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents, &ret.TotalCents,
-			&method, &ret.Reason, &ret.CreditMemoID, &createdAt)
+			&method, &ret.Reason, &ret.CreditMemoID, &createdAt, &ret.RestockingFeeCents, &ret.ExchangeSaleID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("return not found")
 	}
@@ -1407,7 +1410,8 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	ret.RefundMethod = RefundMethod(method)
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, position, product_id, description, ROUND(-quantity * 10000)::bigint, uom,
-			ROUND(unit_price * 10000)::bigint, ROUND(-line_total * 100)::bigint, restock
+			ROUND(unit_price * 10000)::bigint, ROUND(-line_total * 100)::bigint, restock, reason_code,
+			ROUND(restocking_fee * 100)::bigint
 		FROM pos_return_lines WHERE return_id = $1 ORDER BY position, id`, id)
 	if err != nil {
 		return nil, err
@@ -1416,7 +1420,7 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	for rows.Next() {
 		var l ReturnLine
 		if err := rows.Scan(&l.ID, &l.Position, &l.ProductID, &l.Description, &l.Quantity, &l.UOM, &l.UnitPrice,
-			&l.LineTotal, &l.Restock); err != nil {
+			&l.LineTotal, &l.Restock, &l.ReasonCode, &l.RestockingFeeCents); err != nil {
 			return nil, err
 		}
 		ret.Lines = append(ret.Lines, l)
@@ -1429,7 +1433,7 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
 			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
-			refund_method, reason, credit_memo_id, created_at
+			refund_method, reason, credit_memo_id, created_at, ROUND(restocking_fee * 100)::bigint, exchange_sale_id
 		FROM pos_returns
 		WHERE ($1 = '' OR register_id = $1)
 			AND created_at >= $2 AND created_at < $3
@@ -1447,7 +1451,7 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 		var createdAt time.Time
 		if err := rows.Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID,
 			&ret.OriginalSaleID, &ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents,
-			&ret.TotalCents, &method, &ret.Reason, &ret.CreditMemoID, &createdAt); err != nil {
+			&ret.TotalCents, &method, &ret.Reason, &ret.CreditMemoID, &createdAt, &ret.RestockingFeeCents, &ret.ExchangeSaleID); err != nil {
 			return nil, err
 		}
 		ret.CreatedAt = httpx.TimestampOf(createdAt)

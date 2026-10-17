@@ -262,6 +262,8 @@ type returnLineRequest struct {
 	Quantity    json.RawMessage `json:"quantity"`
 	UnitPrice   json.RawMessage `json:"unit_price_ten_thousandths"`
 	Restock     *bool           `json:"restock"`
+	// ReasonCode is the line's reason from the closed list (absent is other).
+	ReasonCode *string `json:"reason_code"`
 }
 
 func (r *returnRequest) parse() (*ReturnIn, error) {
@@ -292,9 +294,8 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		v.Check(false, "refund_method", "must be cash, card or account")
 	}
 	if r.Reason != nil {
-		out.Reason = *r.Reason
+		out.Reason = strings.TrimSpace(*r.Reason)
 	}
-	v.Required("reason", out.Reason)
 	if r.GatewayTxID != nil {
 		out.GatewayTxID = *r.GatewayTxID
 	}
@@ -332,7 +333,27 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		if l.Restock != nil {
 			rl.Restock = *l.Restock
 		}
+		// the reason is from the closed lowercase list; none named is other
+		if l.ReasonCode != nil && *l.ReasonCode != "" {
+			rl.ReasonCode = *l.ReasonCode
+			v.Enum(field("reason_code"), rl.ReasonCode, returnReasonCodes()...)
+		} else {
+			rl.ReasonCode = ReasonOther
+		}
 		out.Lines = append(out.Lines, rl)
+	}
+	// other asks for the return's note; a return whose every line names a
+	// reason of the list needs none, and the memo says the reasons in words
+	needsNote := false
+	for i := range out.Lines {
+		if out.Lines[i].ReasonCode == ReasonOther {
+			needsNote = true
+		}
+	}
+	if needsNote {
+		v.Required("reason", out.Reason)
+	} else if out.Reason == "" {
+		out.Reason = reasonNote(out.Lines)
 	}
 	if err := v.Err(); err != nil {
 		return nil, err

@@ -143,6 +143,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
+	mux.HandleFunc("GET /api/v1/pos/return-reasons", guard(h.ListReturnReasons))
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
 	mux.HandleFunc("GET /api/v1/pos/returns/{id}", guard(h.GetReturn))
 

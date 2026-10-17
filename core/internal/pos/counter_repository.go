@@ -250,3 +250,34 @@ func (r *PostgresRepository) UnbumpPrintCount(ctx context.Context, saleID uuid.U
 	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET print_count = GREATEST(print_count - 1, 0) WHERE id = $1`, saleID)
 	return err
 }
+
+// RestockingFeeBps reads the database wide restocking fee of each return
+// reason, in basis points (pos.restocking_fee_bps.<reason>); a reason with no
+// setting carries no fee. A setting that is not a whole number from 0 to
+// 10000 is an error, never a silent zero.
+func (r *PostgresRepository) RestockingFeeBps(ctx context.Context) (map[string]int, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT key, value FROM system_settings WHERE key LIKE $1 ORDER BY key`,
+		settingRestockingFeePrefix+"%")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the restocking fees: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var key string
+		var value *string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		code := strings.TrimPrefix(key, settingRestockingFeePrefix)
+		if !isReturnReason(code) || value == nil || strings.TrimSpace(*value) == "" {
+			continue
+		}
+		n, perr := strconv.Atoi(strings.TrimSpace(*value))
+		if perr != nil || n < 0 || n > 10000 {
+			return nil, fmt.Errorf("the %s setting is not a whole number of basis points from 0 to 10000: %q", key, *value)
+		}
+		out[code] = n
+	}
+	return out, rows.Err()
+}
