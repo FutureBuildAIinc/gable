@@ -5,7 +5,7 @@ use tauri_build::{AppManifest, Attributes};
 
 // Every command the webview may call is declared here, so Tauri applies an
 // ACL to it and the capability must allow it by name. An undeclared app
-// command would be open to every window. Work declares the two token
+// command would be open to every window. Pro declares the two token
 // commands and nothing else (the webview never reaches the custody slot
 // itself): no keychain command, no filesystem, no shell.
 //
