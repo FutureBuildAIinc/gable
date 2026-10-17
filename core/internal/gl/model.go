@@ -60,6 +60,7 @@ type GLAccount struct {
 	IsActive      bool       `json:"is_active"`
 	Description   string     `json:"description"`
 	Balance       int64      `json:"balance"` // Computed, in cents
+	Revision      int64      `json:"revision"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
@@ -99,23 +100,29 @@ type JournalLine struct {
 
 // FiscalPeriod represents an accounting period that can be opened or closed.
 type FiscalPeriod struct {
-	ID        uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	StartDate time.Time  `json:"start_date"`
-	EndDate   time.Time  `json:"end_date"`
-	Status    string     `json:"status"`
-	ClosedAt  *time.Time `json:"closed_at,omitempty"`
-	ClosedBy  string     `json:"closed_by,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID           uuid.UUID  `json:"id"`
+	Name         string     `json:"name"`
+	StartDate    time.Time  `json:"start_date"`
+	EndDate      time.Time  `json:"end_date"`
+	Status       string     `json:"status"`
+	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+	ClosedBy     string     `json:"closed_by,omitempty"`
+	ReopenReason string     `json:"reopen_reason,omitempty"`
+	ReopenedBy   string     `json:"reopened_by,omitempty"`
+	ReopenedAt   *time.Time `json:"reopened_at,omitempty"`
+	Revision     int64      `json:"revision"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
-// TrialBalanceRow is a single row in the trial balance report.
+// TrialBalanceRow is a single row in the trial balance report: one account's
+// posted totals in one currency at one branch.
 type TrialBalanceRow struct {
 	AccountID   uuid.UUID `json:"account_id"`
 	AccountCode string    `json:"account_code"`
 	AccountName string    `json:"account_name"`
 	AccountType string    `json:"account_type"`
 	Currency    string    `json:"currency"`
+	BranchID    uuid.UUID `json:"branch_id"`
 	Debit       int64     `json:"debit"`  // Cents
 	Credit      int64     `json:"credit"` // Cents
 }
@@ -169,8 +176,10 @@ type AccountLineItem struct {
 // ProfitAndLossReport is an income statement covering [StartDate, EndDate].
 type ProfitAndLossReport struct {
 	Currency      string            `json:"currency"`
+	BranchID      *uuid.UUID        `json:"branch_id,omitempty"`
 	StartDate     string            `json:"start_date"`
 	EndDate       string            `json:"end_date"`
+	Comparison    *ProfitAndLossComparison `json:"comparison,omitempty"`
 	Revenue       []AccountLineItem `json:"revenue"`
 	COGS          []AccountLineItem `json:"cogs"`
 	Expenses      []AccountLineItem `json:"expenses"`
@@ -191,6 +200,7 @@ type ProfitAndLossReport struct {
 // and does not double-count.
 type BalanceSheetReport struct {
 	Currency         string            `json:"currency"`
+	BranchID         *uuid.UUID        `json:"branch_id,omitempty"`
 	AsOfDate         string            `json:"as_of_date"`
 	Assets           []AccountLineItem `json:"assets"`
 	Liabilities      []AccountLineItem `json:"liabilities"`

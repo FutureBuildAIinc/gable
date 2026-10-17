@@ -5,23 +5,37 @@ package gl
 
 import (
 	"encoding/json"
-	"math"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
-// Handler exposes GL REST endpoints.
+// Handler exposes the GL REST endpoints on the ADR 0001 wire contract:
+// integer cents, cursor pagination on the lists, revision plus If-Match on
+// the mutable masters, and the branch wall on every read and write that
+// names or returns a branch.
 type Handler struct {
-	svc *Service
+	svc   *Service
+	guard *middleware.BranchGuard
 }
 
 // NewHandler creates a new GL Handler.
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// WithBranchGuard wires the branch guard that holds a named branch to the
+// caller's reach.
+func (h *Handler) WithBranchGuard(g *middleware.BranchGuard) *Handler {
+	h.guard = g
+	return h
 }
 
 // RegisterRoutes registers all GL routes on the mux.
@@ -49,17 +63,70 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/gl/journal-entries/{id}/void", guard(h.HandleVoidJournalEntry))
 	mux.HandleFunc("POST /api/v1/gl/journal-entries/{id}/reverse", guard(h.HandleReverseJournalEntry))
 
-	// Trial Balance
+	// Trial Balance, statements, drill down, tie out
 	mux.HandleFunc("GET /api/v1/gl/trial-balance", guard(h.HandleTrialBalance))
-
-	// Financial Statements
 	mux.HandleFunc("GET /api/v1/gl/profit-and-loss", guard(h.HandleProfitAndLoss))
 	mux.HandleFunc("GET /api/v1/gl/balance-sheet", guard(h.HandleBalanceSheet))
+	mux.HandleFunc("GET /api/v1/gl/detail", guard(h.HandleGLDetail))
+	mux.HandleFunc("GET /api/v1/gl/tie-out", guard(h.HandleTieOut))
 
-	// Fiscal Periods
+	// Fiscal Periods and the year end close
 	mux.HandleFunc("GET /api/v1/gl/fiscal-periods", guard(h.HandleListFiscalPeriods))
 	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/close", guard(h.HandleCloseFiscalPeriod))
 	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/reopen", guard(h.HandleReopenFiscalPeriod))
+	mux.HandleFunc("POST /api/v1/gl/years/{year}/close", guard(h.HandleCloseYear))
+}
+
+// branchRead resolves a statement read's branch parameter against the
+// caller's reach: a named branch is held to it, and a consolidated read (no
+// branch named) needs every branch's reach, so a caller held to one branch
+// is refused rather than handed a silent partial sum.
+func (h *Handler) branchRead(w http.ResponseWriter, r *http.Request, raw string) (*uuid.UUID, bool) {
+	ctx := r.Context()
+	if raw == "" {
+		if middleware.BranchIDForQuery(ctx) != nil || middleware.GrantsSubForQuery(ctx) != nil {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: "a consolidated read needs every branch reach",
+				Details: []httpx.FieldError{{Field: "branch_id", Message: "name a branch you may read, or drop the branch header for the consolidated view"}}})
+			return nil, false
+		}
+		return nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("branch_id is not a uuid",
+			httpx.FieldError{Field: "branch_id", Message: "must be a branch id"}))
+		return nil, false
+	}
+	if h.guard != nil {
+		if err := h.guard.CheckGrantsBranch(ctx, &id); err != nil {
+			h.writeGuardError(w, r, err)
+			return nil, false
+		}
+	}
+	return &id, true
+}
+
+// branchWrite holds a written branch to the caller's reach the same way.
+func (h *Handler) branchWrite(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	if h.guard != nil {
+		if err := h.guard.CheckPayloadBranch(r.Context(), id); err != nil {
+			h.writeGuardError(w, r, err)
+			return false
+		}
+	}
+	return true
+}
+
+// writeGuardError maps the branch guard's refusal to its 403; a lookup fault
+// stays the server's.
+func (h *Handler) writeGuardError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "the branch is outside your reach",
+			Details: []httpx.FieldError{{Field: "branch_id", Message: "is not one of your branches"}}})
+		return
+	}
+	httpx.WriteError(w, r, err)
 }
 
 // HandleReverseJournalEntry posts a net-zero reversal of a posted entry.
@@ -82,31 +149,35 @@ func (h *Handler) HandleReverseJournalEntry(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(map[string]any{"reversal_entry_id": revID})
 }
 
-// HandleReopenFiscalPeriod reopens a closed period (controller correction).
-func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
-		return
-	}
-	if err := h.svc.ReopenFiscalPeriod(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to reopen fiscal period", http.StatusBadRequest, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "reopened"})
-}
-
 // --- Account Handlers ---
 
+const accountsCursorScope = "gl_accounts"
+
 func (h *Handler) HandleListAccounts(w http.ResponseWriter, r *http.Request) {
-	accounts, err := h.svc.ListAccounts(r.Context())
+	page, err := httpx.ParseListQuery(r, accountsCursorScope)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list GL accounts", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(accounts)
+	after := ""
+	if len(page.Key) > 0 {
+		after = page.Key[0]
+	}
+	accounts, err := h.svc.ListAccountsPage(r.Context(), page.Limit+1, after)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(accounts) > page.Limit {
+		accounts = accounts[:page.Limit]
+		next, err = httpx.MintCursor(accountsCursorScope, accounts[len(accounts)-1].Code)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, accounts, next, page.Limit)
 }
 
 type createAccountRequest struct {
@@ -117,6 +188,7 @@ type createAccountRequest struct {
 	ParentID      *uuid.UUID `json:"parent_id,omitempty"`
 	NormalBalance string     `json:"normal_balance"`
 	Description   string     `json:"description"`
+	Revision      *int64     `json:"revision"`
 }
 
 func (h *Handler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -154,9 +226,18 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	current, err := h.svc.GetAccount(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "account not found", http.StatusNotFound, err)
+		return
+	}
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if err := httpx.CheckRevision(current.Revision, r.Header.Get("If-Match"), req.Revision); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 
@@ -170,27 +251,61 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		NormalBalance: req.NormalBalance,
 		Description:   req.Description,
 		IsActive:      true,
+		Revision:      current.Revision,
 	}
 
 	if err := h.svc.UpdateAccount(r.Context(), acct); err != nil {
+		if errors.Is(err, ErrStaleRevision) {
+			httpx.WriteError(w, r, httpx.StaleRevision("the account was changed after this revision was read; reload and retry"))
+			return
+		}
 		httputil.RespondError(w, r, "failed to update GL account", http.StatusInternalServerError, err)
 		return
 	}
 
+	httpx.WriteRevisionETag(w, acct.Revision)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(acct)
 }
 
 // --- Journal Entry Handlers ---
 
+const entriesCursorScope = "gl_journal_entries"
+
 func (h *Handler) HandleListJournalEntries(w http.ResponseWriter, r *http.Request) {
-	entries, err := h.svc.ListJournalEntries(r.Context())
+	page, err := httpx.ParseListQuery(r, entriesCursorScope)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list journal entries", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
+		return
+	}
+	before := 0
+	if len(page.Key) > 0 {
+		before, err = strconv.Atoi(page.Key[0])
+		if err != nil {
+			httpx.WriteError(w, r, httpx.BadRequest("cursor is malformed",
+				httpx.FieldError{Field: "cursor", Message: "was not minted for this ordering"}))
+			return
+		}
+	}
+	entries, err := h.svc.ListJournalEntriesPage(r.Context(), page.Limit+1, before, branch)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(entries) > page.Limit {
+		entries = entries[:page.Limit]
+		next, err = httpx.MintCursor(entriesCursorScope, strconv.Itoa(entries[len(entries)-1].EntryNumber))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, entries, next, page.Limit)
 }
 
 func (h *Handler) HandleGetJournalEntry(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +321,19 @@ func (h *Handler) HandleGetJournalEntry(w http.ResponseWriter, r *http.Request) 
 		httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, err)
 		return
 	}
+	// The by-id read is walled like the list: a caller held to one branch
+	// finds another branch's entry missing rather than read.
+	if b := middleware.BranchIDForQuery(r.Context()); b != nil && *b != entry.BranchID {
+		httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, nil)
+		return
+	}
+	if h.guard != nil {
+		branch := entry.BranchID
+		if err := h.guard.CheckGrantsBranch(r.Context(), &branch); err != nil {
+			httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, nil)
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entry)
@@ -215,20 +343,31 @@ type createJournalEntryRequest struct {
 	EntryDate string           `json:"entry_date"` // YYYY-MM-DD
 	Memo      string           `json:"memo"`
 	BranchID  string           `json:"branch_id"`
+	PostedBy  string           `json:"posted_by"`
 	Lines     []journalLineReq `json:"lines"`
 }
 
 type journalLineReq struct {
-	AccountID   string  `json:"account_id"`
-	Description string  `json:"description"`
-	Debit       float64 `json:"debit"`
-	Credit      float64 `json:"credit"`
+	AccountID   string `json:"account_id"`
+	Description string `json:"description"`
+	DebitCents  int64  `json:"debit_cents"`
+	CreditCents int64  `json:"credit_cents"`
 }
 
 func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Request) {
 	var req createJournalEntryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	branchID, err := uuid.Parse(req.BranchID)
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("a manual journal entry names its branch",
+			httpx.FieldError{Field: "branch_id", Message: "must be a branch id"}))
+		return
+	}
+	if !h.branchWrite(w, r, branchID) {
 		return
 	}
 
@@ -244,8 +383,9 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 
 	var lines []JournalLine
 	for _, lr := range req.Lines {
-		if lr.Debit < 0 || lr.Credit < 0 {
-			httputil.RespondError(w, r, "debit and credit amounts must be >= 0", http.StatusBadRequest, nil)
+		if lr.DebitCents < 0 || lr.CreditCents < 0 {
+			httpx.WriteError(w, r, httpx.BadRequest("debit and credit are cents and never negative",
+				httpx.FieldError{Field: "lines", Message: "debit_cents and credit_cents must be >= 0"}))
 			return
 		}
 		accountID, err := uuid.Parse(lr.AccountID)
@@ -256,15 +396,9 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 		lines = append(lines, JournalLine{
 			AccountID:   accountID,
 			Description: lr.Description,
-			Debit:       int64(math.Round(lr.Debit * 100)),
-			Credit:      int64(math.Round(lr.Credit * 100)),
+			Debit:       lr.DebitCents,
+			Credit:      lr.CreditCents,
 		})
-	}
-
-	branchID, err := uuid.Parse(req.BranchID)
-	if err != nil {
-		httputil.RespondError(w, r, "a manual journal entry names its branch (branch_id)", http.StatusBadRequest, err)
-		return
 	}
 
 	entry := &JournalEntry{
@@ -272,11 +406,17 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 		Memo:      req.Memo,
 		Source:    SourceManual,
 		BranchID:  branchID,
+		PostedBy:  req.PostedBy,
 		Status:    StatusDraft,
 		Lines:     lines,
 	}
 
-	if err := h.svc.CreateJournalEntry(r.Context(), entry); err != nil {
+	if err := h.svc.CreateManualJournalEntry(r.Context(), entry); err != nil {
+		if errors.Is(err, ErrNoBranch) {
+			httpx.WriteError(w, r, httpx.BadRequest("a manual journal entry names its branch",
+				httpx.FieldError{Field: "branch_id", Message: "is required"}))
+			return
+		}
 		httputil.RespondError(w, r, "failed to create journal entry", http.StatusBadRequest, err)
 		return
 	}
@@ -323,9 +463,12 @@ func (h *Handler) HandleVoidJournalEntry(w http.ResponseWriter, r *http.Request)
 // --- Trial Balance ---
 
 func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
-	asOfStr := r.URL.Query().Get("as_of")
-	asOf := time.Now()
-	if asOfStr != "" {
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
+		return
+	}
+	asOf := time.Time{}
+	if asOfStr := r.URL.Query().Get("as_of"); asOfStr != "" {
 		parsed, err := time.Parse("2006-01-02", asOfStr)
 		if err != nil {
 			httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
@@ -338,7 +481,7 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.svc.GetTrialBalance(r.Context(), asOf, currency)
+	rows, err := h.svc.GetTrialBalanceFor(r.Context(), asOf, currency, branch)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get trial balance", http.StatusInternalServerError, err)
 		return
@@ -352,8 +495,13 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 
 // HandleProfitAndLoss serves GET /api/v1/gl/profit-and-loss?start=&end=.
 // Both parameters are YYYY-MM-DD and inclusive; start defaults to the first of
-// the current month and end to today.
+// the current month and end to today. compare_start and compare_end carry
+// the previous period the row asks to sit beside the current one.
 func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
+		return
+	}
 	now := time.Now()
 	startStr := r.URL.Query().Get("start")
 	if startStr == "" {
@@ -366,7 +514,7 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 
 	// Validate here so that a malformed range answers 400 and anything the
 	// service reports afterwards is a genuine server fault (500). The service
-	// re-checks both — it is a public method with other potential callers.
+	// re-checks both: it is a public method with other potential callers.
 	start, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
 		httputil.RespondError(w, r, "invalid start date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
@@ -386,9 +534,10 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	report, err := h.svc.GetProfitAndLoss(r.Context(), startStr, endStr, currency)
+	report, err := h.svc.GetProfitAndLossFor(r.Context(), startStr, endStr, currency, branch,
+		r.URL.Query().Get("compare_start"), r.URL.Query().Get("compare_end"))
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
+		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusBadRequest, err)
 		return
 	}
 
@@ -397,28 +546,95 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleBalanceSheet serves GET /api/v1/gl/balance-sheet?as_of=.
-// as_of is YYYY-MM-DD and inclusive; it defaults to today.
+// as_of is YYYY-MM-DD and inclusive; it defaults to the branch's business day.
 func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
-	asOfStr := r.URL.Query().Get("as_of")
-	if asOfStr == "" {
-		asOfStr = time.Now().Format("2006-01-02")
-	}
-
-	if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
-		httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
 		return
+	}
+	asOfStr := r.URL.Query().Get("as_of")
+	if asOfStr != "" {
+		if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
+			httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+			return
+		}
 	}
 
 	currency, ok := currencyParam(w, r)
 	if !ok {
 		return
 	}
-	report, err := h.svc.GetBalanceSheet(r.Context(), asOfStr, currency)
+	report, err := h.svc.GetBalanceSheetFor(r.Context(), asOfStr, currency, branch)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
+		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusBadRequest, err)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+// HandleGLDetail serves the drill down from a statement row:
+// GET /api/v1/gl/detail?account_id=&from=&to=&branch_id=, the posted lines of
+// one account over a date window, one branch's or every branch's.
+func (h *Handler) HandleGLDetail(w http.ResponseWriter, r *http.Request) {
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
+		return
+	}
+	accountID, err := uuid.Parse(r.URL.Query().Get("account_id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("account_id is required",
+			httpx.FieldError{Field: "account_id", Message: "must be an account id"}))
+		return
+	}
+	from, err := time.Parse("2006-01-02", r.URL.Query().Get("from"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid from date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+	to, err := time.Parse("2006-01-02", r.URL.Query().Get("to"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid to date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+	rows, err := h.svc.GetGLDetail(r.Context(), accountID, from, to, branch)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get gl detail", http.StatusInternalServerError, err)
+		return
+	}
+	if rows == nil {
+		rows = []GLDetailRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rows)
+}
+
+// HandleTieOut serves GET /api/v1/gl/tie-out?as_of=&currency=&branch_id=: the
+// AR and AP control accounts against their subledgers, differences in cents.
+func (h *Handler) HandleTieOut(w http.ResponseWriter, r *http.Request) {
+	branch, ok := h.branchRead(w, r, r.URL.Query().Get("branch_id"))
+	if !ok {
+		return
+	}
+	asOf := time.Time{}
+	if s := r.URL.Query().Get("as_of"); s != "" {
+		parsed, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+			return
+		}
+		asOf = parsed
+	}
+	currency, ok := currencyParam(w, r)
+	if !ok {
+		return
+	}
+	report, err := h.svc.TieOut(r.Context(), asOf, currency, branch)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to tie out", http.StatusInternalServerError, err)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
 }
@@ -436,20 +652,105 @@ func (h *Handler) HandleListFiscalPeriods(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
 		return
 	}
-
-	if err := h.svc.CloseFiscalPeriod(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to close fiscal period", http.StatusBadRequest, err)
+	period, err := h.svc.GetFiscalPeriod(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "fiscal period not found", http.StatusNotFound, err)
 		return
 	}
-
+	if err := httpx.CheckRevision(period.Revision, r.Header.Get("If-Match"), nil); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	closed, err := h.svc.CloseFiscalPeriodFor(r.Context(), id, period.Revision, actorOf(r))
+	if err != nil {
+		h.writeActError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, closed.Revision)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "closed"})
+	json.NewEncoder(w).Encode(closed)
+}
+
+func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.Reason == "" {
+		httpx.WriteError(w, r, httpx.BadRequest("a period is reopened with a reason",
+			httpx.FieldError{Field: "reason", Message: "is required to reopen a fiscal period"}))
+		return
+	}
+	period, err := h.svc.GetFiscalPeriod(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "fiscal period not found", http.StatusNotFound, err)
+		return
+	}
+	if err := httpx.CheckRevision(period.Revision, r.Header.Get("If-Match"), nil); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	reopened, err := h.svc.ReopenFiscalPeriodFor(r.Context(), id, period.Revision, body.Reason, actorOf(r))
+	if err != nil {
+		h.writeActError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, reopened.Revision)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reopened)
+}
+
+// HandleCloseYear zeroes the year's revenue and expense accounts into
+// Retained Earnings, per branch.
+func (h *Handler) HandleCloseYear(w http.ResponseWriter, r *http.Request) {
+	year, err := strconv.Atoi(r.PathValue("year"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid year", http.StatusBadRequest, err)
+		return
+	}
+	out, err := h.svc.CloseYear(r.Context(), year, r.URL.Query().Get("currency"), actorOf(r))
+	if err != nil {
+		h.writeActError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+// writeActError maps the service refusals of the period and year end acts to
+// their wire shapes; anything else is the server's fault.
+func (h *Handler) writeActError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrStaleRevision):
+		httpx.WriteError(w, r, httpx.StaleRevision("the period was changed after this revision was read; reload and retry"))
+	case errors.Is(err, ErrReopenReason):
+		httpx.WriteError(w, r, httpx.BadRequest("a period is reopened with a reason",
+			httpx.FieldError{Field: "reason", Message: "is required to reopen a fiscal period"}))
+	case errors.Is(err, ErrPeriodClosed):
+		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+			Message: "the year end close would post into a closed fiscal period",
+			Details: []httpx.FieldError{httpx.Blocker("period_closed", "reopen the period with a reason, close the year, then close it again")}})
+	default:
+		httputil.RespondError(w, r, "the act failed", http.StatusInternalServerError, err)
+	}
+}
+
+// actorOf answers the caller's actor for the audit rows.
+func actorOf(r *http.Request) string {
+	if a := r.Header.Get("X-Actor"); a != "" {
+		return a
+	}
+	return "system"
 }
 
 // currencyParam reads the optional currency parameter of the reports: three

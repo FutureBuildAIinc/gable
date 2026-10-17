@@ -370,12 +370,18 @@ func Run() {
 
 	// GL Module (Full General Ledger): the books span every branch, so a
 	// branch bound key is refused the whole surface outright by the route
-	// allowlist gate (ADR 0007 section 5.5).
+	// allowlist gate (ADR 0007 section 5.5). The routes mount the branch
+	// middleware: every read and write carries the branch wall, a named
+	// branch is held to the caller's reach by the guard, and the period and
+	// year end acts carry their audit row and outbox event in their own
+	// transaction.
 	glAdapter := glint.NewMockGLAdapter()
 	glRepo := gl.NewRepository(db)
-	glSvc := gl.NewService(glRepo, glAdapter, logger)
-	glHandler := gl.NewHandler(glSvc)
-	glHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	glSvc := gl.NewService(glRepo, glAdapter, logger).
+		WithAuditTrail(db, auditLog, outbox.NewWriter(db, cfg.EventsOrg))
+	gl.NewHandler(glSvc).
+		WithBranchGuard(wall.guard).
+		RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"), wall.mw))
 
 	// Account Module: the AR core, the single writer of the subledger, the
 	// balance, the applications and the AR columns of the documents (ADR 0005

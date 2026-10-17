@@ -63,6 +63,50 @@ func (m *MockRepository) UpdateAccount(ctx context.Context, acct *GLAccount) err
 	return nil
 }
 
+func (m *MockRepository) GetTrialBalanceFor(ctx context.Context, asOfDate time.Time, currency string, f branchFilter) ([]TrialBalanceRow, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) GetAccountActivityFor(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string, f branchFilter) ([]AccountActivity, error) {
+	return m.GetAccountActivity(ctx, start, end, accountTypes, currency)
+}
+
+func (m *MockRepository) GetGLDetail(ctx context.Context, accountID uuid.UUID, from, to time.Time, f branchFilter) ([]GLDetailRow, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) YearActivityByBranch(ctx context.Context, year int, currency string) (map[uuid.UUID][]AccountActivity, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) BranchBusinessDay(ctx context.Context, branch *uuid.UUID) (time.Time, error) {
+	return time.Now(), nil
+}
+
+func (m *MockRepository) ControlBalance(ctx context.Context, code string, asOf time.Time, currency string, f branchFilter) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) ARSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) APSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) ListJournalEntriesPage(ctx context.Context, limit, beforeNumber int, f branchFilter) ([]JournalEntry, error) {
+	return nil, nil
+}
+
 func (m *MockRepository) CreateJournalEntry(ctx context.Context, entry *JournalEntry) error {
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
@@ -144,7 +188,7 @@ func (m *MockRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, cl
 	return nil
 }
 
-func (m *MockRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error {
+func (m *MockRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reason, reopenedBy string) error {
 	for i := range m.periods {
 		if m.periods[i].ID == id {
 			m.periods[i].Status = PeriodOpen

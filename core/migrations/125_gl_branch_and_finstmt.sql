@@ -47,13 +47,14 @@ FROM (
         LIMIT 1
     ) vpi ON TRUE
 ) d
-WHERE e.branch_id IS NULL;
+WHERE e.id = d.id AND e.branch_id IS NULL;
 
--- A reversal belongs to the branch of the entry it reverses.
+-- A reversal belongs to the branch of the entry it reverses (the default the
+-- source pass leaves it is not its branch).
 UPDATE gl_journal_entries e
 SET branch_id = orig.branch_id
 FROM gl_journal_entries orig
-WHERE e.reverses_entry_id = orig.id AND e.branch_id IS NULL;
+WHERE e.reverses_entry_id = orig.id;
 
 -- Whatever no source named lands on the default branch, so the column can go
 -- NOT NULL: an entry with no derivable branch is the default branch's.

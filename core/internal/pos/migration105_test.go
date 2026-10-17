@@ -473,6 +473,8 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	// the service reads the columns migration 114 added to the sale and the
 	// invoice; the database stops at 105 for the legacy rows only
 	mig105Apply(t, conn, "../../migrations/114_pos_sale_account_refs.sql")
+	// the ledger branch dimension: the service stamps every posting's branch
+	mig105Apply(t, conn, "../../migrations/125_gl_branch_and_finstmt.sql")
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {

@@ -13,6 +13,9 @@ import (
 
 	"github.com/gablelbm/gable/internal/domain"
 	integration "github.com/gablelbm/gable/internal/integrations/gl"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +24,13 @@ type Service struct {
 	repo    Repository
 	adapter integration.GLAdapter
 	logger  *slog.Logger
+
+	// db, audit and events ride the period and year end mutations: every act
+	// opens one transaction and carries its audit row and outbox event in it
+	// (ADR 0003). Any may be nil; the act then runs without that side.
+	db     *database.DB
+	audit  *audit.Logger
+	events *outbox.Writer
 }
 
 // NewService creates a new GL Service. The adapter is optional (nil if no external GL sync).
@@ -243,23 +253,7 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 	return rev.ID, nil
 }
 
-// ReopenFiscalPeriod flips a CLOSED period back to OPEN (correction path;
-// should be a controller-privileged action at the handler layer).
-func (s *Service) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID) error {
-	return s.repo.ReopenFiscalPeriod(ctx, id, "system")
-}
-
 // --- Trial Balance ---
-
-// GetTrialBalance sums per account and per currency, never across two currencies
-// (ADR 0005 4.2). currency "" answers every currency's rows, each naming its
-// currency; a code answers that currency alone.
-func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
-	if asOfDate.IsZero() {
-		asOfDate = time.Now()
-	}
-	return s.repo.GetTrialBalance(ctx, asOfDate, currency)
-}
 
 // reportCurrency settles the currency of an income statement or a balance
 // sheet: the one named, else the dealer default. A statement is always in one
@@ -278,7 +272,7 @@ const statementDateLayout = "2006-01-02"
 
 // GetProfitAndLoss assembles an income statement covering [startDate, endDate]
 // inclusive. Both dates are YYYY-MM-DD.
-func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string) (*ProfitAndLossReport, error) {
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string, branch *uuid.UUID) (*ProfitAndLossReport, error) {
 	start, err := time.Parse(statementDateLayout, startDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid start date %q: %w", startDate, err)
@@ -294,7 +288,7 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, curr
 	if currency, err = s.reportCurrency(ctx, currency); err != nil {
 		return nil, err
 	}
-	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency)
+	rows, err := s.repo.GetAccountActivityFor(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +299,7 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, curr
 
 // GetBalanceSheet assembles a statement of financial position as of asOfDate
 // (YYYY-MM-DD).
-func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string) (*BalanceSheetReport, error) {
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string, branch *uuid.UUID) (*BalanceSheetReport, error) {
 	asOf, err := time.Parse(statementDateLayout, asOfDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid as_of date %q: %w", asOfDate, err)
@@ -317,13 +311,13 @@ func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string
 	if currency, err = s.reportCurrency(ctx, currency); err != nil {
 		return nil, err
 	}
-	position, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency)
+	position, err := s.repo.GetAccountActivityFor(ctx, nil, asOf,
+		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
-	earnings, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeRevenue, AccountTypeExpense}, currency)
+	earnings, err := s.repo.GetAccountActivityFor(ctx, nil, asOf,
+		[]string{AccountTypeRevenue, AccountTypeExpense}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
