@@ -62,6 +62,21 @@ func (s *Service) OpenTill(ctx context.Context, registerID string, cashierID uui
 		if err != nil {
 			return err
 		}
+		// The branch's day lock, the one the day close takes, so a drawer never
+		// opens between that close's check and its write; and a branch whose
+		// business date is closed takes no new drawer (CP-09).
+		if branch != nil {
+			if err := s.repo.LockBranchDay(ctx, *branch); err != nil {
+				return err
+			}
+			closed, err := s.repo.BranchDayClosed(ctx, *branch)
+			if err != nil {
+				return err
+			}
+			if closed {
+				return conflict("day_closed", "the branch's business date is closed: no drawer opens until the next day")
+			}
+		}
 		session := &TillSession{RegisterID: registerID, BranchID: branch, CashierID: cashierID,
 			Status: TillOpen, OpeningFloat: openingFloat,
 			ExpectedByMethod: map[string]int64{}, CountedByMethod: map[string]int64{}}

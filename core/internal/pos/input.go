@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -591,4 +592,39 @@ func (r *variancePolicyRequest) parse() (uuid.UUID, *int64, error) {
 		return uuid.Nil, nil, err
 	}
 	return branch, cents, nil
+}
+
+// dayCloseRequest is POST /pos/end-of-day/close.
+type dayCloseRequest struct {
+	BranchID       *string `json:"branch_id"`
+	Date           *string `json:"date"`
+	DepositSlipRef *string `json:"deposit_slip_ref"`
+}
+
+func (r *dayCloseRequest) parse() (branch uuid.UUID, date, slip string, err error) {
+	v := &httpx.Validator{}
+	branch, _ = v.UUID("branch_id", r.BranchID, true)
+	if r.Date != nil {
+		date = *r.Date
+	}
+	if _, perr := time.Parse("2006-01-02", date); perr != nil {
+		v.Check(false, "date", "is required, as YYYY-MM-DD")
+	}
+	if r.DepositSlipRef != nil {
+		slip = strings.TrimSpace(*r.DepositSlipRef)
+	}
+	v.Check(slip != "", "deposit_slip_ref", "is required: the reference printed on the deposit slip")
+	v.Check(len(slip) <= 64, "deposit_slip_ref", "must be at most 64 characters")
+	return branch, date, slip, v.Err()
+}
+
+// depositMatchRequest is POST /pos/end-of-day/{id}/deposit-match.
+type depositMatchRequest struct {
+	BankTransactionID *string `json:"bank_transaction_id"`
+}
+
+func (r *depositMatchRequest) parse() (uuid.UUID, error) {
+	v := &httpx.Validator{}
+	id, _ := v.UUID("bank_transaction_id", r.BankTransactionID, true)
+	return id, v.Err()
 }

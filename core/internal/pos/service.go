@@ -93,6 +93,7 @@ type Service struct {
 	tx        TxRunner
 	ar        ARCore
 	inventory CounterInventory
+	bank      BankLines
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -150,6 +151,18 @@ func (s *Service) holdTillBranch(ctx context.Context, sessionID uuid.UUID) error
 		return httpx.NotFound("till session not found")
 	}
 	return s.holdRecordBranch(ctx, "till session", branch, sessionID)
+}
+
+// holdDayCloseBranch is holdSaleBranch for a branch day close.
+func (s *Service) holdDayCloseBranch(ctx context.Context, closeID uuid.UUID) error {
+	branch, found, err := s.repo.DayCloseBranch(ctx, closeID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return httpx.NotFound("branch day close not found")
+	}
+	return s.holdRecordBranch(ctx, "branch day close", &branch, closeID)
 }
 
 func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {

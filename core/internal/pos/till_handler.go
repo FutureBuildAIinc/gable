@@ -224,3 +224,107 @@ func (h *Handler) PutVariancePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, p)
 }
+
+// GetBranchDay is GET /pos/end-of-day?branch_id=&date=: the branch's end of
+// day summary for a business date (the branch's today when no date is sent).
+func (h *Handler) GetBranchDay(w http.ResponseWriter, r *http.Request) {
+	q, err := httpx.StrictQuery(r, "branch_id", "date")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	branch, perr := uuid.Parse(q.Get("branch_id"))
+	if perr != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "branch_id", Message: "is required and must be a UUID"}))
+		return
+	}
+	day, err := h.service.BranchDay(r.Context(), branch, q.Get("date"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, day)
+}
+
+// CloseBranchDay is POST /pos/end-of-day/close.
+func (h *Handler) CloseBranchDay(w http.ResponseWriter, r *http.Request) {
+	// the close is a person's act, as the sign off is
+	if _, ok := cashierOf(w, r); !ok {
+		return
+	}
+	var req dayCloseRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	branch, date, slip, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	day, err := h.service.CloseBranchDay(r.Context(), branch, date, slip, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/pos/end-of-day?branch_id="+branch.String()+"&date="+date)
+	writeJSON(w, http.StatusCreated, day)
+}
+
+// ListDepositCandidates is GET /pos/end-of-day/{id}/deposit-candidates.
+func (h *Handler) ListDepositCandidates(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	lines, err := h.service.DepositCandidates(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type candidate struct {
+		BankTransactionID uuid.UUID   `json:"bank_transaction_id"`
+		TransactionDate   string      `json:"transaction_date"`
+		AmountCents       httpx.Cents `json:"amount_cents"`
+		Description       string      `json:"description"`
+		Reference         string      `json:"reference"`
+	}
+	items := make([]candidate, 0, len(lines))
+	for _, l := range lines {
+		items = append(items, candidate{BankTransactionID: l.ID, TransactionDate: l.TransactionDate.Format("2006-01-02"),
+			AmountCents: httpx.Cents(l.Amount), Description: l.Description, Reference: l.Reference})
+	}
+	httpx.WriteList(w, items, "", dayCandidateLimit)
+}
+
+// MatchDeposit is POST /pos/end-of-day/{id}/deposit-match.
+func (h *Handler) MatchDeposit(w http.ResponseWriter, r *http.Request) {
+	if _, ok := cashierOf(w, r); !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req depositMatchRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	line, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	c, err := h.service.MatchDeposit(r.Context(), id, line, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}

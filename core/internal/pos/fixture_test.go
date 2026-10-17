@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -121,7 +122,8 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	f.events = &recordingWriter{inner: outbox.NewWriter(db, "")}
 	f.service = pos.NewService(db, pos.NewRepository(db), logger).
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
-		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db)
+		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db).
+		WithBankLines(bankrecon.NewDepositLines(db))
 	// the counter guards the AR core's applications as serve wires it (C2-5):
 	// an invoice whose sale's void has standing claims takes no application,
 	// and a payment whose unapplied cash is a declined void tender's credit
@@ -270,6 +272,7 @@ func (f *fixture) cleanup() {
 	}
 
 	exec(`DELETE FROM pos_sync_log`)
+	exec(`DELETE FROM till_day_closes`)
 	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
 	exec(`DELETE FROM till_sessions`)

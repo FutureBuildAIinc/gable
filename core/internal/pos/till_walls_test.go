@@ -139,3 +139,55 @@ func TestTheSignOffRoutesCarryTheBranchWall(t *testing.T) {
 		t.Errorf("the unscoped sign off = %d, want 200: %s", r.status, r.raw)
 	}
 }
+
+// RULE: the end of day routes carry the branch wall: a caller held to branch B
+// is refused branch A's summary and close by name, and finds A's day close (the
+// candidates and the match) a missing record; nothing is written.
+func TestTheEndOfDayRoutesCarryTheBranchWall(t *testing.T) {
+	w := newWallFixture(t)
+	sessionID := w.openDrawerA()
+	if r := w.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 5000}}); r.status != http.StatusOK {
+		t.Fatalf("close = %d: %s", r.status, r.raw)
+	}
+	var day string
+	if err := w.db.Pool.QueryRow(contextB(), `SELECT (NOW() AT TIME ZONE COALESCE((SELECT timezone FROM locations WHERE id = $1), 'UTC'))::date::text`, w.branchID).Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	scoped := append([]string{}, w.scoped...)
+	scoped[1] = "finance"
+	noHdr := append([]string{}, w.noHdr...)
+	noHdr[1] = "finance"
+	closeBody := map[string]any{"branch_id": w.branchID.String(), "date": day, "deposit_slip_ref": "WALL-1"}
+	summary := "/api/v1/pos/end-of-day?branch_id=" + w.branchID.String() + "&date=" + day
+
+	for name, hdr := range map[string][]string{"naming branch B": scoped, "naming no branch": noHdr} {
+		if r := w.do("GET", summary, nil, hdr...); r.status != http.StatusForbidden {
+			t.Errorf("branch A's summary, %s = %d, want 403: %s", name, r.status, r.raw)
+		}
+		if r := w.do("POST", "/api/v1/pos/end-of-day/close", closeBody, hdr...); r.status != http.StatusForbidden {
+			t.Errorf("branch A's day close, %s = %d, want 403: %s", name, r.status, r.raw)
+		}
+	}
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1`, w.branchID); got != 0 {
+		t.Fatalf("a day closed through the wall")
+	}
+	// the unscoped caller (no claims, reaching every branch) closes the day
+	r := w.do("POST", "/api/v1/pos/end-of-day/close", closeBody)
+	if r.status != http.StatusCreated {
+		t.Fatalf("unscoped day close = %d: %s", r.status, r.raw)
+	}
+	closeID := str(t, obj(t, r.body, "close"), "id")
+	if r := w.do("GET", "/api/v1/pos/end-of-day/"+closeID+"/deposit-candidates", nil, scoped...); r.status != http.StatusNotFound {
+		t.Errorf("branch A's candidates, naming branch B = %d, want 404: %s", r.status, r.raw)
+	}
+	line := uuid.New()
+	if r := w.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/deposit-match", map[string]any{"bank_transaction_id": line.String()}, scoped...); r.status != http.StatusNotFound {
+		t.Errorf("branch A's match, naming branch B = %d, want 404: %s", r.status, r.raw)
+	}
+	if r := w.do("GET", "/api/v1/pos/end-of-day/"+closeID+"/deposit-candidates", nil, noHdr...); r.status != http.StatusForbidden {
+		t.Errorf("branch A's candidates, naming no branch = %d, want the 403 record rule: %s", r.status, r.raw)
+	}
+	if r := w.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/deposit-match", map[string]any{"bank_transaction_id": line.String()}, noHdr...); r.status != http.StatusForbidden {
+		t.Errorf("branch A's match, naming no branch = %d, want the 403 record rule: %s", r.status, r.raw)
+	}
+}

@@ -147,6 +147,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/till/policy", guard(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
 
+	// The end of day by branch (CP-09): the summary is the counter's to read,
+	// the close and the deposit match are the managers' (finance and owner).
+	mux.HandleFunc("GET /api/v1/pos/end-of-day", guard(h.GetBranchDay))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/close", resolveMount(h.CloseBranchDay))
+	mux.HandleFunc("GET /api/v1/pos/end-of-day/{id}/deposit-candidates", resolveMount(h.ListDepositCandidates))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/deposit-match", resolveMount(h.MatchDeposit))
+
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))

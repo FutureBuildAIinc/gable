@@ -101,6 +101,18 @@ type Repository interface {
 	ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error)
 	GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error)
 	SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error
+	// The branch day (CP-09).
+	BranchZone(ctx context.Context, branch uuid.UUID) (string, bool, error)
+	LockBranchDay(ctx context.Context, branch uuid.UUID) error
+	BranchDayClosed(ctx context.Context, branch uuid.UUID) (bool, error)
+	ListBranchDaySessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	ListUnsettledSessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	BranchCollectionsNet(ctx context.Context, branch uuid.UUID, date string) (httpx.Cents, error)
+	DayCloseBranch(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error)
+	GetDayClose(ctx context.Context, branch uuid.UUID, date string) (*DayClose, error)
+	GetDayCloseByID(ctx context.Context, id uuid.UUID, forUpdate bool) (*DayClose, error)
+	CreateDayClose(ctx context.Context, c *DayClose) error
+	MatchDayClose(ctx context.Context, id uuid.UUID, m *DepositMatch) error
 	// BranchToday is the branch's business date now in its own zone.
 	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 
