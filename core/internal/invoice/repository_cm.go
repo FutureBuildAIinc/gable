@@ -196,7 +196,17 @@ func (r *PostgresRepository) creditLines(ctx context.Context, id uuid.UUID) ([]C
 		l.CostCents = httpx.Cents(cost)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	plain := make([]salesdoc.Line, len(out))
+	for i := range out {
+		plain[i] = out[i].Line
+	}
+	if err := r.attachLineTallyRows(ctx, plain, "credit_memo_line_id"); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // CreditHeader is the stored header of a credit memo for a write. Totals are
@@ -297,21 +307,42 @@ func (r *PostgresRepository) ReplaceCreditLines(ctx context.Context, memoID uuid
 		}
 		_, err := exec.Exec(ctx, `
 			INSERT INTO credit_memo_lines (id, credit_memo_id, position, line_type, parent_line_id, product_id, charge_code_id,
-				invoice_line_id, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price,
-				priced_unit_price, price_source, override_reason, discount_percent, discount_amount, discount_reason,
-				price_adjusted_by, line_total, taxable, revenue_account_code, restock, unit_cost, cost, created_at)
+				invoice_line_id, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in, unit_price,
+				priced_unit_price, price_source, price_basis, override_reason, discount_percent, discount_amount, discount_reason,
+				price_adjusted_by, line_total, taxable, revenue_account_code, restock, cost_source, unit_cost, cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric / 10000, $12, $13, $14::numeric / 10000,
-				$15::numeric / 10000, $16::numeric / 10000, $17::numeric / 10000, $18, $19, $20::numeric / 10000,
-				$21::numeric / 100, $22, $23, $24::numeric / 100, $25, $26, $27, $28::numeric / 10000, $29::numeric / 100, NOW())`,
+				$15::numeric / 10000, $16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000,
+				$20::numeric / 10000, $21::numeric / 10000, $22, $23, $24,
+				$25::numeric / 10000, $26::numeric / 100, $27, $28,
+				$29::numeric / 100, $30, $31, $32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
 			l.ID, memoID, l.Position, string(l.LineType), l.ParentLineID, l.ProductID, l.ChargeCodeID,
-			l.InvoiceLineID, l.SKU, l.Description, qty, l.UOM, l.PriceUOM, uomQty, priceQty, price,
-			priced, string(l.PriceSource), l.OverrideReason, discPct,
-			discAmt, l.DiscountReason, l.PriceAdjustedBy, total, l.Taxable, l.RevenueAccountCode, l.Restock, unitCost, int64(l.CostCents))
+			l.InvoiceLineID, l.SKU, l.Description, qty, l.UOM, l.PriceUOM, uomQty, priceQty,
+			l.StockUOM, qtyArg2(l.StockQuantity), qtyArg2(l.TallyThickness()), qtyArg2(l.TallyWidth()), price,
+			priced, string(l.PriceSource), l.PriceBasis, l.OverrideReason, discPct,
+			discAmt, l.DiscountReason, l.PriceAdjustedBy, total, l.Taxable, l.RevenueAccountCode, l.Restock, l.CostSource, unitCost, int64(l.CostCents))
 		if err != nil {
 			return mapWriteError(err, "failed to insert credit memo line")
 		}
+		if l.Tally != nil {
+			for j, row := range l.Tally.Rows {
+				if _, err := exec.Exec(ctx, `
+					INSERT INTO line_tally_rows (credit_memo_line_id, position, pieces, length_ft)
+					VALUES ($1, $2, $3, $4::numeric / 10000)`,
+					l.ID, j, row.Pieces, int64(row.LengthFT)); err != nil {
+					return mapWriteError(err, "failed to insert a tally row")
+				}
+			}
+		}
 	}
 	return nil
+}
+
+func qtyArg2(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return int64(*q)
 }
 
 func i64p(v int64) *int64 { return &v }

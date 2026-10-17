@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
@@ -180,16 +179,15 @@ func TestCalculatePrice(t *testing.T) {
 		custID := uuid.New()
 		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
 		svc := NewService(&MockRepository{}).WithRepository(fake)
-		cust := &customer.Customer{ID: custID}
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != basePrice {
-			t.Errorf("expected %.2f, got %.2f", basePrice, res.FinalPrice)
+		if res.UnitPrice != priceOf(basePrice) {
+			t.Errorf("expected %v, got %v", priceOf(basePrice), res.UnitPrice)
 		}
-		if res.Source != SourceBase {
-			t.Errorf("expected base source, got %s", res.Source)
+		if res.PriceBasis != SourceBase {
+			t.Errorf("expected base source, got %s", res.PriceBasis)
 		}
 	})
 
@@ -199,20 +197,19 @@ func TestCalculatePrice(t *testing.T) {
 		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
 		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelCode: "SILVER", LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
 		svc := NewService(&MockRepository{}).WithRepository(fake)
-		cust := &customer.Customer{ID: custID}
 
 		// Expected: 10 * 0.9 = 9.00
-		expected := 9.00
+		expected := priceOf(9.00)
 
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != expected {
-			t.Errorf("expected %.2f, got %.2f", expected, res.FinalPrice)
+		if res.UnitPrice != expected {
+			t.Errorf("expected %v, got %v", expected, res.UnitPrice)
 		}
-		if res.Source != SourceLevel {
-			t.Errorf("expected level source, got %s", res.Source)
+		if res.PriceBasis != SourceLevel {
+			t.Errorf("expected level source, got %s", res.PriceBasis)
 		}
 	})
 
@@ -224,17 +221,15 @@ func TestCalculatePrice(t *testing.T) {
 		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
 		svc := NewService(&MockRepository{}).WithRepository(fake)
 
-		cust := &customer.Customer{ID: custID} // Even with a program, the contract wins
-
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != 5.00 {
-			t.Errorf("expected 5.00, got %.2f", res.FinalPrice)
+		if res.UnitPrice != priceOf(5.00) {
+			t.Errorf("expected 5.0000, got %v", res.UnitPrice)
 		}
-		if res.Source != SourceContract {
-			t.Errorf("expected contract source, got %s", res.Source)
+		if res.PriceBasis != SourceContract {
+			t.Errorf("expected contract source, got %s", res.PriceBasis)
 		}
 	})
 }

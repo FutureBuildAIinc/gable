@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -348,7 +349,87 @@ func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]
 		l.CostCents = httpx.Cents(cost)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachLineTallyRows(ctx, invoiceLinesOf(out), "invoice_line_id"); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// invoiceLinesOf collects the embedded lines for the tally read.
+func invoiceLinesOf(in []InvoiceLine) []salesdoc.Line {
+	out := make([]salesdoc.Line, len(in))
+	for i := range in {
+		out[i] = in[i].Line
+	}
+	return out
+}
+
+// attachLineTallyRows reads the tally rows of a read line slice (ADR 0006
+// section 4.2) back into the slices' tallies by the line column named, and
+// completes the exact linear feet and display board feet. The lines must be
+// the same backing array's copies' sources when callers need the rows back:
+// this helper serves the InvoiceLine and CreditMemoLine reads, whose tally
+// rows ride the embedded Line's pointer.
+func (r *PostgresRepository) attachLineTallyRows(ctx context.Context, lines []salesdoc.Line, lineColumn string) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		if lines[i].Tally != nil {
+			ids = append(ids, lines[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+lineColumn+`, pieces, ROUND(length_ft * 10000)::bigint
+		 FROM line_tally_rows WHERE `+lineColumn+` = ANY($1) ORDER BY `+lineColumn+`, position`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to get tally rows: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lineID uuid.UUID
+		var row salesdoc.TallyRow
+		var length int64
+		if err := rows.Scan(&lineID, &row.Pieces, &length); err != nil {
+			return fmt.Errorf("failed to scan a tally row: %w", err)
+		}
+		row.LengthFT = httpx.Quantity(length)
+		for i := range lines {
+			if lines[i].ID == lineID && lines[i].Tally != nil {
+				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to walk tally rows: %w", err)
+	}
+	for i := range lines {
+		t := lines[i].Tally
+		if t == nil {
+			continue
+		}
+		arrow := make([]units.TallyRow, 0, len(t.Rows))
+		for _, row := range t.Rows {
+			arrow = append(arrow, units.TallyRow{Pieces: int64(row.Pieces), LengthFT: row.LengthFT})
+		}
+		lf, err := units.LinearFeet(arrow)
+		if err != nil {
+			return fmt.Errorf("failed to sum a tally: %w", err)
+		}
+		t.LinearFeet = lf
+		if t.ThicknessIn != nil && t.WidthIn != nil {
+			if bf, err := units.BoardFeet(lf, *t.ThicknessIn, *t.WidthIn); err == nil {
+				display := units.DisplayBoardFeet(bf)
+				t.BoardFeet = &display
+			}
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -449,9 +530,9 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *LegacyInvoi
 	}
 	queryLine := `
 		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
-			sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
+			sku, description, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total)
 		SELECT $1, $2, $3, $4::numeric, $5::numeric, $6,
-			p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $5::numeric,
+			p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, $4::numeric, $5::numeric,
 			ROUND($4::numeric * $5::numeric, 2)
 		FROM products p WHERE p.id = $3`
 	for i := range inv.Lines {
@@ -599,23 +680,38 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 		l := &in.Lines[i]
 		_, err := exec.Exec(ctx, `
 			INSERT INTO invoice_lines (id, invoice_id, position, line_type, parent_line_id, product_id, charge_code_id,
-				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source,
-				priced_unit_price, override_reason, price_adjusted_by,
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in,
+				unit_price, price_each, price_source,
+				price_basis, priced_unit_price, override_reason, price_adjusted_by,
 				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
-				order_line_id, unit_cost, cost, created_at)
+				order_line_id, cost_source, unit_cost, cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 10000,
-				CASE WHEN $10::numeric > 0 AND $24::numeric IS NOT NULL THEN ROUND(($24::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END,
-				$16, $26::numeric / 10000, $27, $28,
-				$17::numeric / 10000, $18::numeric / 100, $19, $24::numeric / 100, $20, $21,
-				$22, $23::numeric / 10000, $25::numeric / 100, NOW())`,
+				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
+				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
+				$19::numeric / 10000,
+				CASE WHEN $10::numeric > 0 AND $29::numeric IS NOT NULL THEN ROUND(($29::numeric / 100) / ($10::numeric / 10000), 4) ELSE $20::numeric / 10000 END,
+				$21,
+				$22, $23::numeric / 10000, $24, $25,
+				$26::numeric / 10000, $27::numeric / 100, $28, $29::numeric / 100, $30, $31,
+				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
 			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
-			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty, l.UnitPrice, l.PriceSource,
-			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.Taxable, l.RevenueAccountCode,
-			l.OrderLineID, l.UnitCost, l.LineTotalCents, l.CostCents,
-			l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy)
+			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty,
+			l.StockUOM, l.StockQuantity, l.BoardThicknessIn, l.BoardWidthIn,
+			l.UnitPrice, l.UnitPrice, l.PriceSource,
+			l.PriceBasis, l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy,
+			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.LineTotalCents, l.Taxable, l.RevenueAccountCode,
+			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents)
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+		for j, row := range l.TallyRows {
+			if _, err := exec.Exec(ctx, `
+				INSERT INTO line_tally_rows (invoice_line_id, position, pieces, length_ft)
+				VALUES ($1, $2, $3, $4::numeric / 10000)`,
+				l.ID, j, row.Pieces, row.LengthFT); err != nil {
+				return fmt.Errorf("failed to insert a tally row: %w", err)
+			}
 		}
 	}
 	return nil
@@ -652,23 +748,38 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 		l := &in.Lines[i]
 		_, err := exec.Exec(ctx, `
 			INSERT INTO invoice_lines (id, invoice_id, position, line_type, parent_line_id, product_id, charge_code_id,
-				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source,
-				priced_unit_price, override_reason, price_adjusted_by,
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in,
+				unit_price, price_each, price_source,
+				price_basis, priced_unit_price, override_reason, price_adjusted_by,
 				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
-				order_line_id, unit_cost, cost, created_at)
+				order_line_id, cost_source, unit_cost, cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 10000,
-				CASE WHEN $10::numeric > 0 AND $24::numeric IS NOT NULL THEN ROUND(($24::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END,
-				$16, $26::numeric / 10000, $27, $28,
-				$17::numeric / 10000, $18::numeric / 100, $19, $24::numeric / 100, $20, $21,
-				$22, $23::numeric / 10000, $25::numeric / 100, NOW())`,
+				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
+				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
+				$19::numeric / 10000,
+				CASE WHEN $10::numeric > 0 AND $29::numeric IS NOT NULL THEN ROUND(($29::numeric / 100) / ($10::numeric / 10000), 4) ELSE $20::numeric / 10000 END,
+				$21,
+				$22, $23::numeric / 10000, $24, $25,
+				$26::numeric / 10000, $27::numeric / 100, $28, $29::numeric / 100, $30, $31,
+				$32, $33, $34::numeric / 10000, $35::numeric / 100, NOW())`,
 			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
-			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty, l.UnitPrice, l.PriceSource,
-			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.Taxable, l.RevenueAccountCode,
-			l.OrderLineID, l.UnitCost, l.LineTotalCents, l.CostCents,
-			l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy)
+			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty,
+			l.StockUOM, l.StockQuantity, l.BoardThicknessIn, l.BoardWidthIn,
+			l.UnitPrice, l.UnitPrice, l.PriceSource,
+			l.PriceBasis, l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy,
+			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.LineTotalCents, l.Taxable, l.RevenueAccountCode,
+			l.OrderLineID, l.CostSource, l.UnitCost, l.CostCents)
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+		for j, row := range l.TallyRows {
+			if _, err := exec.Exec(ctx, `
+				INSERT INTO line_tally_rows (invoice_line_id, position, pieces, length_ft)
+				VALUES ($1, $2, $3, $4::numeric / 10000)`,
+				l.ID, j, row.Pieces, row.LengthFT); err != nil {
+				return fmt.Errorf("failed to insert a tally row: %w", err)
+			}
 		}
 	}
 	return nil
@@ -727,12 +838,18 @@ type BilledLine struct {
 	LineType    string
 	ProductID   *uuid.UUID
 	Quantity    httpx.Quantity
+	// StockQuantity is the bill in the stocking unit (ADR 0006 section 3.4):
+	// what a void returns to stock and to quantity_fulfilled. Null on a line
+	// written before the stocking columns, whose quantity is the stocking
+	// quantity anyway.
+	StockQuantity *httpx.Quantity
 }
 
 // BilledLines lists the invoice lines that name an order line.
 func (r *PostgresRepository) BilledLines(ctx context.Context, invoiceID uuid.UUID) ([]BilledLine, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT order_line_id, line_type, product_id, ROUND(quantity * 10000)::bigint
+		SELECT order_line_id, line_type, product_id, ROUND(quantity * 10000)::bigint,
+		       ROUND(stock_quantity * 10000)::bigint
 		FROM invoice_lines WHERE invoice_id = $1 AND order_line_id IS NOT NULL AND quantity IS NOT NULL
 		ORDER BY position, id`, invoiceID)
 	if err != nil {
@@ -742,11 +859,15 @@ func (r *PostgresRepository) BilledLines(ctx context.Context, invoiceID uuid.UUI
 	var out []BilledLine
 	for rows.Next() {
 		var b BilledLine
-		var q int64
-		if err := rows.Scan(&b.OrderLineID, &b.LineType, &b.ProductID, &q); err != nil {
+		var q, sq *int64
+		if err := rows.Scan(&b.OrderLineID, &b.LineType, &b.ProductID, &q, &sq); err != nil {
 			return nil, fmt.Errorf("failed to scan a billed line: %w", err)
 		}
-		b.Quantity = httpx.Quantity(q)
+		b.Quantity = httpx.Quantity(*q)
+		if sq != nil {
+			s := httpx.Quantity(*sq)
+			b.StockQuantity = &s
+		}
 		out = append(out, b)
 	}
 	return out, rows.Err()

@@ -5,6 +5,7 @@ package invoice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -187,13 +189,45 @@ func creditFromInvoiceLine(path string, d *CreditLineInput, src *InvoiceLine, am
 		LineType: src.LineType, ProductID: src.ProductID, ChargeCodeID: src.ChargeCodeID, ChargeCode: src.ChargeCode,
 		SKU: src.SKU, Description: desc, Quantity: &q, UOM: src.UOM, PriceUOM: src.PriceUOM, UOMQty: src.UOMQty,
 		PriceUOMQty: src.PriceUOMQty, UnitPrice: src.UnitPrice, PricedUnitPrice: src.PricedUnitPrice,
-		PriceSource: src.PriceSource, OverrideReason: src.OverrideReason, DiscountPercent: src.DiscountPercent,
+		PriceSource: src.PriceSource, PriceBasis: src.PriceBasis, CostSource: src.CostSource,
+		OverrideReason: src.OverrideReason, DiscountPercent: src.DiscountPercent,
 		DiscountReason: src.DiscountReason, PriceAdjustedBy: src.PriceAdjustedBy,
 		LineTotal: &lt, Taxable: src.Taxable, RevenueAccountCode: src.RevenueAccountCode,
+	}
+	if src.Tally != nil && r == whole {
+		rows := make([]salesdoc.TallyRow, len(src.Tally.Rows))
+		copy(rows, src.Tally.Rows)
+		cl.Tally = &salesdoc.Tally{
+			ThicknessIn: src.Tally.ThicknessIn,
+			WidthIn:     src.Tally.WidthIn,
+			Rows:        rows,
+			LinearFeet:  src.Tally.LinearFeet,
+			BoardFeet:   src.Tally.BoardFeet,
+		}
 	}
 	if src.DiscountAmount != nil {
 		dc := httpx.Cents(discount)
 		cl.DiscountAmount = &dc
+	}
+	// The stocking fields ride as the credit stores them (ADR 0006 section
+	// 3.4): the credited stocking quantity, exact at scale 4, or the credit
+	// is refused with the nearest quantities that are (R5). A fallback bill
+	// (its unit already the stocking unit) converts through the same rule
+	// and comes out exact.
+	if src.StockUOM != nil && src.StockQuantity != nil && src.UOM != nil && src.Quantity != nil && *src.Quantity > 0 {
+		pair := units.Pair{A: httpx.Quantity(whole), B: *src.StockQuantity}
+		stockQty, err := units.ConvertStock(httpx.Quantity(r), *src.UOM, *src.StockUOM, pair)
+		if err != nil {
+			var inexact *units.InexactError
+			if errors.As(err, &inexact) {
+				return CreditLine{}, validationFailed("one or more fields failed validation",
+					httpx.FieldError{Field: path + ".quantity", Message: inexact.Error()})
+			}
+			return CreditLine{}, validationFailed("one or more fields failed validation",
+				httpx.FieldError{Field: path + ".quantity", Message: "does not convert exactly into the stocking unit " + *src.StockUOM})
+		}
+		neg := -stockQty
+		cl.StockUOM, cl.StockQuantity = src.StockUOM, &neg
 	}
 	if d.Restock {
 		if src.LineType != salesdoc.LineProduct || src.ProductID == nil {

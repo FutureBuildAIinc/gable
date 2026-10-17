@@ -47,13 +47,12 @@ func TestRuleDiscountExactScale4(t *testing.T) {
 		DiscountPct: pctQtyPtr(10), IsActive: true,
 	}}}
 	svc := resolveFixture(t, prod, subCentBase, repo)
-	cust := &customer.Customer{ID: uuid.New()}
-	res, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, subCentBase, 1, nil)
+	res, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 1))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.FinalPrice != 1.2353 {
-		t.Fatalf("a 10 percent discount on 1.3725 is exactly 1.23525, which rounds once to scale 4 as 1.2353; got %v", res.FinalPrice)
+	if res.UnitPrice != priceOf(1.2353) {
+		t.Fatalf("a 10 percent discount on 1.3725 is exactly 1.23525, which rounds once to scale 4 as 1.2353; got %v", res.UnitPrice)
 	}
 }
 
@@ -67,13 +66,12 @@ func TestRuleMarkupExactScale4(t *testing.T) {
 		MarkupPct: pctQtyPtr(5), IsActive: true,
 	}}}
 	svc := resolveFixture(t, prod, subCentBase, repo)
-	cust := &customer.Customer{ID: uuid.New()}
-	res, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, subCentBase, 1, nil)
+	res, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 1))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.FinalPrice != 1.4411 {
-		t.Fatalf("a 5 percent markup on 1.3725 is exactly 1.441125, which rounds once to scale 4 as 1.4411; got %v", res.FinalPrice)
+	if res.UnitPrice != priceOf(1.4411) {
+		t.Fatalf("a 5 percent markup on 1.3725 is exactly 1.441125, which rounds once to scale 4 as 1.4411; got %v", res.UnitPrice)
 	}
 }
 
@@ -87,13 +85,12 @@ func TestTierRoundedToScale4(t *testing.T) {
 	fake := newFakeResolveRepo().withProduct(prod, subCentBase, "EA")
 	fake.setProgram(programCust, PricingProgram{LevelID: uuid.MustParse("50000000-0000-4000-8000-000000000008"), LevelCode: "SILVER", LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
 	svc := NewService(&MockRepository{}).WithRepository(fake)
-	cust := &customer.Customer{ID: programCust}
-	res, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, subCentBase, 1, nil)
+	res, err := svc.Resolve(context.Background(), resolveReq(programCust, prod, nil, 1))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.FinalPrice != 1.2353 {
-		t.Fatalf("the Silver tier on 1.3725 is exactly 1.23525, which rounds once to scale 4 as 1.2353; got %v", res.FinalPrice)
+	if res.UnitPrice != priceOf(1.2353) {
+		t.Fatalf("the Silver tier on 1.3725 is exactly 1.23525, which rounds once to scale 4 as 1.2353; got %v", res.UnitPrice)
 	}
 }
 
@@ -156,9 +153,9 @@ func TestVolumeBreakSavingExactScale4(t *testing.T) {
 }
 
 // TestCalculateScaledMatchesCompatibilityEntry: for a fixture of rules,
-// levels and tiers, the float64 entry point answers the same price
-// CalculateScaled does, and apart from the cent rounding this item removes,
-// the base commit's engine (ADR 0006 9.2).
+// levels and tiers, Resolve answers the exact scale 4 price, and apart from
+// the cent rounding this item removes, matches the base commit's engine
+// (ADR 0006 9.2).
 func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 	prod := uuid.MustParse("50000000-0000-4000-8000-000000000001")
 	goldCust := uuid.MustParse("50000000-0000-4000-8000-000000000002")
@@ -170,16 +167,11 @@ func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 	dealerLevel := uuid.MustParse("50000000-0000-4000-8000-000000000005")
 	dealerProgram := PricingProgram{LevelID: dealerLevel, LevelCode: "CONTRACTOR", LevelBasis: "BASE", LevelAdjust: qtyOf(-8.25), LevelActive: true}
 	fixtures := []struct {
-		name    string
-		cust    *customer.Customer
-		program *PricingProgram
-		rules   []PricingRule
-		base    float64
-		// baseCommit is the FinalPrice the base commit's float64 engine
-		// answered for the fixture at quantity 20 (recorded by running the
-		// fixture against it). The compatibility entry point answers the
-		// same value apart from the cent rounding this item removes: never
-		// more than a cent apart, and equal where the base did not round.
+		name       string
+		cust       *customer.Customer
+		program    *PricingProgram
+		rules      []PricingRule
+		base       float64
 		baseCommit float64
 	}{
 		{name: "retail no rules", cust: &customer.Customer{ID: uuid.New()}, base: 10.00, baseCommit: 10},
@@ -203,22 +195,13 @@ func TestCalculateScaledMatchesCompatibilityEntry(t *testing.T) {
 				fake.setProgram(fx.cust.ID, *fx.program)
 			}
 			svc := NewService(repo).WithRepository(fake)
-			compat, err := svc.CalculatePriceWithQty(context.Background(), fx.cust, prod, fx.base, 20, nil)
+			resolved, err := svc.Resolve(context.Background(), resolveReq(fx.cust.ID, prod, nil, 20))
 			if err != nil {
-				t.Fatalf("CalculatePriceWithQty: %v", err)
+				t.Fatalf("Resolve: %v", err)
 			}
-			scaled, err := svc.CalculateScaled(context.Background(), fx.cust, prod, fx.base, 20, nil)
-			if err != nil {
-				t.Fatalf("CalculateScaled: %v", err)
-			}
-			if compat.FinalPrice != scaled.Float64() {
-				t.Fatalf("CalculatePriceWithQty answered %v while CalculateScaled answered %v", compat.FinalPrice, scaled.Float64())
-			}
-			if diff := math.Abs(compat.FinalPrice - fx.baseCommit); diff >= 0.005 {
-				t.Fatalf("the compatibility answer %v is %v from the base commit's %v, more than the cent rounding removed", compat.FinalPrice, diff, fx.baseCommit)
-			}
-			if compat.Source != scaled.Source || compat.Details != scaled.Details {
-				t.Fatalf("the two entry points disagree: %+v vs %+v", compat, scaled)
+			gotFloat := float64(resolved.UnitPrice) / 10_000
+			if diff := math.Abs(gotFloat - fx.baseCommit); diff >= 0.005 {
+				t.Fatalf("the resolved answer %v is %v from the base commit's %v, more than the cent rounding removed", gotFloat, diff, fx.baseCommit)
 			}
 		})
 	}
@@ -243,16 +226,16 @@ func TestCentsOfRoundsHalfAwayInIntegers(t *testing.T) {
 // TestContractReturnedAsStoredSubCent: a contract price is a fixed price and
 // comes back exactly as stored, never rounded (ADR 0006 R4.2).
 func TestContractReturnedAsStoredSubCent(t *testing.T) {
-	cust := &customer.Customer{ID: uuid.New()}
+	cust := uuid.New()
 	prod := uuid.New()
 	fake := newFakeResolveRepo().withProduct(prod, 10, "EA")
-	fake.setContract(cust.ID, prod, nil, 1.2345, "EA")
-	got, err := NewService(&MockRepository{}).WithRepository(fake).CalculateScaled(context.Background(), cust, prod, 10, 1, nil)
+	fake.setContract(cust, prod, nil, 1.2345, "EA")
+	got, err := NewService(&MockRepository{}).WithRepository(fake).Resolve(context.Background(), resolveReq(cust, prod, nil, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Price != priceOf(1.2345) || got.Source != SourceContract {
-		t.Fatalf("contract = %v from %s, want 1.2345 as stored from the contract", got.Price, got.Source)
+	if got.UnitPrice != priceOf(1.2345) || got.PriceBasis != SourceContract {
+		t.Fatalf("contract = %v from %s, want 1.2345 as stored from the contract", got.UnitPrice, got.PriceBasis)
 	}
 }
 
@@ -270,24 +253,25 @@ func TestCategoryFixedReturnedAsStored(t *testing.T) {
 		ID: uuid.New(), Name: "Thirty off", RuleType: RuleTypePromotional,
 		DiscountPct: pctQtyPtr(30), MarginFloorPct: pctQtyPtr(20), IsActive: true,
 	}}}
-	got, err := resolveFixture(t, prod, subCentBase, repo).CalculateScaled(context.Background(), &customer.Customer{ID: uuid.New()}, prod, subCentBase, 1, nil)
+	got, err := resolveFixture(t, prod, subCentBase, repo).Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Price != priceOf(1.0980) {
-		t.Fatalf("30 percent off with a 20 percent floor on 1.3725 = %v, want exactly 1.0980", got.Price)
+	if got.UnitPrice != priceOf(1.0980) {
+		t.Fatalf("30 percent off with a 20 percent floor on 1.3725 = %v, want exactly 1.0980", got.UnitPrice)
 	}
 }
 
 // TestNonNumericQuantityIsAnErrorNotZero: a NaN quantity used to price as
 // quantity 0; an infinite or out of bound one is refused the same way.
 func TestNonNumericQuantityIsAnErrorNotZero(t *testing.T) {
-	prod := uuid.New()
-	svc := resolveFixture(t, prod, 10, nil)
-	cust := &customer.Customer{ID: uuid.New()}
 	for _, q := range []float64{math.NaN(), math.Inf(1), 1e9} {
-		if _, err := svc.CalculateScaled(context.Background(), cust, prod, 10, q, nil); err == nil {
-			t.Errorf("quantity %v priced without an error", q)
+		r, err := ratOfFloat(q)
+		if err != nil {
+			continue
+		}
+		if _, err := quantityOfRat(r); err == nil {
+			t.Errorf("quantity %v converted without an error", q)
 		}
 	}
 }
@@ -299,7 +283,7 @@ func TestPriceBeyondTheBoundIsRefused(t *testing.T) {
 	repo := &MockRepository{rules: []PricingRule{{
 		ID: uuid.New(), Name: "Huge", RuleType: RuleTypePromotional, MarkupPct: pctQtyPtr(99999999), IsActive: true,
 	}}}
-	if _, err := resolveFixture(t, prod, 99999999.9999, repo).CalculateScaled(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 99999999.9999, 1, nil); err == nil {
+	if _, err := resolveFixture(t, prod, 99999999.9999, repo).Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 1)); err == nil {
 		t.Fatal("a price past 99999999.9999 was answered")
 	}
 }

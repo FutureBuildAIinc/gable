@@ -137,9 +137,10 @@ type CatalogRepository interface {
 	UpdateContract(ctx context.Context, c *CustomerContract, revision int64) error
 	DeleteContract(ctx context.Context, id uuid.UUID) error
 
-	// The product facts the writes hold prices against: the stocking unit and
-	// the price unit, the revision.
+	// The product facts the writes hold prices against: the stocking unit,
+	// the price unit, the unit set rows, and the revision.
 	ProductPricingFacts(ctx context.Context, productID uuid.UUID) (*ProductPricingFacts, error)
+	UnitSetRow(ctx context.Context, productID uuid.UUID, uom string) (*UnitSetRowFact, error)
 	ProductRevision(ctx context.Context, productID uuid.UUID) (int64, error)
 }
 
@@ -925,6 +926,10 @@ func (r *PostgresCatalogRepository) DeleteContract(ctx context.Context, id uuid.
 
 func (r *PostgresCatalogRepository) ProductPricingFacts(ctx context.Context, productID uuid.UUID) (*ProductPricingFacts, error) {
 	return NewResolveRepository(r.db).ProductPricingFacts(ctx, productID)
+}
+
+func (r *PostgresCatalogRepository) UnitSetRow(ctx context.Context, productID uuid.UUID, uom string) (*UnitSetRowFact, error) {
+	return NewResolveRepository(r.db).UnitSetRow(ctx, productID, uom)
 }
 
 func (r *PostgresCatalogRepository) ProductRevision(ctx context.Context, productID uuid.UUID) (int64, error) {

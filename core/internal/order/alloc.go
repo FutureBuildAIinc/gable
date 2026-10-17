@@ -57,9 +57,12 @@ func stockedIndexes(lines []OrderLine) []int {
 }
 
 // unallocated is the quantity a stocked line still needs stock for: what was
-// ordered less what is allocated and what shipped.
+// ordered less what is allocated and what shipped, in the stocking unit the
+// inventory rows count (ADR 0006 section 3.4). Every inventory moving
+// quantity on a stocked line reads the stocking quantity, never the sale
+// quantity, which may be in another unit from C3-2B on.
 func unallocated(l *OrderLine) int64 {
-	n := int64(*l.Quantity) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
+	n := int64(salesdoc.StockQty(&l.Line)) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
 	if n < 0 {
 		return 0
 	}
@@ -149,7 +152,7 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 	}
 	for _, i := range order {
 		l := &cur.Lines[i]
-		back := int64(*l.Quantity) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
+		back := int64(salesdoc.StockQty(&l.Line)) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
 		if back < 0 {
 			back = 0
 		}
@@ -257,7 +260,7 @@ func deriveStatus(cur *Order) OrderStatus {
 			continue
 		}
 		any = true
-		if l.QuantityFulfilled < *l.Quantity {
+		if l.QuantityFulfilled < salesdoc.StockQty(&l.Line) {
 			done = false
 		}
 		if l.IsStocked() && l.QuantityBackordered > 0 {

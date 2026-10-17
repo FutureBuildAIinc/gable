@@ -96,6 +96,16 @@ func IsNothingToFulfil(err error) bool {
 
 func exceeds(code, message string) *httpx.Error { return conflictBlocker(code, message) }
 
+func ptrQtyCopy(q httpx.Quantity) *httpx.Quantity { return &q }
+
+func i64PtrFromQty(q *httpx.Quantity) *int64 {
+	if q == nil {
+		return nil
+	}
+	v := int64(*q)
+	return &v
+}
+
 type fulfilItem struct {
 	idx int            // index into the order's lines
 	qty httpx.Quantity // the quantity billed now
@@ -187,6 +197,10 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 			case l.LineType == salesdoc.LineComponent:
 				// follows its kit
 			case l.IsStocked():
+				// allocated is in the stocking unit (ADR 0006 section 3.4);
+				// the bill converts back to the line's sale unit at
+				// billLines, or bills in the stocking unit when the
+				// conversion is not exact.
 				if l.QuantityAllocated > 0 {
 					billed[i] = l.QuantityAllocated
 				}
@@ -231,8 +245,13 @@ func planFulfilment(cur *Order, req FulfilRequest) (*fulfilPlan, error) {
 				}
 				addKit(at, e.Quantity)
 			case l.IsStocked():
+				// lines[].quantity is in the line's stock_uom (ADR 0006
+				// section 4.4), the unit quantity_allocated counts in.
 				if e.Quantity > l.QuantityAllocated {
 					return nil, exceeds("exceeds_allocation", fmt.Sprintf("%s asks for more than the %s allocated", field, l.QuantityAllocated.DecimalString()))
+				}
+				if e.Quantity > salesdoc.StockQty(&l.Line)-l.QuantityFulfilled {
+					return nil, exceeds("exceeds_unbilled", fmt.Sprintf("%s asks for more than the %s left to fulfil", field, (salesdoc.StockQty(&l.Line)-l.QuantityFulfilled).DecimalString()))
 				}
 				billed[at] = e.Quantity
 			default: // a non stock product line, a charge line
@@ -279,13 +298,48 @@ func billLines(cur *Order, plan *fulfilPlan, live map[uuid.UUID]LiveBilled) (bil
 			continue
 		}
 		inv := l
-		inv.Quantity = &q
 		var discount httpx.Cents
-		switch l.LineType {
-		case salesdoc.LineComponent:
+		switch {
+		case l.LineType == salesdoc.LineComponent:
 			zero := httpx.Cents(0)
 			inv.LineTotal = &zero
+			inv.Quantity = &q
+		case l.IsStocked() && l.StockQuantity != nil && *l.StockQuantity > 0:
+			// The cumulative totals of a stocked line read in its stocking
+			// unit, whatever unit each bill carries (ADR 0006 section 3.4):
+			// one unit per line keeps the telescoping sums exact.
+			stockLine, err := salesdoc.StockLineView(&l)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			lv := live[cur.Lines[i].ID]
+			total, d, err := salesdoc.PieceAgainstLive(&stockLine, cur.Lines[i].QuantityFulfilled+q, lv.TotalCents, lv.DiscountCents)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			inv.LineTotal, discount = &total, d
+			if saleQty, exact := salesdoc.SaleFromStock(&l, q); exact {
+				inv.Quantity = &saleQty
+			} else {
+				// The fallback bill: the invoice line bills in the stocking
+				// unit, its pair re-derived from the order line's own stored
+				// quantities (no unit set read), the same unit price.
+				pair, err := salesdoc.StockPricePair(&l)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				uom := ""
+				if l.StockUOM != nil {
+					uom = *l.StockUOM
+				} else if l.UOM != nil {
+					uom = *l.UOM
+				}
+				inv.Quantity = &q
+				inv.UOM = &uom
+				inv.UOMQty, inv.PriceUOMQty = ptrQtyCopy(pair.A), ptrQtyCopy(pair.B)
+			}
 		default:
+			inv.Quantity = &q
 			// against what the line's live invoices already carry, so a voided
 			// piece never leaves the live pieces off the line's total by a cent
 			lv := live[cur.Lines[i].ID]
@@ -544,7 +598,11 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		}
 
 		// The invoice lines.
-		newID := map[uuid.UUID]uuid.UUID{} // order line id -> invoice line id
+		newID := map[uuid.UUID]uuid.UUID{}  // order line id -> invoice line id
+		planQty := map[int]httpx.Quantity{} // order line index -> the bill in stocking units
+		for _, it := range plan.items {
+			planQty[it.idx] = it.qty
+		}
 		for n := range bill {
 			b := &bill[n]
 			ol := &cur.Lines[src[n]]
@@ -557,6 +615,24 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if b.PricedUnitPrice != nil {
 				fl.PricedUnitPrice = i64(int64(*b.PricedUnitPrice))
 			}
+			// The dual-unit and cost fields the invoice line carries beside the
+			// price (ADR 0006 sections 3.4 and 7.5): the bill in the stocking
+			// unit, the cross section and tally rows a tallied line keeps,
+			// the engine's basis and the resolved cost, all beside the sale
+			// unit's own fields.
+			fl.StockUOM = ol.StockUOM
+			if stockQty, ok := planQty[src[n]]; ok && ol.StockQuantity != nil {
+				fl.StockQuantity = i64(int64(stockQty))
+			}
+			if ol.Tally != nil && len(ol.Tally.Rows) > 0 && b.Quantity != nil && *b.Quantity == ol.Tally.LinearFeet {
+				fl.BoardThicknessIn, fl.BoardWidthIn = i64PtrFromQty(ol.TallyThickness()), i64PtrFromQty(ol.TallyWidth())
+				fl.TallyRows = make([]invoice.TallyRowInput, 0, len(ol.Tally.Rows))
+				for _, r := range ol.Tally.Rows {
+					fl.TallyRows = append(fl.TallyRows, invoice.TallyRowInput{Pieces: r.Pieces, LengthFT: int64(r.LengthFT)})
+				}
+			}
+			fl.PriceBasis = ol.PriceBasis
+			fl.CostSource = ol.CostSource
 			olID := ol.ID
 			fl.OrderLineID = &olID
 			newID[ol.ID] = fl.ID

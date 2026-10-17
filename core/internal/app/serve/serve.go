@@ -523,7 +523,6 @@ func Run() {
 		Invoices:   invoiceSvc,
 		Accounts:   accountSvc,
 		Pricing:    pricingSvc,
-		Customers:  customerSvc,
 		Escalators: escalatorRepo,
 		QuoteLines: quoteRepo,
 	})
@@ -725,7 +724,7 @@ func Run() {
 	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, logger).
-		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc}).
 		WithTaxProvider(taxSvc).
 		WithInvoices(invoiceSvc).
 		WithAR(accountSvc).

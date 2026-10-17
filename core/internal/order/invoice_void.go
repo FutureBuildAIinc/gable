@@ -60,18 +60,25 @@ func (s *Service) ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []
 	for i := range cur.Lines {
 		byID[cur.Lines[i].ID] = i
 	}
-	scope := map[uuid.UUID]int64{} // order line id -> the quantity the void returns
+	scope := map[uuid.UUID]int64{} // order line id -> the stocking quantity the void returns
 	for _, b := range billed {
 		i, ok := byID[b.OrderLineID]
 		if !ok {
 			continue // the order line was removed with its draft edit; nothing to return
 		}
 		l := &cur.Lines[i]
-		if l.QuantityFulfilled < b.Quantity {
-			return res, fmt.Errorf("order %s: line %s was fulfilled %s, the void returns %s", cur.ID, l.ID, l.QuantityFulfilled.DecimalString(), b.Quantity.DecimalString())
+		// A stocked line fulfils and restocks in its stocking unit (ADR 0006
+		// section 3.4): the bill carries it, or the bill's own quantity when
+		// the line was written before the stocking columns.
+		returned := b.Quantity
+		if b.StockQuantity != nil {
+			returned = *b.StockQuantity
 		}
-		l.QuantityFulfilled -= b.Quantity
-		scope[l.ID] += int64(b.Quantity)
+		if l.QuantityFulfilled < returned {
+			return res, fmt.Errorf("order %s: line %s was fulfilled %s, the void returns %s", cur.ID, l.ID, l.QuantityFulfilled.DecimalString(), returned.DecimalString())
+		}
+		l.QuantityFulfilled -= returned
+		scope[l.ID] += int64(returned)
 	}
 
 	// Step 6: the billed stock back on hand, then allocated again.

@@ -265,15 +265,20 @@ func (s *Service) ReplaceUnitSet(ctx context.Context, id uuid.UUID, req *PutUnit
 			}
 			return out
 		}
+		afterBase := cur.BasePrice
+		if req.BasePriceTenThousandths != nil {
+			afterBase = httpx.Price(*req.BasePriceTenThousandths)
+		}
 		if err := s.auditChange(ctx, id, cur.SKU, newRevision, EventProductUpdated, map[string]any{
 			"parts": []string{"units"},
 			"before": map[string]any{
 				"stock_uom": cur.UOMPrimary, "sale_uom": cur.SaleUOM, "price_uom": cur.PriceUOM,
-				"purchase_uom": cur.PurchaseUOM,
+				"purchase_uom": cur.PurchaseUOM, "base_price_ten_thousandths": int64(cur.BasePrice),
 			},
 			"after": map[string]any{
 				"stock_uom": req.StockUOM, "sale_uom": req.SaleUOM, "price_uom": req.PriceUOM,
-				"purchase_uom": req.PurchaseUOM, "units": auditRows(rows),
+				"purchase_uom": req.PurchaseUOM, "base_price_ten_thousandths": int64(afterBase),
+				"units": auditRows(rows),
 			},
 		}); err != nil {
 			return err
@@ -327,12 +332,6 @@ func conflictBlocker(code, message string) *httpx.Error {
 // resolveUnitSet applies every check of section 3.2 that answers before the
 // rows are written, and completes the rows by the derivation rules.
 func (s *Service) resolveUnitSet(ctx context.Context, id uuid.UUID, cur *UnitSetProduct, existing []UnitSetRowView, req *PutUnitSetRequest) ([]UnitSetRowView, []units.Warning, error) {
-	// The hold's own rule on the wire (A2's CHECK, 9.1): until C3-2B every
-	// price is in the stocking unit.
-	if req.PriceUOM != req.StockUOM {
-		return nil, nil, httpx.BadRequest("one or more fields failed validation",
-			httpx.FieldError{Field: "price_uom", Message: "a price unit other than the stocking unit arrives with C3-2B"})
-	}
 	// The stocking row trigger's third invariant (3.1), named on the wire
 	// before the deferred trigger can refuse the commit.
 	if cur.RandomLength && req.StockUOM != "LF" {
@@ -375,18 +374,20 @@ func (s *Service) resolveUnitSet(ctx context.Context, id uuid.UUID, cur *UnitSet
 				"the product holds stock or an open order line in "+cur.UOMPrimary+
 					": changing what stock is counted in is a stock conversion, not an edit")
 		}
-		held, why, err := s.repo.ProductPriceHeld(ctx, id)
-		if err != nil {
-			return nil, nil, err
-		}
-		if cur.BasePrice != 0 {
-			held, why = true, "a nonzero base price"
-		}
-		if held {
-			return nil, nil, conflictBlocker("price_unit_held",
-				"the product has "+why+" tied to its stocking unit "+cur.UOMPrimary+
-					": zero the base price and remove those rows first, or wait for C3-2B")
-		}
+		// price_unit_held is gone (C3-2B lifted the hold): a stocking unit
+		// change with prices standing is admitted, the lines' own pairs and
+		// stocking fields carrying what they were written with.
+		_ = cur.BasePrice
+	}
+	// The price unit may be any price row of the set now that the stocking
+	// unit hold is lifted (C3-2B). A PUT that changes it must carry the base
+	// price beside it: the stored base is a price per the old unit, and the
+	// unit and the value change together in the one transaction (3.2).
+	if req.PriceUOM != cur.PriceUOM && req.BasePriceTenThousandths == nil {
+		return nil, nil, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "base_price_ten_thousandths",
+				Message: "is required when the PUT changes price_uom: the stored base price is per " + cur.PriceUOM +
+					", and the unit and the value change together"})
 	}
 
 	// The catalogue: every row's unit must be a real, active unit of the
@@ -665,13 +666,23 @@ func (r *PostgresRepository) LockProductForUnitSet(ctx context.Context, id uuid.
 func (r *PostgresRepository) ReplaceUnitSet(ctx context.Context, id uuid.UUID, rows []UnitSetRowView,
 	stockUOM, saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error) {
 	exec := r.db.GetExecutor(ctx)
-	if _, err := exec.Exec(ctx, `DELETE FROM product_units WHERE product_id = $1`, id); err != nil {
+	keep := make([]string, len(rows))
+	for i, row := range rows {
+		keep[i] = row.UOM
+	}
+	if _, err := exec.Exec(ctx, `DELETE FROM product_units WHERE product_id = $1 AND NOT (uom = ANY($2))`, id, keep); err != nil {
 		return 0, fmt.Errorf("failed to clear the unit set: %w", err)
 	}
 	for _, row := range rows {
 		if _, err := exec.Exec(ctx, `
 			INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
-			VALUES ($1, $2, $3::numeric / 10000, $4::numeric / 10000, $5, $6, $7)`,
+			VALUES ($1, $2, $3::numeric / 10000, $4::numeric / 10000, $5, $6, $7)
+			ON CONFLICT (product_id, uom) DO UPDATE SET
+				unit_qty = EXCLUDED.unit_qty,
+				stock_qty = EXCLUDED.stock_qty,
+				sell = EXCLUDED.sell,
+				purchase = EXCLUDED.purchase,
+				price = EXCLUDED.price`,
 			id, row.UOM, int64(row.UnitQty), int64(row.StockQty), row.Sell, row.Purchase, row.Price); err != nil {
 			return 0, fmt.Errorf("failed to insert a unit set row: %w", err)
 		}

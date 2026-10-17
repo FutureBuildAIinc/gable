@@ -491,7 +491,10 @@ func (s *Service) restockLines(ctx context.Context, branchID uuid.UUID, lines []
 	})
 	for _, i := range idx {
 		l := &lines[i]
-		qty := -*l.Quantity
+		// The credit moves stocking units (ADR 0006 section 3.4): the
+		// credited stocking quantity, or the line's own quantity when it
+		// carries none, negated like the line itself.
+		qty := -salesdoc.StockQty(&l.Line)
 		if add {
 			if err := s.inventory.RestockQty(ctx, *l.ProductID, branchID, qty); err != nil {
 				return err

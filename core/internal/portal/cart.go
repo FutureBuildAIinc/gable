@@ -12,10 +12,15 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
+
+// priceFloatOfQty renders a scale 4 quantity as the float the cart's stored
+// pair carries.
+func priceFloatOfQty(q httpx.Quantity) float64 { return float64(q) / 10000 }
 
 // GetCart returns the current cart for a customer, creating one if it doesn't exist.
 func (s *Service) GetCart(ctx context.Context, customerID uuid.UUID) (*CartDTO, error) {
@@ -47,22 +52,30 @@ func (s *Service) AddToCart(ctx context.Context, customerID uuid.UUID, req AddTo
 	}
 
 	// Get customer-specific price
-	unitPrice := 0.0
 	prod, pErr := s.productSvc.GetProduct(ctx, req.ProductID)
 	if pErr != nil {
 		return nil, fmt.Errorf("product not found: %w", pErr)
 	}
-	unitPrice = prod.BasePrice
-
-	cust, cErr := s.customerSvc.GetCustomer(ctx, customerID)
-	if cErr == nil && s.pricingSvc != nil {
-		cp, prErr := s.pricingSvc.CalculatePrice(ctx, cust, req.ProductID, prod.BasePrice)
-		if prErr == nil {
-			unitPrice = cp.FinalPrice
+	unitPrice := prod.BasePrice
+	// The line shape's unit fields (ADR 0006 section 7.6): the quantity is
+	// in the product's sale unit, the price per the engine's own unit, the
+	// pair resolved here and stored on the item. The engine did not answer:
+	// the base price stands per the product's own unit, pair 1 and 1.
+	units := CartItemUnits{UOM: string(prod.UOMPrimary), PriceUOM: string(prod.UOMPrimary), UOMQty: 1, PriceUOMQty: 1}
+	if res, rErr := s.pricingSvc.Resolve(ctx, pricing.Request{
+		CustomerID: customerID, ProductID: req.ProductID,
+		Quantity: httpx.Quantity(int64(req.Quantity*10000 + 0.5)), UOM: string(prod.UOMPrimary),
+	}); rErr == nil {
+		units = CartItemUnits{
+			UOM: res.UOM, PriceUOM: res.PriceUOM,
+			UOMQty: priceFloatOfQty(res.UOMQty), PriceUOMQty: priceFloatOfQty(res.PriceUOMQty),
+		}
+		if price, _, ok := s.resolveCustomerPrice(ctx, customerID, req.ProductID, string(prod.UOMPrimary), req.Quantity); ok {
+			unitPrice = price
 		}
 	}
 
-	err = s.repo.AddCartItem(ctx, cart.ID, req.ProductID, req.Quantity, unitPrice)
+	err = s.repo.AddCartItem(ctx, cart.ID, req.ProductID, req.Quantity, unitPrice, units)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add to cart: %w", err)
 	}
@@ -130,11 +143,25 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 	for _, item := range cart.Items {
 		productID := item.ProductID
 		qty := httpx.Quantity(int64(math.Round(item.Quantity * 10000)))
-		lines = append(lines, salesdoc.ParsedLine{
+		line := salesdoc.ParsedLine{
 			LineType:  salesdoc.LineProduct,
 			ProductID: &productID,
 			Quantity:  qty,
-		})
+		}
+		// The units the item was added in (ADR 0006 section 7.6): the order
+		// prices the line in the cart's own unit and pair, so the money the
+		// customer saw is the money the order resolves.
+		if item.UOM != "" {
+			line.UOM = item.UOM
+		}
+		if item.PriceUOM != "" {
+			line.PriceUOM = item.PriceUOM
+		}
+		if item.UOMQty > 0 && item.PriceUOMQty > 0 && (item.UOMQty != 1 || item.PriceUOMQty != 1) {
+			line.UOMQty = httpx.Quantity(int64(math.Round(item.UOMQty * 10000)))
+			line.PriceUOMQty = httpx.Quantity(int64(math.Round(item.PriceUOMQty * 10000)))
+		}
+		lines = append(lines, line)
 	}
 	draft := &order.Draft{
 		CustomerID:   customerID,

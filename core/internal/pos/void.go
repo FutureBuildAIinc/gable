@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -386,7 +387,7 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 			if !l.IsStocked() || l.Quantity == nil {
 				continue
 			}
-			if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, *l.Quantity); err != nil {
+			if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, salesdoc.StockQty(l)); err != nil {
 				return err
 			}
 		}

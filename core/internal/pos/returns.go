@@ -993,22 +993,33 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			if p.in.ProductID != nil {
 				// a free line (no sale) restocks at today's average: it has
 				// no source invoice line to read, and no earlier return to
-				// telescope on; a linked line's cost telescopes on its
-				// cumulative returned quantity
+				// telescope on; a linked line's cost and stock quantity
+				// telescope on its cumulative returned quantity
 				cost := restockUnitCost
 				if cost <= 0 {
 					if ref, ok := refs[p.in.ProductID.String()]; ok {
 						cost = ref.AverageCost
 					}
 				}
-				if cost > 0 && p.saleLine == nil {
-					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
-				} else if cost > 0 {
-					back := httpx.Quantity(st.backByLine[p.saleLine.ID])
-					restockCost += int64(salesdoc.CostOf(back+p.in.Quantity, cost)) -
-						int64(salesdoc.CostOf(back, cost))
+				if p.saleLine == nil || p.saleLine.Quantity == nil || *p.saleLine.Quantity <= 0 {
+					if cost > 0 {
+						restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
+					}
+					restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
+				} else {
+					back := st.backByLine[p.saleLine.ID]
+					stockSold := int64(salesdoc.StockQty(p.saleLine))
+					sold := int64(*p.saleLine.Quantity)
+					before := httpx.Quantity(divRound(stockSold*back, sold))
+					after := httpx.Quantity(divRound(stockSold*(back+int64(p.in.Quantity)), sold))
+					if cost > 0 {
+						restockCost += int64(salesdoc.CostOf(after, cost)) -
+							int64(salesdoc.CostOf(before, cost))
+					}
+					if after > before {
+						restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: after - before})
+					}
 				}
-				restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
 			}
 		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
