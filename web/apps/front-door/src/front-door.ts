@@ -563,7 +563,7 @@ export class GableFrontDoor extends LitElement {
         ${this._renderMethodList(this._authCfg.methods)}
       </div>
       <details class="border-t border-white/15 pt-4">
-        <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none">
+        <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none rounded hover:text-white hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-colors">
           Use a bearer token instead
         </summary>
         <div class="pt-3 space-y-3">
@@ -578,13 +578,13 @@ export class GableFrontDoor extends LitElement {
               rows="4"
               aria-label="Bearer token"
               placeholder="Paste the token"
-              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-base sm:text-xs font-mono text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             ></textarea>
           </label>
           <button
             type="button"
             @click=${() => this._signIn()}
-            class="w-full rounded-lg bg-surface-2 border border-zinc-500 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green transition-all"
+            class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-surface-2 border border-zinc-500 px-4 py-3 sm:py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
           >
             Sign in with the token
           </button>
@@ -643,7 +643,7 @@ export class GableFrontDoor extends LitElement {
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
               aria-label="Email"
               autocomplete="username"
-              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+              class="w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             />
           </label>
           <label class="block space-y-1.5">
@@ -655,13 +655,13 @@ export class GableFrontDoor extends LitElement {
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
               aria-label="Password"
               autocomplete="current-password"
-              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+              class="w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             />
           </label>
           <button
             type="button"
             @click=${() => void this._signInEmailPassword()}
-            class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+            class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-gable-green/10 border border-gable-green px-4 py-3 sm:py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow [[data-theme=light]_&]:bg-gable-green [[data-theme=light]_&]:text-black [[data-theme=light]_&]:hover:bg-gable-green-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
           >
             Sign in
           </button>
@@ -677,10 +677,12 @@ export class GableFrontDoor extends LitElement {
           type="button"
           @click=${() => void this._startMethod(m)}
           aria-label="Sign in with ${m.label}"
-          class="w-full flex items-center justify-center gap-2.5 rounded-lg border border-zinc-500 bg-surface-2 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 transition-all"
+          class="w-full min-h-[44px] sm:min-h-0 flex items-center justify-center rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
         >
-          <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
-          <span>${m.label}</span>
+          <span class="inline-flex items-center gap-2.5 max-w-full">
+            <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
+            <span class="text-left leading-snug">${m.label}</span>
+          </span>
         </button>
         ${this._signInError && this._errorSource === m.method ? html`
           <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
@@ -703,7 +705,7 @@ export class GableFrontDoor extends LitElement {
             @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
             @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this._signIn(); }}
             aria-label="Display name"
-            class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+            class="w-full min-h-[44px] sm:min-h-0 bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
           />
         </label>
         ${this._signInError ? html`
@@ -711,7 +713,7 @@ export class GableFrontDoor extends LitElement {
         ` : nothing}
         <button
           @click=${() => this._signIn()}
-          class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+          class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-gable-green/10 border border-gable-green px-4 py-3 sm:py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow [[data-theme=light]_&]:bg-gable-green [[data-theme=light]_&]:text-black [[data-theme=light]_&]:hover:bg-gable-green-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
         >
           Sign in
         </button>

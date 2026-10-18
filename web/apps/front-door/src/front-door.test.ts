@@ -535,4 +535,53 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(logoImg).not.toBeNull();
     expect(logoImg?.getAttribute('src')).toBe('/api/v1/dealer-profile/logo');
   });
+
+  it('applies light-theme solid primary Sign in styling, 44px/16px mobile sizing, grouped icon+label, interactive summary, and sans token placeholder', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'oidc', kind: 'redirect', label: 'Northridge Corporate Single Sign On', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+
+    // V2-1: Primary Sign in button uses solid deep green fill with paper text in Gable Light.
+    const primaryBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === 'Sign in',
+    )!;
+    expect(primaryBtn.className).toContain('[[data-theme=light]_&]:bg-gable-green');
+    expect(primaryBtn.className).toContain('[[data-theme=light]_&]:text-black');
+
+    // V2-5: Inputs and buttons have 44px minimum height and 16px text on phone viewports.
+    const emailInput = el.querySelector<HTMLInputElement>('input[aria-label="Email"]')!;
+    const passwordInput = el.querySelector<HTMLInputElement>('input[aria-label="Password"]')!;
+    for (const input of [emailInput, passwordInput]) {
+      expect(input.className).toContain('min-h-[44px]');
+      expect(input.className).toContain('text-base');
+      expect(input.className).toContain('sm:text-sm');
+    }
+    expect(primaryBtn.className).toContain('min-h-[44px]');
+
+    // V3-2: Method button wraps icon and label in an inner inline-flex group.
+    const oidcBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Northridge Corporate Single Sign On"]')!;
+    expect(oidcBtn.className).toContain('min-h-[44px]');
+    const innerGroup = oidcBtn.firstElementChild as HTMLElement;
+    expect(innerGroup).not.toBeNull();
+    expect(innerGroup.className).toContain('inline-flex');
+    expect(innerGroup.className).toContain('items-center');
+    expect(innerGroup.className).toContain('gap-2.5');
+
+    // V3-3: Disclosure summary styles as an interactive control.
+    const summary = el.querySelector<HTMLElement>('details > summary')!;
+    expect(summary.className).toContain('hover:text-white');
+    expect(summary.className).toContain('hover:underline');
+    expect(summary.className).toContain('focus-visible:ring-2');
+
+    // V3-5: Bearer token textarea uses sans face for its placeholder.
+    const textarea = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Bearer token"]')!;
+    expect(textarea.className).toContain('placeholder:font-sans');
+  });
 });
