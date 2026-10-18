@@ -92,6 +92,16 @@ func (d *dayFixture) today(b *dayBranch) string {
 	return day
 }
 
+// dayAfter is the business day n days from a day, as YYYY-MM-DD.
+func (d *dayFixture) dayAfter(day string, n int) string {
+	d.t.Helper()
+	var out string
+	if err := d.db.Pool.QueryRow(context.Background(), `SELECT ($1::date + $2::int)::text`, day, n).Scan(&out); err != nil {
+		d.t.Fatal(err)
+	}
+	return out
+}
+
 // sell makes a one unit sale on the register with the tenders.
 func (d *dayFixture) sell(register string, tenders ...map[string]any) {
 	d.t.Helper()
@@ -254,7 +264,7 @@ func TestTheBranchSummaryAddsUpToTheCent(t *testing.T) {
 	// reads validate their names
 	for name, path := range map[string]string{
 		"no branch":  "/api/v1/pos/end-of-day",
-		"a bad date": "/api/v1/pos/end-of-day?branch_id=" + a.id.String() + "&date=17-10-2026",
+		"a bad date": "/api/v1/pos/end-of-day?branch_id=" + a.id.String() + "&date=tomorrow",
 		"an unknown": "/api/v1/pos/end-of-day?branch_id=" + a.id.String() + "&x=1",
 	} {
 		if r := d.do("GET", path, nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusBadRequest {
@@ -315,7 +325,7 @@ func TestTheDayCloseIsRefusedWithATillOpenAndAcceptedAfter(t *testing.T) {
 		"a blank slip":   {map[string]any{"branch_id": a.id.String(), "date": day, "deposit_slip_ref": "  "}, "finance", http.StatusBadRequest},
 		"no date":        {map[string]any{"branch_id": a.id.String(), "deposit_slip_ref": "S"}, "finance", http.StatusBadRequest},
 		"a cashier":      {map[string]any{"branch_id": a.id.String(), "date": day, "deposit_slip_ref": "S"}, "cashier", http.StatusForbidden},
-		"a future date":  {map[string]any{"branch_id": a.id.String(), "date": "2999-01-01", "deposit_slip_ref": "S"}, "finance", http.StatusConflict},
+		"a future date":  {map[string]any{"branch_id": a.id.String(), "date": d.dayAfter(day, 30), "deposit_slip_ref": "S"}, "finance", http.StatusConflict},
 		"no such branch": {map[string]any{"branch_id": uuid.NewString(), "date": day, "deposit_slip_ref": "S"}, "finance", http.StatusNotFound},
 	} {
 		if r := d.do("POST", "/api/v1/pos/end-of-day/close", c.body, "X-Test-Role", c.role, "X-Test-Sub", mustUUID(t)); r.status != c.want {
@@ -420,7 +430,7 @@ func TestTheDepositMatchRecordsTheDifference(t *testing.T) {
 	near := d.bankLine(604, day)   // five cents over the slip
 	far := d.bankLine(90000, day)  // a different deposit
 	debit := d.bankLine(-599, day) // not a deposit
-	tooOld := d.bankLine(599, "2000-01-01")
+	tooOld := d.bankLine(599, d.dayAfter(day, -400))
 	_ = tooOld
 
 	cands := d.do("GET", "/api/v1/pos/end-of-day/"+closeA+"/deposit-candidates", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))

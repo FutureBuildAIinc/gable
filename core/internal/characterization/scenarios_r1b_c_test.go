@@ -765,7 +765,7 @@ func r1bCPOSGroups() []groupDef {
 				// The end of day by branch (CP-09): the register ends the run with an
 				// open drawer, so the day cannot close and the refusal pins the shape.
 				{name: "pos.eod.summary", method: "GET", path: "/api/v1/pos/end-of-day?branch_id={branch}&date={today}", maskBody: true},
-				{name: "pos.eod.summary.bad_date", method: "GET", path: "/api/v1/pos/end-of-day?branch_id={branch}&date=17-10-2026"},
+				{name: "pos.eod.summary.bad_date", method: "GET", path: "/api/v1/pos/end-of-day?branch_id={branch}&date=tomorrow"},
 				{name: "pos.eod.close.till_open", method: "POST", path: "/api/v1/pos/end-of-day/close",
 					body: map[string]any{"branch_id": "{branch}", "date": "{today}", "deposit_slip_ref": "R1B-C-SLIP"}},
 				{name: "pos.eod.close.bad_body", method: "POST", path: "/api/v1/pos/end-of-day/close", body: "not an object"},

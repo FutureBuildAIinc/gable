@@ -9,7 +9,7 @@ import { chooseOption, flush, jsonResponse, mount, q, text, update } from '../..
 
 const movement = {
   id: 'm-1', till_session_id: 's-1', register_id: 'REG-01', branch_id: 'b-1', kind: 'safe_drop', amount_cents: 2050,
-  reason_code: null, note: '', actor: 'u-1', taken_by: null, gl_entry_id: 'g-1', created_at: '2026-01-01T00:00:00Z',
+  reason_code: null, note: '', actor: 'u-1', taken_by: null, gl_entry_id: 'g-1', created_at: new Date(0).toISOString(),
 };
 
 let calls: { url: string; body: Record<string, unknown> }[] = [];

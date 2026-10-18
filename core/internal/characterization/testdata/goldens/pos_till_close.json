@@ -809,7 +809,7 @@
     "name": "pos.eod.summary.bad_date",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/end-of-day?branch_id=<id-2>&date=17-10-2026"
+      "path": "/api/v1/pos/end-of-day?branch_id=<id-2>&date=tomorrow"
     },
     "response": {
       "status": 400,

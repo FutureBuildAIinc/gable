@@ -7,8 +7,14 @@ import './TillSignoffQueue';
 import type { GableBranchDay } from './BranchDay';
 import type { GableTillSignoffQueue } from './TillSignoffQueue';
 import { branchContext } from '../../services/BranchContext';
+import { addDays, todayDay } from '../../lib/dates';
 import { flush, jsonResponse, mountAsync, q, text, update } from '../../test/dom';
 import type { BranchDay, DayFigures } from '../../types/pos';
+
+// days are relative to today: the screens read the dates they are given, none is fixed
+const DAY = todayDay();
+const NEXT_DAY = addDays(DAY, 1);
+const AFTER = addDays(DAY, 2);
 
 const figures = (patch: Partial<DayFigures> = {}): DayFigures => ({
   session_count: 1, sale_count: 2, sales_total_cents: 1198, tendered_by_method: { CASH: 1198 }, movement_totals_by_kind: {},
@@ -17,15 +23,15 @@ const figures = (patch: Partial<DayFigures> = {}): DayFigures => ({
 });
 
 const day = (patch: Partial<BranchDay> = {}): BranchDay => ({
-  branch_id: 'b-1', business_date: '2026-03-02',
+  branch_id: 'b-1', business_date: DAY,
   registers: [{ register_id: 'REG-01', sessions: [], ...figures() }],
   totals: figures(), open_session_count: 0, pending_signoff_count: 0, ready_to_close: true,
   collections_net_cents: 1198, close: null, ...patch,
 });
 
 const closed = {
-  id: 'c-1', branch_id: 'b-1', business_date: '2026-03-02', deposit_slip_ref: 'SLIP-9', closed_by: 'mgr-1',
-  closed_at: '2026-03-02T22:00:00Z', cash_to_deposit_cents: 1148, checks_to_deposit_cents: 0, card_total_cents: 0, deposit_match: null,
+  id: 'c-1', branch_id: 'b-1', business_date: DAY, deposit_slip_ref: 'SLIP-9', closed_by: 'mgr-1',
+  closed_at: `${DAY}T22:00:00Z`, cash_to_deposit_cents: 1148, checks_to_deposit_cents: 0, card_total_cents: 0, deposit_match: null,
 };
 
 let requests: { method: string; url: string; body?: Record<string, unknown> }[] = [];
@@ -75,7 +81,7 @@ describe('the branch end of day', () => {
     await update(el, {});
     const post = requests.find((r) => r.method === 'POST');
     expect(post?.url).toContain('/api/v1/pos/end-of-day/close');
-    expect(post?.body).toEqual({ branch_id: 'b-1', date: '2026-03-02', deposit_slip_ref: 'SLIP-9' });
+    expect(post?.body).toEqual({ branch_id: 'b-1', date: DAY, deposit_slip_ref: 'SLIP-9' });
     expect(text(q(el, '[data-testid="day-closed"]'))).toContain('Closed by mgr-1');
     expect(text(q(el, '[data-testid="day-slip"]'))).toBe('SLIP-9');
     expect(el.querySelector('[data-testid="day-close"]')).toBeNull();
@@ -111,14 +117,14 @@ describe('the branch end of day', () => {
 
   it('matches the deposit to a bank line and shows the difference', async () => {
     const matched = { ...closed, deposit_match: {
-      bank_transaction_id: 'bt-1', bank_amount_cents: 1150, bank_transaction_date: '2026-03-03', bank_description: 'DEPOSIT',
-      difference_cents: 2, matched_by: 'fin-1', matched_at: '2026-03-03T14:00:00Z' } };
+      bank_transaction_id: 'bt-1', bank_amount_cents: 1150, bank_transaction_date: NEXT_DAY, bank_description: 'DEPOSIT',
+      difference_cents: 2, matched_by: 'fin-1', matched_at: `${NEXT_DAY}T14:00:00Z` } };
     handler = (method, url) => {
       if (method === 'POST') return jsonResponse(matched);
       if (url.includes('deposit-candidates')) {
         return jsonResponse({ items: [
-          { bank_transaction_id: 'bt-1', transaction_date: '2026-03-03', amount_cents: 1150, description: 'DEPOSIT', reference: '' },
-          { bank_transaction_id: 'bt-2', transaction_date: '2026-03-04', amount_cents: 9000, description: 'OTHER', reference: '' },
+          { bank_transaction_id: 'bt-1', transaction_date: NEXT_DAY, amount_cents: 1150, description: 'DEPOSIT', reference: '' },
+          { bank_transaction_id: 'bt-2', transaction_date: AFTER, amount_cents: 9000, description: 'OTHER', reference: '' },
         ], next_cursor: null, limit: 20 });
       }
       return jsonResponse(day({ close: closed }));
@@ -154,7 +160,7 @@ describe('the branch end of day', () => {
 describe('the sign off queue', () => {
   const pending = {
     id: 's-1', register_id: 'REG-01', branch_id: 'b-1', cashier_id: 'u-1', status: 'pending_signoff', opening_float_cents: 10000,
-    opened_at: '2026-03-02T14:00:00Z', closed_at: '2026-03-02T22:00:00Z', expected_by_method: { CASH: 11000 }, counted_by_method: { CASH: 10000 },
+    opened_at: `${DAY}T14:00:00Z`, closed_at: `${DAY}T22:00:00Z`, expected_by_method: { CASH: 11000 }, counted_by_method: { CASH: 10000 },
     over_short_cents: -1000, gl_entry_id: null, notes: '', closed_by: 'cashier-1', variance_threshold_cents: 500, sign_off: null,
   };
 
