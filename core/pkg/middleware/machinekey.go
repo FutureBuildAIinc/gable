@@ -85,6 +85,10 @@ const (
 // machine key is not a principal there.
 var machineKeyExcludedSegments = map[string]string{
 	"a2a": "agent-to-agent JWS seam; keeps its own authentication",
+	// The contractors' shared project pipeline is a desk surface: the dealer's
+	// acceptance is recorded against a named desk user, so a machine key is
+	// not a principal there.
+	"pro-projects": "desk surface for named users; the dealer's acceptance is recorded against the desk user",
 }
 
 // machineKeyModules is the scope vocabulary: every first path segment under

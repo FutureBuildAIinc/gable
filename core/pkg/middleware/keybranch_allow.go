@@ -442,6 +442,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/quotes":                                          {KeyBranchClassWalled, "quotes.branch_id (the payload branch rule); the body's customer_id and job_id through the customer branch wall (round 9 P1-1, round 11 P1-1)"},
 	"POST /api/v1/quotes/{id}/convert":                             {KeyBranchClassWalled, "quotes.branch_id (the convert reads the quote under the wall); the quote's stored customer through the customer branch wall, rechecked where it becomes an order (round 11 P2-1); TestKeyBranchPin_QuoteConvertCustomerWall"},
 	"POST /api/v1/quotes/{id}/transitions":                         {KeyBranchClassWalled, "quotes.branch_id"},
+	"POST /api/v1/quotes/{id}/share-link":                          {KeyBranchClassRefused, "the link is a public credential to a quote, issued by a named desk user; a branch bound key is not a principal there"},
 	"PUT /api/v1/activities/{id}":                                  {KeyBranchClassWalled, "crm_activities.customer_id to customer_branches; on a shared customer a bound key never changes one (no branch tag; TestKeyBranchPin_ActivityFollowsTheContactRule)"},
 	"PUT /api/v1/contacts/{id}":                                    {KeyBranchClassWalled, "contacts.customer_id to customer_branches"},
 	"PUT /api/v1/credit-memos/{id}":                                {KeyBranchClassWalled, "credit_memos.branch_id"},

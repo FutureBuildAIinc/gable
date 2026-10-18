@@ -1190,6 +1190,561 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portal/v1/customer-quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The contractor's customer quotes
+         * @description The cursor list envelope, newest first on (created_at, id), with an optional lowercase status filter. A role without the quoting and see-money capabilities is a 403.
+         */
+        get: operations["customerQuoteList"];
+        put?: never;
+        /**
+         * Build a customer quote
+         * @description The server prices every line from the dealer for the contractor's account and captures the cost; no cost, sell price or total is an input. The three tier markup resolves per line: the line's own override, then the quote's rule for the line's product category, then the quote default, each either a markup on cost or a target gross margin (a margin of 100 percent or more is a 400). valid_until is bounded by the source dealer quote's expiry and, for lines priced from the catalog, by the dealer's configured price protection horizon. The quote starts as a draft.
+         */
+        post: operations["customerQuoteCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One click export of the contractor's own customers, projects and quotes
+         * @description JSON carries all three tables; CSV carries the one named by kind. The contractor's own markup and margin are part of their own record. A CSV cell that starts with a formula character is prefixed with a quote.
+         */
+        get: operations["customerQuoteExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The contractor's defaults for new quotes */
+        get: operations["customerQuoteSettingsGet"];
+        /**
+         * Save the contractor's defaults
+         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code.
+         */
+        put: operations["customerQuoteSettingsPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/settings/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the contractor's logo
+         * @description The image is the raw request body: PNG or JPEG, held to the dealer logo's size and pixel limits; a JPEG is stored re-encoded.
+         */
+        put: operations["customerQuoteLogoPut"];
+        post?: never;
+        /** Remove the contractor's logo */
+        delete: operations["customerQuoteLogoDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One customer quote with its costs, markups and margin
+         * @description The contractor's own view. The raw link token is never readable again; link only says when the live link ends.
+         */
+        get: operations["customerQuoteGet"];
+        /**
+         * Replace a draft
+         * @description The whole draft is replaced on the client's revision (If-Match; neither is 428, a stale one 409 stale_revision). A line that names its id keeps the cost it captured while its product and quantity are unchanged. Only a draft is editable; a sent quote is revised first.
+         */
+        put: operations["customerQuoteUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer's page, as the customer would see it now
+         * @description The strict public allowlist shape, built from the stored quote.
+         */
+        get: operations["customerQuotePreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer PDF under the contractor's mark
+         * @description Built from the public allowlist view alone (price wall 2).
+         */
+        get: operations["customerQuotePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The approval record of a quote
+         * @description Every step, in order, with who and when: the customer's approval or decline (name, contact, signature kind, source address, user agent, link token hash, the SHA-256 of the snapshot and the total), the contractor's confirmation and the dealer's acceptance. Append only.
+         */
+        get: operations["customerQuoteApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send the quote, freezing it and issuing the capability link
+         * @description Needs a project (the dealer sees it), a job site address and an email or phone for the customer. valid_until is bounded again. Mints a 256 bit token from the secure random source, stores only its SHA-256 hash and returns the link here, once (Cache-Control: no-store); the link is emailed when a real email sender is configured, link.delivered says whether anything was sent. The link expires at valid_until, bounded by the configured maximum lifetime.
+         */
+        post: operations["customerQuoteSend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/link/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kill the live link and issue a new one
+         * @description The old link is refused from this moment. Only a sent quote has a link.
+         */
+        post: operations["customerQuoteLinkRotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/link/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kill the live link
+         * @description The quote stays sent; rotate issues a new link.
+         */
+        post: operations["customerQuoteLinkRevoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw a draft or sent quote */
+        post: operations["customerQuoteWithdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a sent or declined quote back to a draft
+         * @description The link dies and the selections reset; the earlier decisions stay in the approval record under their revision.
+         */
+        post: operations["customerQuoteRevise"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the customer's approval into the dealer's order
+         * @description Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. The markup, labour, overhead and the customer's prices never reach the order.
+         */
+        post: operations["customerQuoteConfirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer's page (capability link, no account)
+         * @description No session and no cookie. An unknown or malformed token is a bare 404; a token that existed and is expired, revoked or rotated away is 410. Rate limited per link and per source address (429). Every answer is Cache-Control: no-store with Referrer-Policy: no-referrer. The body is the strict allowlist shape (price wall 2).
+         */
+        get: operations["customerQuotePublicView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The customer PDF */
+        get: operations["customerQuotePublicPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The contractor's logo */
+        get: operations["customerQuotePublicLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/selections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Approve or decline selections
+         * @description Each material line is approved or declined. In an option group the customer chooses one: approving a line declines the group's others. Only while the quote is open (sent and not expired).
+         */
+        put: operations["customerQuotePublicSelections"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a six digit verification code
+         * @description Only when the contractor requires a code. The code goes to the email or phone the contractor put on the quote, never to an address the caller names. Hashed with a per row salt, single use, valid for ten minutes, five wrong guesses lock it; at most three requests in ten minutes. SMS has no live carrier at this base (a stub).
+         */
+        post: operations["customerQuotePublicCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign off
+         * @description Every selection must be decided and something approved. The sign off is a typed full name, an email or a phone, and a typed or drawn (PNG) signature; with the contractor's code toggle on, a valid code too. The server records the time, the source address and the user agent and an immutable SHA-256 snapshot of the chosen selections and the total, in one transaction with the status change. Two acceptances of one link at once give exactly one approval; the loser is a 409. A wrong code is a 400 code_invalid and counts against the code's attempts.
+         */
+        post: operations["customerQuotePublicAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline the quote */
+        post: operations["customerQuotePublicDecline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The contractors' shared project pipeline
+         * @description Quotes from the moment they are sent (a draft is the contractor's own work and is not shared), most recently moved first. Price wall 1: the project, job site, customer and site contact, selection status and the material pipeline at the dealer's own prices, and nothing of the contractor's markup rules, basis points, labour or overhead lines or the customer's sell prices.
+         */
+        get: operations["proProjectList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One shared project with its approval record
+         * @description The approval record shows who and when for each step and the hash of what the customer decided, never the decision's own figures.
+         */
+        get: operations["proProjectGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the dealer's acceptance
+         * @description Once, for a confirmed project. Appends the dealer_accepted step to the approval record with the desk user.
+         */
+        post: operations["proProjectAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/share-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the link of a sent dealer quote
+         * @description The dealer's own quote to a contractor, accepted or declined from a link with no login (PE-05), on the same token module as the customer quote link: 256 random bits, only the SHA-256 hash stored, expiring at the quote's expiry bounded by the configured maximum lifetime. Only a sent, unexpired quote has a link; issuing again kills the earlier link. The token is returned here once (Cache-Control: no-store); send_to emails it through the email path. The quote module's role and branch wall guards the route.
+         */
+        post: operations["quoteShareLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's quote, from its link
+         * @description No session. An unknown token, including a customer quote token, is a bare 404; an expired, revoked or rotated link is 410. Every answer is Cache-Control: no-store. The body is a strict allowlist: the lines at the contractor's own account prices, never the dealer's cost or margin.
+         */
+        get: operations["dealerQuotePublicView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the dealer's quote
+         * @description A typed full name. The quote moves through the quote module's own lifecycle (only a sent quote can be accepted, once), and the audit log records who, from which address and user agent, in the same transaction.
+         */
+        post: operations["dealerQuotePublicAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline the dealer's quote */
+        post: operations["dealerQuotePublicDecline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboard/summary": {
         parameters: {
             query?: never;
@@ -8755,6 +9310,559 @@ export interface components {
              */
             revision?: number;
         };
+        CustomerQuoteGone: {
+            error: {
+                /** @enum {string} */
+                code: "link_unavailable";
+                message: string;
+            };
+            meta: {
+                request_id: string;
+            };
+        };
+        /** @description A markup on cost (sell = cost x (10000 + bps) / 10000) or a target gross margin (sell = cost x 10000 / (10000 - bps); under 10000). */
+        CustomerQuoteMarkup: {
+            /** @enum {string} */
+            kind: "markup" | "margin";
+            /** Format: int64 */
+            bps: number;
+        };
+        CustomerQuoteContact: {
+            name: string;
+            email?: string;
+            phone?: string;
+        };
+        CustomerQuoteTax: {
+            /** @enum {string} */
+            mode: "site_rate" | "included" | "at_checkout";
+            /** Format: int64 */
+            rate_bps: number;
+        };
+        /** @description Unknown fields are a 400. markup, tax, payment_terms, deposit_bps and require_code default to the contractor's saved defaults. */
+        CustomerQuoteInput: {
+            title: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            /** Format: uuid */
+            source_quote_id?: string | null;
+            job_site_address?: string;
+            end_customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact?: components["schemas"]["CustomerQuoteContact"];
+            markup?: components["schemas"]["CustomerQuoteMarkup"] | null;
+            hide_line_prices?: boolean;
+            tax?: components["schemas"]["CustomerQuoteTax"] | null;
+            payment_terms?: string | null;
+            /** Format: int64 */
+            deposit_bps?: number | null;
+            customer_note?: string;
+            require_code?: boolean | null;
+            /** Format: date-time */
+            valid_until?: string | null;
+            groups?: {
+                key: string;
+                label: string;
+            }[];
+            lines?: {
+                /** Format: uuid */
+                id?: string | null;
+                /** Format: uuid */
+                product_id: string;
+                /** Format: uuid */
+                source_line_id?: string | null;
+                quantity: string;
+                group_key?: string | null;
+                markup?: components["schemas"]["CustomerQuoteMarkup"] | null;
+                note?: string;
+            }[];
+            category_rules?: {
+                /** Format: uuid */
+                category_id: string;
+                markup: components["schemas"]["CustomerQuoteMarkup"];
+            }[];
+            labour?: {
+                description: string;
+                /** @enum {string} */
+                rate_type: "flat" | "hourly";
+                /** Format: int64 */
+                rate_cents: number;
+                hours?: string;
+                contractor_only?: boolean;
+            }[];
+            overhead?: {
+                label: string;
+                /** @enum {string} */
+                amount_type: "flat" | "percent";
+                /**
+                 * Format: int64
+                 * @description Cents when flat, basis points when percent.
+                 */
+                value: number;
+                contractor_only?: boolean;
+            }[];
+        };
+        CustomerQuoteLine: {
+            /** Format: uuid */
+            id: string;
+            position: number;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            category_id: string | null;
+            sku: string;
+            description: string;
+            uom: string;
+            quantity: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            /** Format: int64 */
+            cost_cents: number;
+            /** @enum {string} */
+            price_basis: "catalog" | "dealer_quote";
+            /** Format: uuid */
+            group_id: string | null;
+            markup: components["schemas"]["CustomerQuoteMarkup"] | null;
+            applied: {
+                /** @enum {string} */
+                tier: "line" | "category" | "quote";
+                /** @enum {string} */
+                kind: "markup" | "margin";
+                /** Format: int64 */
+                bps: number;
+            };
+            /** Format: int64 */
+            sell_cents: number;
+            note: string;
+            /** @enum {string} */
+            selection: "pending" | "approved" | "declined";
+        };
+        /** @description Every figure is a sum of rounded lines. labour_cents and overhead_cents are the customer facing lines; contractor_cost_cents is the contractor only lines, counted against margin_cents and in no price. */
+        CustomerQuoteTotals: {
+            /** Format: int64 */
+            material_cost_cents: number;
+            /** Format: int64 */
+            material_sell_cents: number;
+            /** Format: int64 */
+            labour_cents: number;
+            /** Format: int64 */
+            overhead_cents: number;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            deposit_cents: number;
+            /** Format: int64 */
+            contractor_cost_cents: number;
+            /** Format: int64 */
+            margin_cents: number;
+            /** Format: int64 */
+            margin_bps: number;
+        };
+        /** @description The contractor's own view of a quote: cost, markup, labour, overhead and margin included. It never reaches the customer or the dealer. */
+        CustomerQuoteView: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+            /** @description status, or expired for a sent quote past valid_until. */
+            effective_status: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: uuid */
+            source_quote_id: string | null;
+            job_site_address: string;
+            end_customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact: components["schemas"]["CustomerQuoteContact"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            hide_line_prices: boolean;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            payment_terms: string;
+            /** Format: int64 */
+            deposit_bps: number;
+            customer_note: string;
+            require_code: boolean;
+            /** Format: date-time */
+            valid_until: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            declined_at: string | null;
+            /** Format: date-time */
+            confirmed_at: string | null;
+            /** Format: date-time */
+            dealer_accepted_at: string | null;
+            groups: {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                position: number;
+            }[];
+            lines: components["schemas"]["CustomerQuoteLine"][];
+            category_rules: {
+                /** Format: uuid */
+                category_id: string;
+                markup: components["schemas"]["CustomerQuoteMarkup"];
+            }[];
+            labour: {
+                /** Format: uuid */
+                id: string;
+                position: number;
+                description: string;
+                /** @enum {string} */
+                rate_type: "flat" | "hourly";
+                /** Format: int64 */
+                rate_cents: number;
+                hours?: string;
+                contractor_only: boolean;
+                /** Format: int64 */
+                total_cents: number;
+            }[];
+            overhead: {
+                /** Format: uuid */
+                id: string;
+                position: number;
+                label: string;
+                /** @enum {string} */
+                amount_type: "flat" | "percent";
+                /** Format: int64 */
+                value: number;
+                contractor_only: boolean;
+                /** Format: int64 */
+                total_cents: number;
+            }[];
+            totals: components["schemas"]["CustomerQuoteTotals"];
+            link: {
+                /** Format: date-time */
+                expires_at: string;
+            } | null;
+            order: {
+                /** Format: uuid */
+                id: string;
+                number: string;
+                status: string;
+                /** @enum {string} */
+                fulfilment: "ordered" | "being_prepared" | "fulfilled" | "cancelled";
+                /** Format: int64 */
+                total_cents: number;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuoteSummary: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            title: string;
+            status: string;
+            effective_status: string;
+            end_customer_name: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: date-time */
+            valid_until: string;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            margin_cents: number;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuotePage: {
+            items: components["schemas"]["CustomerQuoteSummary"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        CustomerQuoteLinkResult: {
+            quote: components["schemas"]["CustomerQuoteView"];
+            /** @description The raw token appears here and nowhere else, once. delivered is false when nothing real was emailed (no real sender, or no address): the contractor shares the link themselves. */
+            link: {
+                /** @description The customer page path, /q/ then the token. */
+                path: string;
+                /** @description The absolute URL, when the deployment has a public URL. */
+                url?: string;
+                /** Format: date-time */
+                expires_at: string;
+                delivered: boolean;
+            };
+        };
+        CustomerQuoteSettings: {
+            display_name: string;
+            has_logo: boolean;
+            payment_terms: string;
+            /** Format: int64 */
+            deposit_bps: number;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            require_code: boolean;
+        };
+        CustomerQuoteSettingsInput: {
+            display_name?: string;
+            payment_terms?: string;
+            /** Format: int64 */
+            deposit_bps?: number;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            require_code?: boolean;
+        };
+        CustomerQuoteApprovalList: {
+            items: {
+                /** @enum {string} */
+                step: "customer_approved" | "customer_declined" | "contractor_confirmed" | "dealer_accepted";
+                /** Format: int64 */
+                quote_revision: number;
+                /** @enum {string} */
+                actor_kind: "customer" | "contractor" | "dealer";
+                actor_name: string;
+                actor_contact: string;
+                /** Format: date-time */
+                occurred_at: string;
+                token_hash?: string;
+                /** @enum {string} */
+                signature_kind?: "typed" | "drawn";
+                source_address?: string;
+                user_agent?: string;
+                code_verified: boolean;
+                snapshot_sha256?: string;
+                /** Format: int64 */
+                total_cents?: number;
+                note?: string;
+            }[];
+        };
+        CustomerQuoteExport: {
+            customers: {
+                name: string;
+                email: string;
+                phone: string;
+                quote_count: number;
+                last_quote_reference: string;
+            }[];
+            projects: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                status: string;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+            quotes: components["schemas"]["CustomerQuoteView"][];
+        };
+        /** @description The strict allowlist of price wall 2. There is no field for the dealer's cost, a markup, basis points (the customer site tax rate excepted), a margin or a contractor only line. With hide_line_prices no line or extra carries a price and the totals are the lump sum. */
+        CustomerQuotePublicView: {
+            reference: string;
+            title: string;
+            /** @enum {string} */
+            status: "open" | "expired" | "approved" | "declined" | "confirmed" | "withdrawn";
+            contractor: {
+                name: string;
+                has_logo: boolean;
+            };
+            customer_name: string;
+            job_site_address: string;
+            /** Format: date-time */
+            valid_until: string;
+            note: string;
+            payment_terms: string;
+            hide_line_prices: boolean;
+            groups: {
+                /** Format: uuid */
+                id: string;
+                label: string;
+            }[];
+            lines: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                group_id?: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                note?: string;
+                /** Format: int64 */
+                price_cents?: number;
+                /** @enum {string} */
+                selection: "pending" | "approved" | "declined";
+            }[];
+            extras: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                kind: "labour" | "overhead";
+                description: string;
+                /** Format: int64 */
+                price_cents?: number;
+            }[];
+            totals: {
+                /** Format: int64 */
+                subtotal_cents: number;
+                /** Format: int64 */
+                tax_cents: number;
+                /** Format: int64 */
+                total_cents: number;
+                /** Format: int64 */
+                deposit_cents: number;
+                /** @enum {string} */
+                tax_mode: "site_rate" | "included" | "at_checkout";
+                /** Format: int64 */
+                tax_rate_bps?: number;
+                tax_note: string;
+            };
+            requires_code: boolean;
+            can_decide: boolean;
+            approval?: {
+                /** @enum {string} */
+                decision: "approved" | "declined";
+                signed_by: string;
+                /** Format: date-time */
+                at: string;
+            };
+            /** @enum {string} */
+            fulfilment?: "ordered" | "being_prepared" | "fulfilled" | "cancelled";
+        };
+        CustomerQuoteChoices: {
+            choices: {
+                /** Format: uuid */
+                line_id: string;
+                /** @enum {string} */
+                state: "pending" | "approved" | "declined";
+            }[];
+        };
+        CustomerQuoteAcceptRequest: {
+            full_name: string;
+            email?: string;
+            phone?: string;
+            signature: {
+                /** @enum {string} */
+                kind: "typed" | "drawn";
+                text?: string;
+                /** @description A PNG of at most 128 KB, base64 encoded, for a drawn signature. */
+                png_base64?: string;
+            };
+            code?: string;
+        };
+        CustomerQuoteDeclineRequest: {
+            full_name: string;
+            reason?: string;
+        };
+        /** @description The strict allowlist of price wall 1. The materials are at the dealer's own prices; there is no field for the contractor's markup, basis points, labour, overhead, margin or the customer's sell prices. */
+        CustomerQuoteDealerProject: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            contractor: {
+                /** Format: uuid */
+                customer_id: string;
+                name: string;
+            };
+            project: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            } | null;
+            job_site_address: string;
+            customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact: {
+                name: string;
+                phone?: string;
+            };
+            /** @enum {string} */
+            status: "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+            selections: {
+                approved: number;
+                declined: number;
+                pending: number;
+            };
+            materials: {
+                sku: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                /** Format: int64 */
+                dealer_cost_cents: number;
+                /** @enum {string} */
+                selection: "pending" | "approved" | "declined";
+            }[];
+            /**
+             * Format: int64
+             * @description The counted material at the dealer's prices under the customer's decisions.
+             */
+            material_cents: number;
+            order: {
+                /** Format: uuid */
+                id: string;
+                number: string;
+                /** @description The order's lowercase status. */
+                status: string;
+                /** Format: int64 */
+                total_cents: number;
+            } | null;
+            /** Format: date-time */
+            dealer_accepted_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuoteDealerProjectDetail: components["schemas"]["CustomerQuoteDealerProject"] & {
+            approvals: {
+                /** @enum {string} */
+                step: "customer_approved" | "customer_declined" | "contractor_confirmed" | "dealer_accepted";
+                /** @enum {string} */
+                actor_kind: "customer" | "contractor" | "dealer";
+                actor_name: string;
+                /** Format: date-time */
+                occurred_at: string;
+                snapshot_sha256?: string;
+            }[];
+        };
+        CustomerQuoteDealerPage: {
+            items: components["schemas"]["CustomerQuoteDealerProject"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        CustomerQuoteDealerLink: {
+            /** @description The page path, /dq/ then the token. The raw token appears here, once. */
+            path: string;
+            url?: string;
+            /** Format: date-time */
+            expires_at: string;
+            delivered: boolean;
+        };
+        CustomerQuoteDealerQuoteView: {
+            number: string;
+            /** @enum {string} */
+            status: "open" | "accepted" | "declined" | "expired" | "withdrawn";
+            dealer_name: string;
+            customer_name: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            can_decide: boolean;
+            lines: {
+                description: string;
+                quantity: string;
+                uom: string;
+                price_uom: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths: number;
+                /** Format: int64 */
+                line_total_cents: number;
+            }[];
+            /** Format: int64 */
+            freight_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
             /**
@@ -15418,6 +16526,42 @@ export interface components {
                 "application/json": components["schemas"]["AppsDisabledError"];
             };
         };
+        /** @description The portal role holds neither the quote customers nor the see money capability. */
+        CustomerQuoteForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The logo is neither image/png nor image/jpeg. */
+        CustomerQuoteUnsupported: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description Too many requests for this link or from this address (code rate_limited). */
+        CustomerQuoteRateLimited: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The link existed and is expired, revoked or rotated away (code link_unavailable). The same bare answer whichever it is. */
+        CustomerQuoteLinkGone: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteGone"];
+            };
+        };
         /** @description The body or a parameter is malformed. */
         IntegrationBadRequest: {
             headers: {
@@ -18387,6 +19531,952 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteList: {
+        parameters: {
+            query?: {
+                status?: "draft" | "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of quotes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteInput"];
+            };
+        };
+        responses: {
+            /** @description The created draft, with its ETag and a Location header. */
+            201: {
+                headers: {
+                    /** @description The quote's revision in quotes. Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteExport: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv";
+                /** @description Which table a CSV carries. */
+                kind?: "quotes" | "customers" | "projects";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export, as an attachment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteExport"];
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSettingsGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The defaults (zero values when none were saved). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteSettings"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSettingsPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The saved defaults. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLogoPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+            };
+        };
+        responses: {
+            /** @description The logo is stored. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["CustomerQuoteUnsupported"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLogoDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote. */
+            200: {
+                headers: {
+                    /** @description The quote's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteInput"];
+            };
+        };
+        responses: {
+            /** @description The updated draft. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteApprovalList"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSend: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sent quote and its link. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteLinkResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLinkRotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteLinkResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLinkRevoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteWithdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The withdrawn quote; its link is dead. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteRevise: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The confirmed quote with its order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF, built from the public allowlist view alone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicSelections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteChoices"];
+            };
+        };
+        responses: {
+            /** @description The customer's view under the new choices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    channel: "email" | "sms";
+                };
+            };
+        };
+        responses: {
+            /** @description The code was sent. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    customerQuotePublicAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description The approved view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            413: components["responses"]["PayloadTooLarge"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicDecline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteDeclineRequest"];
+            };
+        };
+        responses: {
+            /** @description The declined view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerProjectDetail"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project with the acceptance recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerProjectDetail"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteShareLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description An email address to send the link to. */
+                    send_to?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerLink"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The accepted quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicDecline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The declined quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
