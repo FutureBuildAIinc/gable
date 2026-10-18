@@ -10,7 +10,7 @@
  * "Display name" field sits under a "Sign in with another name" heading.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { authConfig, authCustody } from '@gable/auth';
+import { authConfig, authCustody, resetAuthMethodsCache } from '@gable/auth';
 import './front-door.ts';
 import { TILE_ICONS, type GableFrontDoor } from './front-door.ts';
 import { DESK_ENTRIES } from './apps-catalog.ts';
@@ -211,9 +211,18 @@ describe('front door persona cards (dev mode)', () => {
  * so the production build must not render "Gable Building Supply".
  */
 describe('front door production build (no dev mode)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetAuthMethodsCache();
+    // The door asks for the dealer's allowed methods at boot; a failed
+    // answer fails closed to email and password with the token paste.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+  });
+
   it('renders the token door with no persona cards', async () => {
     authConfig.devMode = false;
     const el = await mount();
+    await settle(el);
     expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
     expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
     expect(el.querySelector('button[aria-label^="Sign in as"]')).toBeNull();
@@ -223,6 +232,498 @@ describe('front door production build (no dev mode)', () => {
   it('does not include the tenant name in the heading', async () => {
     authConfig.devMode = false;
     const el = await mount();
+    await settle(el);
     expect(el.querySelector('h1')?.textContent).not.toContain('Building Supply');
   });
 });
+
+/**
+ * The production door renders the dealer's allowed sign in methods,
+ * discovered at runtime from /api/v1/auth/config, in the server's order;
+ * a failure fails closed to email and password with the visible notice, and
+ * a method the server has not built yet shows its plain refusal inline.
+ * The dev sign-in stokes the identity tap with the display block alone.
+ */
+describe('front door runtime sign in methods (S8)', () => {
+  function stubConfig(body: unknown, status = 200) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify(body), { status });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    resetAuthMethodsCache();
+  });
+
+  it('renders only the allowed methods, in the server\'s order (allowlist one)', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
+    // The subtitle speaks to the methods shown, not the token paste.
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Sign in with your work account');
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+    // The form's submit is the card's one primary button, named Sign in.
+    const primary = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Sign in');
+    expect(primary).toBeDefined();
+    expect(primary?.className).toContain('bg-gable-green');
+    // The quiet divider between the form and the other methods.
+    expect(el.textContent).toContain('or');
+    const methodButtons = [...el.querySelectorAll('button[aria-label^="Sign in with"]')] as HTMLButtonElement[];
+    expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual(['Sign in with Google']);
+    // Each method button leads with a mark in the icon style.
+    expect(methodButtons[0].querySelector('svg')).not.toBeNull();
+    // The token sentence moved inside the disclosure.
+    expect(el.querySelector('h1 + p')?.textContent).not.toContain('bearer token');
+    expect(el.querySelector('details')?.textContent).toContain('bearer token');
+  });
+
+  it('renders a different allowlist the same way (allowlist two)', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'oidc', kind: 'redirect', label: 'Dealer SSO', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
+        { method: 'magic_link', kind: 'link', label: 'Email a sign in link', start_url: '/api/v1/auth/start/magic_link', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+    const methodButtons = [...el.querySelectorAll('button[aria-label^="Sign in with"]')] as HTMLButtonElement[];
+    expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Sign in with Dealer SSO',
+      'Sign in with Passkey',
+      'Sign in with Email a sign in link',
+      'Sign in with Microsoft',
+    ]);
+    for (const btn of methodButtons) {
+      expect(btn.querySelector('svg')).not.toBeNull();
+    }
+    // With only redirect style methods, the choice leads the subtitle and no
+    // divider shows (one kind only).
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Choose how you sign in');
+    const orDividers = [...el.querySelectorAll('span')].filter((s) => s.textContent?.trim() === 'or');
+    expect(orDividers).toHaveLength(0);
+    // No email form: the dealer allows no form method.
+    expect(el.querySelector('input[aria-label="Email"]')).toBeNull();
+    // The out of band token paste stays available either way.
+    expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
+  });
+
+  it('fails closed to email and password with a warning notice box and Retry action that re-reads the config', async () => {
+    authConfig.devMode = false;
+    stubConfig({}, 500);
+    const el = await mount();
+    await settle(el);
+    const alertBox = el.querySelector<HTMLElement>('[role="alert"]');
+    expect(alertBox).not.toBeNull();
+    expect(alertBox?.textContent).toContain("We could not load this dealer's sign in options, so only email and password is shown.");
+    expect(alertBox?.className).toContain('border-amber-300/40');
+    expect(alertBox?.className).toContain('bg-amber-300/10');
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+
+    const retryBtn = alertBox?.querySelector<HTMLButtonElement>('button');
+    expect(retryBtn).not.toBeNull();
+    expect(retryBtn?.textContent?.trim()).toBe('Retry');
+
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: null,
+      methods: [
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+      ],
+    });
+    retryBtn!.click();
+    await settle(el);
+
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Northridge Lumber');
+    expect(el.querySelector('button[aria-label="Sign in with Google"]')).not.toBeNull();
+  });
+
+  it('places the error message directly under the control that raised it (form, method button, or token button)', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+
+    // 1. Form error renders inside the form block, above the Google button.
+    const signInBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === 'Sign in',
+    )!;
+    const googleBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!;
+    const microsoftBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Microsoft"]')!;
+
+    signInBtn.click();
+    await settle(el);
+
+    let alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alertEl).not.toBeNull();
+    expect(alertEl.textContent).toContain('Enter your email and password.');
+    expect(signInBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(googleBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 2. Method start error renders directly under the clicked Google button, above Microsoft.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+      { status: 501 },
+    )));
+    googleBtn.click();
+    await settle(el);
+
+    alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alertEl).not.toBeNull();
+    expect(alertEl.textContent).toContain('not available on this server yet');
+    expect(googleBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(microsoftBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 3. Token error renders inside the <details> disclosure under the token button.
+    const tokenBtn = [...el.querySelectorAll<HTMLButtonElement>('details button')].find(
+      (b) => b.textContent?.trim() === 'Sign in with the token',
+    )!;
+    tokenBtn.click();
+    await settle(el);
+
+    const detailsAlert = el.querySelector<HTMLElement>('details [role="alert"]')!;
+    expect(detailsAlert).not.toBeNull();
+    expect(detailsAlert.textContent).toContain('not a readable, unexpired JWT');
+  });
+
+  it('a dev persona sign in stokes the identity tap and writes no token anywhere', async () => {
+    authConfig.devMode = true;
+    stubConfig({});
+    const el = await mount();
+    const ownerCard = [...el.querySelectorAll('button[aria-label^="Sign in as"]')].find(
+      (b) => b.textContent?.includes('Morgan Hale'),
+    ) as HTMLButtonElement;
+    ownerCard.click();
+    await settle(el);
+    const tap = localStorage.getItem('gable.identity-tap.v1');
+    expect(tap).not.toBeNull();
+    expect(tap).toContain('Morgan Hale');
+    const allStorage = [...Object.entries({ ...localStorage })].map(([k, v]) => k + v).join(' ')
+      + [...Array(sessionStorage.length).keys()].map((i) => sessionStorage.key(i) + sessionStorage.getItem(sessionStorage.key(i) as string)).join(' ');
+    expect(allStorage).not.toContain('eyJ');
+    expect(allStorage).not.toContain('token');
+  });
+
+  it('renders Continue as <name> as a real button with only the method used, and starts that method on click when still allowed', async () => {
+    authConfig.devMode = false;
+    localStorage.setItem(
+      'gable.identity-tap.v1',
+      JSON.stringify({ v: 1, displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN', method: 'google' }),
+    );
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(String(url));
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify({
+          auth_mode: 'production',
+          methods: [
+            { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+        { status: 501 },
+      );
+    }));
+
+    const el = await mount();
+    await settle(el);
+
+    const continueBtn = el.querySelector<HTMLButtonElement>('button[aria-label^="Continue as Morgan Hale"]');
+    expect(continueBtn).not.toBeNull();
+    expect(continueBtn!.getAttribute('type')).toBe('button');
+    expect(continueBtn!.className).toContain('rounded-lg');
+    expect(continueBtn!.className).toContain('hover:border-gable-green');
+    expect(continueBtn!.className).toContain('focus-visible:ring-2');
+    expect(continueBtn!.textContent).toContain('Continue as Morgan Hale');
+    expect(continueBtn!.textContent).toContain('with Google');
+    expect(continueBtn!.textContent).not.toContain('owner');
+    expect(continueBtn!.textContent).not.toContain('OWNER');
+    expect(continueBtn!.textContent).not.toContain('KEL-MAIN');
+
+    continueBtn!.click();
+    await settle(el);
+    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(true);
+  });
+
+  it('focuses the first allowed method when the Continue as method is no longer allowed', async () => {
+    authConfig.devMode = false;
+    localStorage.setItem(
+      'gable.identity-tap.v1',
+      JSON.stringify({ v: 1, displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN', method: 'google' }),
+    );
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
+      ],
+    });
+
+    const el = await mount();
+    await settle(el);
+
+    const continueBtn = el.querySelector<HTMLButtonElement>('button[aria-label^="Continue as Morgan Hale"]')!;
+    expect(continueBtn).not.toBeNull();
+    continueBtn.click();
+    await settle(el);
+
+    const firstMethodBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Passkey"]')!;
+    expect(document.activeElement).toBe(firstMethodBtn);
+  });
+
+  it('white labels the header and card title with the dealer mark or monogram and name when configured, and falls back to Gable when empty', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: null,
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Northridge Lumber');
+    const header = el.querySelector('header')!;
+    expect(header.textContent).toContain('NL');
+    expect(header.textContent).toContain('Northridge Lumber');
+    expect(header.querySelector('gable-brand-logo')).toBeNull();
+    expect(el.querySelector('footer')?.textContent).toContain('Powered by Gable');
+
+    // With a dealer_mark_url, the header renders the img mark instead of the monogram.
+    document.body.innerHTML = '';
+    resetAuthMethodsCache();
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: '/api/v1/dealer-profile/logo',
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const elWithLogo = await mount();
+    await settle(elWithLogo);
+    const logoImg = elWithLogo.querySelector<HTMLImageElement>('header img');
+    expect(logoImg).not.toBeNull();
+    expect(logoImg?.getAttribute('src')).toBe('/api/v1/dealer-profile/logo');
+  });
+
+  it('applies light-theme solid primary Sign in styling, 44px/16px mobile sizing, grouped icon+label, interactive summary, and sans token placeholder', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+        { method: 'oidc', kind: 'redirect', label: 'Northridge Corporate Single Sign On', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+
+    // V2-1: Primary Sign in button uses solid deep green fill with paper text in Gable Light.
+    const primaryBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === 'Sign in',
+    )!;
+    expect(primaryBtn.className).toContain('[[data-theme=light]_&]:bg-gable-green');
+    expect(primaryBtn.className).toContain('[[data-theme=light]_&]:text-black');
+
+    // V2-5: Inputs and buttons have 44px minimum height and 16px text on phone viewports.
+    const emailInput = el.querySelector<HTMLInputElement>('input[aria-label="Email"]')!;
+    const passwordInput = el.querySelector<HTMLInputElement>('input[aria-label="Password"]')!;
+    for (const input of [emailInput, passwordInput]) {
+      expect(input.className).toContain('min-h-[44px]');
+      expect(input.className).toContain('text-base');
+      expect(input.className).toContain('sm:text-sm');
+    }
+    expect(primaryBtn.className).toContain('min-h-[44px]');
+
+    // V3-2: Method button wraps icon and label in an inner inline-flex group.
+    const oidcBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Northridge Corporate Single Sign On"]')!;
+    expect(oidcBtn.className).toContain('min-h-[44px]');
+    const innerGroup = oidcBtn.firstElementChild as HTMLElement;
+    expect(innerGroup).not.toBeNull();
+    expect(innerGroup.className).toContain('inline-flex');
+    expect(innerGroup.className).toContain('items-center');
+    expect(innerGroup.className).toContain('gap-2.5');
+
+    // V3-3: Disclosure summary styles as an interactive control.
+    const summary = el.querySelector<HTMLElement>('details > summary')!;
+    expect(summary.className).toContain('hover:text-white');
+    expect(summary.className).toContain('hover:underline');
+    expect(summary.className).toContain('focus-visible:ring-2');
+
+    // V3-5: Bearer token textarea uses sans face for its placeholder.
+    const textarea = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Bearer token"]')!;
+    expect(textarea.className).toContain('placeholder:font-sans');
+  });
+});
+
+/**
+ * The front-door console launcher (?console=1): a five-group role picker and
+ * "Continue as" from identity-tap, never storing or showing a bearer token,
+ * with each role opening its target shell (/shell/, /field/, /portal) matching
+ * tauri/core/src/profiles.rs.
+ */
+describe('front door console launcher (?console=1)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    resetAuthMethodsCache();
+    window.history.replaceState(null, '', '/?console=1');
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('renders the five-group role picker in both production and dev mode and never shows a bearer token input', async () => {
+    for (const devMode of [false, true]) {
+      document.body.innerHTML = '';
+      authConfig.devMode = devMode;
+      const el = await mount();
+      await settle(el);
+
+      const groups = [...el.querySelectorAll<HTMLElement>('[data-testid^="role-group-"]')];
+      expect(groups).toHaveLength(5);
+      expect(groups.map((g) => g.querySelector('h2')?.textContent?.trim())).toEqual([
+        'Counter and Sales',
+        'Yard and Delivery',
+        'Purchasing and Finance',
+        'Leadership and Admin',
+        'Contractor Portal',
+      ]);
+
+      const cards = [...el.querySelectorAll<HTMLButtonElement>('button[data-testid^="role-card-"]')];
+      expect(cards).toHaveLength(9);
+
+      // Never shows a bearer token textarea or disclosure in ?console=1.
+      expect(el.querySelector('textarea[aria-label="Bearer token"]')).toBeNull();
+      expect(el.textContent?.toLowerCase()).not.toContain('use a bearer token instead');
+      expect(el.textContent).not.toMatch(/[\u2013\u2014]/);
+
+      for (const card of cards) {
+        expect(card.getAttribute('type')).toBe('button');
+        expect(card.className).toContain('min-h-[44px]');
+        expect(card.className).toContain('focus-visible:ring-2');
+      }
+    }
+  });
+
+  it('routes each role card to its target shell (/shell/, /field/, or /portal) and records identity-tap without storing a token', async () => {
+    const expectedRoutes: ReadonlyArray<readonly [string, string, string]> = [
+      ['owner', 'work-shell', '/shell/'],
+      ['admin', 'work-shell', '/shell/'],
+      ['finance', 'work-shell', '/shell/'],
+      ['sales', 'work-shell', '/shell/'],
+      ['cashier', 'work-shell', '/shell/'],
+      ['purchasing', 'work-shell', '/shell/'],
+      ['warehouse', 'field-shell', '/field/'],
+      ['driver', 'field-shell', '/field/'],
+      ['pro', 'pro-shell', '/portal'],
+    ];
+
+    authConfig.devMode = false;
+    const el = await mount();
+    await settle(el);
+
+    const navigated: string[] = [];
+    el.navigateTo = (path: string) => {
+      navigated.push(path);
+    };
+
+    for (const [role, expectedShell, expectedPath] of expectedRoutes) {
+      localStorage.clear();
+      sessionStorage.clear();
+      navigated.length = 0;
+
+      const card = el.querySelector<HTMLButtonElement>(`button[data-testid="role-card-${role}"]`);
+      expect(card, `card for ${role}`).not.toBeNull();
+      expect(card?.getAttribute('data-shell')).toBe(expectedShell);
+      expect(card?.getAttribute('data-shell-path')).toBe(expectedPath);
+
+      card!.click();
+      await settle(el);
+
+      expect(navigated).toEqual([expectedPath]);
+      const tap = localStorage.getItem('gable.identity-tap.v1');
+      expect(tap).not.toBeNull();
+      expect(JSON.parse(tap!)).toMatchObject({ v: 1, role });
+
+      const allStorage =
+        [...Object.entries({ ...localStorage })].map(([k, v]) => k + v).join(' ') +
+        [...Array(sessionStorage.length).keys()]
+          .map((i) => (sessionStorage.key(i) ?? '') + (sessionStorage.getItem(sessionStorage.key(i) as string) ?? ''))
+          .join(' ');
+      expect(allStorage).not.toContain('eyJ');
+      expect(allStorage).not.toContain('token');
+    }
+  });
+
+  it('renders "Continue as" from identity-tap and navigates to the remembered role shell without a token', async () => {
+    authConfig.devMode = false;
+    const cases: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['Sam Ortiz', 'warehouse', 'Gable Field', '/field/'],
+      ['Avery Brooks', 'sales', 'Gable Work', '/shell/'],
+      ['Tarnwick Construction', 'pro', 'Gable Pro', '/portal'],
+    ];
+
+    for (const [displayName, role, shellLabel, expectedPath] of cases) {
+      document.body.innerHTML = '';
+      localStorage.setItem(
+        'gable.identity-tap.v1',
+        JSON.stringify({ v: 1, displayName, role, yard: 'KEL-MAIN' }),
+      );
+
+      const el = await mount();
+      await settle(el);
+
+      const navigated: string[] = [];
+      el.navigateTo = (path: string) => {
+        navigated.push(path);
+      };
+
+      const continueBtn = el.querySelector<HTMLButtonElement>('button[data-testid="console-continue-as"]');
+      expect(continueBtn).not.toBeNull();
+      expect(continueBtn?.getAttribute('type')).toBe('button');
+      expect(continueBtn?.className).toContain('min-h-[44px]');
+      expect(continueBtn?.className).toContain('focus-visible:ring-2');
+      expect(continueBtn?.textContent).toContain(`Continue as ${displayName}`);
+      expect(continueBtn?.textContent).toContain(shellLabel);
+      expect(continueBtn?.textContent).not.toContain('eyJ');
+
+      continueBtn!.click();
+      await settle(el);
+
+      expect(navigated).toEqual([expectedPath]);
+    }
+  });
+});
+

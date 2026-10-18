@@ -110,7 +110,7 @@ func TestAFailingAuditWriteRollsTheActBack(t *testing.T) {
 func TestFailingEventWriteRollsTheReturnBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	saleID, body := f.saleOf("2", tender("cash", 1198))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
@@ -147,8 +147,10 @@ func TestFailingEventWriteRollsTheReturnBack(t *testing.T) {
 func TestFailingEventWriteRollsTheTillCloseBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
-		f.events.fail = "till.closed"
+		f.events.setFail("till.closed")
 	})
+	// the count below is off by design: the variance is not the subject
+	f.allowAnyVariance()
 	sessionID := f.openTill(1000)
 	f.saleOf("1", tender("cash", 599))
 	r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{

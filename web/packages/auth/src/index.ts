@@ -32,3 +32,20 @@ export {
   type FetchWithAuthOptions,
 } from './fetchClient.ts';
 export { BRANCH_STORAGE_KEY } from './branch.ts';
+export {
+  authMethodsConfig,
+  degradedAuthMethodsConfig,
+  parseAuthMethodsConfig,
+  resetAuthMethodsCache,
+  type AuthMethodsRuntimeConfig,
+  type SignInMethodCode,
+  type SignInMethodConfig,
+  type SignInMethodKind,
+} from './runtime-config.ts';
+export {
+  recordIdentity,
+  readIdentity,
+  forgetIdentity,
+  IDENTITY_TAP_KEY,
+  type TappedIdentity,
+} from './identity-tap.ts';

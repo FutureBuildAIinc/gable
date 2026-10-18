@@ -12,6 +12,7 @@
         "branch_id": "<id-1>",
         "cashier_id": "<id-2>",
         "closed_at": null,
+        "closed_by": null,
         "counted_by_method": {},
         "expected_by_method": {},
         "gl_entry_id": null,
@@ -21,7 +22,9 @@
         "opening_float_cents": 10000,
         "over_short_cents": null,
         "register_id": "REG-01",
-        "status": "open"
+        "sign_off": null,
+        "status": "open",
+        "variance_threshold_cents": null
       }
     }
   },

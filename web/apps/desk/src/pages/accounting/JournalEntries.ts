@@ -183,10 +183,12 @@ export class JournalEntries extends LitElement {
                         </p>
                     </div>
                     <div class="flex items-center gap-3">
-                        <gable-branch-scope
-                            .value=${this.scope}
-                            @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this._load(); }}
-                        ></gable-branch-scope>
+                        ${!this.showCreate ? html`
+                            <gable-branch-scope
+                                .value=${this.scope}
+                                @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this._load(); }}
+                            ></gable-branch-scope>
+                        ` : nothing}
                         <button
                             @click=${() => this.showCreate = true}
                             class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors"

@@ -27,7 +27,7 @@ import (
 func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
-		f.events.fail = "pos_transaction.completed"
+		f.events.setFail("pos_transaction.completed")
 	})
 	saleID := f.startSale(nil)
 	f.addLine(saleID, f.productLine("3"))
@@ -66,7 +66,7 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	}
 	// The gapless invoice series spent nothing: the next invoice takes the
 	// number the rolled back sale would have taken.
-	f.events.fail = ""
+	f.events.setFail("")
 	saleID2, _ := f.saleOf("1", tender("cash", 599))
 	if got := f.counterInvoices(t); got != invoicesBefore+1 {
 		t.Errorf("%d invoices after the retry, want %d", got, invoicesBefore+1)
@@ -74,9 +74,9 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	_ = saleID2
 
 	// The same proof for the void.
-	f.events.fail = "pos_transaction.voided"
+	f.events.setFail("pos_transaction.voided")
 	f2 := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
-		f.events.fail = "pos_transaction.voided"
+		f.events.setFail("pos_transaction.voided")
 	})
 	saleID3, body := f2.saleOf("2", tender("cash", 1198))
 	r = f2.do("POST", "/api/v1/pos/transactions/"+saleID3+"/void",
@@ -102,6 +102,7 @@ func TestTwoSalesOfTheLastUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 2 WHERE product_id = $1`, f.productID)
+	f.ensureTill()
 	var wg sync.WaitGroup
 	results := make([]int, 2)
 	for i := 0; i < 2; i++ {
@@ -285,6 +286,7 @@ const httpOK = 200
 // startSaleOn opens a cart on a named register.
 func (f *fixture) startSaleOn(register string) string {
 	f.t.Helper()
+	f.ensureTillOn(register)
 	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": register},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 	if r.status != 201 {

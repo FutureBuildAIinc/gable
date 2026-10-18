@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# One web image for the whole workspace: the front door and the desk, built
-# from web/ with its root lockfile and served by web/nginx.conf.
+# One web image for the whole workspace: the front door, the desk and the
+# work shell, built from web/ with its root lockfile and served by
+# web/nginx.conf.
 #
 #   docker build -f web/Dockerfile .      (context: the repository root)
 
@@ -23,14 +24,17 @@ ENV VITE_AUTH_DEV_MODE=$VITE_AUTH_DEV_MODE
 COPY web/package.json web/package-lock.json ./
 COPY web/apps/desk/package.json apps/desk/
 COPY web/apps/front-door/package.json apps/front-door/
+COPY web/apps/work-shell/package.json apps/work-shell/
+COPY web/apps/field-shell/package.json apps/field-shell/
 COPY web/packages/api-client/package.json packages/api-client/
 COPY web/packages/auth/package.json packages/auth/
 COPY web/packages/design-system/package.json packages/design-system/
+COPY web/packages/shell-chrome/package.json packages/shell-chrome/
 RUN npm ci
 
 COPY web/ .
 
-# Both bundles: apps/desk/dist and apps/front-door/dist.
+# Every bundle: desk, front-door, work-shell and field-shell.
 RUN npm run build
 
 # Run stage
@@ -43,9 +47,12 @@ RUN rm /etc/nginx/conf.d/default.conf
 
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY web/nginx-headers.conf /etc/nginx/gable-headers.conf
+COPY web/nginx-headers-frameable.conf /etc/nginx/gable-headers-frameable.conf
 
 COPY --from=builder /app/web/apps/front-door/dist /usr/share/nginx/html/front-door
 COPY --from=builder /app/web/apps/desk/dist /usr/share/nginx/html/desk
+COPY --from=builder /app/web/apps/work-shell/dist /usr/share/nginx/html/work-shell
+COPY --from=builder /app/web/apps/field-shell/dist /usr/share/nginx/html/field-shell
 
 # nginx's official image runs the master as root and the workers as `nginx`;
 # that is kept because a custom non-root user broke the pid and cache paths on
