@@ -12,8 +12,8 @@ import (
 )
 
 // DeleteCustomerQuotes removes every customer quote of the given contractor
-// accounts, the approval log included. The log refuses UPDATE, DELETE and
-// TRUNCATE for everybody, so this switches its triggers off and on again
+// accounts, the approval log included. The log refuses UPDATE and DELETE for
+// everybody, so this switches its trigger off and on again
 // inside one transaction: nothing outside the transaction ever sees them off.
 func DeleteCustomerQuotes(t *testing.T, db *database.DB, customerIDs ...uuid.UUID) {
 	t.Helper()

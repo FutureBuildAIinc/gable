@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -691,5 +692,142 @@ func TestConcurrency_ThreeSendsIssueOneLink(t *testing.T) {
 	_ = w.db.Pool.QueryRow(ctx, `SELECT count(*) FROM pro_portal_share_tokens WHERE quote_id = $1`, q.ID).Scan(&links)
 	if ok != 1 || links != 1 {
 		t.Fatalf("%d sends succeeded and %d links exist, want 1 and 1 (%v)", ok, links, errs)
+	}
+}
+
+func TestRevise_ThenResendAllowsANewDecisionUnderANewRevision(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	if _, err := w.svc.Decline(ctx, token, anon, customerquote.DeclineInput{FullName: "Pat Homeowner", Reason: "price"}); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := w.svc.Revise(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The contractor lowers the markup and sends again.
+	in := w.basicInput()
+	in.Markup = &customerquote.Markup{Kind: customerquote.KindMarkup, BPS: 1000}
+	updated, err := w.svc.Update(ctx, w.a, q.ID, `"`+itoa(draft.Revision)+`"`, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := w.svc.Send(ctx, w.a, q.ID, `"`+itoa(updated.Revision)+`"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newToken := strings.TrimPrefix(res.Path, "/q/")
+	if newToken == token {
+		t.Fatal("the revised quote went out on the old link")
+	}
+	if _, err := w.acceptAll(newToken, typed("Pat Homeowner"), ""); err != nil {
+		t.Fatalf("the second decision: %v", err)
+	}
+	log, _ := w.svc.Approvals(ctx, w.a, q.ID)
+	if len(log) != 2 || log[0].Step != customerquote.StepCustomerDeclined || log[1].Step != customerquote.StepCustomerApproved || log[0].QuoteRevision >= log[1].QuoteRevision {
+		t.Fatalf("the record: %+v", log)
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestWithdraw_KillsTheLinkAndTheQuoteStopsBeingShared(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	out, err := w.svc.Withdraw(ctx, w.a, q.ID)
+	if err != nil || out.Status != customerquote.StatusWithdrawn {
+		t.Fatalf("withdraw: %v %v", out, err)
+	}
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+		t.Errorf("a withdrawn quote's link: %v", err)
+	}
+	if _, err := w.svc.Withdraw(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrInvalidState) {
+		t.Errorf("withdrawing twice: %v", err)
+	}
+	if _, err := w.svc.Rotate(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrInvalidState) {
+		t.Errorf("rotating a withdrawn quote: %v", err)
+	}
+}
+
+func TestSettings_AreTheDefaultsOfANewQuoteAndAreValidated(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	st, err := w.svc.PutSettings(ctx, w.a, customerquote.SettingsInput{DisplayName: "A and Sons Building", PaymentTerms: "Due on receipt", DepositBPS: 1000,
+		Tax: customerquote.Tax{Mode: customerquote.TaxIncluded}, Markup: customerquote.Markup{Kind: customerquote.KindMargin, BPS: 3000}, RequireCode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.DisplayName != "A and Sons Building" || !st.RequireCode || st.Markup.Kind != customerquote.KindMargin {
+		t.Fatalf("settings %+v", st)
+	}
+	// A quote that names none of them takes them.
+	in := w.basicInput()
+	in.Markup, in.Tax, in.PaymentTerms, in.DepositBPS = nil, nil, nil, nil
+	q, err := w.svc.Create(ctx, w.a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Markup.Kind != customerquote.KindMargin || q.Markup.BPS != 3000 || q.Tax.Mode != customerquote.TaxIncluded ||
+		q.PaymentTerms != "Due on receipt" || q.DepositBPS != 1000 || !q.RequireCode {
+		t.Errorf("defaults not applied: %+v", q)
+	}
+	// 30 percent margin on the studs: 55000 / 0.7.
+	if q.Lines[0].SellCents != 78571 {
+		t.Errorf("stud sell %d", q.Lines[0].SellCents)
+	}
+	for name, bad := range map[string]customerquote.SettingsInput{
+		"margin 100":     {Tax: customerquote.Tax{Mode: customerquote.TaxAtCheckout}, Markup: customerquote.Markup{Kind: customerquote.KindMargin, BPS: 10000}},
+		"unknown tax":    {Tax: customerquote.Tax{Mode: "vat"}, Markup: customerquote.Markup{Kind: customerquote.KindMarkup}},
+		"deposit 101":    {DepositBPS: 10001, Tax: customerquote.Tax{Mode: customerquote.TaxAtCheckout}, Markup: customerquote.Markup{Kind: customerquote.KindMarkup}},
+		"rate in at-co":  {Tax: customerquote.Tax{Mode: customerquote.TaxAtCheckout, RateBPS: 5}, Markup: customerquote.Markup{Kind: customerquote.KindMarkup}},
+		"rate over 50pc": {Tax: customerquote.Tax{Mode: customerquote.TaxSiteRate, RateBPS: 5001}, Markup: customerquote.Markup{Kind: customerquote.KindMarkup}},
+	} {
+		if _, err := w.svc.PutSettings(ctx, w.a, bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// Another contractor's settings are their own.
+	other, err := w.svc.GetSettings(ctx, w.b)
+	if err != nil || other.DisplayName != "" || other.RequireCode {
+		t.Errorf("another contractor's settings: %+v %v", other, err)
+	}
+}
+
+func TestExport_CSVDefusesSpreadsheetFormulas(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	in := w.basicInput()
+	in.Title = "=HYPERLINK(\"http://x.example\",\"click\")"
+	in.EndCustomer.Name = "+1 Name"
+	if _, err := w.svc.Create(ctx, w.a, in); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := w.svc.Export(ctx, w.a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"quotes", "customers", "projects"} {
+		var sb strings.Builder
+		if err := ex.WriteCSV(&sb, kind); err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(sb.String(), "\n") {
+			for _, cell := range strings.Split(line, ",") {
+				cell = strings.Trim(cell, `"`)
+				if cell != "" && strings.ContainsRune("=+-@", rune(cell[0])) && !strings.HasPrefix(cell, "-") {
+					t.Errorf("%s: a formula cell survives: %q", kind, cell)
+				}
+			}
+		}
+	}
+	var sb strings.Builder
+	_ = ex.WriteCSV(&sb, "quotes")
+	if !strings.Contains(sb.String(), `'=HYPERLINK`) {
+		t.Errorf("the title was not defused: %s", sb.String())
+	}
+	if err := ex.WriteCSV(&sb, "nope"); err == nil {
+		t.Error("an unknown kind was accepted")
 	}
 }

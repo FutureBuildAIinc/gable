@@ -18,8 +18,10 @@
 -- tables, which no dealer surface reads except through the shared project
 -- columns (the project name, job site, customer and site contact, selection
 -- status and the dealer's own cost). Only the share token's SHA-256 hash is
--- stored, never the token. The approval log refuses UPDATE, DELETE and
--- TRUNCATE in the database.
+-- stored, never the token. The approval log refuses UPDATE and DELETE in the
+-- database. TRUNCATE is not refused: the demo seed clears the transactional
+-- tables with TRUNCATE ... CASCADE on every run, which reaches this log through
+-- the quotes' foreign keys, and only the table's owner can truncate.
 --
 -- Rollback lives at migrations/down/131_pro_customer_quotes_and_selections_down.sql
 -- (outside the migrator's glob, applied by hand).
@@ -261,8 +263,3 @@ DROP TRIGGER IF EXISTS pro_customer_quote_approval_log_no_change ON pro_customer
 CREATE TRIGGER pro_customer_quote_approval_log_no_change
     BEFORE UPDATE OR DELETE ON pro_customer_quote_approval_log
     FOR EACH ROW EXECUTE FUNCTION pro_customer_quote_approval_log_refuse();
-
-DROP TRIGGER IF EXISTS pro_customer_quote_approval_log_no_truncate ON pro_customer_quote_approval_log;
-CREATE TRIGGER pro_customer_quote_approval_log_no_truncate
-    BEFORE TRUNCATE ON pro_customer_quote_approval_log
-    FOR EACH STATEMENT EXECUTE FUNCTION pro_customer_quote_approval_log_refuse();

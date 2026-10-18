@@ -5,7 +5,8 @@ package customerquote_test
 
 // Migration 131 on a scratch database that holds every earlier migration: it
 // applies, rolls back (the down file drops every table it made), applies
-// again, and the approval log refuses UPDATE, DELETE and TRUNCATE.
+// again, the approval log refuses UPDATE and DELETE, and the demo seed's
+// TRUNCATE ... CASCADE still clears it.
 
 import (
 	"context"
@@ -175,16 +176,10 @@ func TestMigration131_ApprovalLogIsAppendOnly(t *testing.T) {
 	}
 
 	for name, stmt := range map[string]string{
-		"update":   `UPDATE pro_customer_quote_approval_log SET actor_name = 'Someone Else' WHERE id = $1`,
-		"delete":   `DELETE FROM pro_customer_quote_approval_log WHERE id = $1`,
-		"truncate": `TRUNCATE pro_customer_quote_approval_log`,
+		"update": `UPDATE pro_customer_quote_approval_log SET actor_name = 'Someone Else' WHERE id = $1`,
+		"delete": `DELETE FROM pro_customer_quote_approval_log WHERE id = $1`,
 	} {
-		var err error
-		if name == "truncate" {
-			_, err = conn.Exec(ctx, stmt)
-		} else {
-			_, err = conn.Exec(ctx, stmt, logID)
-		}
+		_, err := conn.Exec(ctx, stmt, logID)
 		if err == nil {
 			t.Errorf("%s of the approval log was accepted", name)
 			continue
@@ -204,6 +199,31 @@ func TestMigration131_ApprovalLogIsAppendOnly(t *testing.T) {
 		t.Error("a quote that has an approval log was deleted")
 	}
 
+	// The demo seed clears the transactional tables with TRUNCATE ... CASCADE, which
+	// reaches the log through the quote's foreign keys; it must keep working.
+	if _, err := conn.Exec(ctx, `TRUNCATE TABLE projects, orders, quotes CASCADE`); err != nil {
+		t.Errorf("the seed's truncate cascade was refused: %v", err)
+	}
+	var left int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pro_customer_quote_approval_log`).Scan(&left); err != nil || left != 0 {
+		t.Errorf("the cascade left %d log rows: %v", left, err)
+	}
+}
+
+func TestMigration131_OneDecisionPerRevision(t *testing.T) {
+	conn := scratchDB131(t)
+	before, target, _ := migration131Files(t)
+	for _, f := range before {
+		apply131(t, conn, f)
+	}
+	apply131(t, conn, target)
+	ctx := context.Background()
+	quoteID := seedQuote131(t, conn)
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO pro_customer_quote_approval_log (quote_id, quote_revision, step, actor_kind, actor_name)
+		 VALUES ($1, 1, 'customer_approved', 'customer', 'A Homeowner')`, quoteID); err != nil {
+		t.Fatal(err)
+	}
 	// One decision per revision: a second customer_approved for revision 1 is refused,
 	// the next revision is allowed.
 	if _, err := conn.Exec(ctx,
