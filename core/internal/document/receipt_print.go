@@ -121,7 +121,9 @@ func (h *Handler) printSaleReceipt(w http.ResponseWriter, r *http.Request, saleI
 		w.Header().Set("X-Receipt-Print", strconv.Itoa(print.Number))
 	}
 	if layout == LayoutInvoice {
-		h.printInvoice(w, r, invoiceID)
+		if !h.printInvoice(w, r, invoiceID) && h.prints != nil {
+			h.prints.CancelReceiptPrint(r.Context(), saleID)
+		}
 		return
 	}
 	pdf, err := h.thermal(r.Context(), invoiceID, print)

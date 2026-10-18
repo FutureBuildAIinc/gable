@@ -21,11 +21,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type toggleInvoiceRepo struct {
+	invoice.Repository
+	fail *bool
+}
+
+func (r *toggleInvoiceRepo) GetInvoice(ctx context.Context, id uuid.UUID) (*invoice.Invoice, error) {
+	if r.fail != nil && *r.fail {
+		return nil, errors.New("invoice lookup failed")
+	}
+	return r.Repository.GetInvoice(ctx, id)
+}
 
 // a one pixel PNG, the smallest honest signature image
 const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
@@ -62,11 +76,18 @@ func withReceipts(render document.ThermalRenderer) func(*fixture) {
 }
 
 func withRealThermalReceipts() func(*fixture) {
+	return withRealInvoiceAndThermalReceipts(nil)
+}
+
+func withRealInvoiceAndThermalReceipts(failInvoice *bool) func(*fixture) {
 	return func(f *fixture) {
 		f.mounts = append(f.mounts, func(f *fixture, mux *http.ServeMux) {
 			store := document.NewStore(f.db)
 			docSvc := document.NewService(nil).WithYards(store).WithJobs(store)
-			h := document.NewHandler(docSvc, nil, nil, nil, nil).WithSaleReceipts(f.service).WithReceiptPrints(f.service)
+			invRepo := &toggleInvoiceRepo{Repository: invoice.NewRepository(f.db), fail: failInvoice}
+			invSvc := invoice.NewService(invRepo, nil, nil, f.db)
+			custSvc := customer.NewService(customer.NewRepository(f.db))
+			h := document.NewHandler(docSvc, nil, invSvc, custSvc, nil).WithSaleReceipts(f.service).WithReceiptPrints(f.service)
 			h.WithThermalReceipt(h.ThermalRendererOf(f.service))
 			h.RegisterReceiptRoutes(mux, func(next http.Handler) http.Handler { return next })
 		})
@@ -361,4 +382,122 @@ func TestTheRealThermalReceiptPDFRendersSaleSignatureAndReprint(t *testing.T) {
 		}
 	}
 }
+
+// RULE: GET /api/v1/pos/transactions/{id}/receipt (1) does not mutate
+// pos_transactions.revision, (2) unbumps print_count when an invoice-layout
+// render fails, and (3) never increments print_count on a sale that a
+// concurrent VoidSale has voided (pool size 4).
+func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	var failInvoice bool
+	f := newFixture(t, db, withRealInvoiceAndThermalReceipts(&failInvoice))
+	f.openTill(0)
+
+	// (1) & (2): failed invoice-layout render unbumps print_count, successful
+	// invoice and thermal80 prints leave pos_transactions.revision unchanged so
+	// a subsequent void with the pre-receipt revision succeeds.
+	sale1, _ := completedSale(t, f)
+	revBefore := num(t, f.getSale(t, sale1), "revision")
+
+	failInvoice = true
+	if r := f.printReceipt(sale1, "layout=invoice"); r.status == http.StatusOK {
+		t.Fatalf("expected failing invoice render to return non-200, got 200")
+	}
+	if got := f.printCount(sale1); got != 0 {
+		t.Errorf("print_count after failed invoice render = %d, want 0", got)
+	}
+	if got := num(t, f.getSale(t, sale1), "revision"); got != revBefore {
+		t.Errorf("revision after failed invoice render = %d, want %d", got, revBefore)
+	}
+
+	failInvoice = false
+	r1 := f.printReceipt(sale1, "layout=invoice")
+	if r1.status != http.StatusOK {
+		t.Fatalf("invoice receipt print = %d: %s", r1.status, r1.raw)
+	}
+	if r1.header.Get("X-Receipt-Print") != "1" {
+		t.Errorf("X-Receipt-Print after failed render = %q, want 1", r1.header.Get("X-Receipt-Print"))
+	}
+	r2 := f.printReceipt(sale1, "layout=thermal80")
+	if r2.status != http.StatusOK || r2.header.Get("X-Receipt-Print") != "2" {
+		t.Fatalf("thermal receipt print = %d (%q): %s", r2.status, r2.header.Get("X-Receipt-Print"), r2.raw)
+	}
+	if got := f.printCount(sale1); got != 2 {
+		t.Errorf("print_count = %d, want 2", got)
+	}
+	if got := num(t, f.getSale(t, sale1), "revision"); got != revBefore {
+		t.Errorf("revision after receipt prints = %d, want %d", got, revBefore)
+	}
+	void1 := f.do("POST", "/api/v1/pos/transactions/"+sale1+"/void",
+		map[string]any{"reason": "void with pre-receipt revision", "revision": revBefore},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if void1.status != http.StatusOK {
+		t.Fatalf("void with pre-receipt revision = %d: %s", void1.status, void1.raw)
+	}
+
+	// (3) Concurrent VoidSale vs PrintReceipt at pool size 4 never increments
+	// print_count on a VOIDED sale.
+	sale2, _ := completedSale(t, f)
+	sale2Meta := f.getSale(t, sale2)
+	rev2 := num(t, sale2Meta, "revision")
+	inv2 := uuid.MustParse(str(t, sale2Meta, "invoice_id"))
+
+	ctx := t.Context()
+	txHold, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txHold: %v", err)
+	}
+	defer func() { _ = txHold.Rollback(ctx) }()
+	if _, err := txHold.Exec(ctx, `SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, inv2); err != nil {
+		t.Fatalf("lock invoice: %v", err)
+	}
+
+	voidCh := make(chan resp, 1)
+	go func() {
+		voidCh <- f.do("POST", "/api/v1/pos/transactions/"+sale2+"/void",
+			map[string]any{"reason": "concurrent void", "revision": rev2},
+			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	}()
+
+	// Wait until VoidSale has locked pos_transactions and is waiting on invoices.
+	for range 50 {
+		var waiting int64
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&waiting)
+		if waiting >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	printCh := make(chan resp, 1)
+	go func() {
+		printCh <- f.printReceipt(sale2, "layout=thermal80")
+	}()
+
+	// Wait until PrintReceipt has passed GetSale and is waiting on pos_transactions.
+	for range 50 {
+		var waiting int64
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&waiting)
+		if waiting >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	_ = txHold.Rollback(ctx)
+
+	vRes := <-voidCh
+	pRes := <-printCh
+	if vRes.status != http.StatusOK {
+		t.Fatalf("concurrent void = %d: %s", vRes.status, vRes.raw)
+	}
+	if pRes.status != http.StatusConflict {
+		t.Errorf("concurrent print against voiding sale = %d, want 409: %s", pRes.status, pRes.raw)
+	}
+	if got := f.printCount(sale2); got != 0 {
+		t.Errorf("print_count on VOIDED sale = %d, want 0", got)
+	}
+}
+
 

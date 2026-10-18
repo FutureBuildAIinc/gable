@@ -162,31 +162,36 @@ func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 
 // printInvoice answers the invoice's document: the documents route and the
 // counter's receipt route render it through this one function.
-func (h *Handler) printInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+func (h *Handler) printInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	if h.invoiceSvc == nil || h.customerSvc == nil || h.docSvc == nil {
+		httputil.RespondError(w, r, "failed to generate invoice PDF", http.StatusInternalServerError, errors.New("invoice document service not configured"))
+		return false
+	}
 	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
-		return
+		return false
 	}
 	if !h.recordBranchAllowed(w, r, "invoice", inv.BranchID) {
-		return
+		return false
 	}
 
 	cust, err := h.customerSvc.GetCustomer(r.Context(), inv.CustomerID)
 	if err != nil {
 		httputil.RespondError(w, r, "customer not found", http.StatusNotFound, err)
-		return
+		return false
 	}
 
 	pdfBytes, err := h.docSvc.GenerateInvoicePDF(r.Context(), inv, cust)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to generate invoice PDF", http.StatusInternalServerError, err)
-		return
+		return false
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", "inline; filename=invoice.pdf")
 	w.Write(pdfBytes)
+	return true
 }
 
 func (h *Handler) HandlePrintPickTicket(w http.ResponseWriter, r *http.Request) {

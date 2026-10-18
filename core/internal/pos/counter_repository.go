@@ -261,13 +261,16 @@ func (r *PostgresRepository) GetSignature(ctx context.Context, saleID uuid.UUID)
 }
 
 // BumpPrintCount counts one more print of the sale's receipt and answers the
-// new count. The statement is the guard: racing prints are numbered apart.
+// new count. The statement is the guard: racing prints are numbered apart, and
+// a sale voided between the initial read and the update is refused without
+// touching revision.
 func (r *PostgresRepository) BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error) {
 	var n int
-	err := r.ex(ctx).QueryRow(ctx, `UPDATE pos_transactions SET print_count = print_count + 1 WHERE id = $1
+	err := r.ex(ctx).QueryRow(ctx, `UPDATE pos_transactions SET print_count = print_count + 1
+		WHERE id = $1 AND status = 'COMPLETED'
 		RETURNING print_count`, saleID).Scan(&n)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, httpx.NotFound("sale not found")
+		return 0, httpx.InvalidStateTransition("cannot print receipt for a non-completed sale")
 	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to count the print: %w", err)
