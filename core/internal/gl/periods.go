@@ -263,16 +263,17 @@ func (s *Service) CloseYear(ctx context.Context, year int, currency, actor strin
 			legs := make([]Leg, 0, len(rows)+1)
 			var net int64
 			for _, row := range rows {
-				amount := signedBalance(row)
-				if amount == 0 {
+				diff := row.Debit - row.Credit
+				if diff == 0 {
 					continue
 				}
 				net += signedBalanceToEquity(row)
-				if row.AccountType == AccountTypeRevenue {
-					// zero a revenue account: debit what it holds
-					legs = append(legs, Leg{AccountCode: row.AccountCode, Description: "Year end close: " + row.AccountName, Debit: amount})
+				if diff > 0 {
+					// Net debit balance (normal expense or contra-revenue): credit to zero it out.
+					legs = append(legs, Leg{AccountCode: row.AccountCode, Description: "Year end close: " + row.AccountName, Credit: diff})
 				} else {
-					legs = append(legs, Leg{AccountCode: row.AccountCode, Description: "Year end close: " + row.AccountName, Credit: amount})
+					// Net credit balance (normal revenue or net-credit expense): debit to zero it out.
+					legs = append(legs, Leg{AccountCode: row.AccountCode, Description: "Year end close: " + row.AccountName, Debit: -diff})
 				}
 			}
 			if net < 0 {

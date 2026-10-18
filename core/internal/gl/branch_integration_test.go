@@ -424,11 +424,17 @@ func TestYearEndCloseZeroesEachBranchIntoRetainedEarnings(t *testing.T) {
 
 	day := time.Date(year, 7, 1, 0, 0, 0, 0, time.UTC)
 	post(t, db, svc, a, day, memo,
-		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 20000},
-		gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 20000})
+		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 20500},
+		gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 20500})
+	post(t, db, svc, a, day, memo,
+		gl.Leg{AccountCode: "4030", Debit: 700},
+		gl.Leg{AccountCode: gl.AccountCodeAR, Credit: 700})
 	post(t, db, svc, a, day, memo,
 		gl.Leg{AccountCode: gl.AccountCodeCOGS, Debit: 8000},
 		gl.Leg{AccountCode: "1030", Credit: 8000})
+	post(t, db, svc, a, day, memo,
+		gl.Leg{AccountCode: gl.AccountCodeCash, Debit: 200},
+		gl.Leg{AccountCode: "5030", Credit: 200})
 	post(t, db, svc, b, day, memo,
 		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 9000},
 		gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 9000})
@@ -470,6 +476,21 @@ func TestYearEndCloseZeroesEachBranchIntoRetainedEarnings(t *testing.T) {
 		}
 		if pnl.NetIncome != nets[branch] {
 			t.Errorf("branch %v income statement after the close nets %d, want the year's %d", branch, pnl.NetIncome, nets[branch])
+		}
+		for _, code := range []string{"4010", "4030", "5010", "5030"} {
+			var acctHeld int64
+			if err := db.Pool.QueryRow(ctx, `
+				SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint
+				FROM gl_journal_lines l
+				JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+				JOIN gl_accounts a ON a.id = l.account_id
+				WHERE e.status = 'POSTED' AND a.code = $1 AND l.branch_id = $2
+				  AND e.entry_date BETWEEN make_date($3, 1, 1) AND make_date($3, 12, 31)`, code, branch, year).Scan(&acctHeld); err != nil {
+				t.Fatal(err)
+			}
+			if acctHeld != 0 {
+				t.Errorf("branch %v account %s holds %d after the close, want zero", branch, code, acctHeld)
+			}
 		}
 		var held int64
 		if err := db.Pool.QueryRow(ctx, `
