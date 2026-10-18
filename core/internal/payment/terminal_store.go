@@ -634,12 +634,13 @@ func (l *TerminalLedger) ReleaseReversal(ctx context.Context, id uuid.UUID, by s
 	return err == nil, err
 }
 
-// OpenIntentsAtRegister answers the open intents (claimed or at the device)
-// of one register, so the till close can refuse while one stands.
+// OpenIntentsAtRegister answers the open intents (claimed, at the device, or
+// an authorized sale leg whose money was neither booked nor reversed) of one
+// register, so the till close can refuse while one stands.
 func (l *TerminalLedger) OpenIntentsAtRegister(ctx context.Context, registerID string) ([]uuid.UUID, error) {
 	rows, err := l.db.GetExecutor(ctx).Query(ctx, `
 		SELECT id FROM payment_terminal_intents
-		WHERE register_id = $1 AND state IN ('claimed', 'pending_at_device')`, registerID)
+		WHERE register_id = $1 AND (state IN ('claimed', 'pending_at_device') OR (state = 'authorized' AND spent_at IS NULL AND kind = 'sale'))`, registerID)
 	if err != nil {
 		return nil, err
 	}

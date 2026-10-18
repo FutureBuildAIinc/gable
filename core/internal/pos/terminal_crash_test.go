@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -475,3 +476,41 @@ func TestAnAnswerForAClaimedIntentIsRefusedAtTheLedger(t *testing.T) {
 		t.Fatalf("the answer for a claimed intent = %v, wanted ErrAnswerForClaimedIntent", err)
 	}
 }
+
+// TestReviewTillClosesOverAnAuthorizedUnbookedLeg: when a card sale act stops
+// at TerminalPointAfterAnswer (the device authorized the charge, the sale's
+// booking transaction has not opened), the intent is authorized and unspent on
+// the open sale. CloseTill refuses with 409 naming the intent until the open
+// sale completes on that leg.
+func TestReviewTillClosesOverAnAuthorizedUnbookedLeg(t *testing.T) {
+	f, seam := crashFixture(t, payment.SimApprove, nil)
+	saleID := f.openSale(t, nil)
+	seam.set(pos.TerminalPointAfterAnswer)
+	if r := f.completeSale(saleID, f.cardAll(t, saleID)); r.status != http.StatusInternalServerError {
+		t.Fatalf("stopped act = %d, wanted 500: %s", r.status, r.raw)
+	}
+	id, state, _ := f.terminalIntentOf(t, saleID)
+	if state != "authorized" {
+		t.Fatalf("intent = %s, wanted authorized", state)
+	}
+	if _, spent, _ := f.intentFacts(t, id); spent {
+		t.Fatal("intent is already marked spent before booking")
+	}
+	sessionID := f.currentTill(t)
+	cl := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	requireBlocker(t, cl, "terminal_intent_in_flight")
+	if !strings.Contains(string(cl.raw), id.String()) {
+		t.Fatalf("till close refusal does not name intent %s: %s", id, cl.raw)
+	}
+	seam.set("")
+	if done := f.completeSale(saleID, f.cardAll(t, saleID)); done.status != http.StatusOK {
+		t.Fatalf("completion on authorized leg = %d: %s", done.status, done.raw)
+	}
+	cl2 := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0, "card": f.totalOf(t, saleID)}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if cl2.status != http.StatusOK {
+		t.Fatalf("till close after booking = %d: %s", cl2.status, cl2.raw)
+	}
+}
+
