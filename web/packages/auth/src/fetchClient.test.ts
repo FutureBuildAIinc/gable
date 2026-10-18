@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fetchWithAuth, SESSION_EXPIRED_EVENT } from './fetchClient'
+import { NO_SIGNAL_ERROR } from '@gable/work-offline'
 import { authCustody } from './custody'
 import { BRANCH_STORAGE_KEY } from './branch'
 
@@ -49,6 +50,77 @@ function hangUntilAborted() {
       init.signal?.addEventListener('abort', () => reject(abortError()))
     })
 }
+
+const writeVerbs = ['POST', 'PUT', 'PATCH', 'DELETE'] as const
+const readVerbs = ['GET', 'HEAD', 'OPTIONS'] as const
+
+describe('fetchWithAuth and the no signal guard (money never queues)', () => {
+  const originalOnLine = Object.getOwnPropertyDescriptor(Navigator.prototype, 'onLine')
+
+  afterEach(() => {
+    if (originalOnLine) Object.defineProperty(Navigator.prototype, 'onLine', originalOnLine)
+  })
+
+  function setOnLine(value: boolean) {
+    Object.defineProperty(Navigator.prototype, 'onLine', { ...originalOnLine, get: () => value })
+  }
+
+  it.each(writeVerbs)(
+    'refuses an offline %s before the first fetch and never retries it',
+    async (method) => {
+      setOnLine(false)
+      await expect(fetchWithAuth('/api/v1/payments', { method, body: '{}', retries: 3 })).rejects.toThrow(
+        NO_SIGNAL_ERROR,
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('names the refusal NoSignalError', async () => {
+    setOnLine(false)
+    const caught = await fetchWithAuth('/api/v1/payments', { method: 'POST', body: '{}' }).catch(
+      (e: Error) => e,
+    )
+    expect(caught).toBeInstanceOf(Error)
+    expect(caught.name).toBe('NoSignalError')
+    expect(caught.message).toBe(NO_SIGNAL_ERROR)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends an offline GET through, for the cached reads', async () => {
+    setOnLine(false)
+    await fetchWithAuth('/api/v1/pos/catalog')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(readVerbs.filter((m) => m !== 'GET'))('sends an offline %s through', async (method) => {
+    await fetchWithAuth('/api/v1/pos/catalog', { method })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('is case insensitive about the method', async () => {
+    setOnLine(false)
+    await expect(fetchWithAuth('/api/v1/payments', { method: 'post', body: '{}' })).rejects.toThrow(
+      NO_SIGNAL_ERROR,
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('takes an onlineSignal over the platform word, for deterministic tests', async () => {
+    await expect(
+      fetchWithAuth('/api/v1/payments', { method: 'POST', body: '{}', onlineSignal: () => false }),
+    ).rejects.toThrow(NO_SIGNAL_ERROR)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await fetchWithAuth('/api/v1/payments', { method: 'POST', body: '{}', onlineSignal: () => true })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends a write through while the platform reports online', async () => {
+    setOnLine(true)
+    await fetchWithAuth('/api/v1/payments', { method: 'POST', body: '{}' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
 
 beforeEach(() => {
   fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))

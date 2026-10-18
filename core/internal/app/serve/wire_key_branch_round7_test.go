@@ -294,22 +294,16 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	}
 }
 
-// Fix round 7 (r15 P3-3): the offline sync logged its batch under the batch
-// register_id whatever the pin held, so a key pinned to A sending batch
-// register regB with an item on regA wrote a pos_sync_log row naming another
-// branch's register. The batch register is now held to the caller's branch
-// context before any item runs and before the log row is written: the whole
-// batch is refused 403, nothing written, and the pin's own register passes.
+// Fix round 7 (r15 P3-3), under the money never queues rule: the offline
+// sync no longer runs its items at all. A batch whose register names another
+// branch was refused 403 before any item ran; now every batch that parses is
+// refused 409 money_never_queues before any item runs and before a log row
+// is written, whatever register it names.
 func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 	f, _, first := round5Fixture(t)
 	ctx := context.Background()
 	client := uuid.New()
 	batch := "pin-r7-" + uuid.NewString()[:8]
-	// the control's sale completes, so the pin's product needs stock
-	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, NULL, '', 50)`, f.posProd); err != nil {
-		t.Fatalf("seed stock: %v", err)
-	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
@@ -329,11 +323,11 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 		return n
 	}
 
-	// The batch register of another branch: the whole batch is refused before
-	// the log row is written.
+	// The batch register of another branch: the batch is refused by rule
+	// before any item runs and before the log row is written.
 	status, buf := f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(f.regB, f.regA), nil)
-	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
-		t.Errorf("bound key sync with another branch's batch register: %d %s, want the 403 naming the register rule", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key sync with another branch's batch register: %d %s, want the rule's 409", status, buf)
 	}
 	if n := logRows(); n != 0 {
 		t.Errorf("the refused sync wrote %d pos_sync_log rows for the batch, want none", n)
@@ -342,13 +336,17 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want none", n)
 	}
 
-	// The control: the pin's own register as the batch register passes.
+	// The control: the pin's own register as the batch register is refused by
+	// the same rule, nothing written.
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(f.regA, f.regA), nil)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("bound key sync with the pin's own batch register: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key sync with the pin's own batch register: %d %s, want the rule's 409", status, buf)
 	}
-	if n := logRows(); n != 1 {
-		t.Errorf("the control sync wrote %d pos_sync_log rows, want its one", n)
+	if n := logRows(); n != 0 {
+		t.Errorf("the refused control sync wrote %d pos_sync_log rows, want none", n)
+	}
+	if n := f.transactionsWithID(t, client); n != 0 {
+		t.Errorf("the refused control sync wrote %d transactions, want none", n)
 	}
 }
 

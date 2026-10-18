@@ -722,20 +722,15 @@ paths:
     post:
       operationId: posSyncOffline
       tags: [pos]
-      summary: Replay a batch of offline sales
+      summary: Refuse the offline sale replay by rule (money never queues)
       description: >-
-        Each sale in the batch is replayed through the same completion path
-        (stock, invoice, payments, ledger, event) keyed by its client_id: a
-        replayed sale is a duplicate, not an error. The batch register is
-        read before any item runs and before the sync log row is written: a
-        register_id that is empty or names no register the counter knows is
-        a 400 for every caller, and a register of another branch is the
-        branch wall's 403. A sale whose tax provider call fails is never
-        rejected (the one exception to the provider rule, ADR 0005 section
-        3): it stays pending in the sync log and the sync retries it;
-        errors lists what could not complete and pending what waits. A sale
-        replayed at a register with no open till session is an error entry
-        (till_not_open): the counter takes no sale outside a drawer.
+        Offline sale replay is refused by rule: money never queues offline,
+        so a sale is completed online at the counter, never captured, queued
+        and replayed later. A batch that parses answers 409
+        money_never_queues before anything of it is written: no sale, no
+        invoice, no payment, no sync log row. A malformed body, a missing
+        batch_id or an empty items array keeps its 400, and the branch and
+        customer wall refusals run ahead of the handler as on every route.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -746,18 +741,21 @@ paths:
             schema:
               $ref: "#/components/schemas/PosSyncRequest"
       responses:
-        "200":
-          description: The batch's outcome.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PosSyncResponse"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          description: >-
+            The rule's refusal (the ADR 0001 envelope, code
+            money_never_queues): money never queues offline; complete the
+            sale online.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/catalog:
@@ -2217,7 +2215,7 @@ components:
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit
         (with its component lines), charge and text lines, the priced fields
         null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -2233,9 +2231,13 @@ components:
         price_uom: {type: [string, "null"], description: "The unit the price is per; equals uom unless the pair converts."}
         uom_qty: {type: [string, "null"], description: "The pair side in the sale unit; 1 and 1 when the units agree."}
         price_uom_qty: {type: [string, "null"]}
+        stock_uom: {type: [string, "null"]}
+        stock_quantity: {type: [string, "null"]}
+        tally: {oneOf: [{$ref: "#/components/schemas/Tally"}, {type: "null"}]}
         unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "Scale 4; null on a text line."}
         priced_unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "The price before an override or discount moved it."}
         price_source: {type: string, enum: [price_list, quote, override, manual, none]}
+        price_basis: {type: [string, "null"]}
         override_reason: {type: [string, "null"]}
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
@@ -2680,29 +2682,6 @@ components:
         unit_price_cents: {type: integer, format: int64}
         uom: {type: string}
         in_stock: {type: string, description: "A decimal string of the on hand quantity."}
-    PosSyncResponse:
-      type: object
-      required: [batch_id, synced_count, duplicate_count, error_count, pending_count, errors, pending]
-      properties:
-        batch_id: {type: string}
-        synced_count: {type: integer}
-        duplicate_count: {type: integer, description: "Sales already synced, by client_id."}
-        error_count: {type: integer}
-        pending_count: {type: integer, description: "Sales waiting on the tax provider; the sync retries them."}
-        errors:
-          type: array
-          items:
-            $ref: "#/components/schemas/PosSyncItemResult"
-        pending:
-          type: array
-          items:
-            $ref: "#/components/schemas/PosSyncItemResult"
-    PosSyncItemResult:
-      type: object
-      required: [client_id, reason]
-      properties:
-        client_id: {type: string, format: uuid}
-        reason: {type: string}
     PosTerminalIntent:
       type: object
       required: [id, transaction_id, leg_key, kind, state, amount_cents, provider_ref, answer_verdict]

@@ -146,6 +146,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if len(preLines) == 0 {
 		return nil, invalid("lines", "the sale has no lines to complete")
 	}
+	if err := s.checkLineStockUnits(ctx, preLines); err != nil {
+		return nil, err
+	}
 	// The tax, priced before the transaction with the same resolver the
 	// transaction uses (exemption first, then the provider or the branch
 	// rate), so the tender pre-check refuses the obvious cases before a card
@@ -495,15 +498,19 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 		}
 
-		// Stock out: each stocked line's quantity from on hand, in
+		// Stock out: each stocked line's stock quantity from on hand, in
 		// (product id, line id) order (section 11, step 6).
+		if err := s.checkLineStockUnits(ctx, lines); err != nil {
+			return err
+		}
 		stocked := stockedLines(lines)
 		for _, i := range stocked {
 			l := &lines[i]
-			if err := s.inventory.IssueQty(ctx, *l.ProductID, sale.BranchID, *l.Quantity); err != nil {
+			sq := salesdoc.StockQty(l)
+			if err := s.inventory.IssueQty(ctx, *l.ProductID, sale.BranchID, sq); err != nil {
 				if errors.Is(err, inventoryErrInsufficient) {
 					return conflict("insufficient_stock",
-						fmt.Sprintf("line %s asks for more %s than the branch holds on hand", l.ID, (*l.Quantity).DecimalString()))
+						fmt.Sprintf("line %s asks for more %s than the branch holds on hand", l.ID, sq.DecimalString()))
 				}
 				return err
 			}
@@ -541,8 +548,23 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			fl := invoice.FulfilmentLine{
 				ID: uuid.New(), Position: n, LineType: string(b.LineType), ProductID: b.ProductID,
 				ChargeCodeID: b.ChargeCodeID, SKU: b.SKU, Description: b.Description, UOM: b.UOM, PriceUOM: b.PriceUOM,
+				StockUOM: b.StockUOM, PriceBasis: b.PriceBasis, CostSource: b.CostSource,
 				PriceSource: string(b.PriceSource), Taxable: b.Taxable, RevenueAccountCode: b.RevenueAccountCode,
 				OverrideReason: b.OverrideReason, PriceAdjustedBy: b.PriceAdjustedBy,
+			}
+			if b.Tally != nil && len(b.Tally.Rows) > 0 {
+				if th := b.TallyThickness(); th != nil {
+					t := int64(*th)
+					fl.BoardThicknessIn = &t
+				}
+				if wi := b.TallyWidth(); wi != nil {
+					w := int64(*wi)
+					fl.BoardWidthIn = &w
+				}
+				fl.TallyRows = make([]invoice.TallyRowInput, 0, len(b.Tally.Rows))
+				for _, r := range b.Tally.Rows {
+					fl.TallyRows = append(fl.TallyRows, invoice.TallyRowInput{Pieces: r.Pieces, LengthFT: int64(r.LengthFT)})
+				}
 			}
 			invoiceLineOf[b.ID] = fl.ID
 			if b.PricedUnitPrice != nil {
@@ -556,6 +578,13 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if b.LineType != salesdoc.LineText {
 				q := int64(*b.Quantity)
 				fl.Quantity = &q
+				if b.StockQuantity != nil {
+					sq := int64(*b.StockQuantity)
+					fl.StockQuantity = &sq
+				} else if b.ProductID != nil {
+					sq := int64(salesdoc.StockQty(b))
+					fl.StockQuantity = &sq
+				}
 				uq, pq := int64(*b.UOMQty), int64(*b.PriceUOMQty)
 				fl.UOMQty, fl.PriceUOMQty = &uq, &pq
 				up := int64(*b.UnitPrice)
@@ -575,7 +604,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 					if ref, ok := refs[b.ProductID.String()]; ok && ref.AverageCost > 0 {
 						uc := int64(ref.AverageCost)
 						fl.UnitCost = &uc
-						cost := int64(salesdoc.CostOf(*b.Quantity, ref.AverageCost))
+						cost := int64(salesdoc.CostOf(salesdoc.StockQty(b), ref.AverageCost))
 						fl.CostCents = cost
 						inv.CostCents += cost
 					}
@@ -780,6 +809,34 @@ func productLess(a, b *salesdoc.Line) bool {
 		return false
 	}
 	return a.ProductID.String() < b.ProductID.String()
+}
+
+// checkLineStockUnits verifies that every stocked line in lines still matches
+// its product's current stocking unit (ADR 0006 section 3.4).
+func (s *Service) checkLineStockUnits(ctx context.Context, lines []salesdoc.Line) error {
+	var ids []uuid.UUID
+	for i := range lines {
+		if lines[i].IsStocked() && lines[i].ProductID != nil && lines[i].StockUOM != nil && *lines[i].StockUOM != "" {
+			ids = append(ids, *lines[i].ProductID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	refs, err := s.repo.LookupProducts(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range lines {
+		l := &lines[i]
+		if !l.IsStocked() || l.ProductID == nil || l.StockUOM == nil || *l.StockUOM == "" {
+			continue
+		}
+		if ref, ok := refs[l.ProductID.String()]; ok && ref.UOMPrimary != "" && *l.StockUOM != ref.UOMPrimary {
+			return salesdoc.StockUnitChangedError(i, *l.StockUOM, ref.UOMPrimary)
+		}
+	}
+	return nil
 }
 
 // costRefs reads the products the billed lines name, for the cost of goods

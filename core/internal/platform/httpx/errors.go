@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // Stable error codes (ADR 0001 §3). Clients branch on these, never on
@@ -36,6 +38,10 @@ const (
 	// CodePaymentRequired is the 402 of a card charge that was declined or that
 	// the gateway could not take, before anything was recorded.
 	CodePaymentRequired = "payment_required"
+	// CodeMoneyNeverQueues is the 409 of the offline sale replay: money never
+	// queues offline, so every batch that parses is refused before any part of
+	// it is written.
+	CodeMoneyNeverQueues = "money_never_queues"
 	// CodeChargeNotReversed is the 502 of a card charge the gateway approved,
 	// the system refused, and nothing gave back (ADR 0005 9.4).
 	CodeChargeNotReversed = "charge_not_reversed"
@@ -236,7 +242,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error(e.Message,
 			"status", e.Status,
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", httputil.SafePath(r.URL.Path),
 			"request_id", requestID(w, r),
 		)
 	}

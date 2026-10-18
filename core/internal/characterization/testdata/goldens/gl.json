@@ -232,10 +232,23 @@
         },
         {
           "balance": 0,
+          "code": "4060",
+          "created_at": "<ts+0d>",
+          "description": "Periodic finance charges on overdue receivables",
+          "id": "<id-18>",
+          "is_active": true,
+          "name": "Finance Charge Income",
+          "normal_balance": "CREDIT",
+          "subtype": "Operating",
+          "type": "REVENUE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "balance": 0,
           "code": "4090",
           "created_at": "<ts+0d>",
           "description": "Cash received at the counter outside a sale",
-          "id": "<id-18>",
+          "id": "<id-19>",
           "is_active": true,
           "name": "Other Income",
           "normal_balance": "CREDIT",
@@ -248,7 +261,7 @@
           "code": "5010",
           "created_at": "<ts+0d>",
           "description": "Direct cost of materials sold",
-          "id": "<id-19>",
+          "id": "<id-20>",
           "is_active": true,
           "name": "Cost of Goods Sold",
           "normal_balance": "DEBIT",
@@ -261,7 +274,7 @@
           "code": "5020",
           "created_at": "<ts+0d>",
           "description": "Rent, utilities, wages, and general overhead",
-          "id": "<id-20>",
+          "id": "<id-21>",
           "is_active": true,
           "name": "Operating Expenses",
           "normal_balance": "DEBIT",
@@ -274,7 +287,7 @@
           "code": "5030",
           "created_at": "<ts+0d>",
           "description": "Till drawer counting variances (short = expense, over = credit)",
-          "id": "<id-21>",
+          "id": "<id-22>",
           "is_active": true,
           "name": "Cash Over/Short",
           "normal_balance": "DEBIT",
@@ -287,7 +300,7 @@
           "code": "5040",
           "created_at": "<ts+0d>",
           "description": "Receivables written off as uncollectable",
-          "id": "<id-22>",
+          "id": "<id-23>",
           "is_active": true,
           "name": "Bad Debt Expense",
           "normal_balance": "DEBIT",
@@ -329,23 +342,23 @@
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
         "entry_number": 128,
-        "id": "<id-23>",
+        "id": "<id-24>",
         "lines": [
           {
             "account_id": "<id-1>",
             "credit": 0,
             "debit": 10000,
             "description": "golden debit",
-            "id": "<id-24>",
-            "journal_entry_id": "<id-23>"
+            "id": "<id-25>",
+            "journal_entry_id": "<id-24>"
           },
           {
             "account_id": "<id-14>",
             "credit": 10000,
             "debit": 0,
             "description": "golden credit",
-            "id": "<id-25>",
-            "journal_entry_id": "<id-23>"
+            "id": "<id-26>",
+            "journal_entry_id": "<id-24>"
           }
         ],
         "memo": "golden characterisation entry",
@@ -362,7 +375,7 @@
     "name": "gl.journal_entry.post",
     "request": {
       "method": "POST",
-      "path": "/api/v1/gl/journal-entries/<id-23>/post"
+      "path": "/api/v1/gl/journal-entries/<id-24>/post"
     },
     "response": {
       "status": 200,
@@ -399,7 +412,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-26>"
+          "request_id": "<id-27>"
         }
       }
     }

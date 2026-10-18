@@ -24,7 +24,6 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/config"
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
@@ -222,8 +221,7 @@ func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
 		Inventory:  inventory.NewService(inventory.NewRepository(db)),
 		Invoices:   newInvoiceServiceWith(db, accounts),
 		Accounts:   accounts,
-		Pricing:    pricing.NewService(pricing.NewRepository(db)),
-		Customers:  customer.NewService(customer.NewRepository(db)),
+		Pricing:    pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db)),
 		Escalators: pricing.NewEscalatorRepository(db),
 		QuoteLines: quote.NewRepository(db),
 	})

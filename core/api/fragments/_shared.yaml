@@ -455,6 +455,7 @@ components:
                 - conflict
                 - payment_required
                 - charge_not_reversed
+                - money_never_queues
                 - ai_off
                 - precondition_failed
                 - payload_too_large

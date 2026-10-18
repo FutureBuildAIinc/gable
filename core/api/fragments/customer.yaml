@@ -3,11 +3,13 @@
 #
 # The customer module on the wire contract of ADR 0001 (item C2-1, ADR 0005
 # section 7): the cursor list envelope with working filters, the one error
-# envelope, a lowercase tier, integer _cents money (a credit limit that is
-# null for no limit), a revision with its ETag on every record, ship-to
-# addresses, the payment terms master, and per contact order authority. The
-# activities routes that sat in the middle are the CRM module's own since
-# C5-1b and live in the activities fragment on the wire contract.
+# envelope, integer _cents money (a credit limit that is null for no limit),
+# a revision with its ETag on every record, ship-to addresses, the payment
+# terms master, and per contact order authority. The customer's pricing
+# program is its price profile (ADR 0006 section 5.2); the price level read
+# this module served moved to GET /api/v1/pricing/levels. The activities
+# routes that sat in the middle are the CRM module's own since C5-1b and live
+# in the activities fragment on the wire contract.
 paths:
   /api/v1/customers:
     get:
@@ -16,10 +18,9 @@ paths:
       summary: List customers
       description: >-
         The cursor list envelope, newest first. q searches name, account number
-        and email (case blind); tier, is_active and salesperson_id filter. total
+        and email (case blind); is_active and salesperson_id filter. total
         appears only under include=total. A parameter the route does not declare, a
-        tier outside the lowercase vocabulary, a malformed cursor or an out of range
-        limit is a 400.
+        malformed cursor or an out of range limit is a 400.
       parameters:
         - name: q
           in: query
@@ -27,13 +28,6 @@ paths:
           description: Search term for name, account_number and email, at most 100 characters.
           schema:
             type: string
-        - name: tier
-          in: query
-          required: false
-          description: One lowercase tier.
-          schema:
-            type: string
-            enum: [retail, silver, gold, platinum]
         - name: is_active
           in: query
           required: false
@@ -71,9 +65,10 @@ paths:
       summary: Create a customer
       description: >-
         Creates a customer. account_number and name are required; the terms default
-        to NET30, the tier to retail. The currency override, when given, must be an
-        enabled currency. The balance is not a request field: the AR core writes it.
-        Writes customer.created in the same transaction.
+        to NET30, the pricing program to the default profile. The currency override,
+        when given, must be an enabled currency. The balance is not a request
+        field: the AR core writes it. Writes customer.created in the same
+        transaction.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -927,77 +922,11 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
-  /api/v1/price_levels:
-    get:
-      operationId: customerListPriceLevels
-      tags: [customer]
-      summary: List price levels
-      description: >-
-        The cursor list envelope, newest first.
-      parameters:
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Include"
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: The page of price levels.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PriceLevelPage"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalErrorEither"
 components:
   schemas:
-    CustomerTier:
-      type: string
-      enum: [retail, silver, gold, platinum]
-      description: The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
     TermsKind:
       type: string
       enum: [net_days, day_of_month, due_on_receipt]
-    PriceLevel:
-      type: object
-      required: [id, name, multiplier, created_at, updated_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        multiplier:
-          type: number
-          description: "A price multiplier, a rate and not money."
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-    PriceLevelPage:
-      type: object
-      required: [items, next_cursor, limit]
-      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/PriceLevel"
-        next_cursor:
-          type: [string, "null"]
-          description: Opaque; pass it back verbatim as cursor. Null on the last page.
-        limit:
-          type: integer
-        total:
-          type: integer
-          format: int64
     PaymentTermsRef:
       type: object
       required: [id, code, name]
@@ -1011,7 +940,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, tier, is_active, primary_branch_id, branch_ids, price_level_id, price_level, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1027,8 +956,6 @@ components:
         address:
           type: [string, "null"]
           description: "The free text billing address; delivery addresses are ship-tos."
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
@@ -1044,13 +971,10 @@ components:
             The yards the customer trades at, home yard included, in id order. Customers
             are dealer wide accounts (ruling A): the first document at a yard the customer
             is not yet linked to adds the yard here.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
-        price_level:
-          oneOf:
-            - $ref: "#/components/schemas/PriceLevel"
-            - type: "null"
+          description: The customer's pricing program (ADR 0006 section 5.2); the create takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid
@@ -1124,17 +1048,16 @@ components:
           type: [string, "null"]
         address:
           type: [string, "null"]
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
           type: string
           format: uuid
           description: Create only; fixed afterwards, and a PUT carrying it is a 400.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
+          description: The pricing program; a create that names none takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid
@@ -1173,17 +1096,16 @@ components:
           type: [string, "null"]
         address:
           type: [string, "null"]
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
           type: string
           format: uuid
           description: Create only; fixed afterwards, and a PUT carrying it is a 400.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
+          description: The pricing program; a create that names none takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid

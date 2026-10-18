@@ -550,6 +550,9 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 	one("vehicle", `SELECT id FROM vehicles WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("driver", `SELECT id FROM drivers WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("marketIndex", `SELECT id FROM market_indices WHERE index_code = 'RL_SPF_2X4'`)
+	// The migration's default price level and profile, for the pricing
+	// catalogue scenarios.
+	one("d_level", `SELECT value FROM system_settings WHERE key = 'pricing.default_price_level_id'`)
 	// The seed day captured by TestMain, not "now at request time": the two
 	// can only differ if the run crossed UTC midnight, which the end-of-run
 	// guard rejects anyway.

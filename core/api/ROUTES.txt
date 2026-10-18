@@ -31,6 +31,7 @@ GET	/api/integration/vehicles	internal/integrations	h.ListVehicles
 GET	/api/partner/v1/dashboard	internal/partner	h.GetDashboard
 GET	/api/partner/v1/quotes	internal/partner	h.ListQuotes
 GET	/api/partner/v1/quotes/{id}	internal/partner	h.GetQuote
+GET	/api/portal/v1/billing/summary	internal/portal	h.HandleBillingSummary
 GET	/api/portal/v1/cart	internal/portal	h.HandleGetCart
 POST	/api/portal/v1/cart/items	internal/portal	h.HandleAddToCart
 DELETE	/api/portal/v1/cart/items/{id}	internal/portal	h.HandleRemoveCartItem
@@ -41,6 +42,25 @@ GET	/api/portal/v1/catalog/{id}	internal/portal	h.HandleGetCatalogProduct
 GET	/api/portal/v1/catalog/{id}/volume-breaks	internal/portal	h.HandleVolumeBreaks
 POST	/api/portal/v1/checkout	internal/portal	h.HandleCheckout
 GET	/api/portal/v1/config	internal/portal	h.HandleGetConfig
+GET	/api/portal/v1/customer-quotes	internal/customerquote	h.List
+POST	/api/portal/v1/customer-quotes	internal/customerquote	h.Create
+GET	/api/portal/v1/customer-quotes/export	internal/customerquote	h.Export
+GET	/api/portal/v1/customer-quotes/settings	internal/customerquote	h.GetSettings
+PUT	/api/portal/v1/customer-quotes/settings	internal/customerquote	h.PutSettings
+DELETE	/api/portal/v1/customer-quotes/settings/logo	internal/customerquote	h.DeleteLogo
+PUT	/api/portal/v1/customer-quotes/settings/logo	internal/customerquote	h.PutLogo
+GET	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Get
+PUT	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Update
+GET	/api/portal/v1/customer-quotes/{id}/approvals	internal/customerquote	h.Approvals
+POST	/api/portal/v1/customer-quotes/{id}/confirm	internal/customerquote	h.Confirm
+GET	/api/portal/v1/customer-quotes/{id}/confirm-preview	internal/customerquote	h.ConfirmPreview
+POST	/api/portal/v1/customer-quotes/{id}/link/revoke	internal/customerquote	h.Revoke
+POST	/api/portal/v1/customer-quotes/{id}/link/rotate	internal/customerquote	h.Rotate
+GET	/api/portal/v1/customer-quotes/{id}/pdf	internal/customerquote	h.PDF
+GET	/api/portal/v1/customer-quotes/{id}/preview	internal/customerquote	h.Preview
+POST	/api/portal/v1/customer-quotes/{id}/revise	internal/customerquote	h.Revise
+POST	/api/portal/v1/customer-quotes/{id}/send	internal/customerquote	h.Send
+POST	/api/portal/v1/customer-quotes/{id}/withdraw	internal/customerquote	h.Withdraw
 GET	/api/portal/v1/dashboard	internal/portal	h.HandleDashboard
 GET	/api/portal/v1/deliveries	internal/portal	h.HandleListDeliveries
 GET	/api/portal/v1/deliveries/{id}	internal/portal	h.HandleGetDelivery
@@ -50,25 +70,67 @@ GET	/api/portal/v1/invites	internal/portal	h.HandleListInvites
 POST	/api/portal/v1/invites	internal/portal	h.HandleInviteUser
 GET	/api/portal/v1/invoices	internal/portal	h.HandleListInvoices
 GET	/api/portal/v1/invoices/{id}	internal/portal	h.HandleGetInvoice
+GET	/api/portal/v1/invoices/{id}/pdf	internal/portal	h.HandleInvoicePDF
 POST	/api/portal/v1/login	internal/portal	h.HandleLogin
 POST	/api/portal/v1/logout	internal/portal	h.HandleLogout
+GET	/api/portal/v1/me	internal/portal	h.HandleMe
 GET	/api/portal/v1/orders	internal/portal	h.HandleListOrders
 POST	/api/portal/v1/orders/reorder	internal/portal	h.HandleReorder
 GET	/api/portal/v1/orders/{id}	internal/portal	h.HandleGetOrder
 POST	/api/portal/v1/orders/{id}/cancel	internal/portal	h.HandleCancelOrder
+PUT	/api/portal/v1/orders/{id}/delivery-instructions	internal/portal	h.HandleSetDeliveryInstructions
 PUT	/api/portal/v1/orders/{id}/project	internal/portal	h.HandleSetOrderProject
+GET	/api/portal/v1/orders/{id}/reorder-preview	internal/portal	h.HandleReorderPreview
+GET	/api/portal/v1/orders/{id}/timeline	internal/portal	h.HandleOrderTimeline
+GET	/api/portal/v1/payment-methods	internal/portal	h.HandleListPaymentMethods
+POST	/api/portal/v1/payment-methods	internal/portal	h.HandleCreatePaymentMethod
+DELETE	/api/portal/v1/payment-methods/{id}	internal/portal	h.HandleDeletePaymentMethod
+PUT	/api/portal/v1/payment-methods/{id}/default	internal/portal	h.HandleSetDefaultPaymentMethod
+GET	/api/portal/v1/payments	internal/portal	h.HandleListPayments
+POST	/api/portal/v1/payments	internal/portal	h.HandleCreatePayment
+GET	/api/portal/v1/procurement/projects	internal/portal	h.HandleListProcurementProjects
+POST	/api/portal/v1/procurement/projects	internal/portal	h.HandleCreateProcurementProject
+DELETE	/api/portal/v1/procurement/projects/{id}	internal/portal	h.HandleDeleteProcurementProject
+GET	/api/portal/v1/procurement/projects/{id}	internal/portal	h.HandleGetProcurementProject
+PUT	/api/portal/v1/procurement/projects/{id}	internal/portal	h.HandleUpdateProcurementProject
+POST	/api/portal/v1/procurement/projects/{id}/lines	internal/portal	h.HandleAddProcurementLine
+DELETE	/api/portal/v1/procurement/projects/{id}/lines/{lineId}	internal/portal	h.HandleDeleteProcurementLine
+PUT	/api/portal/v1/procurement/projects/{id}/lines/{lineId}	internal/portal	h.HandleUpdateProcurementLine
+POST	/api/portal/v1/procurement/projects/{id}/submit-rfq	internal/portal	h.HandleSubmitProcurementRFQ
 GET	/api/portal/v1/projects	internal/project	h.HandleListProjects
 POST	/api/portal/v1/projects	internal/project	h.HandleCreateProject
 GET	/api/portal/v1/projects/{id}	internal/project	h.HandleGetProject
 PUT	/api/portal/v1/projects/{id}	internal/project	h.HandleUpdateProject
 GET	/api/portal/v1/quotes	internal/portal	h.HandleListQuotes
 POST	/api/portal/v1/quotes	internal/portal	h.HandleCreateQuote
+POST	/api/portal/v1/quotes/intake	internal/portal	h.HandleQuoteIntake
 GET	/api/portal/v1/quotes/{id}	internal/portal	h.HandleGetQuote
 POST	/api/portal/v1/quotes/{id}/accept	internal/portal	h.HandleAcceptQuote
+POST	/api/portal/v1/quotes/{id}/convert	internal/portal	h.HandleConvertQuote
 POST	/api/portal/v1/quotes/{id}/decline	internal/portal	h.HandleDeclineQuote
+POST	/api/portal/v1/schedule/holds	internal/portal	h.HandleCreateScheduleHold
+DELETE	/api/portal/v1/schedule/holds/{id}	internal/portal	h.HandleReleaseScheduleHold
+GET	/api/portal/v1/schedule/holds/{id}	internal/portal	h.HandleGetScheduleHold
+PUT	/api/portal/v1/schedule/holds/{id}	internal/portal	h.HandleChangeScheduleHold
+GET	/api/portal/v1/schedule/windows	internal/portal	h.HandleListScheduleWindows
+GET	/api/portal/v1/statement	internal/portal	h.HandleGetStatement
+GET	/api/portal/v1/statement/pdf	internal/portal	h.HandleStatementPDF
+GET	/api/portal/v1/statements	internal/portal	h.HandleListStatements
+GET	/api/portal/v1/statements/{id}/pdf	internal/portal	h.HandleStatementRunItemPDF
+GET	/api/portal/v1/today	internal/portal	h.HandleToday
 GET	/api/portal/v1/users	internal/portal	h.HandleListUsers
 PUT	/api/portal/v1/users/{id}/role	internal/portal	h.HandleUpdateUserRole
 PUT	/api/portal/v1/users/{id}/status	internal/portal	h.HandleUpdateUserStatus
+GET	/api/public/v1/customer-quotes/{token}	internal/customerquote	h.View
+POST	/api/public/v1/customer-quotes/{token}/accept	internal/customerquote	h.Accept
+POST	/api/public/v1/customer-quotes/{token}/code	internal/customerquote	h.Code
+POST	/api/public/v1/customer-quotes/{token}/decline	internal/customerquote	h.Decline
+GET	/api/public/v1/customer-quotes/{token}/logo	internal/customerquote	h.Logo
+GET	/api/public/v1/customer-quotes/{token}/pdf	internal/customerquote	h.PDF
+PUT	/api/public/v1/customer-quotes/{token}/selections	internal/customerquote	h.Selections
+GET	/api/public/v1/dealer-quotes/{token}	internal/customerquote	h.DealerQuoteView
+POST	/api/public/v1/dealer-quotes/{token}/accept	internal/customerquote	h.DealerQuoteAccept
+POST	/api/public/v1/dealer-quotes/{token}/decline	internal/customerquote	h.DealerQuoteDecline
 POST	/api/v1/a2a/purchase-order	cmd/server	a2aReceiver.ReceiveWebhook
 GET	/api/v1/accounts/{id}	internal/account	wrap(guard, h.HandleSummary)
 GET	/api/v1/accounts/{id}/transactions	internal/account	wrap(guard, h.HandleTransactions)
@@ -109,9 +171,29 @@ POST	/api/v1/apps/{key}/enable	pkg/apps	h.handleEnable
 GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
 GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
 POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
+GET	/api/v1/ar/credit-holds	internal/account	wrap(guard, h.HandleListCreditHolds)
+POST	/api/v1/ar/credit-holds	internal/account	wrap(finance, h.HandlePlaceCreditHold)
+POST	/api/v1/ar/credit-holds/evaluate	internal/account	wrap(finance, h.HandleEvaluateCreditHolds)
+POST	/api/v1/ar/credit-holds/{id}/override	internal/account	wrap(finance, h.HandleOverrideCreditHold)
+POST	/api/v1/ar/credit-holds/{id}/release	internal/account	wrap(finance, h.HandleReleaseCreditHold)
+GET	/api/v1/ar/customers/{id}/credit-limit-changes	internal/account	wrap(guard, h.HandleListCreditLimitChanges)
+POST	/api/v1/ar/customers/{id}/credit-limit-changes	internal/account	wrap(finance, h.HandleRequestCreditLimitChange)
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
 POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
+GET	/api/v1/ar/finance-charges/rules	internal/account	wrap(guard, h.HandleGetFinanceChargeRules)
+PUT	/api/v1/ar/finance-charges/rules	internal/account	wrap(finance, h.HandleUpdateFinanceChargeRules)
+GET	/api/v1/ar/finance-charges/runs	internal/account	wrap(guard, h.HandleListFinanceChargeRuns)
+POST	/api/v1/ar/finance-charges/runs	internal/account	wrap(finance, h.HandleRunFinanceCharges)
+GET	/api/v1/ar/finance-charges/runs/{id}	internal/account	wrap(guard, h.HandleGetFinanceChargeRun)
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
+GET	/api/v1/ar/statements/runs	internal/account	wrap(guard, h.HandleListStatementRuns)
+POST	/api/v1/ar/statements/runs	internal/account	wrap(finance, h.HandleCreateStatementRun)
+GET	/api/v1/ar/statements/runs/{id}	internal/account	wrap(guard, h.HandleGetStatementRun)
+GET	/api/v1/ar/worklist	internal/account	wrap(guard, h.HandleWorklist)
+GET	/api/v1/auth/config	internal/signinmethods	h.GetConfig
+GET	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.GetAllowlist)
+PUT	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.PutAllowlist)
+POST	/api/v1/auth/start/{method}	internal/signinmethods	h.Start
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
@@ -346,7 +428,6 @@ GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleRec
 POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction
 GET	/api/v1/pos/zreports	internal/pos	h.ListZReports
-GET	/api/v1/price_levels	internal/customer	h.HandleListPriceLevels
 GET	/api/v1/pricing/calculate	internal/pricing	h.HandleCalculatePrice
 POST	/api/v1/pricing/calculate-escalation	internal/pricing	h.HandleCalculateEscalation
 GET	/api/v1/pricing/categories	internal/pricing	h.HandleListCategories
@@ -359,8 +440,24 @@ POST	/api/v1/pricing/category-rules/bulk	internal/pricing	h.HandleBulkUpsertRule
 DELETE	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleDeleteCategoryRule
 PUT	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleUpdateCategoryRule
 GET	/api/v1/pricing/category-rules/{id}/audit	internal/pricing	h.HandleGetRuleAudit
+GET	/api/v1/pricing/contracts	internal/pricing	h.HandleListContracts
+POST	/api/v1/pricing/contracts	internal/pricing	h.HandleCreateContract
+DELETE	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleDeleteContract
+GET	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleGetContract
+PUT	/api/v1/pricing/contracts/{id}	internal/pricing	h.HandleUpdateContract
+GET	/api/v1/pricing/cost	internal/pricing	h.HandleCost
+GET	/api/v1/pricing/levels	internal/pricing	h.HandleListLevels
+POST	/api/v1/pricing/levels	internal/pricing	h.HandleCreateLevel
+GET	/api/v1/pricing/levels/{id}	internal/pricing	h.HandleGetLevel
+PUT	/api/v1/pricing/levels/{id}	internal/pricing	h.HandleUpdateLevel
 POST	/api/v1/pricing/market-check	internal/marketcheck	wrap(runGuard, h.run)
 GET	/api/v1/pricing/matrix	internal/pricing	h.HandleGetMatrix
+GET	/api/v1/pricing/products/{id}/prices	internal/pricing	h.HandleListProductPrices
+PUT	/api/v1/pricing/products/{id}/prices	internal/pricing	h.HandleReplaceProductPrices
+GET	/api/v1/pricing/profiles	internal/pricing	h.HandleListProfiles
+POST	/api/v1/pricing/profiles	internal/pricing	h.HandleCreateProfile
+GET	/api/v1/pricing/profiles/{id}	internal/pricing	h.HandleGetProfile
+PUT	/api/v1/pricing/profiles/{id}	internal/pricing	h.HandleUpdateProfile
 GET	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleListPrograms
 POST	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleCreateProgram
 GET	/api/v1/pricing/rebates/programs/{id}	internal/pricing	h.HandleGetProgram
@@ -369,6 +466,17 @@ POST	/api/v1/pricing/rebates/programs/{id}/claims/calculate	internal/pricing	h.H
 GET	/api/v1/pricing/resolve	internal/pricing	h.HandleResolvePreview
 GET	/api/v1/pricing/rules	internal/pricing	h.HandleListRules
 POST	/api/v1/pricing/rules	internal/pricing	h.HandleCreateRule
+GET	/api/v1/pricing/vendor-costs	internal/pricing	h.HandleListVendorCosts
+POST	/api/v1/pricing/vendor-costs	internal/pricing	h.HandleCreateVendorCost
+GET	/api/v1/pricing/vendor-costs/{id}	internal/pricing	h.HandleGetVendorCost
+PUT	/api/v1/pricing/vendor-costs/{id}	internal/pricing	h.HandleUpdateVendorCost
+GET	/api/v1/pricing/vendor-levels	internal/pricing	h.HandleListVendorLevels
+POST	/api/v1/pricing/vendor-levels	internal/pricing	h.HandleCreateVendorLevel
+GET	/api/v1/pricing/vendor-levels/{id}	internal/pricing	h.HandleGetVendorLevel
+PUT	/api/v1/pricing/vendor-levels/{id}	internal/pricing	h.HandleUpdateVendorLevel
+GET	/api/v1/pro-projects	internal/customerquote	h.List
+GET	/api/v1/pro-projects/{id}	internal/customerquote	h.Get
+POST	/api/v1/pro-projects/{id}/accept	internal/customerquote	h.Accept
 GET	/api/v1/products	internal/product	h.HandleListProducts
 POST	/api/v1/products	internal/product	h.HandleCreateProduct
 GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts
@@ -420,6 +528,7 @@ POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
 PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
+POST	/api/v1/quotes/{id}/share-link	internal/customerquote	h.ShareLink
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview
@@ -440,6 +549,11 @@ GET	/api/v1/reports/exposure	internal/pricing	h.HandleReportExposure
 GET	/api/v1/reports/sales-summary	internal/reporting	h.HandleSalesSummary
 GET	/api/v1/sales-team	internal/salesteam	h.HandleList
 GET	/api/v1/sales-team/{id}	internal/salesteam	h.HandleGet
+GET	/api/v1/scheduling/windows	internal/scheduling	h.handleList
+POST	/api/v1/scheduling/windows	internal/scheduling	h.handleCreate
+DELETE	/api/v1/scheduling/windows/{id}	internal/scheduling	h.handleDelete
+GET	/api/v1/scheduling/windows/{id}	internal/scheduling	h.handleGet
+PUT	/api/v1/scheduling/windows/{id}	internal/scheduling	h.handleUpdate
 GET	/api/v1/ship-tos/{id}	internal/customer	h.HandleGetShipTo
 PUT	/api/v1/ship-tos/{id}	internal/customer	h.HandleUpdateShipTo
 POST	/api/v1/tax/exemptions	internal/tax	h.createExemption

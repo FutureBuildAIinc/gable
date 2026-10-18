@@ -415,8 +415,19 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 			_, err := exec.Exec(txCtx, `
 				INSERT INTO quote_lines (
 					id, quote_id, product_id, sku, description, customer_note,
-					quantity, uom, unit_price, line_total, position, created_at
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, 0, $9, NOW())
+					quantity, uom, price_uom, uom_qty, price_uom_qty,
+					stock_uom, stock_quantity,
+					unit_price, line_total, position, created_at
+				)
+				SELECT
+					$1, $2, $3::uuid, $4, $5, $6,
+					$7::numeric, $8, $8, 1, 1,
+					CASE WHEN $3::uuid IS NOT NULL THEN COALESCE(p.uom_primary::text, $8) ELSE NULL END,
+					CASE WHEN $3::uuid IS NOT NULL THEN ROUND($7::numeric * COALESCE(pu.stock_qty, 1) / COALESCE(pu.unit_qty, 1), 4) ELSE NULL END,
+					0, 0, $9, NOW()
+				FROM (SELECT 1) AS dummy
+				LEFT JOIN products p ON p.id = $3::uuid
+				LEFT JOIN product_units pu ON pu.product_id = p.id AND pu.uom = $8
 			`, uuid.New(), quoteID, l.ProductID, l.SKU, l.Description, l.CustomerNote, l.Quantity, l.UOM, i)
 			if err != nil {
 				return fmt.Errorf("failed to insert quote line: %w", err)
@@ -481,9 +492,23 @@ func scanPortalQuote(row pgx.Row) (*PortalQuoteDTO, error) {
 
 // ListPortalQuotes returns the calling customer's quotes, newest first.
 func (r *PostgresRepository) ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error) {
-	rows, err := r.db.GetExecutor(ctx).Query(ctx,
-		portalQuoteSelect+` WHERE q.customer_id = $1 ORDER BY q.created_at DESC LIMIT 100`,
-		customerID)
+	return r.ListPortalQuotesFiltered(ctx, customerID, nil)
+}
+
+// ListPortalQuotesFiltered narrows the quote list by the change feed cursor
+// (Part 7): without a cursor the display list, newest created first; with one
+// the feed page, updated_at ascending and tie-completed, the same shape the
+// order feed uses so the cursor cannot lose a row.
+func (r *PostgresRepository) ListPortalQuotesFiltered(ctx context.Context, customerID uuid.UUID, since *time.Time) ([]PortalQuoteDTO, error) {
+	query := portalQuoteSelect + ` WHERE q.customer_id = $1`
+	args := []interface{}{customerID}
+	if since != nil {
+		query += ` AND q.updated_at > $2 ORDER BY q.updated_at ASC FETCH FIRST 100 ROWS WITH TIES`
+		args = append(args, *since)
+	} else {
+		query += ` ORDER BY q.created_at DESC LIMIT 100`
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}

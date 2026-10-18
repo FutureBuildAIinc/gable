@@ -132,10 +132,34 @@ type Line struct {
 	UOMQty      *httpx.Quantity `json:"uom_qty"`
 	PriceUOMQty *httpx.Quantity `json:"price_uom_qty"`
 
+	// The stocking columns of ADR 0006 section 3.4: what the line sold,
+	// carried into the unit the product stocks in, exact or the line is
+	// refused. Null on a line without a product.
+	StockUOM      *string         `json:"stock_uom"`
+	StockQuantity *httpx.Quantity `json:"stock_quantity"`
+
+	// Tally is a random length line's pieces by length (ADR 0006 section 4),
+	// copied from its source line when the document converts. Null without
+	// one; its cross section is the line's board_thickness_in and
+	// board_width_in columns.
+	Tally *Tally `json:"tally"`
+
 	UnitPrice       *httpx.Price `json:"unit_price_ten_thousandths"`
 	PricedUnitPrice *httpx.Price `json:"priced_unit_price_ten_thousandths"`
 	PriceSource     PriceSource  `json:"price_source"`
-	OverrideReason  *string      `json:"override_reason"`
+	// PriceBasis is the pricing engine's own source (ADR 0006 section 5.3:
+	// contract, promotional, quantity_break, category_profile, level, branch,
+	// base), stored from the engine's answer; null on a line the engine did
+	// not price (an override, a manual line, a charge).
+	PriceBasis     *string `json:"price_basis"`
+	OverrideReason *string `json:"override_reason"`
+
+	// CostSource and StockingUnitCost are the line's resolved cost and where
+	// it came from (ADR 0006 section 7.5): the cost COGS reads, per the
+	// stocking unit. Persisted, read by nothing on the wire until the desk
+	// asks.
+	CostSource       *string      `json:"-"`
+	StockingUnitCost *httpx.Price `json:"-"`
 
 	DiscountPercent *httpx.Quantity `json:"discount_percent"`
 	DiscountAmount  *httpx.Cents    `json:"discount_cents"`

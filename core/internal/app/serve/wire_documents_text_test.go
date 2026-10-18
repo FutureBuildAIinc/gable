@@ -50,6 +50,7 @@ func TestEmailedStatementNamesItsPeriodInWords(t *testing.T) {
 // The printed purchase order carries its vendor's name: the print route reads
 // the record with the vendor, not the bare record.
 func TestPrintedPurchaseOrderNamesItsVendor(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	var name string

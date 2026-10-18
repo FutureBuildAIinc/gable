@@ -119,7 +119,7 @@ func TestKeyBranchPin_CustomerConfinedReads(t *testing.T) {
 	if status == http.StatusForbidden {
 		t.Errorf("calculate with the pin's own job was refused: %s", buf)
 	}
-	if status == http.StatusOK && !strings.Contains(string(buf), `"price_basis":"retail"`) {
+	if status == http.StatusOK && !strings.Contains(string(buf), `"price_basis":"level"`) && !strings.Contains(string(buf), `"price_basis":"base"`) {
 		t.Errorf("calculate with the pin's own job answered %s, want the module's own answer", buf)
 	}
 	// The resolve preview answers a bare product with no match rather than a
@@ -191,64 +191,81 @@ func TestKeyBranchPin_PricingRuleJobConfinement(t *testing.T) {
 	}
 }
 
-// TestKeyBranchPin_CategoryTierRefusals closes the tier half of round 4 P2: a
-// tier category rule prices every branch's customers, so a bound key is
-// refused it on every verb, and a bulk delete that names a tier rule row is
-// refused like one that names a foreign customer's row.
-func TestKeyBranchPin_CategoryTierRefusals(t *testing.T) {
+// TestKeyBranchPin_CategoryLevelRefusals closes the non account half of
+// round 4 P2 in the program vocabulary: a level category rule prices the
+// customers of that level across every branch, so a bound key is refused it
+// on every verb, and a bulk delete that names such a row is refused like one
+// that names a foreign customer's row.
+func TestKeyBranchPin_CategoryLevelRefusals(t *testing.T) {
 	f := newKeyPinFixture(t)
-	// PIN-TIER is not any tier the migrations seed, so the rows this test
-	// creates are exactly its own and the cleanup can name them (each on its
-	// own category: a target and category pair is unique).
-	tier := func() string {
-		return fmt.Sprintf(`{"target_type":"tier","tier":"PIN-TIER","category_id":%q,"rule_type":"markup","value_pct":"5"}`,
-			f.freshCategory(t).String())
-	}
-
-	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", tier(), nil)
-	var tierRows int
+	var defaultLevel string
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM category_pricing_rules WHERE tier = 'PIN-TIER'`).Scan(&tierRows); err != nil {
-		t.Fatal(err)
+		`SELECT value FROM system_settings WHERE key = 'pricing.default_price_level_id'`).Scan(&defaultLevel); err != nil {
+		t.Fatalf("the default price level: %v", err)
 	}
-	if tierRows != 0 {
-		t.Errorf("refused tier rule create wrote %d rows", tierRows)
+	// The test's own categories: every body plants its rule on a fresh one,
+	// so the count of the rows this test created is a count on them alone.
+	var ownCategories []uuid.UUID
+	freshOwnCategory := func() uuid.UUID {
+		id := f.freshCategory(t)
+		ownCategories = append(ownCategories, id)
+		return id
 	}
-	for _, who := range []string{"unbound", "user"} {
-		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tier(), nil, http.StatusCreated)
+	levelRows := func() int {
+		var n int
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM category_pricing_rules WHERE price_level_id = $1::uuid AND category_id = ANY($2)`,
+			defaultLevel, ownCategories).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
 	}
 
-	// A tier rule that also names the pin's own customer is still a tier rule:
-	// it prices every branch's customers of that tier, so the wall refuses the
-	// element however many branches of the named customer hold the pin (round
-	// 6 P1-1). The handler and the migration keep the same invariant: a tier
-	// rule carries no customer, an account rule no tier.
-	tierNamingCustomer := func(customer uuid.UUID) string {
-		return fmt.Sprintf(`{"target_type":"tier","tier":"PIN-TIER","customer_id":%q,"category_id":%q,"rule_type":"markup","value_pct":"5"}`,
-			customer.String(), f.freshCategory(t).String())
+	levelRule := func(extra string) string {
+		body := fmt.Sprintf(`{"target_type":"level","price_level_id":%q,"category_id":%q,"rule_type":"markup","value_pct":"5"`,
+			defaultLevel, freshOwnCategory().String())
+		if extra != "" {
+			body += "," + extra
+		}
+		return body + "}"
+	}
+
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", levelRule(""), nil)
+	before := levelRows()
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", levelRule(""), nil, http.StatusCreated)
+	}
+	if got := levelRows(); got != before+2 {
+		t.Errorf("the allowed creates left %d level rules, want %d", got, before+2)
+	}
+
+	// A level rule that also names the pin's own customer is still a level
+	// rule: it prices that level's customers on every branch, so the wall
+	// refuses the element however many branches of the named customer hold
+	// the pin. The handler and the migration keep the same invariant: a level
+	// rule carries no customer, an account rule no level.
+	levelNamingCustomer := func(customer uuid.UUID) string {
+		return fmt.Sprintf(`{"target_type":"level","price_level_id":%q,"customer_id":%q,"category_id":%q,"rule_type":"markup","value_pct":"5"}`,
+			defaultLevel, customer.String(), f.freshCategory(t).String())
 	}
 	for _, customer := range []uuid.UUID{f.custID, f.custB} {
-		f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", tierNamingCustomer(customer), nil)
+		f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", levelNamingCustomer(customer), nil)
 	}
 	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules/bulk",
-		"["+tierNamingCustomer(f.custID)+","+categoryRuleBody(f.custID, f.freshCategory(t))+"]", nil)
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM category_pricing_rules WHERE tier = 'PIN-TIER' AND customer_id IS NOT NULL`).Scan(&tierRows); err != nil {
-		t.Fatal(err)
+		"["+levelNamingCustomer(f.custID)+","+categoryRuleBody(f.custID, f.freshCategory(t))+"]", nil)
+	if got := levelRows(); got != before+2 {
+		t.Errorf("the refused level rules naming a customer wrote rows: %d, want %d", got, before+2)
 	}
-	if tierRows != 0 {
-		t.Errorf("refused tier rule naming a customer wrote %d rows", tierRows)
-	}
-	// A target that names no customer and no tier is neither an account rule
-	// nor a tier rule: refused for the bound key, and the handler's own 400
-	// answers everyone else.
+	// A target that names no customer and no level is not an account rule:
+	// refused for the bound key, and the handler's own 400 answers everyone
+	// else.
 	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules",
 		fmt.Sprintf(`{"target_type":"account","category_id":%q,"rule_type":"markup","value_pct":"5"}`, f.freshCategory(t).String()), nil)
 	// The unbound key and the user pass the wall on the same body and meet the
-	// handler's own invariant answer: a tier rule that names a customer is a
+	// handler's own invariant answer: a level rule that names a customer is a
 	// 400 naming customer_id, never a write.
 	for _, who := range []string{"unbound", "user"} {
-		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tierNamingCustomer(f.custID), nil, http.StatusBadRequest)
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", levelNamingCustomer(f.custID), nil, http.StatusBadRequest)
 	}
 
 	putBody := `{"rule_type":"markdown","value_pct":"2"}`
@@ -256,13 +273,13 @@ func TestKeyBranchPin_CategoryTierRefusals(t *testing.T) {
 		map[string]string{"If-Match": f.catRuleRev(t, f.catRuleT)})
 	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/"+f.catRuleT.String(), "",
 		map[string]string{"If-Match": f.catRuleRev(t, f.catRuleT)})
-	var tierRow int
+	var levelRow int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM category_pricing_rules WHERE id = $1`, f.catRuleT).Scan(&tierRow); err != nil {
+		`SELECT COUNT(*) FROM category_pricing_rules WHERE id = $1`, f.catRuleT).Scan(&levelRow); err != nil {
 		t.Fatal(err)
 	}
-	if tierRow != 1 {
-		t.Errorf("tier rule refusals disturbed the seeded tier rule: %d rows", tierRow)
+	if levelRow != 1 {
+		t.Errorf("level rule refusals disturbed the seeded level rule: %d rows", levelRow)
 	}
 	f.refuseForeign(t, "GET", "/api/v1/pricing/category-rules/"+f.catRuleT.String()+"/audit", "", nil)
 	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/bulk",

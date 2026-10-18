@@ -44,7 +44,7 @@ func TestVolumeBreaks_BuildsTheLadder(t *testing.T) {
 			breakRule("20+", prod, 20, 10, 20), // higher priority, shallower discount
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 	cust := &customer.Customer{ID: uuid.New()}
 
 	breaks, err := svc.VolumeBreaks(context.Background(), cust, prod, 10.00)
@@ -77,14 +77,12 @@ func TestVolumeBreaks_DropsRungsThatDoNotBeatTheUnitPrice(t *testing.T) {
 	custID := uuid.New()
 
 	// A contract price wins the waterfall at every quantity, so no quantity
-	// break can ever improve on it.
-	repo := &MockRepository{
-		contracts: map[string]CustomerContract{
-			custID.String() + ":" + prod.String(): {CustomerID: custID, ProductID: prod, ContractPrice: 4.00},
-		},
-		rules: []PricingRule{breakRule("50+", prod, 50, 15, 0)},
-	}
-	svc := NewService(repo)
+	// break can ever improve on it. The contract lives in the resolve
+	// repository now: the adapters read it there.
+	fake := newFakeResolveRepo().withProduct(prod, 10.00, "EA")
+	fake.setContract(custID, prod, nil, 4.00, "EA")
+	repo := &MockRepository{rules: []PricingRule{breakRule("50+", prod, 50, 15, 0)}}
+	svc := NewService(repo).WithRepository(fake)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: custID}, prod, 10.00)
 	if err != nil {
@@ -112,7 +110,7 @@ func TestVolumeBreaks_RespectsProductAndCustomerScope(t *testing.T) {
 			otherCustRule,
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: custID}, prod, 10.00)
 	if err != nil {
@@ -126,7 +124,7 @@ func TestVolumeBreaks_RespectsProductAndCustomerScope(t *testing.T) {
 // CORRECTNESS: no customer, no ladder. Returning a retail ladder for a nil
 // customer would show one contractor a price that is not theirs.
 func TestVolumeBreaks_NilCustomerReturnsNothing(t *testing.T) {
-	svc := NewService(&MockRepository{contracts: map[string]CustomerContract{}})
+	svc := wiredService(&MockRepository{}, 10.00)
 	breaks, err := svc.VolumeBreaks(context.Background(), nil, uuid.New(), 10.00)
 	if err != nil {
 		t.Fatalf("VolumeBreaks: %v", err)
@@ -147,7 +145,7 @@ func TestVolumeBreaks_LadderIsMonotonic(t *testing.T) {
 			breakRule("20+", prod, 20, 5, 10),
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	breaks, err := svc.VolumeBreaks(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00)
 	if err != nil {
@@ -196,28 +194,28 @@ func TestCalculatePriceWithQty_DeepestBreakShouldWin(t *testing.T) {
 			breakRule("100+", prod, 100, 12, 10), // same priority — the tie
 		},
 	}
-	svc := NewService(repo)
-	cust := &customer.Customer{ID: uuid.New()}
+	svc := wiredService(repo, 10.00)
+	custID := uuid.New()
 
-	got, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 100, nil)
+	got, err := svc.Resolve(context.Background(), resolveReq(custID, prod, nil, 100))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got.FinalPrice != 8.80 {
-		t.Errorf("at qty 100 the price is %v, want 8.80 (the 12%% break); the 8%% break at $9.20 means the deeper rung was skipped", got.FinalPrice)
+	if got.UnitPrice != priceOf(8.80) {
+		t.Errorf("at qty 100 the price is %v, want 8.80 (the 12%% break); the 8%% break at $9.20 means the deeper rung was skipped", got.UnitPrice)
 	}
 	if got.Details != "100+" {
-		t.Errorf("Details = %q, want %q — the winning rule should be named in the quote", got.Details, "100+")
+		t.Errorf("Details = %q, want %q: the winning rule should be named in the quote", got.Details, "100+")
 	}
 
 	// The shallow buyer is unaffected: at qty 20 the 100+ rung does not apply
 	// at all, so the 8% rule is the only candidate.
-	got20, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 20, nil)
+	got20, err := svc.Resolve(context.Background(), resolveReq(custID, prod, nil, 20))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(qty 20): %v", err)
+		t.Fatalf("Resolve(qty 20): %v", err)
 	}
-	if got20.FinalPrice != 9.20 {
-		t.Errorf("at qty 20 the price is %v, want 9.20 (the 8%% break)", got20.FinalPrice)
+	if got20.UnitPrice != priceOf(9.20) {
+		t.Errorf("at qty 20 the price is %v, want 9.20 (the 8%% break)", got20.UnitPrice)
 	}
 }
 
@@ -233,14 +231,14 @@ func TestCalculatePriceWithQty_PriorityStillOverridesADeeperBreak(t *testing.T) 
 			breakRule("100+ deeper", prod, 100, 12, 10), // deeper AND cheaper, but outranked
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
-	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
+	got, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 100))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got.FinalPrice != 9.20 {
-		t.Errorf("FinalPrice = %v, want 9.20: priority 99 forces the 8%% rule, so picking the cheaper 12%% rule would delete the override mechanism", got.FinalPrice)
+	if got.UnitPrice != priceOf(9.20) {
+		t.Errorf("UnitPrice = %v, want 9.20: priority 99 forces the 8%% rule, so picking the cheaper 12%% rule would delete the override mechanism", got.UnitPrice)
 	}
 	if got.Details != "20+ forced" {
 		t.Errorf("Details = %q, want %q", got.Details, "20+ forced")
@@ -265,19 +263,19 @@ func TestCalculatePriceWithQty_PromoOutranksABreakAtTheSamePriority(t *testing.T
 		contracts: map[string]CustomerContract{},
 		rules:     []PricingRule{promo, breakRule("100+", prod, 100, 12, 10)},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
-	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 100, nil)
+	got, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 100))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got.Source != SourcePromotional || got.FinalPrice != 9.50 {
-		t.Errorf("got %v at %v, want PROMOTIONAL at 9.50: rule_type ASC puts PROMOTIONAL ahead of QUANTITY_BREAK in the same priority band", got.Source, got.FinalPrice)
+	if got.PriceBasis != SourcePromotional || got.UnitPrice != priceOf(9.50) {
+		t.Errorf("got %v at %v, want PROMOTIONAL at 9.50: rule_type ASC puts PROMOTIONAL ahead of QUANTITY_BREAK in the same priority band", got.PriceBasis, got.UnitPrice)
 	}
 }
 
-// CORRECTNESS: a misconfigured ladder — a deeper rung priced ABOVE the
-// shallower rung beside it at the same priority — must not charge the larger
+// CORRECTNESS: a misconfigured ladder (a deeper rung priced ABOVE the
+// shallower rung beside it at the same priority) must not charge the larger
 // buyer more than the smaller one. The qty-100 customer could get 15% by
 // splitting the order into five qty-20 lines, so honouring 15% costs the
 // dealer nothing they were not already going to lose, and it keeps the engine
@@ -291,22 +289,22 @@ func TestCalculatePriceWithQty_MisconfiguredLadderNeverPunishesTheBiggerBuyer(t 
 			breakRule("100+ (typo: shallower discount)", prod, 100, 5, 10),
 		},
 	}
-	svc := NewService(repo)
-	cust := &customer.Customer{ID: uuid.New()}
+	svc := wiredService(repo, 10.00)
+	custID := uuid.New()
 
-	at20, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 20, nil)
+	at20, err := svc.Resolve(context.Background(), resolveReq(custID, prod, nil, 20))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(20): %v", err)
+		t.Fatalf("Resolve(20): %v", err)
 	}
-	at100, err := svc.CalculatePriceWithQty(context.Background(), cust, prod, 10.00, 100, nil)
+	at100, err := svc.Resolve(context.Background(), resolveReq(custID, prod, nil, 100))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(100): %v", err)
+		t.Fatalf("Resolve(100): %v", err)
 	}
-	if at100.FinalPrice > at20.FinalPrice {
-		t.Errorf("qty 100 costs %v/unit but qty 20 costs %v/unit — buying more must never cost more per unit", at100.FinalPrice, at20.FinalPrice)
+	if at100.UnitPrice > at20.UnitPrice {
+		t.Errorf("qty 100 costs %v/unit but qty 20 costs %v/unit: buying more must never cost more per unit", at100.UnitPrice, at20.UnitPrice)
 	}
-	if at100.FinalPrice != 8.50 {
-		t.Errorf("at qty 100 the price is %v, want 8.50 (the 15%% rung the customer already qualifies for)", at100.FinalPrice)
+	if at100.UnitPrice != priceOf(8.50) {
+		t.Errorf("at qty 100 the price is %v, want 8.50 (the 15%% rung the customer already qualifies for)", at100.UnitPrice)
 	}
 }
 
@@ -337,19 +335,19 @@ func TestGetMatchingRules_ShouldHonourCategoryScope(t *testing.T) {
 		IsActive:    true,
 	}
 	repo := &MockRepository{contracts: map[string]CustomerContract{}, rules: []PricingRule{roofingOnly}}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
 	// prod is not a roofing product. The rule must not reach it.
-	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, prod, 10.00, 1, nil)
+	got, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), prod, nil, 1))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got.Source == SourcePromotional {
+	if got.PriceBasis == SourcePromotional {
 		t.Errorf("a Roofing-scoped promo priced a non-roofing product: %+v", got)
 	}
 }
 
-// CORRECTNESS: the flip side — a category-scoped rule DOES reach a product in
+// CORRECTNESS: the flip side: a category-scoped rule DOES reach a product in
 // that category, including through an ancestor. Scope that only ever says "no"
 // is not scope, it is an outage.
 func TestGetMatchingRules_CategoryScopeReachesItsOwnCategory(t *testing.T) {
@@ -368,28 +366,28 @@ func TestGetMatchingRules_CategoryScopeReachesItsOwnCategory(t *testing.T) {
 		productCategories: map[uuid.UUID][]string{
 			// A roofing SKU: own node plus its slug.
 			roofProd: {"Roofing", "roofing"},
-			// A framing SKU: own node, its slug, and its ANCESTOR — which is
+			// A framing SKU: own node, its slug, and its ANCESTOR, which is
 			// what `pc.path <@ anc.path` resolves in SQL. 'Roofing' is not in
 			// this list, so the promo must not reach it.
 			lumberProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
 		},
 	}
-	svc := NewService(repo)
-	cust := &customer.Customer{ID: uuid.New()}
+	svc := wiredService(repo, 10.00)
+	custID := uuid.New()
 
-	onRoofing, err := svc.CalculatePriceWithQty(context.Background(), cust, roofProd, 10.00, 1, nil)
+	onRoofing, err := svc.Resolve(context.Background(), resolveReq(custID, roofProd, nil, 1))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(roofing): %v", err)
+		t.Fatalf("Resolve(roofing): %v", err)
 	}
-	if onRoofing.Source != SourcePromotional || onRoofing.FinalPrice != 9.50 {
-		t.Errorf("roofing product priced %v from %v, want 9.50 from PROMOTIONAL", onRoofing.FinalPrice, onRoofing.Source)
+	if onRoofing.PriceBasis != SourcePromotional || onRoofing.UnitPrice != priceOf(9.50) {
+		t.Errorf("roofing product priced %v from %v, want 9.50 from PROMOTIONAL", onRoofing.UnitPrice, onRoofing.PriceBasis)
 	}
 
-	onLumber, err := svc.CalculatePriceWithQty(context.Background(), cust, lumberProd, 10.00, 1, nil)
+	onLumber, err := svc.Resolve(context.Background(), resolveReq(custID, lumberProd, nil, 1))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty(lumber): %v", err)
+		t.Fatalf("Resolve(lumber): %v", err)
 	}
-	if onLumber.Source == SourcePromotional {
+	if onLumber.PriceBasis == SourcePromotional {
 		t.Errorf("the Roofing promo reached a framing SKU: %+v", onLumber)
 	}
 }
@@ -411,13 +409,13 @@ func TestGetMatchingRules_ParentCategoryRuleCoversDescendants(t *testing.T) {
 			framingProd: {"Framing Lumber", "framing_lumber", "Lumber", "lumber"},
 		},
 	}
-	svc := NewService(repo)
+	svc := wiredService(repo, 10.00)
 
-	got, err := svc.CalculatePriceWithQty(context.Background(), &customer.Customer{ID: uuid.New()}, framingProd, 10.00, 100, nil)
+	got, err := svc.Resolve(context.Background(), resolveReq(uuid.New(), framingProd, nil, 100))
 	if err != nil {
-		t.Fatalf("CalculatePriceWithQty: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
-	if got.Source != SourceQuantityBreak || got.FinalPrice != 9.00 {
-		t.Errorf("got %v at %v, want QUANTITY_BREAK at 9.00: a rule on the parent category must reach a product in a child category", got.Source, got.FinalPrice)
+	if got.PriceBasis != SourceQuantityBreak || got.UnitPrice != priceOf(9.00) {
+		t.Errorf("got %v at %v, want QUANTITY_BREAK at 9.00: a rule on the parent category must reach a product in a child category", got.PriceBasis, got.UnitPrice)
 	}
 }

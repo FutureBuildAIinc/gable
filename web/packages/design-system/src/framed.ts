@@ -116,7 +116,15 @@ export function readFramedByShell(win: FramedWindow): boolean {
     const parent = win.parent as { location: { origin: string; pathname?: string } };
     if (parent.location.origin !== win.location.origin) return false;
     const parentPath = parent.location.pathname;
-    if (typeof parentPath === 'string' && parentPath !== '/shell' && !parentPath.startsWith('/shell/')) return false;
+    if (
+      typeof parentPath === 'string' &&
+      parentPath !== '/shell' &&
+      !parentPath.startsWith('/shell/') &&
+      parentPath !== '/field' &&
+      !parentPath.startsWith('/field/')
+    ) {
+      return false;
+    }
     return true;
   } catch {
     return false;

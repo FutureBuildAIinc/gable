@@ -78,10 +78,14 @@ describe('readFramedByShell', () => {
     expect(readFramedByShell(win)).toBe(true);
   });
 
-  it('is true when the parent is the shell path, false when the parent is another same origin page', () => {
+  it('is true when the parent is a shell path (/shell/ or /field/), false when the parent is another same origin page', () => {
     const { win } = framedWindow();
     const shellParent = { location: { origin: ORIGIN, pathname: '/shell/' }, postMessage: () => {} };
     expect(readFramedByShell({ ...win, parent: shellParent })).toBe(true);
+    const fieldParent = { location: { origin: ORIGIN, pathname: '/field/' }, postMessage: () => {} };
+    expect(readFramedByShell({ ...win, parent: fieldParent })).toBe(true);
+    const fieldBareParent = { location: { origin: ORIGIN, pathname: '/field' }, postMessage: () => {} };
+    expect(readFramedByShell({ ...win, parent: fieldBareParent })).toBe(true);
     const otherParent = { location: { origin: ORIGIN, pathname: '/evil' }, postMessage: () => {} };
     expect(readFramedByShell({ ...win, parent: otherParent })).toBe(false);
   });

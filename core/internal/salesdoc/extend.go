@@ -83,6 +83,12 @@ func Explode(lines []Line, kits map[string][]KitComponent, refs map[string]Produ
 			continue
 		}
 		line.LineType = LineKit
+		// The kit line names a product, so it carries its stocking fields
+		// like any line (ADR 0006 section 3.4): its own quantity is what it
+		// stocks, in the unit it is written in. The stock that moves is its
+		// components'; the kit line itself is never allocated.
+		line.StockUOM = ptrOf(ref.UOMPrimary)
+		line.StockQuantity = ptrOf(derefQty(line.Quantity))
 		comps, ok := kits[line.ProductID.String()]
 		if !ok || len(comps) == 0 {
 			return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
@@ -131,6 +137,8 @@ func Explode(lines []Line, kits map[string][]KitComponent, refs map[string]Produ
 				PriceUOM:        &cuom,
 				UOMQty:          ptrQty(One),
 				PriceUOMQty:     ptrQty(One),
+				StockUOM:        &cuom,
+				StockQuantity:   &cqty,
 				UnitPrice:       &cprice,
 				PricedUnitPrice: &cprice,
 				PriceSource:     PriceSourceNone,

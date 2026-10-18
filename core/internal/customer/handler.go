@@ -19,7 +19,6 @@ const (
 	shipTosScope      = "ship_tos.created_at_id_desc"
 	contactsScope     = "contacts.created_at_id_desc"
 	termsScope        = "payment_terms.created_at_id_desc"
-	priceLevelsScope  = "price_levels.created_at_id_desc"
 	maxSearchTermSize = 100
 )
 
@@ -70,7 +69,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PATCH /api/v1/customers/{id}/salesperson", restricted(h.HandleUpdateSalesperson))
 	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", restricted(h.HandleGetEscalationPolicy))
 	mux.HandleFunc("PUT /api/v1/customers/{id}/escalation-policy", restricted(h.HandleSetEscalationPolicy))
-	mux.HandleFunc("GET /api/v1/price_levels", guard(h.HandleListPriceLevels))
 
 	mux.HandleFunc("GET /api/v1/customers/{id}/ship-tos", guard(h.HandleListShipTos))
 	mux.HandleFunc("POST /api/v1/customers/{id}/ship-tos", guard(h.HandleCreateShipTo))
@@ -209,7 +207,7 @@ func listOptions(total *int64) []httpx.ListOption {
 // ---- customers ----
 
 func parseCustomerFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) {
-	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "q", "tier", "is_active", "salesperson_id")
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "q", "is_active", "salesperson_id")
 	if err != nil {
 		return f, false, err
 	}
@@ -228,13 +226,6 @@ func parseCustomerFilter(r *http.Request) (f ListFilter, wantTotal bool, err err
 		s = strings.TrimSpace(s)
 		v.Check(len(s) <= maxSearchTermSize, "q", "must be at most 100 characters")
 		f.Query = s
-	}
-	if s, ok := singleValue(v, q, "tier"); ok {
-		if t, ok := ParseTier(s); ok {
-			f.Tier = &t
-		} else {
-			v.Check(false, "tier", "must be one of: "+strings.Join(tierNames, ", "))
-		}
 	}
 	f.IsActive = boolParam(v, q, "is_active")
 	if s, ok := singleValue(v, q, "salesperson_id"); ok {
@@ -422,38 +413,6 @@ func (h *Handler) HandleSetEscalationPolicy(w http.ResponseWriter, r *http.Reque
 }
 
 // ---- price levels ----
-
-func (h *Handler) HandleListPriceLevels(w http.ResponseWriter, r *http.Request) {
-	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	limit, at, id, wantTotal, err := listParams(r, priceLevelsScope, q)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	f := ChildFilter{Limit: limit, AfterID: id}
-	if at != nil {
-		t := at.Time
-		f.AfterTime = &t
-	}
-	items, hasMore, total, err := h.service.ListPriceLevels(r.Context(), f, wantTotal)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	next := ""
-	if len(items) > 0 {
-		last := items[len(items)-1]
-		if next, err = nextCursor(priceLevelsScope, hasMore, last.CreatedAt, last.ID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-	}
-	httpx.WriteList(w, items, next, limit, listOptions(total)...)
-}
 
 // ---- child lists ----
 

@@ -156,17 +156,17 @@ make pg-shell        # psql into the `make db` Postgres (the stack's: COMPOSE_PR
 ```
 The stack runs `AUTH_MODE=dev` (local only, published on 127.0.0.1) and the web image is built with `VITE_AUTH_DEV_MODE=true`. Migrate and seed run once as a one shot service that serve and worker wait for, so the seed (which truncates transactional tables) repaves the demo data on every `make up`; the stack runs in its own compose project (`gable-stack`, volume `gable-stack_postgres_data`, container `gable_stack_postgres`) so the `make db` volume is never truncated or removed. `GABLE_WEB_PORT`, `GABLE_PG_PORT` and `GABLE_PG_CONTAINER` override the host ports and the Postgres container name. CI runs `make up && make smoke && make down` as the "Local stack" job. `make smoke` needs the stack up and requires curl and python3 on the host and uses psql inside the Postgres container.
 
-## The Tauri shell (`tauri/gable-desk`)
+## The Tauri workspace (`tauri/`)
 
-A Tauri 2 window around the front door. It needs Rust 1.90 or newer and, on Linux, the WebKitGTK 4.1 development packages (the "Tauri shell" job in `.github/workflows/ci.yml` lists them). A local build writes several GB under `tauri/gable-desk/target`, so check free disk first.
+One Tauri 2 cargo workspace: the shared Rust core (`tauri/core`, the OS keychain custody of the sign in tokens, the token commands' origin fence and the profile manifest) and three thin profile shells over it, `tauri/gable-work`, `tauri/gable-field` and `tauri/gable-pro` (each its own binary, `tauri.conf.json`, least privilege capabilities and window start app), beside `tauri/gable-desk`, the window around the front door, until the work profile replaces it. The workspace needs Rust 1.90 or newer and, on Linux, the WebKitGTK 4.1 development packages (the "Tauri shell" job in `.github/workflows/ci.yml` lists them). A local build writes several GB under `tauri/target`, so check free disk first.
 ```bash
-cd web && npm ci && npm run build --workspace @gable/front-door   # the shell embeds web/apps/front-door/dist
+cd web && npm ci && npm run build --workspace @gable/front-door   # every shell embeds web/apps/front-door/dist
 cargo install tauri-cli --version 2.12.1 --locked                  # once
-cd ../tauri/gable-desk && cargo tauri build --debug --bundles deb  # binary at target/debug/gable-desk
-cargo test --locked                                                # the deep link and URL rules
+cd tauri && cargo test --locked                                    # the whole workspace: core, profiles, desk
+cd gable-desk && cargo tauri build --debug --bundles deb           # binary at ../../target/debug/gable-desk
 scripts/smoke.sh                                                   # under xvfb: loads the door, logs it, exits 0
 ```
-Set `GABLE_DESK_URL` (an http or https URL of a running Gable) to load that instead of the bundled door. A `gable://quotes/<id>` link opens `/quotes/<id>` in the window; only plain path segments are accepted. The window holds no native permission (`capabilities/default.json` is empty). Run the binary from `cargo tauri build`, not a bare `cargo build`: only the former embeds the bundle.
+Set `GABLE_DESK_URL` (an http or https URL of a running Gable) to load that instead of the bundled door (`GABLE_WORK_URL`, `GABLE_FIELD_URL` and `GABLE_PRO_URL` do the same for the profiles). A `gable://quotes/<id>` link opens `/quotes/<id>` in the desk window; only plain path segments are accepted. The desk window holds no native permission (`capabilities/default.json` is empty); the profiles hold exactly their two token commands, and the access and refresh tokens live only in the OS keychain, never in the webview. Run the binary from `cargo tauri build`, not a bare `cargo build`: only the former embeds the bundle.
 
 ## The contract and the goldens (read before touching an HTTP route)
 

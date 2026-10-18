@@ -98,7 +98,7 @@ export class GableCustomerSelect extends LitElement {
                     <div class="text-xs text-gray-500">#${customer.account_number}</div>
                   </div>
                   <div class="text-xs text-right text-gray-500">
-                    ${customer.price_level?.name || 'Retail'}
+                    Retail
                   </div>
                 </div>
               `) : nothing}

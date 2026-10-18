@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -36,6 +37,7 @@ type ReturnLineIn struct {
 	SaleLineID  *uuid.UUID
 	Description string
 	Quantity    httpx.Quantity
+	UOM         string
 	UnitPrice   *httpx.Price
 	Restock     bool
 }
@@ -54,6 +56,9 @@ type returnLinePriced struct {
 	// chargeCodeID and lineType carry a linked charge line's own shape.
 	chargeCodeID *uuid.UUID
 	lineType     string
+	uom          string
+	stockUOM     *string
+	stockQty     *httpx.Quantity
 }
 
 // returnState is a priced, guarded return ready for its money transaction:
@@ -274,13 +279,22 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 		}
 		resolved[i] = rl
 	}
-	productIDs := make([]uuid.UUID, 0, len(resolved))
+	productIDs := make([]uuid.UUID, 0, len(resolved)+len(saleLines))
 	for i := range resolved {
 		if resolved[i].ProductID != nil {
 			productIDs = append(productIDs, *resolved[i].ProductID)
 		}
 	}
+	for i := range saleLines {
+		if saleLines[i].ProductID != nil {
+			productIDs = append(productIDs, *saleLines[i].ProductID)
+		}
+	}
 	refs, err := s.repo.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	unitSets, err := s.repo.LookupProductUnits(ctx, productIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +314,23 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			if src.LineType == salesdoc.LineComponent && rl.Restock {
 				return nil, invalid(fmt.Sprintf("lines[%d].restock", i),
 					"a kit component returns with its kit line: name the kit line, its components follow")
+			}
+			if rl.Restock {
+				if src.LineType == salesdoc.LineKit {
+					for j := range saleLines {
+						comp := &saleLines[j]
+						if comp.ParentLineID == nil || *comp.ParentLineID != src.ID || comp.ProductID == nil || comp.StockUOM == nil || *comp.StockUOM == "" {
+							continue
+						}
+						if ref, ok := refs[comp.ProductID.String()]; ok && ref.UOMPrimary != "" && *comp.StockUOM != ref.UOMPrimary {
+							return nil, salesdoc.StockUnitChangedError(i, *comp.StockUOM, ref.UOMPrimary)
+						}
+					}
+				} else if src.ProductID != nil && src.StockUOM != nil && *src.StockUOM != "" {
+					if ref, ok := refs[src.ProductID.String()]; ok && ref.UOMPrimary != "" && *src.StockUOM != ref.UOMPrimary {
+						return nil, salesdoc.StockUnitChangedError(i, *src.StockUOM, ref.UOMPrimary)
+					}
+				}
 			}
 			// The line's own extension per unit: the extension the sale
 			// charged (discount included) divided by the quantity it sold
@@ -322,12 +353,51 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 				"is required when the line names no line of the original sale")
 		}
 		taxable := true
+		uom := rl.UOM
+		var stockUOM *string
+		var stockQty *httpx.Quantity
 		if rl.ProductID != nil {
 			if ref, ok := refs[rl.ProductID.String()]; ok {
 				taxable = ref.Taxable
+				uSet := unitSets[*rl.ProductID]
+				if uom == "" {
+					if uSet.SaleUOM != "" {
+						uom = uSet.SaleUOM
+					} else if ref.UOMPrimary != "" {
+						uom = ref.UOMPrimary
+					} else {
+						uom = "EA"
+					}
+				}
+				su := ref.UOMPrimary
+				if su == "" {
+					su = uom
+				}
+				sq := rl.Quantity
+				if uom != su {
+					uRow, ok := uSet.Row(uom)
+					if !ok || !uRow.Sell {
+						return nil, invalid(fmt.Sprintf("lines[%d].uom", i), "is not a sale unit of this product")
+					}
+					converted, err := units.ConvertStock(rl.Quantity, uom, su, uRow.Pair())
+					if err != nil {
+						return nil, invalid(fmt.Sprintf("lines[%d].quantity", i), err.Error())
+					}
+					sq = converted
+				} else if rl.UOM != "" && len(uSet.Rows) > 0 {
+					if uRow, ok := uSet.Row(uom); !ok || !uRow.Sell {
+						return nil, invalid(fmt.Sprintf("lines[%d].uom", i), "is not a sale unit of this product")
+					}
+				}
+				stockUOM = &su
+				stockQty = &sq
 			}
 		}
-		priced = append(priced, returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, *rl.UnitPrice)), taxable: taxable})
+		if uom == "" {
+			uom = "EA"
+		}
+		priced = append(priced, returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, *rl.UnitPrice)),
+			taxable: taxable, uom: uom, stockUOM: stockUOM, stockQty: stockQty})
 	}
 	// The cap (ADR 0005 14.2 C2-5, second review P1-1): no sale line gives
 	// back more than it sold less every earlier return of it. Checked before
@@ -911,7 +981,12 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			p := &priced[i]
 			qty := p.in.Quantity
 			uom, priceUOM := "EA", "EA"
+			if p.uom != "" {
+				uom, priceUOM = p.uom, p.uom
+			}
 			var uomQty, priceUOMQty httpx.Quantity = salesdoc.One, salesdoc.One
+			stockUOM := p.stockUOM
+			stockQty := p.stockQty
 			var invoiceLineID *uuid.UUID
 			restockUnitCost := httpx.Price(0)
 			if p.saleLine != nil {
@@ -933,6 +1008,21 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 					invoiceLineID = &id
 					restockUnitCost = httpx.Price(src.UnitCost)
 				}
+				if p.in.ProductID != nil && p.saleLine.LineType != salesdoc.LineKit && p.saleLine.Quantity != nil && *p.saleLine.Quantity > 0 {
+					back := st.backByLine[p.saleLine.ID]
+					stockSold := int64(salesdoc.StockQty(p.saleLine))
+					sold := int64(*p.saleLine.Quantity)
+					before := httpx.Quantity(divRound(stockSold*back, sold))
+					after := httpx.Quantity(divRound(stockSold*(back+int64(p.in.Quantity)), sold))
+					sQty := after - before
+					stockQty = &sQty
+					if p.saleLine.StockUOM != nil {
+						stockUOM = p.saleLine.StockUOM
+					} else if ref, ok := refs[p.in.ProductID.String()]; ok && ref.UOMPrimary != "" {
+						u := ref.UOMPrimary
+						stockUOM = &u
+					}
+				}
 			}
 			unitPrice := p.in.UnitPrice
 			if unitPrice == nil {
@@ -945,6 +1035,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			lines = append(lines, ReturnLine{
 				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
 				Quantity: &qty, UOM: &uom, PriceUOM: &priceUOM, UOMQty: &uomQty, PriceUOMQty: &priceUOMQty,
+				StockUOM: stockUOM, StockQuantity: stockQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 				LineType: lineType, ChargeCodeID: p.chargeCodeID,
@@ -997,22 +1088,37 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			if p.in.ProductID != nil {
 				// a free line (no sale) restocks at today's average: it has
 				// no source invoice line to read, and no earlier return to
-				// telescope on; a linked line's cost telescopes on its
-				// cumulative returned quantity
+				// telescope on; a linked line's cost and stock quantity
+				// telescope on its cumulative returned quantity
 				cost := restockUnitCost
 				if cost <= 0 {
 					if ref, ok := refs[p.in.ProductID.String()]; ok {
 						cost = ref.AverageCost
 					}
 				}
-				if cost > 0 && p.saleLine == nil {
-					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
-				} else if cost > 0 {
-					back := httpx.Quantity(st.backByLine[p.saleLine.ID])
-					restockCost += int64(salesdoc.CostOf(back+p.in.Quantity, cost)) -
-						int64(salesdoc.CostOf(back, cost))
+				if p.saleLine == nil || p.saleLine.Quantity == nil || *p.saleLine.Quantity <= 0 {
+					sQty := p.in.Quantity
+					if stockQty != nil {
+						sQty = *stockQty
+					}
+					if cost > 0 {
+						restockCost += int64(salesdoc.CostOf(sQty, cost))
+					}
+					restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: sQty})
+				} else {
+					back := st.backByLine[p.saleLine.ID]
+					stockSold := int64(salesdoc.StockQty(p.saleLine))
+					sold := int64(*p.saleLine.Quantity)
+					before := httpx.Quantity(divRound(stockSold*back, sold))
+					after := httpx.Quantity(divRound(stockSold*(back+int64(p.in.Quantity)), sold))
+					if cost > 0 {
+						restockCost += int64(salesdoc.CostOf(after, cost)) -
+							int64(salesdoc.CostOf(before, cost))
+					}
+					if after > before {
+						restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: after - before})
+					}
 				}
-				restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
 			}
 		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
@@ -1032,13 +1138,14 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			}
 			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, charge_code_id, description, quantity,
-					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock,
+					uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, price_source, line_total, taxable, restock,
 					invoice_line_id, created_at)
 				VALUES ($1, $2, $15, $3, $16, $4, -($5::numeric / 10000), $6, $7, $8::numeric / 10000, $9::numeric / 10000,
-					$10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, $14, NOW())`,
+					$17, -($18::numeric / 10000), $10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, $14, NOW())`,
 				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM,
 				qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty), priceArg(l.UnitPrice),
-				centsArg(l.LineTotal), priced[i].taxable, l.Restock, l.InvoiceLineID, lineType, l.ChargeCodeID); err != nil {
+				centsArg(l.LineTotal), priced[i].taxable, l.Restock, l.InvoiceLineID, lineType, l.ChargeCodeID,
+				l.StockUOM, qtyArg(l.StockQuantity)); err != nil {
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
 		}
@@ -1185,6 +1292,7 @@ type storedReturnLine struct {
 	ProductID   *uuid.UUID `json:"product_id,omitempty"`
 	Description string     `json:"description"`
 	Quantity    int64      `json:"quantity"`
+	UOM         string     `json:"uom,omitempty"`
 	Restock     bool       `json:"restock"`
 }
 
@@ -1205,7 +1313,7 @@ func storeReturnRequest(in *ReturnIn) []byte {
 	for i := range in.Lines {
 		l := in.Lines[i]
 		out.Lines = append(out.Lines, storedReturnLine{SaleLineID: l.SaleLineID, ProductID: l.ProductID,
-			Description: l.Description, Quantity: int64(l.Quantity), Restock: l.Restock})
+			Description: l.Description, Quantity: int64(l.Quantity), UOM: l.UOM, Restock: l.Restock})
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
@@ -1222,7 +1330,7 @@ func (r *storedReturnRequest) toReturnIn() *ReturnIn {
 	for i := range r.Lines {
 		l := r.Lines[i]
 		in.Lines = append(in.Lines, ReturnLineIn{ProductID: l.ProductID, SaleLineID: l.SaleLineID,
-			Description: l.Description, Quantity: httpx.Quantity(l.Quantity), Restock: l.Restock})
+			Description: l.Description, Quantity: httpx.Quantity(l.Quantity), UOM: l.UOM, Restock: l.Restock})
 	}
 	return in
 }

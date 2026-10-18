@@ -33,9 +33,15 @@ type FulfilmentLine struct {
 	PriceUOM           *string
 	UOMQty             *int64
 	PriceUOMQty        *int64
+	StockUOM           *string
+	StockQuantity      *int64 // scale 4, the bill in the stocking unit
+	BoardThicknessIn   *int64 // scale 4, a tallied line's cross section
+	BoardWidthIn       *int64
+	TallyRows          []TallyRowInput
 	UnitPrice          *int64 // scale 4
 	PricedUnitPrice    *int64 // scale 4: what the engine resolved
 	PriceSource        string
+	PriceBasis         *string
 	OverrideReason     *string
 	PriceAdjustedBy    *string
 	DiscountPercent    *int64 // scale 4
@@ -45,8 +51,16 @@ type FulfilmentLine struct {
 	Taxable            bool
 	RevenueAccountCode *string
 	OrderLineID        *uuid.UUID
-	UnitCost           *int64 // scale 4
+	CostSource         *string
+	UnitCost           *int64 // scale 4, per the stocking unit
 	CostCents          int64
+}
+
+// TallyRowInput is one row of a line's tally (ADR 0006 section 4.2), copied
+// from its source line.
+type TallyRowInput struct {
+	Pieces   int
+	LengthFT int64 // scale 4
 }
 
 // RevenueLeg is one revenue account's credit of the invoice entry.

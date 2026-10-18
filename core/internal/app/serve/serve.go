@@ -34,6 +34,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
+	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
@@ -66,6 +67,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/unit"
@@ -75,6 +77,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -95,8 +98,11 @@ var publicAPIPaths = []string{
 	"/api/portal/v1/login",
 	"/api/portal/v1/config",
 	"/api/portal/v1/",
+	"/api/public/v1/",
 	"/api/integration/",
 	"/api/v1/a2a/",
+	"/api/v1/auth/config",
+	"/api/v1/auth/start/",
 }
 
 // machineKeyValidator adapts the techadmin service to the machine-key auth
@@ -395,12 +401,29 @@ func Run() {
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
+	pricingResolveRepo := pricing.NewResolveRepository(db)
 	pricingSvc := pricing.NewService(pricingRepo).
+		WithRepository(pricingResolveRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
-	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc).
+		WithBranchGuard(wall.guard)
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, wall.mw, db, "admin", "owner"))
+
+	// The pricing catalogue: levels, profiles, product price lists, vendor
+	// levels and costs, contracts and the cost read (ADR 0006 section 5.6).
+	// Price writes are admin, owner and finance; the reads add sales; the
+	// calculate read is open to every role the counter routes admit, since
+	// the counter prices through it.
+	catalogSvc := pricing.NewCatalogService(pricing.NewCatalogRepository(db)).
+		WithTxRunner(db).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithAudit(pricingAuditAdapter{l: auditLog})
+	catalogHandler := pricing.NewCatalogHandler(catalogSvc).
+		WithEngine(pricingSvc).
+		WithBranchGuard(wall.guard)
+	catalogHandler.RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, wall.mw, db))
 
 	// Market check: our prices against a live store through an FB Connect
 	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
@@ -408,7 +431,7 @@ func Run() {
 	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
 		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
 		WithAudit(marketcheck.AuditRecorder{L: auditLog})
-	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, db)
+	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, wall.mw, db)
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -418,7 +441,8 @@ func Run() {
 			WithAudit(pricingAuditAdapter{l: auditLog})
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
-		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
+		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc).
+			WithProgramReader(pricingResolveRepo.CustomerProgram)
 		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
@@ -505,7 +529,6 @@ func Run() {
 		Invoices:   invoiceSvc,
 		Accounts:   accountSvc,
 		Pricing:    pricingSvc,
-		Customers:  customerSvc,
 		Escalators: escalatorRepo,
 		QuoteLines: quoteRepo,
 	})
@@ -633,6 +656,23 @@ func Run() {
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
 	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	// Sign in method allowlist (S9): the dealer's allowed sign in methods,
+	// discovered by the front door through the public config route. The
+	// allowlist's admin routes are the dealer's admin roles alone; the
+	// config and start routes are on the public path list above.
+	signinRepo, err := signinmethods.NewRepository(db)
+	if err != nil {
+		logger.Error("Sign in methods repository error", "error", err)
+		os.Exit(1)
+	}
+	signinSvc, err := signinmethods.NewService(signinRepo, db, auditLog)
+	if err != nil {
+		logger.Error("Sign in methods service error", "error", err)
+		os.Exit(1)
+	}
+	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
+		Admin: middleware.RequireRole("admin", "owner"),
+	})
 	docStore := document.NewStore(db)
 	docSvc := document.NewService(productRepo).
 		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
@@ -707,7 +747,7 @@ func Run() {
 	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, logger).
-		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc}).
 		WithTaxProvider(taxSvc).
 		WithInvoices(invoiceSvc).
 		WithAR(accountSvc).
@@ -825,6 +865,10 @@ func Run() {
 	}
 
 	wall.delivery(mux, delivery.NewHandler(deliverySvc), "admin", "owner", "warehouse", "driver")
+
+	// The dealer side of the pro portal's scheduling (PE-08): the per yard
+	// delivery windows and pickup slots a yard manager defines.
+	wall.scheduling(mux, scheduling.NewHandler(scheduling.NewService(scheduling.NewRepository(db))))
 
 	// Lumber index-aware quote price protection (the exposure module).
 	// Snapshots a baseline index when a quote is sent, detects moves past the
@@ -953,8 +997,13 @@ func Run() {
 	// Reuse the module-level quoteSvc so a portal accept/decline runs the same
 	// state machine — and the same auto-PO and price-protection side effects —
 	// as a counter salesperson closing the quote from the ERP.
-	portalSvc.WithQuoteService(quoteSvc)
-	portalHandler := portal.NewHandler(portalSvc)
+	portalSvc.WithQuoteService(quoteSvc).
+		WithParsingService(parsingSvc).
+		WithAccountService(accountSvc).
+		WithInvoiceService(invoiceSvc).
+		WithDocumentService(docSvc)
+	portalHandler := portal.NewHandler(portalSvc).
+		WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
@@ -979,14 +1028,10 @@ func Run() {
 					CustomerID: demoCustomerID,
 					Email:      "demo@tarnwick.example",
 					Name:       "Sam Tarnwick",
-					// Role is load-bearing and was previously left empty, so
-					// getPortalUserRole returned "" and requireAdmin refused
-					// every request: GET /users, GET/POST /invites and the
-					// role/status endpoints all returned 403 in dev mode, which
-					// is the only mode the demo runs in. Team management looked
-					// broken rather than bypassed. "Admin" matches the
-					// vocabulary internal/portal enforces.
-					Role: "Admin",
+					// Role is load-bearing: the capability checks resolve it
+					// server side (internal/portal/capabilities.go), and the
+					// demo account is the seeded owner.
+					Role: "owner",
 				}
 				ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
@@ -1013,6 +1058,14 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(auditLog)
 	project.NewHandler(projectSvc).RegisterRoutes(mux, portalChain)
+
+	// Customer quotes: the contractor's quote to their own customer, the
+	// capability link and the dealer's shared project pipeline (wire_customer_quotes.go).
+	wireCustomerQuotes(mux, customerQuoteDeps{
+		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
+		Email: emailSvc, Docs: docSvc, PublicURL: cfg.PublicURL, Trusted: cfg.TrustedProxies,
+		Quotes: quoteSvc, Audit: auditLog, Wall: wall,
+	}, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
@@ -1344,7 +1397,7 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 		next.ServeHTTP(sw, r)
 		logger.Info("request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", httputil.SafePath(r.URL.Path),
 			"status", sw.status,
 			"bytes", sw.bytesWritten,
 			"duration_ms", time.Since(start).Milliseconds(),
@@ -1408,8 +1461,8 @@ func rowOrNone(r links.Row, ok bool) links.Row {
 // walls: the settings behind the admin and owner role guard, the run behind
 // the pricing rules' wall. One function, so serve and the wire test mount the
 // same guards.
-func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, db *database.DB) {
+func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB) {
 	marketcheck.NewHandler(svc).RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner"),
-		pricingRulesCustomerWall(keyWall, db, "admin", "owner"))
+		pricingRulesCustomerWall(keyWall, mw, db, "admin", "owner"))
 }

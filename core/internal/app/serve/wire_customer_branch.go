@@ -417,12 +417,12 @@ func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Requ
 // categoryRuleBodyCustomers resolves the customers a category rule create (or
 // a bulk element) names, holding the request to the same target the handler
 // parses: every element must be an account rule (target_type "account") that
-// carries no tier. A tier rule prices every branch's customers of that tier
-// whether or not it also names a customer, so a tier element is refused
-// however many branches of the customer it names hold the pin (round 6 P1-1);
-// a target that is not an account rule names no branch the wall can hold and
-// is refused with it. Both refusals are ErrBodyRefused, so the bound key
-// never reaches the handler on them.
+// names no profile or level. A profile or level rule prices the customers of
+// that program across every branch, so such an element is refused however
+// many branches of the customer it names hold the pin; a target that is not
+// an account rule names no branch the wall can hold and is refused with it.
+// Both refusals are ErrBodyRefused, so the bound key never reaches the
+// handler on them.
 func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -430,14 +430,15 @@ func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUI
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	element := func(e struct {
-		TargetType string `json:"target_type"`
-		CustomerID string `json:"customer_id"`
-		Tier       string `json:"tier"`
+		TargetType     string `json:"target_type"`
+		CustomerID     string `json:"customer_id"`
+		PriceProfileID string `json:"price_profile_id"`
+		PriceLevelID   string `json:"price_level_id"`
 	}) ([]uuid.UUID, error) {
 		if t, ok := pricing.ParseTargetType(e.TargetType); !ok || t != pricing.TargetTypeAccount {
 			return nil, middleware.ErrBodyRefused
 		}
-		if e.Tier != "" {
+		if e.PriceProfileID != "" || e.PriceLevelID != "" {
 			return nil, middleware.ErrBodyRefused
 		}
 		id, err := uuid.Parse(e.CustomerID)
@@ -448,9 +449,10 @@ func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUI
 	}
 	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
 		var many []struct {
-			TargetType string `json:"target_type"`
-			CustomerID string `json:"customer_id"`
-			Tier       string `json:"tier"`
+			TargetType     string `json:"target_type"`
+			CustomerID     string `json:"customer_id"`
+			PriceProfileID string `json:"price_profile_id"`
+			PriceLevelID   string `json:"price_level_id"`
 		}
 		if err := json.Unmarshal(raw, &many); err != nil {
 			return nil, middleware.ErrBodyRefused
@@ -466,9 +468,10 @@ func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUI
 		return out, nil
 	}
 	var one struct {
-		TargetType string `json:"target_type"`
-		CustomerID string `json:"customer_id"`
-		Tier       string `json:"tier"`
+		TargetType     string `json:"target_type"`
+		CustomerID     string `json:"customer_id"`
+		PriceProfileID string `json:"price_profile_id"`
+		PriceLevelID   string `json:"price_level_id"`
 	}
 	if err := json.Unmarshal(raw, &one); err != nil {
 		return nil, middleware.ErrBodyRefused
@@ -650,16 +653,21 @@ func calculateCustomersOf(db *database.DB) func(ctx context.Context, r *http.Req
 	}
 }
 
-// pricingRulesCustomerWall composes the pricing role guard with the customer
-// branch wall on the rule create (its body names the customer, its job names
-// one, and a body naming neither is dealer wide and refused) and on the
-// calculation (its query names the customer, and its job names one through
-// that job's customer). The unfiltered rule list is REFUSED by the route
-// allowlist gate and never reaches these arms.
-func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
-	role := middleware.RequireRole(roles...)
+// pricingRulesCustomerWall composes the pricing role guard with the branch
+// middleware (P1-1, review r1 argon: without it BranchFromContext is nil on
+// every pricing route, so CheckPayloadBranch refuses every branch-checked
+// write for human users and BranchIDForQuery never answers on reads), the
+// customer branch wall on the rule create (its body names the customer, its
+// job names one, and a body naming neither is dealer wide and refused), and
+// the counter's roles on the calculation (ADR 0006 section 5.6: calculate is
+// open to every role the counter routes admit; the rule create stays
+// admin/owner). The unfiltered rule list is REFUSED by the route allowlist
+// gate and never reaches these arms.
+func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB, roles ...string) func(http.Handler) http.Handler {
+	role := middleware.Compose(middleware.RequireRole(roles...), mw)
+	counterRole := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales", "cashier"), mw)
 	create := middleware.Compose(role, keyWall.CustomerBranchExclusive(pricingRuleCustomersOf(db)))
-	calculate := middleware.Compose(role, keyWall.CustomerBranch(calculateCustomersOf(db)))
+	calculate := middleware.Compose(counterRole, keyWall.CustomerBranch(calculateCustomersOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, calculateHandler, roleHandler := create(next), calculate(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -685,6 +693,28 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // belong to theirs, and the resolve preview
 // names a customer when its query carries one. The matrix is REFUSED by the
 // route allowlist gate; the categories routes are stated limits.
+// pricingCatalogWall guards the pricing catalogue routes (ADR 0006 section
+// 5.6): the writes are admin, owner and finance; the reads add sales; the
+// calculate read is open to every role the counter routes admit, since the
+// counter prices through it.
+func pricingCatalogWall(keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB) func(http.Handler) http.Handler {
+	read := middleware.Compose(middleware.RequireRole("admin", "owner", "finance", "sales"), mw)
+	write := middleware.Compose(middleware.RequireRole("admin", "owner", "finance"), mw)
+	return func(next http.Handler) http.Handler {
+		readHandler, writeHandler := read(next), write(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The reads add sales; every write is finance's. The calculate
+			// read's 5-role dispatch lives in pricingRulesCustomerWall, which
+			// registers it.
+			if r.Method == http.MethodGet {
+				readHandler.ServeHTTP(w, r)
+				return
+			}
+			writeHandler.ServeHTTP(w, r)
+		})
+	}
+}
+
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
 	body := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleBodyCustomers))

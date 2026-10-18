@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package signinmethods
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/jackc/pgx/v5"
+)
+
+const dealerLogoPath = "/api/v1/dealer-profile/logo"
+
+// Repository reads and writes dealer_signin_methods. Every statement goes
+// through GetExecutor(ctx), so calls inside a transaction run on the
+// transaction's own connection, never the pool, and calls outside one use
+// the pool.
+type Repository struct {
+	db *database.DB
+}
+
+// NewRepository validates the database handle.
+func NewRepository(db *database.DB) (*Repository, error) {
+	if db == nil {
+		return nil, errors.New("signin methods: the repository requires a database")
+	}
+	return &Repository{db: db}, nil
+}
+
+// DealerBrand reads the dealer's public display name (trading name when set,
+// else legal name) and optional logo path from the single dealer_profile row.
+// When the row is absent, both answers are empty so the door falls back to
+// Gable's own lockup.
+func (r *Repository) DealerBrand(ctx context.Context) (string, *string, error) {
+	var name string
+	var markURL *string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT CASE WHEN trim(trading_name) <> '' THEN trim(trading_name) ELSE trim(legal_name) END,
+		        CASE WHEN logo IS NULL THEN NULL ELSE $1 END
+		   FROM dealer_profile WHERE id = 1`, dealerLogoPath).Scan(&name, &markURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return name, markURL, nil
+}
+
+// List answers the stored rows in the dealer's order. A code outside the
+// vocabulary cannot be stored (the column check refuses it), so every row
+// answers as it is.
+func (r *Repository) List(ctx context.Context) ([]Row, time.Time, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT method, sort_order, coalesce(oidc_issuer_url, ''), coalesce(oidc_client_id, ''), coalesce(oidc_label, ''),
+		 updated_at
+		 FROM dealer_signin_methods ORDER BY sort_order, method`)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	var out []Row
+	var updated time.Time
+	for rows.Next() {
+		var row Row
+		if err := rows.Scan(&row.Method, &row.SortOrder, &row.OIDCIssuerURL, &row.OIDCClientID, &row.OIDCLabel, &updated); err != nil {
+			return nil, time.Time{}, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, time.Time{}, err
+	}
+	return out, updated, nil
+}
+
+// Lock serialises concurrent allowlist writes on the transaction connection.
+func (r *Repository) Lock(ctx context.Context) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `LOCK TABLE dealer_signin_methods IN SHARE ROW EXCLUSIVE MODE`)
+	return err
+}
+
+// Replace rewrites the allowlist inside the caller's transaction. It takes a
+// table lock first so concurrent replacements serialise instead of leaving a
+// union of their methods, writes the new rows, and then deletes the rows not
+// in the new set so the never empty guard trigger never trips on a valid
+// update.
+func (r *Repository) Replace(ctx context.Context, in []Input, now time.Time) error {
+	if err := r.Lock(ctx); err != nil {
+		return err
+	}
+	exec := r.db.GetExecutor(ctx)
+	keep := make([]string, len(in))
+	for i, m := range in {
+		keep[i] = m.Method
+		if _, err := exec.Exec(ctx,
+			`INSERT INTO dealer_signin_methods (method, sort_order, oidc_issuer_url, oidc_client_id, oidc_label, updated_at)
+			 VALUES ($1, $2, nullif($3, ''), nullif($4, ''), nullif($5, ''), $6)
+			 ON CONFLICT (method) DO UPDATE SET
+			   sort_order = EXCLUDED.sort_order,
+			   oidc_issuer_url = EXCLUDED.oidc_issuer_url,
+			   oidc_client_id = EXCLUDED.oidc_client_id,
+			   oidc_label = EXCLUDED.oidc_label,
+			   updated_at = EXCLUDED.updated_at`,
+			m.Method, i+1, m.OIDCIssuerURL, m.OIDCClientID, m.OIDCLabel, now); err != nil {
+			return err
+		}
+	}
+	if _, err := exec.Exec(ctx,
+		`DELETE FROM dealer_signin_methods WHERE NOT (method = ANY($1))`, keep); err != nil {
+		return err
+	}
+	return nil
+}
