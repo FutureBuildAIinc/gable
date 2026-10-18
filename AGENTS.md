@@ -29,7 +29,8 @@ core/             → Go module: one binary (cmd/core: serve | worker | migrate 
 core/api/         → the contract: openapi.yaml (assembled), fragments/, ROUTES.txt (route census), tools/
 web/apps/desk/    → Lit 3 frontend, the whole current SPA (Vite + TypeScript + Tailwind)
 web/apps/front-door/ → the micro app selector (R1-8)
-web/packages/     → shared web packages (api-client is generated from the contract)
+web/apps/work-shell/ → the work shell host: one header framing the role's apps (the desk first)
+web/packages/     → shared web packages (api-client is generated from the contract; shell-chrome is the work shell's chrome)
 tauri/gable-desk/ → Rust Tauri 2 desktop shell around the front door (R1-9)
 docs/adr/         → architecture decision records (index in docs/adr/README.md)
 docs/refactor/    → the v1 refactor's contract, goldens and census notes

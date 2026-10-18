@@ -254,6 +254,32 @@ need. Save a PDF with `curl -s <url> -o form.pdf` and read it with `pdftotext fo
     (`GET /api/v1/documents/print/purchase-order/<id>`): the quote arrives in the catcher; the purchase order shows
     the vendor, the placing yard's address and its lines.
 
+### The work shell: one header over the desk's apps (S2, S3, S7, S10)
+
+Proves: the work shell host, the shell chrome and the single header framed protocol. Runs on the demo seed with its
+three yards; sign in is the shell's own dev card (the stack runs `AUTH_MODE=dev`).
+
+1. Start the stack (`make up`) and open <http://127.0.0.1:8080/shell/>. The shell's sign in card shows: a name and a
+   role. Sign in as Avery Brooks, role Sales. The shell opens on the Desk app: ONE header band (the dealer's name
+   leading, the app selector centred, then the yard, theme, feedback and account controls), and the desk framed under
+   it with NO header band of its own (its own band is hidden by the framed flag, never rendered twice).
+2. The yard control reads the seeded yards. Pick West Kelowna Satellite (`WK`) in the shell's header, then open Orders
+   inside the frame: the list is the west yard's, and the desk's own requests carry the new yard (the framed desk
+   followed the shell's pick).
+3. The rail is hidden by default. Rest the pointer on the left edge strip (or press the rail control in the header):
+   the rail reveals, listing the apps the role holds (Desk, Point of Sale, Portal for sales) and, wide, their few top
+   level places. Press the pin: the rail stays, as icons on a narrow window, wide on a wide one. Reload the page: the
+   pin survives.
+4. The centred selector opens the app list; pick Portal. The frame switches to the portal tree; the yard and the
+   signed in person carry over (the handoff is the shared session store, no sign in again).
+5. The account chip opens Switch role and Sign out. Press Switch role: the framed app is asked to run its own sign
+   out (a nonce verified handshake with a bounded wait), the shell's own custody clears, and the sign in card comes
+   back. Sign in again as Alex Moreno, role Driver: the selector and rail now hold Desk and Driver only.
+6. Theme: the header's theme control flips Industrial Dark and Gable light for the shell AND the framed app at once
+   (the shared theme store); the choice survives a reload.
+7. Sign out from a desk opened standalone (open <http://127.0.0.1:8080/home> directly): the desk shows its own header
+   band, exactly as it does without the shell.
+
 ### Market check, our prices against a live store through FB Connect
 
 Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address and the pricing flow's webhook id.
