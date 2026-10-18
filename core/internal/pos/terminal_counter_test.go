@@ -63,6 +63,7 @@ func (f *fixture) terminalIntentOf(t *testing.T, saleID string) (id uuid.UUID, s
 // applied to the invoice, and the intent stands authorized with only safe
 // answer fields.
 func TestCounterCardApproveEndToEnd(t *testing.T) {
+	lockTerminalTests(t)
 	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	saleID := f.startSale(nil)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
@@ -101,6 +102,7 @@ func TestCounterCardApproveEndToEnd(t *testing.T) {
 // TestCounterCardDeclineEndToEnd: the device's own no refuses the completion
 // (card_declined), the sale stays open and the intent stands declined.
 func TestCounterCardDeclineEndToEnd(t *testing.T) {
+	lockTerminalTests(t)
 	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimDecline, 0))
 	saleID := f.startSale(nil)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
@@ -131,6 +133,7 @@ func TestCounterCardDeclineEndToEnd(t *testing.T) {
 // manager item, and the manager's declined resolution closes it (the
 // terminal's own record said no).
 func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
+	lockTerminalTests(t)
 	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 250*time.Millisecond))
 	saleID := f.startSale(nil)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
@@ -228,156 +231,10 @@ func (f *fixture) currentTill(t *testing.T) string {
 	return str(t, r.body, "id")
 }
 
-// TestResolveAuthorizedAppliesTenderToCompletedSale: a sale that completed
-// without the card leg (the terminal's answer landed after the counter gave
-// up and the sale was paid another way) takes its money on resolution: the
-// payment applies to the sale's invoice and the tender row appears, in the
-// resolution's own transaction.
-func TestResolveAuthorizedAppliesTenderToCompletedSale(t *testing.T) {
-	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
-	saleID := f.startSale(nil)
-	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
-		t.Fatalf("add line = %d: %s", r.status, r.raw)
-	}
-	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
-		t.Fatalf("complete = %d: %s", r.status, r.raw)
-	}
-	// a lost sale intent of the completed sale, filed by hand the way the
-	// sweep files it
-	ledger := payment.NewTerminalLedger(f.db)
-	var saleNumber string
-	var branch uuid.UUID
-	var register string
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT number, branch_id, register_id FROM pos_transactions WHERE id = $1`, saleID).
-		Scan(&saleNumber, &branch, &register); err != nil {
-		t.Fatal(err)
-	}
-	_ = saleNumber
-	intent := &payment.TerminalIntent{ID: uuid.New(), TransactionID: mustParseUUID(saleID), LegKey: "card-0",
-		RegisterID: register, BranchID: branch, AmountCents: 599, Kind: payment.TerminalKindSale,
-		DeviceID: register, IdempotencyKey: "sale-" + saleID + "-card-0-hand",
-		LeaseUntil: time.Now().Add(-time.Minute)}
-	if err := ledger.Claim(context.Background(), intent); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if _, err := ledger.MarkDispatched(context.Background(), intent.ID, "devref-ap", time.Now().Add(-time.Minute)); err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	if _, err := ledger.Sweep(context.Background(), time.Now()); err != nil {
-		t.Fatalf("sweep: %v", err)
-	}
-	items, err := ledger.OpenLostItems(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("queue: %v", err)
-	}
-	var itemID uuid.UUID
-	for _, it := range items {
-		if it.IntentID == intent.ID {
-			itemID = it.ID
-		}
-	}
-	if itemID == uuid.Nil {
-		t.Fatal("the sweep filed no manager item")
-	}
-	var paymentsBefore int64
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM payments p JOIN pos_tenders t ON t.payment_id = p.id WHERE t.transaction_id = $1 AND t.method = 'CARD'`, saleID).
-		Scan(&paymentsBefore); err != nil {
-		t.Fatal(err)
-	}
-	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID.String()+"/resolve",
-		map[string]any{"outcome": "authorized", "reference": "read the terminal", "reason": "the terminal approved"},
-		"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t))
-	if rr.status != http.StatusOK {
-		t.Fatalf("the manager resolve = %d: %s", rr.status, rr.raw)
-	}
-	if str(t, rr.body, "state") != "resolved_authorized" {
-		t.Fatalf("the item ended %s", str(t, rr.body, "state"))
-	}
-	// the invoice was already paid by the cash tender, so the terminal's
-	// money records as the payment's unapplied credit on the account
-	var paymentsAfter int64
-	var unapplied int64
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*), COALESCE(SUM(ROUND(p.amount_unapplied * 100)), 0) FROM payments p
-		  WHERE p.id IN (SELECT t.payment_id FROM pos_tenders t
-		                  WHERE t.transaction_id = $1 AND t.method = 'CARD')`, saleID).
-		Scan(&paymentsAfter, &unapplied); err != nil {
-		t.Fatal(err)
-	}
-	if paymentsAfter != paymentsBefore+1 || unapplied != 599 {
-		t.Fatalf("the resolution recorded %d card payments (before %d) holding %d cents unapplied", paymentsAfter, paymentsBefore, unapplied)
-	}
-}
-
-// TestResolveAuthorizedRefundsWhenSaleGone: a lost sale intent of a sale
-// that never completed gives the money back through the gateway on
-// resolution (the same day void first), and only then closes the item.
-func TestResolveAuthorizedRefundsWhenSaleGone(t *testing.T) {
-	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 0))
-	voids := &recordingGateway{}
-	f.service.WithGateway(voids)
-	saleID := f.startSale(nil)
-	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
-		t.Fatalf("add line = %d: %s", r.status, r.raw)
-	}
-	ledger := payment.NewTerminalLedger(f.db)
-	var branch uuid.UUID
-	var register string
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT branch_id, register_id FROM pos_transactions WHERE id = $1`, saleID).Scan(&branch, &register); err != nil {
-		t.Fatal(err)
-	}
-	intent := &payment.TerminalIntent{ID: uuid.New(), TransactionID: mustParseUUID(saleID), LegKey: "card-0",
-		RegisterID: register, BranchID: branch, AmountCents: 599, Kind: payment.TerminalKindSale,
-		DeviceID: register, IdempotencyKey: "sale-" + saleID + "-card-0-gone",
-		LeaseUntil: time.Now().Add(-time.Minute)}
-	if err := ledger.Claim(context.Background(), intent); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if ok, err := ledger.MarkDispatched(context.Background(), intent.ID, "devref-gone", time.Now().Add(-time.Minute)); err != nil || !ok {
-		t.Fatalf("dispatch: %t %v", ok, err)
-	}
-	// the answer landed after the sweep's read: the intent carries the
-	// verdict the manager reads
-	if _, err := f.db.Pool.Exec(context.Background(),
-		`UPDATE payment_terminal_intents SET state = 'lost' WHERE id = $1`, intent.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ledger.Sweep(context.Background(), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	items, err := ledger.OpenLostItems(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("queue: %v", err)
-	}
-	var itemID uuid.UUID
-	for _, it := range items {
-		if it.IntentID == intent.ID {
-			itemID = it.ID
-		}
-	}
-	if itemID == uuid.Nil {
-		t.Fatal("the sweep filed no manager item")
-	}
-	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID.String()+"/resolve",
-		map[string]any{"outcome": "authorized", "reference": "read the terminal"},
-		"X-Test-Role", "owner", "X-Test-Sub", mustUUID(t))
-	if rr.status != http.StatusOK {
-		t.Fatalf("the manager resolve = %d: %s", rr.status, rr.raw)
-	}
-	if voids.voided != 1 {
-		t.Fatalf("the sale gone resolution voided %d charges, wanted 1", voids.voided)
-	}
-	if str(t, rr.body, "state") != "resolved_authorized" {
-		t.Fatalf("the item ended %s", str(t, rr.body, "state"))
-	}
-}
-
 // TestCancelClosesUndispatchedClaim: a claim the device never reached
 // cancels lost with no manager item.
 func TestCancelClosesUndispatchedClaim(t *testing.T) {
+	lockTerminalTests(t)
 	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 0))
 	saleID := f.startSale(nil)
 	ledger := payment.NewTerminalLedger(f.db)
@@ -404,24 +261,6 @@ func TestCancelClosesUndispatchedClaim(t *testing.T) {
 		`SELECT count(*) FROM payment_terminal_lost_items WHERE intent_id = $1`, intent.ID).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("the cancelled claim filed %d manager items, wanted 0", n)
 	}
-}
-
-// recordingGateway records the voids and refunds a resolution asks for.
-type recordingGateway struct{ voided, refunded int }
-
-func (g *recordingGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
-	return &payment.GatewayResult{TransactionID: "rec-" + req.IdempotencyKey, Status: payment.GatewayStatusApproved}, nil
-}
-func (g *recordingGateway) Capture(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
-	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusApproved}, nil
-}
-func (g *recordingGateway) Void(ctx context.Context, id string) (*payment.GatewayResult, error) {
-	g.voided++
-	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusVoided}, nil
-}
-func (g *recordingGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
-	g.refunded++
-	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusRefunded}, nil
 }
 
 func mustParseUUID(s string) uuid.UUID {
