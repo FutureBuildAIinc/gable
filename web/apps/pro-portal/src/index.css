@@ -74,7 +74,7 @@
   }
 
   .pro-bottom-nav {
-    @apply sticky inset-x-0 bottom-0 z-40 mt-auto flex items-stretch justify-around border-t border-zinc-800 bg-portal-ground/95 px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden;
+    @apply z-40 mt-auto flex items-stretch justify-around border-t border-zinc-800 bg-portal-ground/95 px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden;
   }
 
   .pro-nav-item {
