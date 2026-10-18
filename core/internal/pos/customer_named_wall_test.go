@@ -50,6 +50,7 @@ func newNamedWall(t *testing.T) *namedWall {
 	exec(`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', 'WL-POS-N', 'named wall B')`, branchB)
 	w := &namedWall{hidden: uuid.New()}
 	f := newFixture(t, db)
+	f.seedTill()
 	w.f = f
 	w.reachable = f.customerID
 	exec(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-cw-a', $1, TRUE, 'test')`, f.branchID)
@@ -300,9 +301,7 @@ func TestAUserReturnNamesAnotherYardsCustomer(t *testing.T) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	if r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": 0}, w.headers...); r.status != http.StatusCreated {
-		t.Fatalf("open till = %d: %s", r.status, r.raw)
-	}
+	// the drawer is the one newNamedWall opened
 	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": f.register}, w.headers...)
 	if r.status != http.StatusCreated {
 		t.Fatalf("create = %d: %s", r.status, r.raw)

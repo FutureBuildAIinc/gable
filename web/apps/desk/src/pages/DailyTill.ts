@@ -10,6 +10,8 @@ import { ReportingService } from '../services/ReportingService.ts';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting.ts';
 import { formatDollars } from '../lib/utils.ts';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide';
+import './pos/TillSignoffQueue.ts';
+import './pos/BranchDay.ts';
 
 @customElement('gable-daily-till')
 export class GableDailyTill extends LitElement {
@@ -134,6 +136,9 @@ export class GableDailyTill extends LitElement {
                         </div>
                     </div>
                 </div>
+
+                <gable-till-signoff-queue></gable-till-signoff-queue>
+                <gable-branch-day></gable-branch-day>
             </div>
         `;
     }

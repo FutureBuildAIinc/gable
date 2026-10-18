@@ -178,7 +178,8 @@ func TestKeyBranchPin_UserRegisterBranchRefusalAnswers403(t *testing.T) {
 		t.Errorf("the refused sale wrote %d transactions on the register, want none", n)
 	}
 
-	// The control: the caller's own register.
+	// The control: the caller's own register, its drawer open.
+	openTillOn(t, f, regA, f.branchA)
 	body := `{"register_id":"` + regA + `","cashier_id":"` + uuid.NewString() + `"}`
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/transactions", body, hdr)
 	var tx struct {

@@ -119,7 +119,7 @@ func TestMachineKeyNeverGetsFabricatedCashier(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want 0", n)
 	}
 	// the till close (a drawer the unkeyed fixture opened)
-	f.openTill(0)
+	f.ensureTill()
 	sessionID := f.currentTillID(t)
 	if code := keyedDo("POST", "/api/v1/pos/till/"+sessionID+"/close",
 		`{"counted_by_method":{"cash":0}}`); code == http.StatusForbidden {

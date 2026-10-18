@@ -51,10 +51,14 @@ func TestSaleWireShape(t *testing.T) {
 			t.Errorf("%s = %d, want %d", key, got, want)
 		}
 	}
-	for _, key := range []string{"customer_id", "till_session_id", "invoice_id", "completed_at"} {
+	for _, key := range []string{"customer_id", "invoice_id", "completed_at"} {
 		if v, ok := b[key]; !ok || v != nil {
 			t.Errorf("%s = %v (present %v), want present as null", key, v, ok)
 		}
+	}
+	// a cart starts in the register's open drawer (CP-08)
+	if got := str(t, b, "till_session_id"); got != f.currentTillID(t) {
+		t.Errorf("till_session_id = %q, want the open drawer %q", got, f.currentTillID(t))
 	}
 	if etag := r.header.Get("ETag"); etag != fmt.Sprintf(`"%d"`, rev(t, r)) {
 		t.Errorf("ETag = %q, want the revision in quotes", etag)

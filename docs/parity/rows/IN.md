@@ -168,4 +168,3 @@ The detail behind the [IN rows of the parity matrix](../LBM-PARITY-MATRIX.md#in-
 - **Agility**: not checked for this row.
 - **The MVP** (Missing): PIM generates AI text and images per SKU (pim/service.go:88) and EDI imports 832 price rows (edi/buying_group.go:79), but no pre-loaded LBM industry product content catalog connector exists.
 - **Gable today** (Missing): No external product content catalog. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-

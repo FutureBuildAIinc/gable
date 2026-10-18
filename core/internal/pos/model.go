@@ -208,8 +208,12 @@ type ReturnLine struct {
 type TillSessionStatus string
 
 const (
-	TillOpen   TillSessionStatus = "OPEN"
-	TillClosed TillSessionStatus = "CLOSED"
+	TillOpen TillSessionStatus = "OPEN"
+	// TillPendingSignoff is a counted drawer whose over or short passed the
+	// branch's variance threshold: it waits for a manager, and its variance is
+	// not on the ledger until the sign off posts it.
+	TillPendingSignoff TillSessionStatus = "PENDING_SIGNOFF"
+	TillClosed         TillSessionStatus = "CLOSED"
 )
 
 // Status returns the wire spelling.
@@ -236,6 +240,21 @@ type TillSession struct {
 	OverShort        *httpx.Cents     `json:"over_short_cents"`
 	GLEntryID        *uuid.UUID       `json:"gl_entry_id"`
 	Notes            string           `json:"notes"`
+
+	// ClosedBy is who counted the drawer; VarianceThreshold the branch's
+	// threshold in force at that count; SignOff the manager's release of a
+	// close that passed it (CP-08).
+	ClosedBy          *string      `json:"closed_by"`
+	VarianceThreshold *httpx.Cents `json:"variance_threshold_cents"`
+	SignOff           *TillSignOff `json:"sign_off"`
+}
+
+// TillSignOff is the manager's release of a counted drawer whose over or
+// short passed the variance threshold: who, why and when.
+type TillSignOff struct {
+	SignedOffBy string          `json:"signed_off_by"`
+	Reason      string          `json:"reason"`
+	SignedOffAt httpx.Timestamp `json:"signed_off_at"`
 }
 
 // TillReport is the live (X) or closing (Z) summary for a session.
@@ -247,6 +266,11 @@ type TillReport struct {
 	ChangeCents      httpx.Cents      `json:"change_cents"`
 	TenderedByMethod map[string]int64 `json:"tendered_by_method"`
 	ExpectedByMethod map[string]int64 `json:"expected_by_method"`
+
+	// Movements are the drops, pickups, paid in and paid out of the session,
+	// oldest first, with their totals by kind; the expected cash carries them.
+	Movements            []TillMovement   `json:"movements"`
+	MovementTotalsByKind map[string]int64 `json:"movement_totals_by_kind"`
 }
 
 // ZReport is the immutable end-of-day snapshot generated once when a till

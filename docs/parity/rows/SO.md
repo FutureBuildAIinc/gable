@@ -178,4 +178,3 @@ The detail behind the [SO rows of the parity matrix](../LBM-PARITY-MATRIX.md#so-
 - **Agility** (found by its research): Long lead processing commits stock by need date; date driven logic alerts when supply will miss a promised date and frees stock when a customer delays. [A57](https://documentation.dmsi.com/Agility/prod/Sales_Transactions/longleadprocessing.htm) [A13](https://www.dmsi.com/keep-your-promises/)
 - **The MVP** (Missing): Nothing on any line: keyword searches for need dates or promise alerts found only unrelated words.
 - **Gable today** (Missing): No need date commitment of stock or promise alerts. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-

@@ -556,4 +556,3 @@ re-sized**.
     contractor's own logo, payment terms, deposit percent and customer site tax rate (or tax included display) under
     `Price Wall 2` (dealer cost and contractor markup never enter the homeowner's JSON response or PDF, wire tested),
     and `valid_until` bounded by the dealer's source quote price protection horizon.
-

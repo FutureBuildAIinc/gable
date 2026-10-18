@@ -107,4 +107,3 @@ The detail behind the [PE rows of the parity matrix](../LBM-PARITY-MATRIX.md#pe-
 - **Rundoo, BisTrack and Agility**: not researched for this row; the product owner added it for the
   contractor Pro Portal goal.
 - **Gable today** (Missing): Nothing for a three-party customer-to-contractor-to-dealer selections loop, capability-link price walls, or selection approval records. **Missing:** Curated selection packages shared via capability links with optional 6-digit verification code on sign-off (Ruling 5b), shared project/customer pipeline insights for the dealer while Price Wall 1 hides contractor markup/sell price from the dealer and Price Wall 2 hides dealer cost/markup from the customer (Ruling 5a), and 1-click conversion into the dealer order. Evidence: [`core/internal/portal/handler.go:64`](https://github.com/FutureBuildAIinc/gable/blob/695d587c5d7431194005a93bec51deb53c3e2749/core/internal/portal/handler.go#L64). (no screen)
-

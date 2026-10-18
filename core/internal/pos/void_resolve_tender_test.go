@@ -162,7 +162,7 @@ func TestTheStrandedVoidOfTwoTendersResolvesOneTenderAtATime(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()}}
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.voided"
+		f.events.setFail("pos_transaction.voided")
 	})
 	f.openTill(0)
 	saleID, body, _ := f.twoCardSaleOf(t, "1", 300, 299)
@@ -176,7 +176,7 @@ func TestTheStrandedVoidOfTwoTendersResolvesOneTenderAtATime(t *testing.T) {
 	if len(intents) != 2 {
 		t.Fatalf("%d claims after the stranded void, want 2", len(intents))
 	}
-	f.events.fail = ""
+	f.events.setFail("")
 	// the first resolution books its own tender only: the sale's void waits
 	rr := f.resolveOn(t, intents[0]["id"].(string), map[string]any{
 		"outcome": "refund", "refund_tx_id": intents[0]["refund_tx_id"].(string), "reason": "the terminal refunded this card",

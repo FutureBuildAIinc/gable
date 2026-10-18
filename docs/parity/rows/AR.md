@@ -116,4 +116,3 @@ The detail behind the [AR rows of the parity matrix](../LBM-PARITY-MATRIX.md#ar-
 - **The MVP** (Missing): No retainage or progress billing on any line.
 - **Gable today** (Missing): Nothing for retainage or progress billing; an order bills by fulfilled quantity only. **Missing:** Retainage percent held on invoices and released later, progress or schedule-of-values billing against a job or contract, and AR aging that separates retainage. Evidence: [`core/internal/order/fulfil.go:118`](https://github.com/FutureBuildAIinc/gable/blob/695d587c5d7431194005a93bec51deb53c3e2749/core/internal/order/fulfil.go#L118). (no screen)
 - **Since `58dde7e8`**: no change.
-
