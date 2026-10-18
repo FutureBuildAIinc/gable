@@ -61,19 +61,14 @@ type ExchangeResult struct {
 	RefundedCents httpx.Cents `json:"refunded_cents"`
 }
 
-// exchangePreview carries a rolled back exchange's figures out of its
-// transaction: the preview runs the whole act and then refuses to commit it.
-type exchangePreview struct{ figures ExchangeFigures }
-
-func (e *exchangePreview) Error() string { return "exchange preview: nothing was written" }
-
 // Exchange rings the return and the replacement sale in ONE act: one
 // transaction in section 11's lock order (the sale rows, the customer's
 // credit, the inventory rows in product order, then the AR core), one credit
 // memo and one sale linked to each other. The memo's credit is a leg of the
 // sale up to the sale's total, tender is taken only for the difference, and
 // money goes back when the return is worth more. With preview true nothing is
-// written: the figures come back and the transaction is rolled back.
+// written: the figures are computed from read-only pricing and tax queries
+// without opening a transaction.
 func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *ExchangeIn, actor string, preview bool) (*ExchangeResult, error) {
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
@@ -127,6 +122,9 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 	pricedTax, err := s.prepareSaleTax(ctx, draftSale, preLines, *st.customerID)
 	if err != nil {
 		return nil, err
+	}
+	if preview {
+		return s.previewExchange(ctx, st, preLines, pricedTax)
 	}
 	var out *ExchangeResult
 	err = s.inTx(ctx, func(ctx context.Context) error {
@@ -189,7 +187,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		returned := -int64(ret.TotalCents)
 		// The sale half: the memo's credit is a leg up to the total, tender
 		// covers the rest.
-		leg := &exchangeLeg{memoID: *ret.CreditMemoID, creditCents: returned, preview: preview}
+		leg := &exchangeLeg{memoID: *ret.CreditMemoID, creditCents: returned}
 		pre, err := s.repo.GetSale(ctx, sale.ID)
 		if err != nil {
 			return err
@@ -237,9 +235,6 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
-		if preview {
-			return &exchangePreview{figures: figures}
-		}
 		retOut, err := s.repo.GetReturn(ctx, ret.ID)
 		if err != nil {
 			return err
@@ -251,14 +246,48 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		out = &ExchangeResult{Return: retOut, Sale: saleOut, ExchangeFigures: figures, RefundedCents: httpx.Cents(refunded)}
 		return nil
 	})
-	var pv *exchangePreview
-	if errors.As(err, &pv) {
-		return &ExchangeResult{ExchangeFigures: pv.figures}, nil
-	}
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines []salesdoc.Line, pricedTax *providerTax) (*ExchangeResult, error) {
+	totals := salesdoc.SumTotals(preLines)
+	var taxCents int64
+	if pricedTax != nil {
+		taxCents = int64(pricedTax.taxCents)
+	} else {
+		exempt, err := s.repo.CustomerExempt(ctx, *st.customerID)
+		if err != nil {
+			return nil, err
+		}
+		if !exempt {
+			rate, ok, err := s.repo.BranchTaxRate(ctx, st.branchID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, conflict("tax_rate_not_configured",
+					"set the branch's default tax rate before completing a sale")
+			}
+			scaled, _, err := salesdoc.ParseTaxRate(rate)
+			if err != nil {
+				return nil, err
+			}
+			taxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
+		}
+	}
+	returned := -st.total
+	replacementTotal := int64(totals.SubtotalCents) + taxCents
+	return &ExchangeResult{
+		ExchangeFigures: ExchangeFigures{
+			ReturnedCents:      httpx.Cents(returned),
+			RestockingFeeCents: httpx.Cents(st.feeCents),
+			ReplacementCents:   httpx.Cents(replacementTotal),
+			DifferenceCents:    httpx.Cents(replacementTotal - returned),
+		},
+	}, nil
 }
 
 func (s *Service) priceReplacementLines(ctx context.Context, sale *Sale, parsed []salesdoc.ParsedLine, actor string) ([]salesdoc.Line, []audit.Entry, error) {
@@ -414,9 +443,9 @@ func (h *Handler) CreateExchange(w http.ResponseWriter, r *http.Request) {
 	h.exchange(w, r, false)
 }
 
-// PreviewExchange is POST /pos/exchanges/preview: the figures of the same
-// request, computed by running the act and rolling it back, so the counter
-// states what is owed or what goes back before anything is rung.
+// PreviewExchange is POST /pos/exchanges/preview: a read-only calculation of
+// the figures of the same request, so the counter states what is owed or what
+// goes back before anything is rung.
 func (h *Handler) PreviewExchange(w http.ResponseWriter, r *http.Request) {
 	h.exchange(w, r, true)
 }

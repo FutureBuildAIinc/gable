@@ -5313,7 +5313,7 @@ export interface paths {
         put?: never;
         /**
          * State what an exchange comes to
-         * @description The same request as the exchange, answered with the figures only: the credit the return is worth (net of the restocking fee), the replacement's total with its tax and the difference (positive is what the customer pays, negative is what goes back). The act is run whole and rolled back, so nothing is written (a rolled back run abandons the sale and return numbers, which are gapped series); a short tender is not refused here. The same refusals as the exchange otherwise.
+         * @description The same request as the exchange, answered with the figures only: the credit the return is worth (net of the restocking fee), the replacement's total with its tax and the difference (positive is what the customer pays, negative is what goes back). Computed from read-only pricing and tax queries without opening a transaction, taking row locks, or advancing sequences; a short tender is not refused here.
          */
         post: operations["posExchangePreview"];
         delete?: never;

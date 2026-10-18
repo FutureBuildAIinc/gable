@@ -419,12 +419,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		tendered := totalTendered + credit
 		change := tendered - total
-		// an exchange preview states the difference instead of refusing the
-		// tender that is not yet offered; nothing it writes is kept
-		previewShort := ex != nil && ex.preview && change < 0
-		if previewShort {
-			change = 0
-		}
 		if change < 0 {
 			return conflict("insufficient_tender",
 				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total-credit, totalTendered))
@@ -435,7 +429,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		// The legs the sale keeps, change taken out of the cash, sum exactly to
 		// the total; the two checks above make it so and this holds it.
-		if !previewShort && tendered-change != total {
+		if tendered-change != total {
 			return conflict("legs_do_not_sum",
 				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
 		}
@@ -978,7 +972,4 @@ type exchangeLeg struct {
 	creditCents  int64
 	appliedCents int64
 	totalCents   int64
-	// preview runs the act to state its figures and rolls it back: a short
-	// tender is not refused.
-	preview bool
 }

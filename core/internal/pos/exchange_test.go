@@ -747,4 +747,84 @@ func TestAnExchangeQuotesTheTaxProviderBeforeOpeningTheTransaction(t *testing.T)
 	f.assertARInvariants(t)
 }
 
+// RULE: POST /api/v1/pos/exchanges/preview is read-only: it succeeds while
+// another transaction holds FOR UPDATE locks on document_counters, customers,
+// pos_transactions, and inventory, and it never advances
+// pos_transaction_number_seq or pos_return_number_seq.
+func TestExchangePreviewIsReadOnlyAndNeverLocksCountersCustomersOrAdvancesSequences(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newFixture(t, db)
+	f.openTill(0)
+	sale, line, _ := f.cashSaleLine(t, "3")
+	// Seed one return so pos_return_number_seq is called at least once.
+	if r := f.returnLines(t, sale, "", lineOf(line, "1", "defective")); r.status != http.StatusCreated {
+		t.Fatalf("seed return = %d: %s", r.status, r.raw)
+	}
+
+	txSeqBefore := f.scalar(`SELECT last_value FROM pos_transaction_number_seq`).(int64)
+	retSeqBefore := f.scalar(`SELECT last_value FROM pos_return_number_seq`).(int64)
+	cmBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64)
+	inBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64)
+
+	ctx := t.Context()
+	txHold, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txHold: %v", err)
+	}
+	defer func() { _ = txHold.Rollback(ctx) }()
+
+	if _, err := txHold.Exec(ctx, `SELECT next_value FROM document_counters WHERE series IN ('credit_memo', 'invoice') FOR UPDATE`); err != nil {
+		t.Fatalf("lock document_counters: %v", err)
+	}
+	if _, err := txHold.Exec(ctx, `SELECT id FROM customers FOR UPDATE`); err != nil {
+		t.Fatalf("lock customers: %v", err)
+	}
+	if _, err := txHold.Exec(ctx, `SELECT id FROM pos_transactions WHERE id = $1 FOR UPDATE`, uuid.MustParse(sale)); err != nil {
+		t.Fatalf("lock sale: %v", err)
+	}
+	if _, err := txHold.Exec(ctx, `SELECT id FROM inventory WHERE product_id = $1 FOR UPDATE`, f.productID); err != nil {
+		t.Fatalf("lock inventory: %v", err)
+	}
+
+	done := make(chan resp, 1)
+	go func() {
+		done <- f.exchange("/preview", map[string]any{
+			"original_sale_id": sale,
+			"returned_lines":   []map[string]any{lineOf(line, "1", "wrong_item")},
+			"sale_lines":       f.replaceWith("2"),
+		})
+	}()
+
+	select {
+	case prev := <-done:
+		if prev.status != http.StatusOK {
+			t.Fatalf("preview = %d: %s", prev.status, prev.raw)
+		}
+		if num(t, prev.body, "returned_cents") != 599 || num(t, prev.body, "replacement_cents") != 1198 || num(t, prev.body, "difference_cents") != 599 {
+			t.Errorf("preview figures = %v, want 599, 1198, 599", prev.body)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = txHold.Rollback(ctx)
+		<-done
+		t.Fatalf("preview blocked on FOR UPDATE locks held on document_counters, customers, pos_transactions, or inventory")
+	}
+
+	_ = txHold.Rollback(ctx)
+
+	if got := f.scalar(`SELECT last_value FROM pos_transaction_number_seq`).(int64); got != txSeqBefore {
+		t.Errorf("pos_transaction_number_seq advanced on preview: got %d, want %d", got, txSeqBefore)
+	}
+	if got := f.scalar(`SELECT last_value FROM pos_return_number_seq`).(int64); got != retSeqBefore {
+		t.Errorf("pos_return_number_seq advanced on preview: got %d, want %d", got, retSeqBefore)
+	}
+	if got := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64); got != cmBefore {
+		t.Errorf("credit_memo counter changed on preview: got %d, want %d", got, cmBefore)
+	}
+	if got := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64); got != inBefore {
+		t.Errorf("invoice counter changed on preview: got %d, want %d", got, inBefore)
+	}
+}
+
+
 
