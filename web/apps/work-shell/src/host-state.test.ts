@@ -16,7 +16,7 @@ describe('the host state', () => {
     const state = signedIn(SESSION, SHELL_APPS);
     expect(state.phase).toBe('desk');
     if (state.phase !== 'desk') return;
-    expect(state.apps.map((a) => a.id)).toEqual(['desk', 'pos', 'portal']);
+    expect(state.apps.map((a) => a.id)).toEqual(['desk', 'pos']);
     expect(state.currentAppId).toBe('desk');
     expect(state.currentPath).toBe('/home');
   });

@@ -58,15 +58,10 @@ export const SHELL_APPS = [
     roles: ['owner', 'admin', 'driver'],
     places: [],
   },
-  {
-    id: 'portal',
-    name: 'Portal',
-    path: '/portal',
-    icon: 'storefront',
-    roles: ['owner', 'admin', 'sales'],
-    places: [
-      { id: 'orders', label: 'Orders', path: '/portal/orders' },
-      { id: 'catalog', label: 'Catalog', path: '/portal/catalog' },
-    ],
-  },
 ] as const;
+
+// The contractor portal is deliberately NOT in the catalog: it is the
+// contractors' surface with its own sign in (its own `portal_user` session,
+// not the staff custody the shell holds), so framing it for staff would either
+// redirect to the contractor login or pretend a session the person does not
+// have. Staff reach it the way they always have, from the desk.

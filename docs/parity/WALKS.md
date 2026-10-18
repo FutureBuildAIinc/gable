@@ -267,11 +267,13 @@ three yards; sign in is the shell's own dev card (the stack runs `AUTH_MODE=dev`
    inside the frame: the list is the west yard's, and the desk's own requests carry the new yard (the framed desk
    followed the shell's pick).
 3. The rail is hidden by default. Rest the pointer on the left edge strip (or press the rail control in the header):
-   the rail reveals, listing the apps the role holds (Desk, Point of Sale, Portal for sales) and, wide, their few top
+   the rail reveals, listing the apps the role holds (Desk and Point of Sale for sales) and, wide, their few top
    level places. Press the pin: the rail stays, as icons on a narrow window, wide on a wide one. Reload the page: the
-   pin survives.
-4. The centred selector opens the app list; pick Portal. The frame switches to the portal tree; the yard and the
-   signed in person carry over (the handoff is the shared session store, no sign in again).
+   pin survives. The contractor portal is NOT in the list: it is the contractors' surface with its own sign in, and
+   the shell never pretends a staff session is a contractor one.
+4. The centred selector opens the app list; pick Point of Sale. The frame switches to the register tree; the yard and
+   the signed in person carry over (the handoff is the shared session store, no sign in again). Open the account
+   chip and switch back through the selector to Desk.
 5. The account chip opens Switch role and Sign out. Press Switch role: the framed app is asked to run its own sign
    out (a nonce verified handshake with a bounded wait), the shell's own custody clears, and the sign in card comes
    back. Sign in again as Alex Moreno, role Driver: the selector and rail now hold Desk and Driver only.
