@@ -33,6 +33,8 @@ type Repository interface {
 	CreateSale(ctx context.Context, s *Sale) error
 	LockSale(ctx context.Context, id uuid.UUID) error
 	BumpSaleRevision(ctx context.Context, id uuid.UUID) error
+	// AttachSaleToTill puts a cart that has no drawer into one.
+	AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error
 	GetSale(ctx context.Context, id uuid.UUID) (*Sale, error)
 	UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error
 	CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error
@@ -88,6 +90,32 @@ type Repository interface {
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
 	CloseTillSession(ctx context.Context, s *TillSession) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
+	// The till's movements (CP-08).
+	CreateTillMovement(ctx context.Context, m *TillMovement) error
+	ListTillMovements(ctx context.Context, sessionID uuid.UUID) ([]TillMovement, error)
+	ListTillMovementsPage(ctx context.Context, sessionID uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillMovement, bool, error)
+	TillMovementTotals(ctx context.Context, sessionID uuid.UUID) (map[string]int64, error)
+	// The variance threshold and the sign off queue (CP-08).
+	VarianceThreshold(ctx context.Context, branch *uuid.UUID) (int64, bool, error)
+	SignOffTillSession(ctx context.Context, s *TillSession) error
+	ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error)
+	GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error)
+	SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error
+	// The branch day (CP-09).
+	BranchZone(ctx context.Context, branch uuid.UUID) (string, bool, error)
+	LockBranchDay(ctx context.Context, branch uuid.UUID) error
+	BranchDayClosed(ctx context.Context, branch uuid.UUID) (bool, error)
+	ListBranchDaySessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	ListUnsettledSessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	BranchCollectionsNet(ctx context.Context, branch uuid.UUID, date string) (httpx.Cents, error)
+	DayCloseBranch(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error)
+	GetDayClose(ctx context.Context, branch uuid.UUID, date string) (*DayClose, error)
+	GetDayCloseByID(ctx context.Context, id uuid.UUID, forUpdate bool) (*DayClose, error)
+	CreateDayClose(ctx context.Context, c *DayClose) error
+	MatchDayClose(ctx context.Context, id uuid.UUID, m *DepositMatch) error
+	ReopenDayClose(ctx context.Context, id uuid.UUID, actor, reason string, reversalID *uuid.UUID) error
+	// BranchToday is the branch's business date now in its own zone.
+	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 
 	// Z-reports
 	CreateZReport(ctx context.Context, z *ZReport) error
@@ -217,6 +245,8 @@ type TillAggregate struct {
 	TenderedByMethod map[string]int64
 	CashRefundsCents int64
 	CardRefundsCents int64
+	// MovementTotals sums the session's movements by kind (CP-08).
+	MovementTotals map[string]int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so
@@ -351,6 +381,16 @@ func (r *PostgresRepository) BumpSaleRevision(ctx context.Context, id uuid.UUID)
 	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to move the sale's revision: %w", err)
+	}
+	return nil
+}
+
+// AttachSaleToTill puts a cart made before the open till rule into the
+// register's open drawer, inside the completion's transaction.
+func (r *PostgresRepository) AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error {
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET till_session_id = $2 WHERE id = $1 AND till_session_id IS NULL`,
+		saleID, sessionID); err != nil {
+		return fmt.Errorf("failed to put the sale into the drawer: %w", err)
 	}
 	return nil
 }

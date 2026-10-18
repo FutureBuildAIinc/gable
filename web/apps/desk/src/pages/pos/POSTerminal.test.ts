@@ -19,6 +19,7 @@ const svc = vi.hoisted(() => ({
   openTill: vi.fn(),
   tillReport: vi.fn(),
   closeTill: vi.fn(),
+  recordMovement: vi.fn(),
   printReceipt: vi.fn(),
   emailReceipt: vi.fn(),
 }));
@@ -2638,6 +2639,117 @@ describe('the blind count fields', () => {
       expect(f.placeholder, 'a placeholder that is a figure reads as entered').not.toMatch(/\d/);
       expect(f.className).toContain('placeholder:text-[rgb(var(--gb-till-muted))]');
     }
+    el.remove();
+  });
+});
+
+describe('drawer cash and a count held for sign off (CP-08)', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const button = (el: Element, label: string) => [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLElement | undefined;
+  const settle = async (el: POSTerminal) => { await new Promise((r) => setTimeout(r, 0)); await el.updateComplete; };
+
+  it('offers Drawer Cash only while a till is open, and opens the movement dialog', async () => {
+    const el = await mount(sale({ lines: [] }));
+    expect(q(el, 'pos-drawer-cash')).toBeTruthy();
+    expect(el.querySelector('gable-till-movement-dialog')).toBeNull();
+    q(el, 'pos-drawer-cash').click();
+    await settle(el);
+    const dialog = el.querySelector('gable-till-movement-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute('session-id')).toBe('t');
+    expect(el.textContent).toContain('Drawer Cash');
+    el.remove();
+  });
+
+  it('offers no Drawer Cash with no till', async () => {
+    svc.listRegisters.mockResolvedValue([REG_01]);
+    svc.currentTill.mockResolvedValue(null);
+    svc.startSale.mockResolvedValue(sale({ lines: [] }));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(el.querySelector('[data-testid="pos-drawer-cash"]')).toBeNull();
+    el.remove();
+  });
+
+  it('records a drop, closes the dialog and says so', async () => {
+    svc.recordMovement.mockResolvedValue({ id: 'm', kind: 'safe_drop', amount_cents: 2000 });
+    const el = await mount(sale({ lines: [] }));
+    q(el, 'pos-drawer-cash').click();
+    await settle(el);
+    const amount = q(el, 'movement-amount') as HTMLInputElement;
+    amount.value = '20';
+    amount.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(el);
+    q(el, 'movement-record').click();
+    await settle(el);
+    await settle(el);
+    expect(svc.recordMovement).toHaveBeenCalledWith('t', { kind: 'safe_drop', amount_cents: 2000 });
+    expect(el.querySelector('gable-till-movement-dialog')).toBeNull();
+    expect(el.textContent).toContain('Safe drop of $20.00 recorded');
+    el.remove();
+  });
+
+  it('keeps the dialog open and says why when the server refuses', async () => {
+    svc.recordMovement.mockRejectedValue(new Error('the till session is not open: its cash has been counted'));
+    const el = await mount(sale({ lines: [] }));
+    q(el, 'pos-drawer-cash').click();
+    await settle(el);
+    const amount = q(el, 'movement-amount') as HTMLInputElement;
+    amount.value = '20';
+    amount.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle(el);
+    q(el, 'movement-record').click();
+    await settle(el);
+    await settle(el);
+    expect(q(el, 'movement-failure').textContent).toContain('has been counted');
+    expect(el.querySelector('gable-till-movement-dialog')).not.toBeNull();
+    el.remove();
+  });
+
+  it('says a count over the limit waits for a manager, not that the till is closed', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000 }, movements: [], movement_totals_by_kind: {},
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { status: 'pending_signoff', variance_threshold_cents: 500, over_short_cents: -2500, expected_by_method: { CASH: 25000 }, counted_by_method: { CASH: 22500 } },
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    button(el, 'Close Till')!.click();
+    await settle(el);
+    const field = el.querySelector('input[type="number"]') as HTMLInputElement;
+    field.value = '225';
+    field.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count'))!.click();
+    await settle(el);
+    expect(el.textContent).toContain('Waiting for Sign Off');
+    expect(q(el, 'till-waiting-signoff').textContent).toContain('over the limit of $5.00');
+    expect(el.textContent).not.toContain('Z-Report - Till Closed');
+    el.remove();
+  });
+
+  it('still says Till Closed for a count inside the limit', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {}, expected_by_method: { CASH: 25000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { status: 'closed', over_short_cents: 0, expected_by_method: { CASH: 25000 }, counted_by_method: { CASH: 25000 } },
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    button(el, 'Close Till')!.click();
+    await settle(el);
+    (el.querySelector('input[type="number"]') as HTMLInputElement).value = '250';
+    (el.querySelector('input[type="number"]') as HTMLInputElement).dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count'))!.click();
+    await settle(el);
+    expect(el.textContent).toContain('Z-Report - Till Closed');
+    expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
     el.remove();
   });
 });

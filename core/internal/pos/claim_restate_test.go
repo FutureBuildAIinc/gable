@@ -174,7 +174,7 @@ func TestTheVoidResolutionsAuditRowRollsBackWithItsBooking(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.voided"
+		f.events.setFail("pos_transaction.voided")
 	})
 	f.openTill(0)
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
@@ -202,7 +202,7 @@ func TestTheVoidResolutionsAuditRowRollsBackWithItsBooking(t *testing.T) {
 		t.Errorf("%d orphaned refund rows after the rolled back replay, want 1 (the stranded void's own record alone)", got)
 	}
 	// the failure gone, the booking writes exactly one
-	f.events.fail = ""
+	f.events.setFail("")
 	if r := f.resolveOn(t, intentID, map[string]any{
 		"outcome": "refund", "refund_tx_id": refundTxID, "reason": "the terminal refunded",
 	}, "finance"); r.status != http.StatusOK {

@@ -68,7 +68,12 @@ func TestACashReturnNeedsAnOpenTillSession(t *testing.T) {
 				{"line_id": lineID, "quantity": "1", "restock": true}},
 		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	}
-	// no session open: the drawer cannot pay
+	// the drawer the sale was made in is counted and closed: no session open,
+	// so the drawer cannot pay
+	if c := f.do("POST", "/api/v1/pos/till/"+f.currentTillID(t)+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 599}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); c.status != http.StatusOK {
+		t.Fatalf("close = %d: %s", c.status, c.raw)
+	}
 	r := cashReturn()
 	if r.status != http.StatusConflict {
 		t.Fatalf("cash return with no open session = %d, want 409: %s", r.status, r.raw)

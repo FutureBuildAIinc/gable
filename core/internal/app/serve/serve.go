@@ -712,7 +712,8 @@ func Run() {
 		WithInvoices(invoiceSvc).
 		WithAR(accountSvc).
 		WithInventory(inventorySvc).
-		WithLedger(glSvc). // post drawer over/short to the GL inside the close's transaction
+		WithLedger(glSvc).                            // post drawer over/short and movements to the GL inside the act's transaction
+		WithBankLines(bankrecon.NewDepositLines(db)). // the branch day's deposit match reads and claims statement lines
 		WithAuditLog(auditLog).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
