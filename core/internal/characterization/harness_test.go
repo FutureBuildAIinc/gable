@@ -340,110 +340,158 @@ func run(t *testing.T, dir string, env []string, name string, stdin string, args
 // production entry point rather than reconstructing the handler in
 // process. The subprocess gets its own process group and is stopped by
 // that group number, even on failure.
-func (h *harness) startServer(t *testing.T, dbURL, buildDir string, extraEnv map[string]string) {
-	t.Helper()
-
-	port, err := freePort()
-	if err != nil {
-		t.Fatalf("find free port: %v", err)
-	}
-
-	srvDir := t.TempDir()
-	h.servers++
-	logPath := filepath.Join(buildDir, fmt.Sprintf("server-%d.log", h.servers))
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		t.Fatalf("create server log: %v", err)
-	}
-
-	// Saving an AI key tests it with the provider (item 130, N7), so the
-	// server's provider is a local stand-in that answers every call: the
-	// goldens never reach the network and never depend on its answer.
-	aiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func newAIStubServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"model":"stub","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
 	}))
-	t.Cleanup(aiStub.Close)
-
-	cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
-	cmd.Dir = srvDir
-	env := map[string]string{
-		"OPENROUTER_BASE_URL": aiStub.URL,
-		"PORT":                strconv.Itoa(port),
-		"DATABASE_URL":        dbURL,
-		"AUTH_MODE":           "dev",
-		"LOG_LEVEL":           "ERROR",
-		"EDI_OUTPUT_DIR":      filepath.Join(srvDir, "edi_out"),
-		"TZ":                  "Etc/UTC",
-		// The harness client is the loopback peer and rotates
-		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
-		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
-	}
-	for k, v := range extraEnv {
-		env[k] = v
-	}
-	cmd.Env = subprocessEnv(env)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = serverProcAttr()
-	// Pdeathsig is paired with the OS thread that calls Start: if the Go
-	// runtime retires that thread, the kernel delivers the signal to a living
-	// parent. Locking the thread around Start pins the pairing to a thread
-	// that stays alive for the rest of the process.
-	runtime.LockOSThread()
-	err = cmd.Start()
-	runtime.UnlockOSThread()
-	if err != nil {
-		t.Fatalf("start server: %v", err)
-	}
-	pgid := cmd.Process.Pid // Setpgid makes the pid the group leader's id
-
-	t.Cleanup(func() {
-		// SIGTERM lets the server drain; the fallback SIGKILL guarantees the
-		// group is gone even if graceful shutdown hangs.
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			<-done
-		}
-		logFile.Close()
-	})
-
-	h.serverCmd = cmd
-	h.serverLog = logFile
-	h.baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookie jar: %v", err)
-	}
-	h.client = &http.Client{Jar: jar, Timeout: 60 * time.Second}
-
-	h.waitReady(t, logPath)
 }
 
-func (h *harness) waitReady(t *testing.T, logPath string) {
+func isCoreLiveResponse(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusOK {
+		return false
+	}
+	if resp.Header.Get("X-Request-ID") == "" {
+		return false
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if err != nil {
+		return false
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false
+	}
+	return len(doc) == 1 && doc["status"] == "ok"
+}
+
+func (h *harness) startServer(t *testing.T, dbURL, buildDir string, extraEnv map[string]string) {
+	t.Helper()
+
+	// Saving an AI key tests it with the provider (item 130, N7), so the
+	// server's provider is a local stand-in that answers every call: the
+	// goldens never reach the network and never depend on its answer. Start
+	// the stub before picking the server's port so its listener is already
+	// open and cannot take the port freePort just released.
+	aiStub := newAIStubServer()
+	t.Cleanup(aiStub.Close)
+
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		port, err := freePort()
+		if err != nil {
+			t.Fatalf("find free port: %v", err)
+		}
+
+		srvDir := t.TempDir()
+		h.servers++
+		logPath := filepath.Join(buildDir, fmt.Sprintf("server-%d.log", h.servers))
+		logFile, err := os.Create(logPath)
+		if err != nil {
+			t.Fatalf("create server log: %v", err)
+		}
+
+		cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
+		cmd.Dir = srvDir
+		env := map[string]string{
+			"OPENROUTER_BASE_URL": aiStub.URL,
+			"PORT":                strconv.Itoa(port),
+			"DATABASE_URL":        dbURL,
+			"AUTH_MODE":           "dev",
+			"LOG_LEVEL":           "ERROR",
+			"EDI_OUTPUT_DIR":      filepath.Join(srvDir, "edi_out"),
+			"TZ":                  "Etc/UTC",
+			// The harness client is the loopback peer and rotates
+			// X-Forwarded-For (see do()), so loopback is its trusted proxy.
+			"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",
+		}
+		for k, v := range extraEnv {
+			env[k] = v
+		}
+		cmd.Env = subprocessEnv(env)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.SysProcAttr = serverProcAttr()
+		// Pdeathsig is paired with the OS thread that calls Start: if the Go
+		// runtime retires that thread, the kernel delivers the signal to a living
+		// parent. Locking the thread around Start pins the pairing to a thread
+		// that stays alive for the rest of the process.
+		runtime.LockOSThread()
+		err = cmd.Start()
+		runtime.UnlockOSThread()
+		if err != nil {
+			logFile.Close()
+			t.Fatalf("start server: %v", err)
+		}
+		pgid := cmd.Process.Pid // Setpgid makes the pid the group leader's id
+		exited := make(chan error, 1)
+		go func() { exited <- cmd.Wait() }()
+
+		h.serverCmd = cmd
+		h.serverLog = logFile
+		h.baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+
+		jar, err := cookiejar.New(nil)
+		if err != nil {
+			t.Fatalf("cookie jar: %v", err)
+		}
+		h.client = &http.Client{Jar: jar, Timeout: 60 * time.Second}
+
+		if h.waitReady(t, logPath, exited, attempt < maxAttempts) {
+			t.Cleanup(func() {
+				// SIGTERM lets the server drain; the fallback SIGKILL guarantees the
+				// group is gone even if graceful shutdown hangs.
+				_ = syscall.Kill(-pgid, syscall.SIGTERM)
+				select {
+				case <-exited:
+				case <-time.After(15 * time.Second):
+					_ = syscall.Kill(-pgid, syscall.SIGKILL)
+					<-exited
+				}
+				logFile.Close()
+			})
+			return
+		}
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		<-exited
+		logFile.Close()
+	}
+}
+
+func (h *harness) waitReady(t *testing.T, logPath string, exited <-chan error, canRetry bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
+		select {
+		case <-exited:
+			logText := readLog(logPath)
+			if canRetry && strings.Contains(logText, "address already in use") {
+				return false
+			}
+			t.Fatalf("server exited during startup; log:\n%s", logText)
+		default:
+		}
 		resp, err := h.client.Get(h.baseURL + "/healthz/live")
 		if err == nil {
+			ok := isCoreLiveResponse(resp)
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return
+			if ok {
+				select {
+				case <-exited:
+					continue
+				default:
+					return true
+				}
 			}
-		}
-		// Fail fast if the server already exited.
-		if h.serverCmd.ProcessState != nil {
-			t.Fatalf("server exited during startup; log:\n%s", readLog(logPath))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("server not ready within 60s; log:\n%s", readLog(logPath))
+	return false
 }
 
 func readLog(path string) string {
@@ -1006,6 +1054,8 @@ func maskString(s string) string {
 	s = reTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
 	s = rePgTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
 	s = reDate.ReplaceAllStringFunc(s, n.dayOffset)
+	s = reWordDateMonthFirst.ReplaceAllStringFunc(s, n.wordMonthFirstOffset)
+	s = reWordDateDayFirst.ReplaceAllStringFunc(s, n.wordDayFirstOffset)
 	return s
 }
 
