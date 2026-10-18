@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { answerAppDialog, pickOption, pickOptionByValue } from './app-controls';
+import { answerAppDialog, pickOptionByValue } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -62,7 +62,6 @@ test.describe('Customer flow on the new contract', () => {
     await page.getByLabel('Email').fill('buyer@example.test');
     await page.getByLabel('Phone').fill('555-0142');
     await page.getByLabel('Billing address').fill('12 Mill Road');
-    await pickOption(page.getByLabel('Tier').last(), 'Gold');
     await pickOptionByValue(page.getByLabel('Payment terms'), net45.id);
     await page.getByLabel('Credit limit (dollars)').fill('2,500.50');
     await page.getByLabel('Purchase order required').check();
@@ -76,9 +75,8 @@ test.describe('Customer flow on the new contract', () => {
     expect(sentBody.payment_terms_id).toBe(net45.id);
     expect(sentBody.credit_limit_cents).toBe(250050);
     expect(sentBody.po_required).toBe(true);
-    expect(sentBody.tier).toBe('gold');
     const customer = await res.json();
-    expect(customer.tier).toBe('gold');
+    expect(typeof customer.price_profile_id).toBe('string');
     expect(customer.credit_limit_cents).toBe(250050);
     expect(customer.payment_terms.code).toBe('NET45');
     expect(customer.po_required).toBe(true);
@@ -164,7 +162,7 @@ test.describe('Customer flow on the new contract', () => {
     const elsewhere = await request.put(`/api/v1/customers/${customer.id}`, {
       data: {
         account_number: current.account_number, name: elsewhereName, email: current.email, phone: current.phone,
-        address: current.address, tier: current.tier, is_active: current.is_active, credit_limit_cents: null,
+        address: current.address, price_profile_id: current.price_profile_id, is_active: current.is_active, credit_limit_cents: null,
         payment_terms_id: current.payment_terms_id, po_required: current.po_required,
       },
       headers: { 'If-Match': '"2"' },
