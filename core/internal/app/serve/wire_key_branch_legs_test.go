@@ -31,7 +31,7 @@ import (
 )
 
 // walledLegDrivers are the tests whose legs the coverage test needs.
-var walledLegDrivers = []string{"sweep", "pos", "body"}
+var walledLegDrivers = []string{"sweep", "pos", "body", "catalog"}
 
 var walledLegs = struct {
 	sync.Mutex
@@ -102,9 +102,11 @@ func (f *keyPinFixture) twinState(t *testing.T, w *walledTwins) map[string]strin
 		"pos_txns":        `SELECT * FROM pos_transactions WHERE id = ` + q(f.txnB) + ` OR branch_id = ` + branchB + ` OR register_id = ` + reg,
 		"pos_lines":       `SELECT * FROM pos_line_items WHERE transaction_id = ` + q(f.txnB),
 		"pos_tenders":     `SELECT * FROM pos_tenders WHERE transaction_id = ` + q(f.txnB),
-		"pos_returns":     `SELECT * FROM pos_returns WHERE branch_id = ` + branchB + ` OR register_id = ` + reg,
-		"tills":           `SELECT * FROM till_sessions WHERE id = ` + q(f.tillB) + ` OR register_id = ` + reg,
-		"z_reports":       `SELECT * FROM till_z_reports WHERE branch_id = ` + branchB,
+		"pos_returns":          `SELECT * FROM pos_returns WHERE branch_id = ` + branchB + ` OR register_id = ` + reg,
+		"tills":                `SELECT * FROM till_sessions WHERE id = ` + q(f.tillB) + ` OR register_id = ` + reg,
+		"z_reports":            `SELECT * FROM till_z_reports WHERE branch_id = ` + branchB,
+		"credit_holds":         `SELECT * FROM credit_holds WHERE id = ` + q(w.holdB) + ` OR customer_id = ` + custB,
+		"credit_limit_changes": `SELECT * FROM credit_limit_changes WHERE customer_id = ` + custB,
 	}
 	out := make(map[string]string, len(rows))
 	for name, sel := range rows {
@@ -153,8 +155,8 @@ func (f *keyPinFixture) customerReplaceAs(t *testing.T, role string, id uuid.UUI
 	t.Helper()
 	cur := f.readJSONAs(t, role, "/api/v1/customers/"+id.String())
 	body := map[string]any{"revision": cur["revision"]}
-	for _, k := range []string{"account_number", "name", "email", "phone", "address", "tier", "is_active",
-		"price_level_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
+	for _, k := range []string{"account_number", "name", "email", "phone", "address", "is_active",
+		"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
 		body[k] = cur[k]
 	}
 	for k, v := range change {
@@ -222,6 +224,8 @@ func purgeFixtureRows(ctx context.Context, db *database.DB, customers, branches 
 		return `(SELECT id FROM ` + table + ` WHERE customer_id = ANY($1) OR branch_id = ANY($2))`
 	}
 	for _, stmt := range []string{
+		`DELETE FROM credit_limit_changes WHERE customer_id = ANY($1)`,
+		`DELETE FROM credit_holds WHERE customer_id = ANY($1)`,
 		`DELETE FROM ar_applications WHERE customer_id = ANY($1)`,
 		`DELETE FROM payment_refunds WHERE payment_id IN ` + own("payments") + ` OR credit_memo_id IN ` + own("credit_memos"),
 		`DELETE FROM tender_lines WHERE payment_id IN ` + own("payments") + ` OR invoice_id IN ` + own("invoices"),

@@ -329,31 +329,64 @@ func TestUnitSetWarning(t *testing.T) {
 	}
 }
 
-// TestUnitSetPriceUnitHold proves A2's CHECK through the PUT: a price unit
-// other than the stocking unit is a 400 naming price_uom until C3-2B.
+// TestUnitSetPriceUnitHold proves C3-2B's price unit rule through the PUT: a
+// PUT changing price_uom without base_price_ten_thousandths is refused with
+// 400 naming base_price_ten_thousandths; with base_price_ten_thousandths it
+// stores both and records both in the audit row's before and after.
 func TestUnitSetPriceUnitHold(t *testing.T) {
 	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
+	ctx := context.Background()
 	id, rev := f.createBoard(map[string]any{
 		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
+		"base_price_ten_thousandths": 52500,
 	})
 	res := f.putUnits(id, unitsBody(rev, "PCS", "PCS", "MBF", "MBF", []any{
 		unitRow("PCS", true, true, true),
 		unitRow("MBF", false, true, true, "1", "187.5"),
 	}))
-	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), "price_uom") {
-		t.Errorf("a price unit other than the stocking unit is a 400 naming price_uom, got %d: %s", res.status, res.raw)
+	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), "base_price_ten_thousandths") {
+		t.Errorf("changing price_uom without base_price_ten_thousandths is a 400 naming base_price_ten_thousandths, got %d: %s", res.status, res.raw)
 	}
-	if !strings.Contains(string(res.raw), "C3-2B") {
-		t.Errorf("the message names what arrives with C3-2B, got %s", res.raw)
+
+	withBase := unitsBody(rev, "PCS", "PCS", "MBF", "MBF", []any{
+		unitRow("PCS", true, true, true),
+		unitRow("MBF", false, true, true, "1", "187.5"),
+	})
+	withBase["base_price_ten_thousandths"] = 4850000
+	res = f.putUnits(id, withBase)
+	if res.status != http.StatusOK {
+		t.Fatalf("changing price_uom with base_price_ten_thousandths = %d: %s", res.status, res.raw)
+	}
+	if res.body["price_uom"] != "MBF" || res.body["base_price_ten_thousandths"] != json.Number("4850000") {
+		t.Errorf("the PUT stores price_uom MBF and base_price_ten_thousandths 4850000, got %s", res.raw)
+	}
+	var beforePriceUOM, afterPriceUOM string
+	var beforeBase, afterBase int64
+	if err := f.db.Pool.QueryRow(ctx, `
+		SELECT changes->'before'->>'price_uom',
+		       (changes->'before'->>'base_price_ten_thousandths')::bigint,
+		       changes->'after'->>'price_uom',
+		       (changes->'after'->>'base_price_ten_thousandths')::bigint
+		FROM audit_log
+		WHERE entity_type = 'product' AND entity_id = $1 AND action = 'product.updated'
+		ORDER BY created_at DESC LIMIT 1`, id).
+		Scan(&beforePriceUOM, &beforeBase, &afterPriceUOM, &afterBase); err != nil {
+		t.Fatalf("read unit set audit row: %v", err)
+	}
+	if beforePriceUOM != "PCS" || beforeBase != 52500 || afterPriceUOM != "MBF" || afterBase != 4850000 {
+		t.Errorf("audit row before=(%s,%d) after=(%s,%d), want (PCS,52500) -> (MBF,4850000)",
+			beforePriceUOM, beforeBase, afterPriceUOM, afterBase)
 	}
 }
 
-// TestUnitSetStockingUnitRefusals proves the three stocking unit refusals
-// of section 3.2: stock_unit_in_use under stock or an open order line,
-// price_unit_held under a nonzero base or a contract, both 409 conflict
-// with the blocker; and the invariant refusals (a random length product is
-// stocked in LF; the stocking row carries price).
+// TestUnitSetStockingUnitRefusals proves the stocking unit and unit-in-use
+// refusals of section 3.2: stock_unit_in_use under stock or an open order
+// line, unit_in_use when removing a unit a contract names, price_unit_held
+// lifted in C3-2B (changing stock_uom on a priced product is admitted when
+// base_price_ten_thousandths accompanies a price_uom change or when the old
+// price unit remains in the set), and the invariant refusals (a random length
+// product is stocked in LF; the stocking row carries price).
 func TestUnitSetStockingUnitRefusals(t *testing.T) {
 	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
@@ -383,19 +416,21 @@ func TestUnitSetStockingUnitRefusals(t *testing.T) {
 		t.Errorf("the blocker is stock_unit_in_use, got %s", res.raw)
 	}
 
-	// price_unit_held: a nonzero base price. Zero the stock first.
+	// price_unit_held is lifted (C3-2B): a stocking unit change on a product
+	// with a base price is admitted when base_price_ten_thousandths is sent
+	// with the changed price_uom.
 	priced, prev := f.createBoard(map[string]any{
 		"description": "priced product", "stock_uom": "PCS", "base_price_ten_thousandths": 5250000,
 	})
-	res = f.putUnits(priced, unitsBody(prev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)}))
-	if res.status != http.StatusConflict {
-		t.Fatalf("a stocking unit change under a base price is a 409, got %d: %s", res.status, res.raw)
-	}
-	if res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "price_unit_held" {
-		t.Errorf("the blocker is price_unit_held, got %s", res.raw)
+	pricedBody := unitsBody(prev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)})
+	pricedBody["base_price_ten_thousandths"] = 5250000
+	res = f.putUnits(priced, pricedBody)
+	if res.status != http.StatusOK {
+		t.Fatalf("a stocking unit change with base_price_ten_thousandths is admitted in C3-2B, got %d: %s", res.status, res.raw)
 	}
 
-	// price_unit_held: a contract names the product (no base price).
+	// A contract names PCS: removing PCS is a 409 unit_in_use; keeping PCS in
+	// the set while moving stock_uom to EA is admitted.
 	contracted, crev := f.createBoard(map[string]any{"description": "contracted product", "stock_uom": "PCS"})
 	var customerID uuid.UUID
 	if err := f.db.Pool.QueryRow(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
@@ -405,22 +440,33 @@ func TestUnitSetStockingUnitRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO customer_contracts (customer_id, product_id, contract_price)
-		 VALUES ($1, $2, 5.00)`, customerID, contracted); err != nil {
+		`INSERT INTO customer_contracts (customer_id, product_id, contract_price, price_uom)
+		 VALUES ($1, $2, 5.00, 'PCS')`, customerID, contracted); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_contracts WHERE product_id = $1`, contracted)
 	}()
-	res = f.putUnits(contracted, unitsBody(crev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)}))
+	removeBody := unitsBody(crev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)})
+	removeBody["base_price_ten_thousandths"] = 0
+	res = f.putUnits(contracted, removeBody)
 	if res.status != http.StatusConflict ||
-		res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "price_unit_held" {
-		t.Errorf("a stocking unit change under a contract is a 409 price_unit_held, got %d: %s", res.status, res.raw)
+		res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "unit_in_use" {
+		t.Errorf("removing a unit named by a contract is a 409 unit_in_use, got %d: %s", res.status, res.raw)
+	}
+	res = f.putUnits(contracted, unitsBody(crev, "EA", "EA", "PCS", "EA", []any{
+		unitRow("EA", true, true, true),
+		unitRow("PCS", true, true, true),
+	}))
+	if res.status != http.StatusOK {
+		t.Errorf("changing stock_uom while keeping the contract's unit in the set is admitted in C3-2B, got %d: %s", res.status, res.raw)
 	}
 
 	// A product with no price and no stock changes its stocking unit freely.
 	free, frev := f.createBoard(map[string]any{"description": "free product", "stock_uom": "PCS"})
-	res = f.putUnits(free, unitsBody(frev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)}))
+	freeBody := unitsBody(frev, "EA", "EA", "EA", "EA", []any{unitRow("EA", true, true, true)})
+	freeBody["base_price_ten_thousandths"] = 0
+	res = f.putUnits(free, freeBody)
 	if res.status != http.StatusOK {
 		t.Errorf("a product with no price changes its stocking unit freely, got %d: %s", res.status, res.raw)
 	}
@@ -482,10 +528,12 @@ func TestUnitSetStockingUnitChangeKeepsTheNamedDefaults(t *testing.T) {
 	id, rev := f.createBoard(map[string]any{
 		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
 	})
-	res := f.putUnits(id, unitsBody(rev, "LF", "PCS", "LF", "LF", []any{
+	body := unitsBody(rev, "LF", "PCS", "LF", "LF", []any{
 		unitRow("LF", true, true, true),
 		unitRow("PCS", true, false, false, "1", "8"),
-	}))
+	})
+	body["base_price_ten_thousandths"] = 0
+	res := f.putUnits(id, body)
 	if res.status != http.StatusOK {
 		t.Fatalf("the stocking unit change with a kept sale default = %d: %s", res.status, res.raw)
 	}
@@ -556,8 +604,8 @@ func TestUnitSetPutAnswerCarriesTheBoardMeasureFacts(t *testing.T) {
 // stores is the request's stock_uom, never the first (1, 1) row of the set:
 // a set carrying two (1, 1) rows (EA and PCS, the natural fastener set)
 // stores stock_uom's unit whatever the row order, the answer agrees with
-// what is stored, and the stock_unit_in_use and price_unit_held holds fire
-// as 409s, never a 500 from a deferred trigger.
+// what is stored, and the stock_unit_in_use hold fires as a 409, never a 500
+// from a deferred trigger.
 func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
 	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
@@ -625,16 +673,13 @@ func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
 		t.Errorf("the blocker is stock_unit_in_use, got %s", res.raw)
 	}
 
-	// A stocking unit change on a priced product is the 409 price_unit_held,
-	// never a 500.
+	// A stocking unit change on a priced product without base_price_ten_thousandths
+	// when price_uom also changes is a 400 naming base_price_ten_thousandths.
 	res = f.putUnits(priced, unitsBody(pricedRev, "EA", "EA", "EA", "EA", []any{
 		unitRow("EA", true, true, true),
 	}))
-	if res.status != http.StatusConflict {
-		t.Fatalf("a stocking unit change under a base price is a 409, got %d: %s", res.status, res.raw)
-	}
-	if res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "price_unit_held" {
-		t.Errorf("the blocker is price_unit_held, got %s", res.raw)
+	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), `"base_price_ten_thousandths"`) {
+		t.Fatalf("changing price_uom without base_price_ten_thousandths is a 400, got %d: %s", res.status, res.raw)
 	}
 
 	// A stock_uom with no row of the set, or whose row is sent as another
@@ -945,9 +990,11 @@ func TestUnitSetTwoPutsAndAReceiveAtPool4(t *testing.T) {
 	for round := 0; round < 5; round++ {
 		id, rev := f.createBoard(map[string]any{"description": "two puts and a receive", "stock_uom": "PCS"})
 		put := func(stock string) resp {
-			return f.putUnits(id, unitsBody(rev, stock, stock, stock, stock, []any{
+			b := unitsBody(rev, stock, stock, stock, stock, []any{
 				unitRow(stock, true, true, true),
-			}))
+			})
+			b["base_price_ten_thousandths"] = 0
+			return f.putUnits(id, b)
 		}
 		results := make(chan resp, 2)
 		received := make(chan error, 1)

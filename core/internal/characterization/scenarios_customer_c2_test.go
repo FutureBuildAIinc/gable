@@ -84,7 +84,7 @@ func customerShipToTermsGroups() []groupDef {
 				headers: ifMatch("5"),
 				body: map[string]any{
 					"account_number": "GOLD-A-001", "name": "Golden Contacts Co", "email": "contacts@example.com",
-					"phone": "250-555-0177", "address": "7 Golden Way, Kelowna BC", "tier": "gold",
+					"phone": "250-555-0177", "address": "7 Golden Way, Kelowna BC",
 					"credit_limit_cents": 5000000, "payment_terms_id": "{a_terms}", "po_required": false,
 				}},
 			{name: "customer.a.get", method: "GET", path: "/api/v1/customers/{a_customer}"},

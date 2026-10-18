@@ -101,11 +101,24 @@ func (w *arWorld) cleanup() {
 		exec(`DELETE FROM credit_memos WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customer_transactions WHERE customer_id = $1`, c)
 		exec(`DELETE FROM invoice_lines WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, c)
+		// The run items, the finance charge items and the holds all name the
+		// customer (the charge items name its invoices too), so they go
+		// before the invoices and the customer they point at.
+		exec(`DELETE FROM ar_statement_run_items WHERE customer_id = $1`, c)
+		exec(`DELETE FROM ar_finance_charge_items WHERE customer_id = $1`, c)
 		exec(`DELETE FROM invoices WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customer_ship_tos WHERE customer_id = $1`, c)
 		exec(`DELETE FROM projects WHERE customer_id = $1`, c)
+		exec(`DELETE FROM credit_limit_changes WHERE customer_id = $1`, c)
+		exec(`DELETE FROM credit_holds WHERE customer_id = $1`, c)
 		exec(`DELETE FROM customers WHERE id = $1`, c)
 	}
+	// The runs outlast no world: their items cascade with them, and a run may
+	// name several worlds' customers, so they are cleared whole.
+	exec(`DELETE FROM ar_finance_charge_items`)
+	exec(`DELETE FROM ar_finance_charge_runs`)
+	exec(`DELETE FROM ar_statement_run_items`)
+	exec(`DELETE FROM ar_statement_runs`)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +350,19 @@ func (w *arWorld) invoiceOn(customer uuid.UUID, total int64, on time.Time) uuid.
 	w.side = append(w.side, customer)
 	_ = fx
 	return inv.ID
+}
+
+// sideOn posts an invoice of a fresh side customer and answers that
+// customer's id: a fixture account whose money stays out of the world's own
+// invariants but whose aging the worklist and the sweep must see.
+func (w *arWorld) sideOn(total int64, on time.Time) uuid.UUID {
+	w.t.Helper()
+	customer := uuid.New()
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Side Co', $2, `+arBranch+`)`,
+		customer, "SIDE-"+uuid.NewString()[:8])
+	w.side = append(w.side, customer)
+	w.invoiceOn(customer, total, on)
+	return customer
 }
 
 func (w *arWorld) postInvoiceRow(customer uuid.UUID, inv *arInvoice, on time.Time) {

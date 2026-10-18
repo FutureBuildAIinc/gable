@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -74,16 +73,14 @@ func (s *CategoryPricingService) WithAudit(a AuditLogger) *CategoryPricingServic
 	return s
 }
 
-// ResolveEffectivePrice runs the 5-step resolution algorithm:
-//  1. Account + exact category
-//  2. Account + ancestor category
-//  3. Tier + exact category
-//  4. Tier + ancestor category
-//  5. No match (fallthrough to base price)
-func (s *CategoryPricingService) ResolveEffectivePrice(
+// ResolveProgramPrice runs the category rung for one customer's pricing
+// program (the profile and the level it names), in the rung's order: account
+// exact, account ancestor, profile exact, profile ancestor, level exact,
+// level ancestor; no match answers MatchType "none" and the rung passes.
+func (s *CategoryPricingService) ResolveProgramPrice(
 	ctx context.Context,
 	customerID uuid.UUID,
-	customerTier string,
+	profileID, levelID uuid.UUID,
 	productID uuid.UUID,
 ) (*ResolvedCategoryPrice, error) {
 	// Step 0: Get the product's category, ltree path, and cost price
@@ -120,24 +117,36 @@ func (s *CategoryPricingService) ResolveEffectivePrice(
 		return makeResult(rule, "account_ancestor"), nil
 	}
 
-	// Step 3: Tier + exact category
-	if customerTier != "" && customerTier != "RETAIL" {
-		rule, err = s.catRepo.ResolveTierExact(ctx, customerTier, categoryID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve tier exact: %w", err)
-		}
-		if rule != nil {
-			return makeResult(rule, "tier_exact"), nil
-		}
+	// Step 3: the profile's rules, exact category then ancestor.
+	rule, err = s.catRepo.ResolveProfileExact(ctx, profileID, categoryID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile exact: %w", err)
+	}
+	if rule != nil {
+		return makeResult(rule, "profile_exact"), nil
+	}
+	rule, err = s.catRepo.ResolveProfileAncestor(ctx, profileID, categoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile ancestor: %w", err)
+	}
+	if rule != nil {
+		return makeResult(rule, "profile_ancestor"), nil
+	}
 
-		// Step 4: Tier + ancestor category
-		rule, err = s.catRepo.ResolveTierAncestor(ctx, customerTier, categoryPath)
-		if err != nil {
-			return nil, fmt.Errorf("resolve tier ancestor: %w", err)
-		}
-		if rule != nil {
-			return makeResult(rule, "tier_ancestor"), nil
-		}
+	// Step 4: the level's rules, exact category then ancestor.
+	rule, err = s.catRepo.ResolveLevelExact(ctx, levelID, categoryID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve level exact: %w", err)
+	}
+	if rule != nil {
+		return makeResult(rule, "level_exact"), nil
+	}
+	rule, err = s.catRepo.ResolveLevelAncestor(ctx, levelID, categoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve level ancestor: %w", err)
+	}
+	if rule != nil {
+		return makeResult(rule, "level_ancestor"), nil
 	}
 
 	// Step 5: No match — fall through to base price
@@ -146,6 +155,27 @@ func (s *CategoryPricingService) ResolveEffectivePrice(
 		CategoryPath: categoryPath,
 		CostPrice:    costPrice,
 	}, nil
+}
+
+// ProductCost reads the product's average unit cost, the cost a markup or
+// margin rule acts on.
+func (s *CategoryPricingService) ProductCost(ctx context.Context, productID uuid.UUID) (httpx.Price, error) {
+	return s.catRepo.GetProductCost(ctx, productID)
+}
+
+// ResolveProgramRule answers the one category rule that wins the rung for a
+// customer's pricing program, in the rung's order: account exact, account
+// ancestor, profile exact, profile ancestor, level exact, level ancestor.
+// nil means no rule matched and the rung passes.
+func (s *CategoryPricingService) ResolveProgramRule(ctx context.Context, customerID, profileID, levelID, productID uuid.UUID) (*CategoryPricingRule, string, error) {
+	resolved, err := s.ResolveProgramPrice(ctx, customerID, profileID, levelID, productID)
+	if err != nil {
+		return nil, "", err
+	}
+	if resolved == nil || resolved.Rule == nil {
+		return nil, "", nil
+	}
+	return resolved.Rule, resolved.MatchType, nil
 }
 
 // ApplyRule calculates the effective price based on rule type, in exact
@@ -323,19 +353,8 @@ func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *Cate
 		if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
 		}
-		// A legacy row that breaks migration 107's single target invariant
-		// (the constraint the migration leaves NOT VALID on a database that
-		// carries one) cannot pass through an update: the write revalidates
-		// the row, which the database would answer as an internal error. The
-		// refusal names the invariant for every caller (round 11 P3-1).
-		if (old.TargetType == TargetTypeTier && old.CustomerID != nil) ||
-			(old.TargetType == TargetTypeAccount && old.Tier != "") {
-			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
-				Message: "the rule names both a tier and a customer, which the single target check refuses; reconcile the row before editing it",
-				Details: []httpx.FieldError{httpx.Blocker("single_target",
-					"an account rule carries no tier, a tier rule no customer")}}
-		}
-		r.TargetType, r.CustomerID, r.Tier, r.CategoryID = old.TargetType, old.CustomerID, old.Tier, old.CategoryID
+		r.TargetType, r.CustomerID, r.PriceProfileID, r.PriceLevelID, r.CategoryID =
+			old.TargetType, old.CustomerID, old.PriceProfileID, old.PriceLevelID, old.CategoryID
 		if err := s.catRepo.UpdateCategoryRule(ctx, r, old.Revision); err != nil {
 			return resolveRuleWrite(err)
 		}
@@ -480,8 +499,10 @@ func (s *CategoryPricingService) BulkUpsertRules(ctx context.Context, rules []Ca
 				return err
 			}
 			r := &rules[i]
-			if r.TargetType != old.TargetType || r.Tier != old.Tier || r.CategoryID != old.CategoryID ||
-				(r.CustomerID == nil) != (old.CustomerID == nil) || (r.CustomerID != nil && *r.CustomerID != *old.CustomerID) {
+			if r.TargetType != old.TargetType || r.CategoryID != old.CategoryID ||
+				(r.CustomerID == nil) != (old.CustomerID == nil) || (r.CustomerID != nil && *r.CustomerID != *old.CustomerID) ||
+				(r.PriceProfileID == nil) != (old.PriceProfileID == nil) || (r.PriceProfileID != nil && *r.PriceProfileID != *old.PriceProfileID) ||
+				(r.PriceLevelID == nil) != (old.PriceLevelID == nil) || (r.PriceLevelID != nil && *r.PriceLevelID != *old.PriceLevelID) {
 				return httpx.BadRequest("a rule's target and category are fixed at create",
 					httpx.FieldError{Field: "id", Message: "the element changes the scope of the rule it replaces"})
 			}
@@ -569,14 +590,16 @@ func (s *CategoryPricingService) logAudit(ctx context.Context, ruleID uuid.UUID,
 		entry.OldValues = ruleToMap(old)
 		entry.CategoryID = &old.CategoryID
 		entry.TargetType = string(old.TargetType)
-		entry.Tier = old.Tier
+		entry.PriceProfileID = old.PriceProfileID
+		entry.PriceLevelID = old.PriceLevelID
 		entry.CustomerID = old.CustomerID
 	}
 	if new_ != nil {
 		entry.NewValues = ruleToMap(new_)
 		entry.CategoryID = &new_.CategoryID
 		entry.TargetType = string(new_.TargetType)
-		entry.Tier = new_.Tier
+		entry.PriceProfileID = new_.PriceProfileID
+		entry.PriceLevelID = new_.PriceLevelID
 		entry.CustomerID = new_.CustomerID
 	}
 	return s.catRepo.CreateAuditEntry(ctx, entry)
@@ -608,8 +631,11 @@ func ruleToMap(r *CategoryPricingRule) map[string]any {
 	if r.MarginFloorPct != nil {
 		m["margin_floor_pct"] = r.MarginFloorPct.WireString()
 	}
-	if r.Tier != "" {
-		m["tier"] = r.Tier
+	if r.PriceProfileID != nil {
+		m["price_profile_id"] = r.PriceProfileID.String()
+	}
+	if r.PriceLevelID != nil {
+		m["price_level_id"] = r.PriceLevelID.String()
 	}
 	if r.CustomerID != nil {
 		m["customer_id"] = r.CustomerID.String()
@@ -619,7 +645,8 @@ func ruleToMap(r *CategoryPricingRule) map[string]any {
 
 // --- Matrix ---
 
-// GetMatrix builds the full pricing matrix for the admin UI.
+// GetMatrix builds the pricing matrix for the admin UI: the level rules'
+// grid, one column per level that carries a rule, keyed by the level's code.
 func (s *CategoryPricingService) GetMatrix(ctx context.Context) (*MatrixResponse, error) {
 	categories, err := s.catRepo.ListCategories(ctx)
 	if err != nil {
@@ -631,25 +658,30 @@ func (s *CategoryPricingService) GetMatrix(ctx context.Context) (*MatrixResponse
 		return nil, fmt.Errorf("get matrix rules: %w", err)
 	}
 
-	tiers := []string{"RETAIL", "SILVER", "GOLD", "PLATINUM"}
-
-	// Build a lookup: tier+categoryID → rule
+	// Build a lookup: level code+categoryID -> rule
 	ruleMap := make(map[string]*CategoryPricingRule)
+	levels := make([]string, 0, 4)
+	seenLevels := map[string]bool{}
 	for i := range rules {
-		key := rules[i].Tier + ":" + rules[i].CategoryID.String()
+		key := rules[i].LevelCode + ":" + rules[i].CategoryID.String()
 		ruleMap[key] = &rules[i]
+		if !seenLevels[rules[i].LevelCode] {
+			seenLevels[rules[i].LevelCode] = true
+			levels = append(levels, rules[i].LevelCode)
+		}
 	}
+	sort.Strings(levels)
 
-	// Build cells for each category×tier combination
+	// Build cells for each category x level combination.
 	var cells []MatrixCell
 	for _, cat := range categories {
-		for _, tier := range tiers {
-			key := tier + ":" + cat.ID.String()
+		for _, level := range levels {
+			key := level + ":" + cat.ID.String()
 			cell := MatrixCell{
 				CategoryID:   cat.ID,
 				CategoryName: cat.Name,
 				CategoryPath: cat.Path,
-				Tier:         tier,
+				Level:        level,
 			}
 
 			if rule, ok := ruleMap[key]; ok {
@@ -657,7 +689,7 @@ func (s *CategoryPricingService) GetMatrix(ctx context.Context) (*MatrixResponse
 				cell.Inherited = false
 			} else {
 				// Check ancestors for inherited rule
-				inheritedRule := findInheritedRule(cat.Path, tier, categories, ruleMap)
+				inheritedRule := findInheritedRule(cat.Path, level, categories, ruleMap)
 				if inheritedRule != nil {
 					cell.Rule = inheritedRule
 					cell.Inherited = true
@@ -671,7 +703,7 @@ func (s *CategoryPricingService) GetMatrix(ctx context.Context) (*MatrixResponse
 
 	return &MatrixResponse{
 		Categories: buildCategoryTree(categories),
-		Tiers:      tiers,
+		Levels:     levels,
 		Cells:      cells,
 	}, nil
 }

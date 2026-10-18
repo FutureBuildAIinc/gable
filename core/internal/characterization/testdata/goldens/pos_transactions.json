@@ -478,23 +478,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -504,11 +508,11 @@
         "register_id": "REG-01",
         "revision": 2,
         "status": "open",
-        "subtotal_cents": 1403,
-        "tax_cents": 168,
+        "subtotal_cents": 1568,
+        "tax_cents": 188,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1571
+        "total_cents": 1756
       }
     }
   },
@@ -550,23 +554,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -581,23 +589,27 @@
             "discount_reason": null,
             "id": "<id-32>",
             "is_special_order": false,
-            "line_total_cents": 6460,
+            "line_total_cents": 7220,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 1,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 323000,
+            "priced_unit_price_ten_thousandths": 361000,
             "product_id": "<id-5>",
             "quantity": "2",
             "revenue_account_code": null,
             "sku": "PLY-34-CDX",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "2",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 323000,
+            "unit_price_ten_thousandths": 361000,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -607,11 +619,11 @@
         "register_id": "REG-01",
         "revision": 3,
         "status": "open",
-        "subtotal_cents": 7863,
-        "tax_cents": 944,
+        "subtotal_cents": 8788,
+        "tax_cents": 1055,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 8807
+        "total_cents": 9843
       }
     }
   },
@@ -732,23 +744,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -758,11 +774,11 @@
         "register_id": "REG-01",
         "revision": 4,
         "status": "open",
-        "subtotal_cents": 1403,
-        "tax_cents": 168,
+        "subtotal_cents": 1568,
+        "tax_cents": 188,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1571
+        "total_cents": 1756
       }
     }
   },
@@ -870,23 +886,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -896,11 +916,11 @@
         "register_id": "REG-01",
         "revision": 4,
         "status": "open",
-        "subtotal_cents": 1403,
-        "tax_cents": 168,
+        "subtotal_cents": 1568,
+        "tax_cents": 188,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1571
+        "total_cents": 1756
       }
     }
   },
@@ -993,7 +1013,7 @@
             "register_id": "REG-01",
             "revision": 4,
             "status": "open",
-            "total_cents": 1571
+            "total_cents": 1756
           },
           {
             "branch_id": "<id-1>",
@@ -1270,10 +1290,10 @@
           "details": [
             {
               "code": "insufficient_tender",
-              "message": "the sale needs 1403 cents and the tenders carry 1"
+              "message": "the sale needs 1568 cents and the tenders carry 1"
             }
           ],
-          "message": "the sale needs 1403 cents and the tenders carry 1"
+          "message": "the sale needs 1568 cents and the tenders carry 1"
         },
         "meta": {
           "request_id": "<id-50>"
@@ -1335,7 +1355,7 @@
       "body": {
         "branch_id": "<id-1>",
         "cashier_id": "<id-2>",
-        "change_cents": 48597,
+        "change_cents": 48432,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
         "currency": "USD",
@@ -1355,23 +1375,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1381,11 +1405,11 @@
         "register_id": "REG-01",
         "revision": 5,
         "status": "completed",
-        "subtotal_cents": 1403,
+        "subtotal_cents": 1568,
         "tax_cents": 0,
         "tenders": [
           {
-            "amount_cents": 1403,
+            "amount_cents": 1568,
             "auth_code": null,
             "card_brand": null,
             "card_last4": null,
@@ -1399,7 +1423,7 @@
           }
         ],
         "till_session_id": "<id-3>",
-        "total_cents": 1403
+        "total_cents": 1568
       }
     }
   },
@@ -1498,23 +1522,27 @@
             "discount_reason": null,
             "id": "<id-57>",
             "is_special_order": false,
-            "line_total_cents": 3800,
+            "line_total_cents": 3610,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 380000,
+            "priced_unit_price_ten_thousandths": 361000,
             "product_id": "<id-5>",
             "quantity": "1",
             "revenue_account_code": null,
             "sku": "PLY-34-CDX",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "1",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 380000,
+            "unit_price_ten_thousandths": 361000,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1524,11 +1552,11 @@
         "register_id": "REG-01",
         "revision": 2,
         "status": "open",
-        "subtotal_cents": 3800,
-        "tax_cents": 456,
+        "subtotal_cents": 3610,
+        "tax_cents": 433,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 4256
+        "total_cents": 4043
       }
     }
   },
@@ -1648,23 +1676,27 @@
             "discount_reason": null,
             "id": "<id-61>",
             "is_special_order": false,
-            "line_total_cents": 550,
+            "line_total_cents": 523,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 55000,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "1",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "1",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 55000,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1674,11 +1706,11 @@
         "register_id": "REG-01",
         "revision": 2,
         "status": "open",
-        "subtotal_cents": 550,
-        "tax_cents": 66,
+        "subtotal_cents": 523,
+        "tax_cents": 63,
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 616
+        "total_cents": 586
       }
     }
   },
@@ -1710,7 +1742,7 @@
       "body": {
         "branch_id": "<id-1>",
         "cashier_id": "<id-2>",
-        "change_cents": 0,
+        "change_cents": 30,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
         "currency": "USD",
@@ -1730,23 +1762,27 @@
             "discount_reason": null,
             "id": "<id-61>",
             "is_special_order": false,
-            "line_total_cents": 550,
+            "line_total_cents": 523,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 55000,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "1",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "1",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 55000,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1756,11 +1792,11 @@
         "register_id": "REG-01",
         "revision": 3,
         "status": "completed",
-        "subtotal_cents": 550,
-        "tax_cents": 66,
+        "subtotal_cents": 523,
+        "tax_cents": 63,
         "tenders": [
           {
-            "amount_cents": 416,
+            "amount_cents": 386,
             "auth_code": null,
             "card_brand": null,
             "card_last4": null,
@@ -1787,7 +1823,7 @@
           }
         ],
         "till_session_id": "<id-3>",
-        "total_cents": 616
+        "total_cents": 586
       }
     }
   },
@@ -1809,7 +1845,7 @@
       "body": {
         "branch_id": "<id-1>",
         "cashier_id": "<id-2>",
-        "change_cents": 0,
+        "change_cents": 30,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
         "currency": "USD",
@@ -1829,23 +1865,27 @@
             "discount_reason": null,
             "id": "<id-61>",
             "is_special_order": false,
-            "line_total_cents": 550,
+            "line_total_cents": 523,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 55000,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "1",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "1",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 55000,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1855,11 +1895,11 @@
         "register_id": "REG-01",
         "revision": 4,
         "status": "voided",
-        "subtotal_cents": 550,
-        "tax_cents": 66,
+        "subtotal_cents": 523,
+        "tax_cents": 63,
         "tenders": [
           {
-            "amount_cents": 416,
+            "amount_cents": 386,
             "auth_code": null,
             "card_brand": null,
             "card_last4": null,
@@ -1886,7 +1926,7 @@
           }
         ],
         "till_session_id": "<id-3>",
-        "total_cents": 616
+        "total_cents": 586
       }
     }
   },
@@ -1902,7 +1942,7 @@
       "body": {
         "branch_id": "<id-1>",
         "cashier_id": "<id-2>",
-        "change_cents": 48597,
+        "change_cents": 48432,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
         "currency": "USD",
@@ -1922,23 +1962,27 @@
             "discount_reason": null,
             "id": "<id-31>",
             "is_special_order": false,
-            "line_total_cents": 1403,
+            "line_total_cents": 1568,
             "line_type": "product",
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "PROMOTIONAL",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
-            "priced_unit_price_ten_thousandths": 46750,
+            "priced_unit_price_ten_thousandths": 52250,
             "product_id": "<id-4>",
             "quantity": "3",
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "3",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
-            "unit_price_ten_thousandths": 46750,
+            "unit_price_ten_thousandths": 52250,
             "uom": "PCS",
             "uom_qty": "1",
             "vendor_id": null
@@ -1948,11 +1992,11 @@
         "register_id": "REG-01",
         "revision": 5,
         "status": "completed",
-        "subtotal_cents": 1403,
+        "subtotal_cents": 1568,
         "tax_cents": 0,
         "tenders": [
           {
-            "amount_cents": 1403,
+            "amount_cents": 1568,
             "auth_code": null,
             "card_brand": null,
             "card_last4": null,
@@ -1966,7 +2010,7 @@
           }
         ],
         "till_session_id": "<id-3>",
-        "total_cents": 1403
+        "total_cents": 1568
       }
     }
   },
@@ -1997,7 +2041,7 @@
             "register_id": "REG-01",
             "revision": 5,
             "status": "completed",
-            "total_cents": 1403
+            "total_cents": 1568
           },
           {
             "branch_id": "<id-1>",
@@ -2013,7 +2057,7 @@
             "register_id": "REG-01",
             "revision": 4,
             "status": "voided",
-            "total_cents": 616
+            "total_cents": 586
           },
           {
             "branch_id": "<id-1>",
@@ -2045,7 +2089,7 @@
             "register_id": "REG-01",
             "revision": 2,
             "status": "open",
-            "total_cents": 4256
+            "total_cents": 4043
           }
         ],
         "limit": 50,
@@ -2070,7 +2114,7 @@
             "at": "<ts+0d>",
             "branch_id": "<id-1>",
             "data": {
-              "change_cents": 0,
+              "change_cents": 30,
               "currency": "USD",
               "customer_id": null,
               "from_status": "open",
@@ -2078,7 +2122,7 @@
               "number": "POS-000004",
               "revision": 3,
               "status": "completed",
-              "total_cents": 616
+              "total_cents": 586
             },
             "entity": {
               "id": "<id-11>",
@@ -2092,7 +2136,7 @@
             "at": "<ts+0d>",
             "branch_id": "<id-1>",
             "data": {
-              "change_cents": 48597,
+              "change_cents": 48432,
               "currency": "USD",
               "customer_id": "<id-8>",
               "from_status": "open",
@@ -2100,7 +2144,7 @@
               "number": "POS-000002",
               "revision": 5,
               "status": "completed",
-              "total_cents": 1403
+              "total_cents": 1568
             },
             "entity": {
               "id": "<id-9>",
@@ -2121,7 +2165,7 @@
               "reason": "r1b c wrong customer",
               "revision": 4,
               "status": "voided",
-              "total_cents": 616
+              "total_cents": 586
             },
             "entity": {
               "id": "<id-11>",

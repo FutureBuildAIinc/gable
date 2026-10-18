@@ -105,7 +105,7 @@ func upsertPersonas(db *sql.DB, yards map[string]uuid.UUID) error {
 
 // seedMultiYard writes the multi yard world on top of the sections above it.
 func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID,
-	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, priceLevelIDs map[string]uuid.UUID) {
+	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, profileIDs map[string]uuid.UUID) {
 
 	// The single branch switch on: the desk's yard switcher shows the yards and
 	// each yard's desk reads its own yard's documents. DEMO_MULTI_YARD=0 leaves
@@ -159,9 +159,9 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 	if ar != nil && yards["WK"] != uuid.Nil {
 		cid, branch, err := seedCustomer(db, demoCustomer{
 			Name: "Quillfield Formwork Ltd", Acct: "QFC-001", Email: "billing@quillfieldformwork.example", Phone: "250-555-3300",
-			Addr: "610 Plywood Ct, West Kelowna BC", Tier: "SILVER", Terms: "NET30", PriceLevel: "Contractor",
+			Addr: "610 Plywood Ct, West Kelowna BC", Terms: "NET30", Profile: "Contractor",
 			CreditLimit: 20000, PrimaryBranch: yards["WK"],
-		}, priceLevelIDs["Contractor"])
+		}, profileIDs["Contractor"])
 		if err != nil {
 			log.Printf("Seed: Quillfield Formwork: %v", err)
 		} else {
@@ -199,17 +199,17 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 				if ready {
 					for j, l := range lines {
 						seedExec(db, "Quillfield order line "+l.SKU, `INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
-								description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+								description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, priced_unit_price, price_source, line_total, taxable,
 								quantity_allocated, quantity_fulfilled)
 							SELECT $1, p.id, $3, $4, 'PRODUCT', $5,
-								COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
+								COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, $3, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
 								0, $3
 							FROM products p WHERE p.id = $2`, orderID, skuToID[l.SKU], l.Qty, l.Price, j)
 					}
 					seedExec(db, "Quillfield invoice lines", `INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
-							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
+							quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, price_each, price_source, line_total, taxable)
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
-							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
+							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.stock_uom, ol.stock_quantity, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
 				}
 				ar.post(ctx, []seedInvoice{{ID: invID, CustomerID: cid, BranchID: branch, Date: on.AddDate(0, 0, 1), Subtotal: 1680000, Tax: 201600}})
@@ -256,8 +256,8 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 		if qid == "" {
 			continue
 		}
-		seedExec(db, "cross yard quote line "+c.Customer, `INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, unit_price, line_total)
-			SELECT $1, p.id, p.sku, p.description, 40, p.uom_primary::text, p.base_price, ROUND(40 * p.base_price, 2)
+		seedExec(db, "cross yard quote line "+c.Customer, `INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, stock_uom, stock_quantity, unit_price, line_total)
+			SELECT $1, p.id, p.sku, p.description, 40, p.uom_primary::text, p.uom_primary::text, 40, p.base_price, ROUND(40 * p.base_price, 2)
 			FROM products p WHERE p.id = $2`, qid, pid)
 		seedExec(db, "cross yard quote total "+c.Customer, `UPDATE quotes SET total_amount = (SELECT COALESCE(SUM(line_total), 0) FROM quote_lines WHERE quote_id = $1) WHERE id = $1`, qid)
 		var linked bool

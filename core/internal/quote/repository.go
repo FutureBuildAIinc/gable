@@ -567,8 +567,11 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 			return nil, fmt.Errorf("failed to scan a tally row: %w", err)
 		}
 		idx, ok := byID[lineID]
-		if !ok || q.Lines[idx].Tally == nil {
+		if !ok {
 			continue
+		}
+		if q.Lines[idx].Tally == nil {
+			q.Lines[idx].Tally = &Tally{Rows: []TallyRow{}}
 		}
 		row.LengthFT = httpx.Quantity(length)
 		q.Lines[idx].Tally.Rows = append(q.Lines[idx].Tally.Rows, row)
@@ -580,6 +583,10 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	// carries, and the display board feet of R4.3.
 	for i := range q.Lines {
 		if q.Lines[i].Tally == nil {
+			continue
+		}
+		if len(q.Lines[i].Tally.Rows) == 0 {
+			q.Lines[i].Tally = nil
 			continue
 		}
 		lf, err := units.LinearFeet(tallyRowsOf(q.Lines[i].Tally))

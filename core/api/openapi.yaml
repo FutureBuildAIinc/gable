@@ -395,6 +395,519 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/ar/credit-holds:
+    get:
+      operationId: arCreditHoldsList
+      tags: [ar]
+      summary: List credit holds
+      description: >-
+        The credit holds, newest first by (placed_at, id) in the cursor list envelope, each with the account's standing beside it (the limit, null for no limit, the balance, and the open invoice cents past due). status selects standing (the default: active and overridden), released or all. A customer named outside the caller's branches is 404, the subledger's wall.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [standing, released, all], default: standing}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of credit holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHoldPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    post:
+      operationId: arCreditHoldPlace
+      tags: [ar]
+      summary: Place a manual credit hold
+      description: >-
+        Roles admin, owner, finance. Places a hold of type manual (the default), over_limit or past_due with a required reason, and writes customers.credit_hold in the same transaction. Idempotent: an account that already carries a standing hold answers it with 200 and placed false; a new hold answers 201 with placed true. The standing hold carries the answer either way.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldPlaceRequest"
+      responses:
+        "200":
+          description: The standing hold, already in place.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "201":
+          description: The hold, placed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/evaluate:
+    post:
+      operationId: arCreditHoldsEvaluate
+      tags: [ar]
+      summary: Run the credit hold sweep
+      description: >-
+        Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldEvaluateRequest"
+      responses:
+        "200":
+          description: The sweep's answer, placed and lifted counts included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHoldEvaluation"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/{id}/release:
+    post:
+      operationId: arCreditHoldRelease
+      tags: [ar]
+      summary: Release a credit hold
+      description: >-
+        Roles admin, owner, finance; a reason is required. Ends a standing hold (active or overridden) with who and why, and clears customers.credit_hold in the same transaction. A released hold refuses with 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldReleaseRequest"
+      responses:
+        "200":
+          description: The hold, released.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/credit-holds/{id}/override:
+    post:
+      operationId: arCreditHoldOverride
+      tags: [ar]
+      summary: Put a time-bounded override on a credit hold
+      description: >-
+        Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditHoldOverrideRequest"
+      responses:
+        "200":
+          description: The hold, overridden until the window ends.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditHold"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/customers/{id}/credit-limit-changes:
+    get:
+      operationId: arCreditLimitChangesList
+      tags: [ar]
+      summary: List a customer's credit limit changes
+      description: >-
+        The credit limit history, newest first by (created_at, id) in the cursor list envelope: what the limit was, what it became, who asked, who approved, and when it was decided. A customer outside the caller's branches is 404, the subledger's wall.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of credit limit changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChangePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    post:
+      operationId: arCreditLimitChangeRequest
+      tags: [ar]
+      summary: Record (and optionally apply) a credit limit change
+      description: >-
+        Roles admin, owner, finance. Records one change with the old limit, the new one, a required reason and who asked, as pending. With approve true the same act applies the new limit to the customer, stamps who approved it and when, and answers 200; a recorded request answers 201.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditLimitChangeRequest"
+      responses:
+        "200":
+          description: The change, approved and applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChange"
+        "201":
+          description: The change, recorded as pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditLimitChange"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/worklist:
+    get:
+      operationId: arWorklist
+      tags: [ar]
+      summary: The controller's collections and credit worklist
+      description: >-
+        The overdue and over-limit accounts, worst first, one row per customer with any past due bucket or any balance. The severity score weighs the over 90 bucket four times, the 61 to 90 bucket twice, the 31 to 60 bucket and the over-limit amount once each, and a standing hold adds a bump that outranks any plain overdue account. Every row carries the aging buckets, the credit limit (null for no limit), the utilisation percent, the hold state and the recommended action: hold for a held, over limit or 90 day account, finance_charge for 61 to 90, call for 31 to 60, send_statement for the rest. The aging carries the caller's branch wall; limit is 10 to 500 rows.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked worklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArWorklist"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+  /api/v1/ar/statements/runs:
+    get:
+      operationId: arStatementRunsList
+      tags: [ar]
+      summary: List batch statement runs
+      description: The batch statement runs, newest first by (created_at, id) in the cursor list envelope.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of runs, without their items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRunPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+    post:
+      operationId: arStatementRunCreate
+      tags: [ar]
+      summary: Generate a batch statement run
+      description: >-
+        Roles admin, owner, finance. Records one run over the customers the period names: every customer with a non-zero balance, or exactly the customers customer_ids names. Each item carries the opening balance (the subledger rows before period_start), the invoices, the payments and the finance charges of the period, the closing balance and the aging buckets of period_end, taken as of that day and never re-derived. A run writes no balance, no document and no subledger row: two runs of one period answer the same numbers. With queue_email true, every item whose closing balance is positive is marked queued with the id of its statement.queued outbox event; a zero balance is skipped. period_end defaults to today and period_start to a month before it; neither may end after today. Answers 201 with the completed run and its items.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArStatementRunRequest"
+      responses:
+        "201":
+          description: The run, completed, with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/statements/runs/{id}:
+    get:
+      operationId: arStatementRunGet
+      tags: [ar]
+      summary: Inspect one batch statement run
+      description: The run with its items, customers by name.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The run and its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatementRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/ar/finance-charges/rules:
+    get:
+      operationId: arFinanceChargeRulesGet
+      tags: [ar]
+      summary: Read the finance charge rules
+      description: >-
+        The tenant's finance charge rules: the monthly rate in basis points, the grace days, the minimum charge and the minimum overdue balance, whether the charges compound, and the income account the charge credits. Migration 124 seeds the row charges off.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRules"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+    put:
+      operationId: arFinanceChargeRulesUpdate
+      tags: [ar]
+      summary: Write the finance charge rules
+      description: >-
+        Roles admin, owner, finance. Writes the whole policy in one act: the rate (at most 100000 basis points, 100 percent a month), the grace days (0 to 365), the two minimums, the compound flag, and an income account the chart of accounts must hold.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArFinanceChargeRules"
+      responses:
+        "200":
+          description: The rules, written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRules"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/finance-charges/runs:
+    get:
+      operationId: arFinanceChargeRunsList
+      tags: [ar]
+      summary: List finance charge runs
+      description: The finance charge runs, newest first by (created_at, id) in the cursor list envelope.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of runs, without their items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRunPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+    post:
+      operationId: arFinanceChargeRunCreate
+      tags: [ar]
+      summary: Preview or execute a finance charge run
+      description: >-
+        Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArFinanceChargeRunRequest"
+      responses:
+        "200":
+          description: The run, executed or previewed, with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+  /api/v1/ar/finance-charges/runs/{id}:
+    get:
+      operationId: arFinanceChargeRunGet
+      tags: [ar]
+      summary: Inspect one finance charge run
+      description: The run with its items, customers by name, each naming the invoice and the entry it generated when executed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The run and its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArFinanceChargeRun"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/customers/{customerId}/activities:
     get:
       operationId: activityList
@@ -2180,7 +2693,7 @@ paths:
       tags: [customer]
       summary: List customers
       description: >-
-        The cursor list envelope, newest first. q searches name, account number and email (case blind); tier, is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a tier outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+        The cursor list envelope, newest first. q searches name, account number and email (case blind); is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a malformed cursor or an out of range limit is a 400.
       parameters:
         - name: q
           in: query
@@ -2188,13 +2701,6 @@ paths:
           description: Search term for name, account_number and email, at most 100 characters.
           schema:
             type: string
-        - name: tier
-          in: query
-          required: false
-          description: One lowercase tier.
-          schema:
-            type: string
-            enum: [retail, silver, gold, platinum]
         - name: is_active
           in: query
           required: false
@@ -2231,7 +2737,7 @@ paths:
       tags: [customer]
       summary: Create a customer
       description: >-
-        Creates a customer. account_number and name are required; the terms default to NET30, the tier to retail. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
+        Creates a customer. account_number and name are required; the terms default to NET30, the pricing program to the default profile. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -3059,33 +3565,6 @@ paths:
           $ref: "#/components/responses/WireConflict"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
-        "500":
-          $ref: "#/components/responses/InternalErrorEither"
-  /api/v1/price_levels:
-    get:
-      operationId: customerListPriceLevels
-      tags: [customer]
-      summary: List price levels
-      description: >-
-        The cursor list envelope, newest first.
-      parameters:
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Include"
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: The page of price levels.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PriceLevelPage"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/dashboard/summary:
@@ -10114,7 +10593,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling.
+          description: "Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling."
           content:
             application/json:
               schema:
@@ -11695,9 +12174,9 @@ paths:
     post:
       operationId: posSyncOffline
       tags: [pos]
-      summary: Replay a batch of offline sales
+      summary: Refuse the offline sale replay by rule (money never queues)
       description: >-
-        Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits.
+        Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -11708,18 +12187,19 @@ paths:
             schema:
               $ref: "#/components/schemas/PosSyncRequest"
       responses:
-        "200":
-          description: The batch's outcome.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PosSyncResponse"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          description: >-
+            The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/catalog:
@@ -13040,6 +13520,797 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pricing/levels:
+    get:
+      operationId: pricingLevelList
+      tags: [pricing]
+      summary: List price levels
+      description: >-
+        Guarded admin, owner or finance. The cursor list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of price levels.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevelPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingLevelCreate
+      tags: [pricing]
+      summary: Create a price level
+      description: >-
+        Guarded admin, owner or finance. code (uppercase, at most 16 characters of A-Z, 0-9 and underscore) and name are required; basis defaults to base; adjust_percent is a decimal string, a level at -100 or above. The response is 201 with Location and the revision ETag.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingLevelWrite"
+      responses:
+        "201":
+          description: The created level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/levels/{id}:
+    get:
+      operationId: pricingLevelGet
+      tags: [pricing]
+      summary: Read one price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingLevelUpdate
+      tags: [pricing]
+      summary: Update a price level
+      description: >-
+        Guarded admin, owner or finance, at the level's revision (428 without, 409 stale behind it).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingLevelWrite"
+      responses:
+        "200":
+          description: The updated level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/profiles:
+    get:
+      operationId: pricingProfileList
+      tags: [pricing]
+      summary: List price profiles
+      description: The cursor list envelope, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of price profiles.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfilePage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingProfileCreate
+      tags: [pricing]
+      summary: Create a price profile
+      description: >-
+        Guarded admin, owner or finance. code and name are required; price_level_id names the level the program prices from.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProfileWrite"
+      responses:
+        "201":
+          description: The created profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/profiles/{id}:
+    get:
+      operationId: pricingProfileGet
+      tags: [pricing]
+      summary: Read one price profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingProfileUpdate
+      tags: [pricing]
+      summary: Update a price profile
+      description: Guarded admin, owner or finance, at the profile's revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProfileWrite"
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/products/{id}/prices:
+    get:
+      operationId: pricingProductPriceList
+      tags: [pricing]
+      summary: List a product's prices
+      description: >-
+        Guarded admin, owner, finance or sales. The rows of the branch named in branch_id and the caller's context branch rows and the every branch rows; a caller with no context branch sees every row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The product's price rows.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProductPriceList"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingProductPriceReplace
+      tags: [pricing]
+      summary: Replace one branch slice of a product's price list
+      description: >-
+        Guarded admin, owner or finance. The PUT replaces the branch_id slice of the product's price list (its branch base and its level prices for that branch) at the product's revision, and touches no other branch's rows. Without branch_id it replaces the every branch slice, admitted only to a caller who may reach every branch. The rows carry no branch_id. While the stocking unit hold of ADR 0006 section 9.1 stands, every row's price unit is the product's stocking unit; a row naming another unit is a 400 naming price_uom. A replace at a stale product revision is a 409 stale_revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProductPriceReplace"
+      responses:
+        "200":
+          description: The slice as it now stands.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProductPriceList"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-levels:
+    get:
+      operationId: pricingVendorLevelList
+      tags: [pricing]
+      summary: List vendor price levels
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of vendor levels.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevelPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingVendorLevelCreate
+      tags: [pricing]
+      summary: Create a vendor price level
+      description: Guarded admin, owner or finance; vendor_id, code and name are required.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorLevelWrite"
+      responses:
+        "201":
+          description: The created vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-levels/{id}:
+    get:
+      operationId: pricingVendorLevelGet
+      tags: [pricing]
+      summary: Read one vendor price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingVendorLevelUpdate
+      tags: [pricing]
+      summary: Update a vendor price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorLevelWrite"
+      responses:
+        "200":
+          description: The updated vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-costs:
+    get:
+      operationId: pricingVendorCostList
+      tags: [pricing]
+      summary: List vendor costs
+      description: >-
+        Guarded admin, owner, finance or sales, under the filters vendor_id, product_id and branch_id, and the branch wall of the caller's context.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of vendor costs.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCostPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingVendorCostCreate
+      tags: [pricing]
+      summary: Create a vendor cost
+      description: >-
+        Guarded admin, owner or finance. vendor_id, vendor_price_level_id (of the same vendor), product_id, purchase_uom, unit_cost_ten_thousandths and effective_from are required; the purchase unit must be a row of the product's unit set, and while the stocking unit hold stands the price unit hold refuses a cost the product cannot read. The payload branch rule holds a branch_id the body names.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorCostWrite"
+      responses:
+        "201":
+          description: The created vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-costs/{id}:
+    get:
+      operationId: pricingVendorCostGet
+      tags: [pricing]
+      summary: Read one vendor cost
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingVendorCostUpdate
+      tags: [pricing]
+      summary: Update a vendor cost
+      description: >-
+        Guarded admin, owner or finance, at the row's revision. The update checks the payload branch rule on the row's stored branch and on the new one: a move out of the caller's reach is a 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorCostWrite"
+      responses:
+        "200":
+          description: The updated vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/contracts:
+    get:
+      operationId: pricingContractList
+      tags: [pricing]
+      summary: List customer contracts
+      description: Under the filters customer_id, product_id and branch_id, and the branch wall.
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of contracts.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContractPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingContractCreate
+      tags: [pricing]
+      summary: Create a customer contract
+      description: >-
+        Guarded admin, owner or finance. customer_id, product_id and contract_price_ten_thousandths are required; the price unit is the product's stocking unit while the hold stands, and a body naming another unit is a 400 naming price_uom. The create does not upsert: a second contract for the same customer, product and branch is a 409 duplicate naming the existing row. The payload branch rule holds the branch the body names; a null branch is the every branch reach. Writes contract.created in the same transaction.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingContractWrite"
+      responses:
+        "201":
+          description: The created contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/contracts/{id}:
+    get:
+      operationId: pricingContractGet
+      tags: [pricing]
+      summary: Read one contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingContractUpdate
+      tags: [pricing]
+      summary: Update a contract
+      description: >-
+        Guarded admin, owner or finance, at the row's revision. Writes contract.updated in the same transaction, with its audit row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingContractWrite"
+      responses:
+        "200":
+          description: The updated contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: pricingContractDelete
+      tags: [pricing]
+      summary: Delete a contract
+      description: >-
+        Guarded admin, owner or finance, at the row's revision in the body. A contract is an agreement, not a document: it is deleted outright, with an audit row carrying the deleted values and contract.deleted in the same transaction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "204":
+          description: The contract is gone.
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/cost:
+    get:
+      operationId: pricingCost
+      tags: [pricing]
+      summary: Resolve a vendor cost
+      description: >-
+        ResolveCost on the wire (ADR 0006 section 5.5): rows at the requested level, or the vendor's default level when none is named, in effect on the date, the branch's row before the all branch row, the latest effective_from first. The answer carries the cost and its purchase unit, the pair between the uom named and the purchase unit, the level's code and the row's id. No cost in effect is a 404: the purchase line takes a manual cost.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: vendor_level_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: on
+          in: query
+          required: false
+          description: A calendar date (YYYY-MM-DD); default today.
+          schema: {type: string}
+        - name: uom
+          in: query
+          required: false
+          description: The purchase line's unit, for the answer's pair.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The resolved cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingResolvedCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/products:
     get:
       operationId: productList
@@ -16732,6 +18003,7 @@ components:
                 - conflict
                 - payment_required
                 - charge_not_reversed
+                - money_never_queues
                 - ai_off
                 - precondition_failed
                 - payload_too_large
@@ -17131,6 +18403,289 @@ components:
         currencies:
           type: array
           items: {$ref: "#/components/schemas/ArLedgerRow"}
+    CreditStanding:
+      type: object
+      required: [credit_limit_cents, current_balance_cents, past_due_cents]
+      properties:
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "null for no limit."}
+        current_balance_cents: {type: integer, format: int64}
+        past_due_cents: {type: integer, format: int64, description: "The open invoice cents past their due date."}
+    CreditHold:
+      type: object
+      required: [id, customer_id, customer_name, reason, hold_type, status, placed_by, placed_at, released_by, released_at, release_reason, override_until, override_by, override_reason, max_order_cents]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        reason: {type: string}
+        hold_type: {type: string, enum: [manual, over_limit, past_due]}
+        status: {type: string, enum: [active, released, overridden]}
+        placed_by: {type: [string, "null"], description: "null on a hold the sweep placed."}
+        placed_at: {type: string, format: date-time}
+        released_by: {type: [string, "null"]}
+        released_at: {type: [string, "null"], format: date-time}
+        release_reason: {type: [string, "null"]}
+        override_until: {type: [string, "null"], format: date-time}
+        override_by: {type: [string, "null"]}
+        override_reason: {type: [string, "null"]}
+        max_order_cents: {type: [integer, "null"], format: int64, description: "The order size the override window allows."}
+        credit:
+          $ref: "#/components/schemas/CreditStanding"
+    CreditHoldPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHold"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    CreditHoldPlaceRequest:
+      type: object
+      required: [customer_id, reason]
+      properties:
+        customer_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        hold_type: {type: string, enum: [manual, over_limit, past_due], default: manual}
+    CreditHoldReleaseRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 500}
+    CreditHoldOverrideRequest:
+      type: object
+      required: [override_reason, override_until]
+      properties:
+        override_reason: {type: string, minLength: 1, maxLength: 500}
+        override_until: {type: string, format: date-time, description: "A future instant: the window the override buys."}
+        max_order_cents: {type: [integer, "null"], format: int64}
+    CreditHoldEvaluateRequest:
+      type: object
+      required: []
+      properties:
+        dry_run: {type: boolean, default: true}
+        customer_ids:
+          type: array
+          description: "Absent, every active credit account; present, exactly these."
+          items: {type: string, format: uuid}
+    CreditHoldPlacement:
+      type: object
+      required: [customer_id, hold_type, reason]
+      properties:
+        customer_id: {type: string, format: uuid}
+        hold_type: {type: string, enum: [over_limit, past_due]}
+        reason: {type: string}
+        hold_id: {type: string, format: uuid, description: "Set on an executed sweep; empty on a dry run."}
+    CreditHoldReleaseRecord:
+      type: object
+      required: [hold_id, customer_id, reason]
+      properties:
+        hold_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        reason: {type: string}
+    CreditHoldEvaluation:
+      type: object
+      required: [dry_run, evaluated, would_place, would_release, placed, released]
+      properties:
+        dry_run: {type: boolean}
+        evaluated: {type: integer, description: "The accounts the sweep read."}
+        would_place:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHoldPlacement"}
+        would_release:
+          type: array
+          items: {$ref: "#/components/schemas/CreditHoldReleaseRecord"}
+        placed: {type: integer, description: "Zero on a dry run."}
+        released: {type: integer, description: "Zero on a dry run."}
+    CreditLimitChange:
+      type: object
+      required: [id, customer_id, old_limit_cents, new_limit_cents, requested_by, approved_by, status, reason, created_at, decided_at]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        old_limit_cents: {type: integer, format: int64}
+        new_limit_cents: {type: integer, format: int64}
+        requested_by: {type: [string, "null"]}
+        approved_by: {type: [string, "null"]}
+        status: {type: string, enum: [pending, approved, rejected]}
+        reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        decided_at: {type: [string, "null"], format: date-time}
+    CreditLimitChangePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/CreditLimitChange"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    CreditLimitChangeRequest:
+      type: object
+      required: [new_limit_cents, reason]
+      properties:
+        new_limit_cents: {type: integer, format: int64, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        approve: {type: boolean, default: false, description: "true applies the limit in the same act."}
+    ArWorklistRow:
+      type: object
+      required: [customer_id, customer_name, currency, balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, past_due_cents, over_limit_cents, credit_limit_cents, credit_utilization_pct, hold_status, severity_score, recommended_action]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        balance_cents: {type: integer, format: int64}
+        current_cents: {type: integer, format: int64}
+        days_1_30_cents: {type: integer, format: int64}
+        days_31_60_cents: {type: integer, format: int64}
+        days_61_90_cents: {type: integer, format: int64}
+        over_90_cents: {type: integer, format: int64}
+        past_due_cents: {type: integer, format: int64}
+        over_limit_cents: {type: integer, format: int64}
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "null for no limit."}
+        credit_utilization_pct: {type: [integer, "null"], description: "The balance over the limit, percent; null for no limit."}
+        hold_status: {type: string, enum: [none, active, overridden]}
+        hold_id: {type: string, format: uuid}
+        override_until: {type: [string, "null"], format: date-time}
+        severity_score: {type: integer, format: int64}
+        recommended_action: {type: string, enum: [hold, call, send_statement, finance_charge]}
+    ArWorklist:
+      type: object
+      required: [as_of, rows]
+      properties:
+        as_of: {type: string, format: date}
+        rows:
+          type: array
+          items: {$ref: "#/components/schemas/ArWorklistRow"}
+    ArStatementRunItem:
+      type: object
+      required: [id, run_id, customer_id, customer_name, currency, opening_balance_cents, invoices_cents, payments_cents, finance_charges_cents, closing_balance_cents, delivery_status, outbox_id, aging_buckets]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        opening_balance_cents: {type: integer, format: int64, description: "The subledger before period_start."}
+        invoices_cents: {type: integer, format: int64}
+        payments_cents: {type: integer, format: int64}
+        finance_charges_cents: {type: integer, format: int64}
+        closing_balance_cents: {type: integer, format: int64}
+        delivery_status: {type: string, enum: [not_queued, queued, sent, failed, skipped]}
+        outbox_id: {type: [string, "null"], format: uuid, description: "The statement.queued event of a queued item."}
+        aging_buckets:
+          type: object
+          description: "The aging as of period_end: current, days_1_30, days_31_60, days_61_90 and over_90, in cents."
+          additionalProperties: {type: integer, format: int64}
+    ArStatementRun:
+      type: object
+      required: [id, period_start, period_end, as_of_date, status, total_customers, queued_count, sent_count, total_balance_cents, triggered_by, created_at, completed_at]
+      properties:
+        id: {type: string, format: uuid}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        as_of_date: {type: string, format: date}
+        status: {type: string, enum: [running, completed, failed]}
+        total_customers: {type: integer}
+        queued_count: {type: integer}
+        sent_count: {type: integer}
+        total_balance_cents: {type: integer, format: int64}
+        triggered_by: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: [string, "null"], format: date-time}
+        items:
+          type: array
+          description: "On the by-id read and the create answer; the list read carries none."
+          items: {$ref: "#/components/schemas/ArStatementRunItem"}
+    ArStatementRunPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ArStatementRun"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    ArStatementRunRequest:
+      type: object
+      required: []
+      properties:
+        period_start: {type: string, format: date, description: "Default a month before period_end."}
+        period_end: {type: string, format: date, description: "Default today; never after today."}
+        customer_ids:
+          type: array
+          description: "Absent, every customer with a non-zero balance; present, exactly these."
+          items: {type: string, format: uuid}
+        queue_email: {type: boolean, default: false}
+    ArFinanceChargeRunRequest:
+      type: object
+      required: []
+      properties:
+        as_of_date: {type: string, format: date, description: "Default today; never after today."}
+        dry_run: {type: boolean, default: true}
+        customer_ids:
+          type: array
+          description: "Absent, every eligible customer; present, exactly these."
+          items: {type: string, format: uuid}
+    ArFinanceChargeRules:
+      type: object
+      required: [monthly_rate_bps, grace_days, min_charge_cents, min_balance_cents, compound, income_account_code, updated_by, updated_at]
+      properties:
+        monthly_rate_bps: {type: integer, format: int64, minimum: 0, maximum: 100000, description: "10000 basis points is 100 percent a month."}
+        grace_days: {type: integer, minimum: 0, maximum: 365}
+        min_charge_cents: {type: integer, format: int64, minimum: 0}
+        min_balance_cents: {type: integer, format: int64, minimum: 0}
+        compound: {type: boolean, description: "false, the default, never charges on a finance charge invoice."}
+        income_account_code: {type: string, description: "The chart account the charge credits; 4060 by default."}
+        updated_by: {type: [string, "null"]}
+        updated_at: {type: string, format: date-time}
+    ArFinanceChargeItem:
+      type: object
+      required: [id, run_id, customer_id, customer_name, currency, overdue_cents, charge_cents, invoice_id, invoice_number, journal_entry_id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        overdue_cents: {type: integer, format: int64, description: "The basis the charge was taken on."}
+        charge_cents: {type: integer, format: int64}
+        invoice_id: {type: [string, "null"], format: uuid, description: "null on a dry run's preview."}
+        invoice_number: {type: [string, "null"]}
+        journal_entry_id: {type: [string, "null"], format: uuid, description: "null on a dry run's preview."}
+        created_at: {type: string, format: date-time}
+    ArFinanceChargeRun:
+      type: object
+      required: [id, as_of_date, rate_bps, grace_days, min_charge_cents, status, total_charged_cents, customer_count, triggered_by, created_at, completed_at]
+      properties:
+        id: {type: string, format: uuid}
+        as_of_date: {type: string, format: date}
+        rate_bps: {type: integer, format: int64}
+        grace_days: {type: integer}
+        min_charge_cents: {type: integer, format: int64}
+        status: {type: string, enum: [running, completed, failed, dry_run]}
+        total_charged_cents: {type: integer, format: int64}
+        customer_count: {type: integer}
+        triggered_by: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: [string, "null"], format: date-time, description: "null on a dry run: a preview never completes."}
+        items:
+          type: array
+          description: "On the by-id read and the run answer; the list read carries none."
+          items: {$ref: "#/components/schemas/ArFinanceChargeItem"}
+    ArFinanceChargeRunPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ArFinanceChargeRun"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
     ActivityType:
       type: string
       description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
@@ -18317,48 +19872,9 @@ components:
           type: string
         description:
           type: string
-    CustomerTier:
-      type: string
-      enum: [retail, silver, gold, platinum]
-      description: The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
     TermsKind:
       type: string
       enum: [net_days, day_of_month, due_on_receipt]
-    PriceLevel:
-      type: object
-      required: [id, name, multiplier, created_at, updated_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        multiplier:
-          type: number
-          description: "A price multiplier, a rate and not money."
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-    PriceLevelPage:
-      type: object
-      required: [items, next_cursor, limit]
-      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/PriceLevel"
-        next_cursor:
-          type: [string, "null"]
-          description: Opaque; pass it back verbatim as cursor. Null on the last page.
-        limit:
-          type: integer
-        total:
-          type: integer
-          format: int64
     PaymentTermsRef:
       type: object
       required: [id, code, name]
@@ -18372,7 +19888,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, tier, is_active, primary_branch_id, branch_ids, price_level_id, price_level, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -18388,8 +19904,6 @@ components:
         address:
           type: [string, "null"]
           description: "The free text billing address; delivery addresses are ship-tos."
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
@@ -18403,13 +19917,10 @@ components:
             format: uuid
           description: >-
             The yards the customer trades at, home yard included, in id order. Customers are dealer wide accounts (ruling A): the first document at a yard the customer is not yet linked to adds the yard here.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
-        price_level:
-          oneOf:
-            - $ref: "#/components/schemas/PriceLevel"
-            - type: "null"
+          description: The customer's pricing program (ADR 0006 section 5.2); the create takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid
@@ -18480,17 +19991,16 @@ components:
           type: [string, "null"]
         address:
           type: [string, "null"]
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
           type: string
           format: uuid
           description: Create only; fixed afterwards, and a PUT carrying it is a 400.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
+          description: The pricing program; a create that names none takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid
@@ -18527,17 +20037,16 @@ components:
           type: [string, "null"]
         address:
           type: [string, "null"]
-        tier:
-          $ref: "#/components/schemas/CustomerTier"
         is_active:
           type: boolean
         primary_branch_id:
           type: string
           format: uuid
           description: Create only; fixed afterwards, and a PUT carrying it is a 400.
-        price_level_id:
+        price_profile_id:
           type: [string, "null"]
           format: uuid
+          description: The pricing program; a create that names none takes the default profile.
         salesperson_id:
           type: [string, "null"]
           format: uuid
@@ -21688,9 +23197,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -21755,7 +23268,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -21771,6 +23284,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -21785,6 +23313,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -22196,9 +23729,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -22264,7 +23801,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -22280,6 +23817,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -22294,6 +23846,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -23081,9 +24638,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -23145,7 +24706,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -23161,6 +24722,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -23175,6 +24751,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -23248,9 +24829,13 @@ components:
         - price_uom
         - uom_qty
         - price_uom_qty
+        - stock_uom
+        - stock_quantity
+        - tally
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
+        - price_basis
         - override_reason
         - discount_percent
         - discount_cents
@@ -23316,7 +24901,7 @@ components:
           type:
             - string
             - 'null'
-          description: The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1).
+          description: The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3).
         price_uom:
           type:
             - string
@@ -23332,6 +24917,21 @@ components:
             - string
             - 'null'
           description: The other side of the conversion pair.
+        stock_uom:
+          type:
+            - string
+            - 'null'
+          description: The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product.
+        stock_quantity:
+          type:
+            - string
+            - 'null'
+          description: The quantity converted into the stocking unit, exact at scale 4; null on a line without a product.
+        tally:
+          oneOf:
+            - $ref: '#/components/schemas/Tally'
+            - type: 'null'
+          description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -23346,6 +24946,11 @@ components:
           description: What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
         price_source:
           $ref: '#/components/schemas/SalesPriceSource'
+        price_basis:
+          type:
+            - string
+            - 'null'
+          description: The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line.
         override_reason:
           type:
             - string
@@ -24822,7 +26427,7 @@ components:
           description: Float dollars.
     PortalCartItem:
       type: object
-      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available]
+      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available, uom, price_uom, uom_qty, price_uom_qty]
       properties:
         id:
           type: string
@@ -24845,6 +26450,14 @@ components:
           type: number
           description: Float dollars.
         available:
+          type: number
+        uom:
+          type: string
+        price_uom:
+          type: string
+        uom_qty:
+          type: number
+        price_uom_qty:
           type: number
     PortalAddToCartRequest:
       type: object
@@ -25737,7 +27350,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -25753,9 +27366,13 @@ components:
         price_uom: {type: [string, "null"], description: "The unit the price is per; equals uom unless the pair converts."}
         uom_qty: {type: [string, "null"], description: "The pair side in the sale unit; 1 and 1 when the units agree."}
         price_uom_qty: {type: [string, "null"]}
+        stock_uom: {type: [string, "null"]}
+        stock_quantity: {type: [string, "null"]}
+        tally: {oneOf: [{$ref: "#/components/schemas/Tally"}, {type: "null"}]}
         unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "Scale 4; null on a text line."}
         priced_unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "The price before an override or discount moved it."}
         price_source: {type: string, enum: [price_list, quote, override, manual, none]}
+        price_basis: {type: [string, "null"]}
         override_reason: {type: [string, "null"]}
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
@@ -25948,33 +27565,10 @@ components:
         unit_price_cents: {type: integer, format: int64}
         uom: {type: string}
         in_stock: {type: string, description: "A decimal string of the on hand quantity."}
-    PosSyncResponse:
-      type: object
-      required: [batch_id, synced_count, duplicate_count, error_count, pending_count, errors, pending]
-      properties:
-        batch_id: {type: string}
-        synced_count: {type: integer}
-        duplicate_count: {type: integer, description: "Sales already synced, by client_id."}
-        error_count: {type: integer}
-        pending_count: {type: integer, description: "Sales waiting on the tax provider; the sync retries them."}
-        errors:
-          type: array
-          items:
-            $ref: "#/components/schemas/PosSyncItemResult"
-        pending:
-          type: array
-          items:
-            $ref: "#/components/schemas/PosSyncItemResult"
-    PosSyncItemResult:
-      type: object
-      required: [client_id, reason]
-      properties:
-        client_id: {type: string, format: uuid}
-        reason: {type: string}
     PricingSource:
       type: string
       description: Where a price came from, lowercase (ADR 0006 section 7.3).
-      enum: [contract, tier, retail, quantity_break, job_override, promotional, category_tier, category_account]
+      enum: [contract, quantity_break, job_override, promotional, category_account, category_profile, category_level, level, branch, base]
     PricingRuleType:
       type: string
       enum: [quantity_break, job_override, promotional]
@@ -25982,7 +27576,7 @@ components:
       type: object
       description: >-
         The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule.
-      required: [customer_id, product_id, quantity, uom, unit_price_ten_thousandths, price_uom, uom_qty, price_uom_qty, line_total_cents, price_basis, details]
+      required: [customer_id, product_id, quantity, uom, unit_price_ten_thousandths, price_uom, uom_qty, price_uom_qty, line_total_cents, price_basis, details, branch_id, reference_price_ten_thousandths, reference_price_uom]
       properties:
         customer_id: {type: string, format: uuid}
         product_id: {type: string, format: uuid}
@@ -25998,9 +27592,20 @@ components:
         details:
           type: string
           description: Free text such as "Gold Tier (15%)".
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: The branch the price answers at; null when the read named none and the caller carries no branch.
+        reference_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: >-
+            The reference price (the branch base when the branch has one, else the product's base), the price a percent or markup rule acts on.
+        reference_price_uom:
+          type: string
     PricingRule:
       type: object
-      required: [id, name, rule_type, product_id, customer_id, job_id, category, fixed_price_ten_thousandths, discount_pct, markup_pct, min_quantity, max_quantity, margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at]
+      required: [id, name, rule_type, product_id, customer_id, job_id, category, fixed_price_ten_thousandths, discount_pct, markup_pct, min_quantity, max_quantity, margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at, price_uom]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -26025,6 +27630,9 @@ components:
         revision: {type: integer, format: int64}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        price_uom:
+          type: [string, "null"]
+          description: The unit a fixed price is per (the product's stocking unit while the hold stands); a percent or markup rule carries none.
     PricingRulePage:
       type: object
       required: [items, next_cursor, limit]
@@ -26132,14 +27740,15 @@ components:
       type: object
       description: >-
         The rule's value is one number with two readings (ADR 0001 section 7): value_ten_thousandths on a fixed rule, value_pct otherwise, null for the other.
-      required: [id, target_type, customer_id, tier, category_id, rule_type, value_ten_thousandths, value_pct, margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at]
+      required: [id, target_type, customer_id, price_profile_id, price_level_id, category_id, rule_type, value_ten_thousandths, value_pct, margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         target_type:
           type: string
-          enum: [account, tier]
+          enum: [account, profile, level]
+          description: >-
+            The customer scope the rule prices: one account, one profile's customers, or one level's customers.
         customer_id: {type: [string, "null"], format: uuid}
-        tier: {type: string}
         category_id: {type: string, format: uuid}
         rule_type:
           type: string
@@ -26158,6 +27767,20 @@ components:
         category_name: {type: string, description: Joined on reads.}
         category_path: {type: string, description: Joined on reads.}
         customer_name: {type: string, description: Joined on reads.}
+        price_profile_id:
+          type: [string, "null"]
+          format: uuid
+          description: A profile rule's target.
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+          description: A level rule's target.
+        level_code:
+          type: [string, "null"]
+          description: The target level's code, on the matrix's rows.
+        profile_code:
+          type: [string, "null"]
+          description: The target profile's code, when joined.
     PricingCategoryRulePage:
       type: object
       required: [items, next_cursor, limit]
@@ -26191,9 +27814,10 @@ components:
           properties:
             target_type:
               type: string
-              enum: [account, tier]
+              enum: [account, profile, level]
             customer_id: {type: [string, "null"], format: uuid}
-            tier: {type: [string, "null"]}
+            price_profile_id: {type: [string, "null"], format: uuid}
+            price_level_id: {type: [string, "null"], format: uuid}
             category_id: {type: string, format: uuid}
     PricingCategoryRuleBulkItem:
       description: >-
@@ -26226,8 +27850,10 @@ components:
         performed_at: {type: string, format: date-time}
         category_id: {type: string, format: uuid}
         target_type: {type: string}
-        tier: {type: string}
-        customer_id: {type: string, format: uuid}
+        tier: {type: [string, "null"], description: A legacy rule's tier, read back for rows written before C3-2A-pricing.: ''}
+        price_profile_id: {type: [string, "null"], format: uuid}
+        price_level_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
     PricingCategoryRuleAuditList:
       type: object
       required: [items, next_cursor, limit]
@@ -26253,26 +27879,27 @@ components:
           items: {type: string, format: uuid}
     PricingMatrixCell:
       type: object
-      required: [category_id, category_name, category_path, tier, inherited]
+      required: [category_id, category_name, category_path, level, inherited]
       properties:
         category_id: {type: string, format: uuid}
         category_name: {type: string}
         category_path: {type: string}
-        tier: {type: string}
+        level: {type: [string, "null"]}
         rule:
           $ref: "#/components/schemas/PricingCategoryRule"
         inherited: {type: boolean}
         source_path: {type: string}
     PricingMatrix:
       type: object
-      required: [categories, tiers, cells]
+      required: [categories, levels, cells]
       properties:
         categories:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/PricingProductCategory"
-        tiers:
+        levels:
           type: [array, "null"]
+          description: The level codes the grid's columns answer, in place of tiers.
           items: {type: string}
         cells:
           type: [array, "null"]
@@ -26444,6 +28071,245 @@ components:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/MarketIndexRefreshTopCustomer"
+    PricingLevel:
+      type: object
+      required: [id, code, name, basis, adjust_percent, position, is_active, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        basis:
+          type: string
+          enum: [base, average_cost, replacement_cost]
+        adjust_percent:
+          type: string
+          description: A decimal string; -10 is ten percent off the basis.
+        position: {type: integer}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingLevelWrite:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+        basis: {type: string}
+        adjust_percent: {type: string}
+        position: {type: integer}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+    PricingLevelPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingLevel"
+        next_cursor:
+          type: [string, "null"]
+        limit: {type: integer}
+    PricingProfile:
+      type: object
+      required: [id, code, name, price_level_id, is_active, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        price_level_id: {type: string, format: uuid}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingProfileWrite:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+        price_level_id: {type: string, format: uuid}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+    PricingProfilePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingProfile"
+        next_cursor:
+          type: [string, "null"]
+        limit: {type: integer}
+    PricingProductPrice:
+      type: object
+      required: [id, product_id, price_uom, unit_price_ten_thousandths, revision]
+      properties:
+        id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+          description: Null on the branch's base price row.
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: Null on an every branch row.
+        price_uom: {type: string}
+        unit_price_ten_thousandths: {type: integer, format: int64}
+        revision: {type: integer, format: int64}
+    PricingProductPriceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingProductPrice"
+    PricingProductPriceReplace:
+      type: object
+      required: [revision, prices]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: The product revision the list was read at.
+        prices:
+          type: array
+          description: The slice's rows; each carries its own revision for reads.
+          items:
+            type: object
+            properties:
+              price_level_id:
+                type: [string, "null"]
+                format: uuid
+              price_uom: {type: string}
+              unit_price_ten_thousandths: {type: integer, format: int64}
+    PricingVendorLevel:
+      type: object
+      required: [id, vendor_id, code, name, is_default, is_active, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        is_default: {type: boolean}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingVendorLevelWrite:
+      type: object
+      properties:
+        vendor_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        is_default: {type: boolean}
+        is_active: {type: boolean}
+        revision: {type: integer, format: int64}
+    PricingVendorLevelPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingVendorLevel"
+        next_cursor:
+          type: [string, "null"]
+        limit: {type: integer}
+    PricingVendorCost:
+      type: object
+      required: [id, vendor_id, vendor_price_level_id, product_id, purchase_uom, unit_cost_ten_thousandths, effective_from, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        vendor_id: {type: string, format: uuid}
+        vendor_price_level_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+        purchase_uom: {type: string}
+        unit_cost_ten_thousandths: {type: integer, format: int64}
+        vendor_sku:
+          type: [string, "null"]
+        effective_from: {type: string}
+        effective_to:
+          type: [string, "null"]
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingVendorCostWrite:
+      type: object
+      properties:
+        vendor_id: {type: string, format: uuid}
+        vendor_price_level_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        branch_id: {type: [string, "null"], format: uuid}
+        purchase_uom: {type: string}
+        unit_cost_ten_thousandths: {type: integer, format: int64}
+        vendor_sku: {type: [string, "null"]}
+        effective_from: {type: string}
+        effective_to: {type: [string, "null"]}
+        revision: {type: integer, format: int64}
+    PricingVendorCostPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingVendorCost"
+        next_cursor:
+          type: [string, "null"]
+        limit: {type: integer}
+    PricingContract:
+      type: object
+      required: [id, customer_id, product_id, contract_price_ten_thousandths, price_uom, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        contract_price_ten_thousandths: {type: integer, format: int64}
+        price_uom: {type: string}
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: Null is the every branch row.
+        revision: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    PricingContractWrite:
+      type: object
+      properties:
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        branch_id: {type: [string, "null"], format: uuid}
+        contract_price_ten_thousandths: {type: integer, format: int64}
+        price_uom: {type: string}
+        revision: {type: integer, format: int64}
+    PricingContractPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+          $ref: "#/components/schemas/PricingContract"
+        next_cursor:
+          type: [string, "null"]
+        limit: {type: integer}
+    PricingResolvedCost:
+      type: object
+      required: [unit_cost_ten_thousandths, purchase_uom, uom_qty, purchase_uom_qty, vendor_level_code, vendor_level_id, vendor_cost_id]
+      properties:
+        unit_cost_ten_thousandths: {type: integer, format: int64}
+        purchase_uom: {type: string}
+        uom_qty: {type: string}
+        purchase_uom_qty: {type: string}
+        vendor_level_code: {type: string}
+        vendor_level_id: {type: string, format: uuid}
+        vendor_cost_id: {type: string, format: uuid}
     KitComponent:
       type: object
       required: [component_product_id, sku, description, quantity, uom, position]

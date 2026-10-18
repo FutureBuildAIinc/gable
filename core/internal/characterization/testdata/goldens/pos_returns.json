@@ -39,7 +39,7 @@
             "quantity": "2",
             "restock": true,
             "unit_price_ten_thousandths": 125000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000001",
@@ -96,7 +96,7 @@
             "quantity": "1",
             "restock": false,
             "unit_price_ten_thousandths": 300000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000002",
@@ -306,7 +306,7 @@
             "quantity": "2",
             "restock": true,
             "unit_price_ten_thousandths": 125000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000001",

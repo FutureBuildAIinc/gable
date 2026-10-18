@@ -175,10 +175,15 @@ func TestCategoryWrites_AuditAndEventInOneTransaction(t *testing.T) {
 	}
 
 	// A category rule's create leaves its own audit entry and now a
-	// category_rule.created event, in the same transaction.
-	tier := "AUDTIER"
+	// category_rule.created event, in the same transaction. The rule targets
+	// the migration's default level, which every database carries.
+	var levelID uuid.UUID
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT value::uuid FROM system_settings WHERE key = 'pricing.default_price_level_id'`).Scan(&levelID); err != nil {
+		t.Fatalf("the default price level: %v", err)
+	}
 	rule := &pricing.CategoryPricingRule{
-		TargetType: pricing.TargetTypeTier, Tier: tier, CategoryID: cat.ID,
+		TargetType: pricing.TargetTypeLevel, PriceLevelID: &levelID, CategoryID: cat.ID,
 		RuleType: pricing.CategoryRuleMarkup, ValuePct: qty(t, "12.5"), IsActive: true, Priority: 3,
 	}
 	if err := good.CreateCategoryRule(ctx, rule); err != nil {
@@ -192,8 +197,9 @@ func TestCategoryWrites_AuditAndEventInOneTransaction(t *testing.T) {
 	assertOne(`SELECT count(*) FROM category_pricing_audit WHERE rule_id = $1`, rule.ID, "category rule audit entries")
 	assertOne(`SELECT count(*) FROM events_outbox WHERE type = 'category_rule.created' AND entity_id = $1`, rule.ID, "category_rule.created events")
 
+	failedLevel := levelID
 	failedRule := &pricing.CategoryPricingRule{
-		TargetType: pricing.TargetTypeTier, Tier: tier + "2", CategoryID: cat.ID,
+		TargetType: pricing.TargetTypeLevel, PriceLevelID: &failedLevel, CategoryID: cat.ID,
 		RuleType: pricing.CategoryRuleMarkdown, ValuePct: qty(t, "10"), IsActive: true,
 	}
 	if err := badEvent.CreateCategoryRule(ctx, failedRule); err == nil {

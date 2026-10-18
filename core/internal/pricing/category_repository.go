@@ -43,17 +43,23 @@ type CategoryRepository interface {
 	LockCategoryRule(ctx context.Context, id uuid.UUID) (*CategoryPricingRule, error)
 	ListCategoryRules(ctx context.Context, filter CategoryRuleFilter) ([]CategoryPricingRule, error)
 
-	// Resolution: 5-step algorithm queries
+	// Resolution: the category rung's six arms, each exact category then
+	// ancestor, in the order the rung answers: account, profile, level.
 	ResolveAccountExact(ctx context.Context, customerID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error)
 	ResolveAccountAncestor(ctx context.Context, customerID uuid.UUID, categoryPath string) (*CategoryPricingRule, error)
-	ResolveTierExact(ctx context.Context, tier string, categoryID uuid.UUID) (*CategoryPricingRule, error)
-	ResolveTierAncestor(ctx context.Context, tier string, categoryPath string) (*CategoryPricingRule, error)
+	ResolveProfileExact(ctx context.Context, profileID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error)
+	ResolveProfileAncestor(ctx context.Context, profileID uuid.UUID, categoryPath string) (*CategoryPricingRule, error)
+	ResolveLevelExact(ctx context.Context, levelID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error)
+	ResolveLevelAncestor(ctx context.Context, levelID uuid.UUID, categoryPath string) (*CategoryPricingRule, error)
 
 	// Matrix view (batch for admin UI)
 	GetMatrixRules(ctx context.Context) ([]CategoryPricingRule, error)
 
 	// Product category lookup (returns categoryID, categoryPath, the scale 4 cost)
 	GetProductCategoryPath(ctx context.Context, productID uuid.UUID) (uuid.UUID, string, httpx.Price, error)
+	// GetProductCost reads the product's average unit cost alone, readable
+	// with no category to name.
+	GetProductCost(ctx context.Context, productID uuid.UUID) (httpx.Price, error)
 
 	// Audit trail
 	CreateAuditEntry(ctx context.Context, entry *CategoryPricingAudit) error
@@ -189,7 +195,7 @@ func mapCategoryWriteError(what string, err error) error {
 			}
 			return httpx.Duplicate("a category with this slug or path already exists")
 		case "23503":
-			for _, field := range []string{"category_id", "customer_id", "parent_id"} {
+			for _, field := range []string{"category_id", "customer_id", "price_profile_id", "price_level_id", "parent_id"} {
 				if strings.Contains(pgErr.ConstraintName, field) {
 					return httpx.BadRequest(field+" does not name an existing row",
 						httpx.FieldError{Field: field, Message: "no such row"})
@@ -215,16 +221,16 @@ func (r *PostgresCategoryRepository) CreateCategoryRule(ctx context.Context, rul
 
 	query := `
 		INSERT INTO category_pricing_rules
-			(id, target_type, customer_id, tier, category_id, rule_type, rule_value,
+			(id, target_type, customer_id, price_profile_id, price_level_id, category_id, rule_type, rule_value,
 			 margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16)`
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15, $16, $17)`
 
 	args, err := categoryRuleWriteArgs(rule)
 	if err != nil {
 		return err
 	}
 	_, err = r.db.GetExecutor(ctx).Exec(ctx, query,
-		append(args[:13], rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time)...)
+		append(args[:14], rule.Revision, rule.CreatedAt.Time, rule.UpdatedAt.Time)...)
 	if err != nil {
 		return mapCategoryWriteError("category rule", err)
 	}
@@ -246,7 +252,7 @@ func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rul
 		return err
 	}
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		rule.ID, args[5], args[6], args[7], args[8], args[9], args[10], args[11], rule.UpdatedAt.Time, revision,
+		rule.ID, args[6], args[7], args[8], args[9], args[10], args[11], args[12], rule.UpdatedAt.Time, revision,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update category rule: %w", err)
@@ -287,7 +293,7 @@ func (r *PostgresCategoryRepository) LockCategoryRule(ctx context.Context, id uu
 
 func (r *PostgresCategoryRepository) getCategoryRule(ctx context.Context, id uuid.UUID, lock string) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
@@ -312,7 +318,7 @@ func (r *PostgresCategoryRepository) getCategoryRule(ctx context.Context, id uui
 
 func (r *PostgresCategoryRepository) ListCategoryRules(ctx context.Context, filter CategoryRuleFilter) ([]CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
@@ -329,9 +335,14 @@ func (r *PostgresCategoryRepository) ListCategoryRules(ctx context.Context, filt
 		args = append(args, *filter.TargetType)
 		argIdx++
 	}
-	if filter.Tier != "" {
-		query += fmt.Sprintf(" AND cpr.tier = $%d", argIdx)
-		args = append(args, filter.Tier)
+	if filter.PriceProfileID != nil {
+		query += fmt.Sprintf(" AND cpr.price_profile_id = $%d", argIdx)
+		args = append(args, *filter.PriceProfileID)
+		argIdx++
+	}
+	if filter.PriceLevelID != nil {
+		query += fmt.Sprintf(" AND cpr.price_level_id = $%d", argIdx)
+		args = append(args, *filter.PriceLevelID)
 		argIdx++
 	}
 	if filter.CustomerID != nil {
@@ -350,7 +361,7 @@ func (r *PostgresCategoryRepository) ListCategoryRules(ctx context.Context, filt
 		argIdx++
 	}
 
-	query += " ORDER BY cpr.target_type ASC, cpr.tier ASC, pc.path ASC, cpr.priority DESC"
+	query += " ORDER BY cpr.target_type ASC, cpr.price_level_id ASC, cpr.price_profile_id ASC, pc.path ASC, cpr.priority DESC"
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
@@ -365,7 +376,7 @@ func (r *PostgresCategoryRepository) ListCategoryRules(ctx context.Context, filt
 
 func (r *PostgresCategoryRepository) ResolveAccountExact(ctx context.Context, customerID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
@@ -386,7 +397,7 @@ func (r *PostgresCategoryRepository) ResolveAccountExact(ctx context.Context, cu
 
 func (r *PostgresCategoryRepository) ResolveAccountAncestor(ctx context.Context, customerID uuid.UUID, categoryPath string) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
@@ -405,17 +416,17 @@ func (r *PostgresCategoryRepository) ResolveAccountAncestor(ctx context.Context,
 	return r.scanSingleRule(ctx, query, customerID, categoryPath)
 }
 
-func (r *PostgresCategoryRepository) ResolveTierExact(ctx context.Context, tier string, categoryID uuid.UUID) (*CategoryPricingRule, error) {
+func (r *PostgresCategoryRepository) ResolveProfileExact(ctx context.Context, profileID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
 		       pc.name, pc.path::text
 		FROM category_pricing_rules cpr
 		JOIN product_categories pc ON pc.id = cpr.category_id
-		WHERE cpr.target_type = 'TIER'
-		  AND cpr.tier = $1
+		WHERE cpr.target_type = 'PROFILE'
+		  AND cpr.price_profile_id = $1
 		  AND cpr.category_id = $2
 		  AND cpr.is_active = true
 		  AND (cpr.starts_at IS NULL OR cpr.starts_at <= NOW())
@@ -423,20 +434,20 @@ func (r *PostgresCategoryRepository) ResolveTierExact(ctx context.Context, tier 
 		ORDER BY cpr.priority DESC
 		LIMIT 1`
 
-	return r.scanSingleRule(ctx, query, tier, categoryID)
+	return r.scanSingleRule(ctx, query, profileID, categoryID)
 }
 
-func (r *PostgresCategoryRepository) ResolveTierAncestor(ctx context.Context, tier string, categoryPath string) (*CategoryPricingRule, error) {
+func (r *PostgresCategoryRepository) ResolveProfileAncestor(ctx context.Context, profileID uuid.UUID, categoryPath string) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
 		       pc.name, pc.path::text
 		FROM category_pricing_rules cpr
 		JOIN product_categories pc ON pc.id = cpr.category_id
-		WHERE cpr.target_type = 'TIER'
-		  AND cpr.tier = $1
+		WHERE cpr.target_type = 'PROFILE'
+		  AND cpr.price_profile_id = $1
 		  AND cpr.is_active = true
 		  AND pc.path <@ $2::ltree
 		  AND (cpr.starts_at IS NULL OR cpr.starts_at <= NOW())
@@ -444,25 +455,70 @@ func (r *PostgresCategoryRepository) ResolveTierAncestor(ctx context.Context, ti
 		ORDER BY nlevel(pc.path) DESC, cpr.priority DESC
 		LIMIT 1`
 
-	return r.scanSingleRule(ctx, query, tier, categoryPath)
+	return r.scanSingleRule(ctx, query, profileID, categoryPath)
 }
 
-// --- Matrix (admin UI) ---
-
-func (r *PostgresCategoryRepository) GetMatrixRules(ctx context.Context) ([]CategoryPricingRule, error) {
+func (r *PostgresCategoryRepository) ResolveLevelExact(ctx context.Context, levelID uuid.UUID, categoryID uuid.UUID) (*CategoryPricingRule, error) {
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
 		       pc.name, pc.path::text
 		FROM category_pricing_rules cpr
 		JOIN product_categories pc ON pc.id = cpr.category_id
-		WHERE cpr.is_active = true
-		  AND cpr.target_type = 'TIER'
+		WHERE cpr.target_type = 'LEVEL'
+		  AND cpr.price_level_id = $1
+		  AND cpr.category_id = $2
+		  AND cpr.is_active = true
 		  AND (cpr.starts_at IS NULL OR cpr.starts_at <= NOW())
 		  AND (cpr.expires_at IS NULL OR cpr.expires_at > NOW())
-		ORDER BY pc.path ASC, cpr.tier ASC`
+		ORDER BY cpr.priority DESC
+		LIMIT 1`
+
+	return r.scanSingleRule(ctx, query, levelID, categoryID)
+}
+
+func (r *PostgresCategoryRepository) ResolveLevelAncestor(ctx context.Context, levelID uuid.UUID, categoryPath string) (*CategoryPricingRule, error) {
+	query := `
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
+		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
+		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
+		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
+		       pc.name, pc.path::text
+		FROM category_pricing_rules cpr
+		JOIN product_categories pc ON pc.id = cpr.category_id
+		WHERE cpr.target_type = 'LEVEL'
+		  AND cpr.price_level_id = $1
+		  AND cpr.is_active = true
+		  AND pc.path <@ $2::ltree
+		  AND (cpr.starts_at IS NULL OR cpr.starts_at <= NOW())
+		  AND (cpr.expires_at IS NULL OR cpr.expires_at > NOW())
+		ORDER BY nlevel(pc.path) DESC, cpr.priority DESC
+		LIMIT 1`
+
+	return r.scanSingleRule(ctx, query, levelID, categoryPath)
+}
+
+// --- Matrix (admin UI) ---
+
+// GetMatrixRules reads the LEVEL rules with their level's code, the grid the
+// pricing matrix renders.
+func (r *PostgresCategoryRepository) GetMatrixRules(ctx context.Context) ([]CategoryPricingRule, error) {
+	query := `
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
+		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
+		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
+		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,
+		       pc.name, pc.path::text, pl.code
+		FROM category_pricing_rules cpr
+		JOIN product_categories pc ON pc.id = cpr.category_id
+		JOIN price_levels pl ON pl.id = cpr.price_level_id
+		WHERE cpr.is_active = true
+		  AND cpr.target_type = 'LEVEL'
+		  AND (cpr.starts_at IS NULL OR cpr.starts_at <= NOW())
+		  AND (cpr.expires_at IS NULL OR cpr.expires_at > NOW())
+		ORDER BY pc.path ASC, cpr.price_level_id ASC`
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
@@ -470,10 +526,40 @@ func (r *PostgresCategoryRepository) GetMatrixRules(ctx context.Context) ([]Cate
 	}
 	defer rows.Close()
 
-	return scanCategoryRules(rows)
+	var rules []CategoryPricingRule
+	for rows.Next() {
+		raw := &rawCategoryRule{}
+		var code string
+		if err := scanRawRuleInto(rows, raw, &code); err != nil {
+			return nil, fmt.Errorf("failed to scan category rule: %w", err)
+		}
+		var rule CategoryPricingRule
+		if err := rule.fromRaw(raw); err != nil {
+			return nil, err
+		}
+		rule.LevelCode = code
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("category rule rows error: %w", err)
+	}
+	return rules, nil
 }
 
 // --- Product Category Lookup ---
+
+func (r *PostgresCategoryRepository) GetProductCost(ctx context.Context, productID uuid.UUID) (httpx.Price, error) {
+	var costText string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COALESCE(average_unit_cost, 0)::text FROM products WHERE id = $1`, productID).Scan(&costText)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("product cost lookup: %w", err)
+	}
+	return httpx.ParsePrice(costText)
+}
 
 func (r *PostgresCategoryRepository) GetProductCategoryPath(ctx context.Context, productID uuid.UUID) (uuid.UUID, string, httpx.Price, error) {
 	query := `
@@ -540,7 +626,7 @@ type rawCategoryRule struct {
 	id, categoryID             uuid.UUID
 	targetType                 TargetType
 	customerID                 *uuid.UUID
-	tier                       *string
+	profileID, levelID         *uuid.UUID
 	ruleType                   CategoryRuleType
 	value, floor               *string
 	startsAt, expiresAt        *time.Time
@@ -555,14 +641,7 @@ type rawCategoryRule struct {
 // scanRawRule scans the shared column list into a raw row; nil means no row.
 func scanRawRule(scanner interface{ Scan(dest ...any) error }) (*rawCategoryRule, error) {
 	var r rawCategoryRule
-	err := scanner.Scan(
-		&r.id, &r.targetType, &r.customerID, &r.tier, &r.categoryID,
-		&r.ruleType, &r.value, &r.floor,
-		&r.startsAt, &r.expiresAt, &r.isActive, &r.priority,
-		&r.createdBy, &r.revision, &r.createdAt, &r.updatedAt,
-		&r.categoryName, &r.categoryPath,
-	)
-	if err != nil {
+	if err := scanRawRuleInto(scanner, &r, nil); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
@@ -571,17 +650,31 @@ func scanRawRule(scanner interface{ Scan(dest ...any) error }) (*rawCategoryRule
 	return &r, nil
 }
 
+// scanRawRuleInto scans the shared column list into raw; extra, when not
+// nil, takes one more trailing column (the matrix's level code).
+func scanRawRuleInto(scanner interface{ Scan(dest ...any) error }, raw *rawCategoryRule, extra any) error {
+	dest := []any{
+		&raw.id, &raw.targetType, &raw.customerID, &raw.profileID, &raw.levelID, &raw.categoryID,
+		&raw.ruleType, &raw.value, &raw.floor,
+		&raw.startsAt, &raw.expiresAt, &raw.isActive, &raw.priority,
+		&raw.createdBy, &raw.revision, &raw.createdAt, &raw.updatedAt,
+		&raw.categoryName, &raw.categoryPath,
+	}
+	if extra != nil {
+		dest = append(dest, extra)
+	}
+	return scanner.Scan(dest...)
+}
+
 // fromRaw parses the raw row's exact fields: the one rule_value column into
 // the reading its type gives it (a scale 4 price for FIXED, a percentage
-// otherwise), the margin floor, the timestamps and the tier.
+// otherwise), the margin floor, the timestamps and the rule's target.
 func (rule *CategoryPricingRule) fromRaw(r *rawCategoryRule) error {
 	rule.ID, rule.TargetType, rule.CustomerID = r.id, r.targetType, r.customerID
 	rule.CategoryID, rule.RuleType = r.categoryID, r.ruleType
 	rule.IsActive, rule.Priority, rule.CreatedBy, rule.Revision = r.isActive, r.priority, r.createdBy, r.revision
 	rule.CategoryName, rule.CategoryPath = r.categoryName, r.categoryPath
-	if r.tier != nil {
-		rule.Tier = *r.tier
-	}
+	rule.PriceProfileID, rule.PriceLevelID = r.profileID, r.levelID
 	if r.value != nil {
 		v, err := httpx.ParseQuantity(*r.value)
 		if err != nil {
@@ -631,7 +724,7 @@ func categoryRuleWriteArgs(rule *CategoryPricingRule) ([]any, error) {
 		return nil, err
 	}
 	return []any{
-		rule.ID, rule.TargetType, rule.CustomerID, nilIfEmpty(rule.Tier), rule.CategoryID,
+		rule.ID, rule.TargetType, rule.CustomerID, rule.PriceProfileID, rule.PriceLevelID, rule.CategoryID,
 		rule.RuleType, value, quantityString(rule.MarginFloorPct),
 		timeOf(rule.StartsAt), timeOf(rule.ExpiresAt), rule.IsActive, rule.Priority,
 		rule.CreatedBy, rule.CreatedAt.Time, rule.UpdatedAt.Time,
@@ -662,14 +755,15 @@ func (r *PostgresCategoryRepository) CreateAuditEntry(ctx context.Context, entry
 	query := `
 		INSERT INTO category_pricing_audit
 			(id, rule_id, action, old_values, new_values, performed_by, performed_at,
-			 category_id, target_type, tier, customer_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			 category_id, target_type, tier, price_profile_id, price_level_id, customer_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		entry.ID, entry.RuleID, entry.Action,
 		oldJSON, newJSON,
 		entry.PerformedBy, entry.PerformedAt.Time,
-		entry.CategoryID, nilIfEmpty(entry.TargetType), nilIfEmpty(entry.Tier), entry.CustomerID,
+		entry.CategoryID, nilIfEmpty(entry.TargetType), nilIfEmpty(entry.Tier),
+		entry.PriceProfileID, entry.PriceLevelID, entry.CustomerID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create audit entry: %w", err)
@@ -680,7 +774,7 @@ func (r *PostgresCategoryRepository) CreateAuditEntry(ctx context.Context, entry
 func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleID uuid.UUID) ([]CategoryPricingAudit, error) {
 	query := `
 		SELECT id, rule_id, action, old_values, new_values, performed_by, performed_at,
-		       category_id, target_type, tier, customer_id
+		       category_id, target_type, tier, price_profile_id, price_level_id, customer_id
 		FROM category_pricing_audit
 		WHERE rule_id = $1
 		ORDER BY performed_at DESC
@@ -701,7 +795,7 @@ func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleI
 		if err := rows.Scan(
 			&e.ID, &e.RuleID, &e.Action, &oldJSON, &newJSON,
 			&e.PerformedBy, &performedAt,
-			&e.CategoryID, &targetType, &tier, &e.CustomerID,
+			&e.CategoryID, &targetType, &tier, &e.PriceProfileID, &e.PriceLevelID, &e.CustomerID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan audit entry: %w", err)
 		}
@@ -751,9 +845,9 @@ func (r *PostgresCategoryRepository) bulkUpsertRulesInTx(ctx context.Context, ru
 
 		query := `
 			INSERT INTO category_pricing_rules
-				(id, target_type, customer_id, tier, category_id, rule_type, rule_value,
+				(id, target_type, customer_id, price_profile_id, price_level_id, category_id, rule_type, rule_value,
 				 margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15, $16)
 			ON CONFLICT (id) DO UPDATE SET
 				rule_type = EXCLUDED.rule_type,
 				rule_value = EXCLUDED.rule_value,
@@ -774,7 +868,7 @@ func (r *PostgresCategoryRepository) bulkUpsertRulesInTx(ctx context.Context, ru
 			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
 		}
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
-			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
+			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, mapCategoryWriteError("category rule", err))
 		}
 	}
 	return nil
@@ -799,9 +893,13 @@ func categoryRuleWhere(filter CategoryRuleFilter) (string, []any) {
 		where += fmt.Sprintf(" AND cpr.target_type = $%d", len(args)+1)
 		args = append(args, *filter.TargetType)
 	}
-	if filter.Tier != "" {
-		where += fmt.Sprintf(" AND cpr.tier = $%d", len(args)+1)
-		args = append(args, filter.Tier)
+	if filter.PriceProfileID != nil {
+		where += fmt.Sprintf(" AND cpr.price_profile_id = $%d", len(args)+1)
+		args = append(args, *filter.PriceProfileID)
+	}
+	if filter.PriceLevelID != nil {
+		where += fmt.Sprintf(" AND cpr.price_level_id = $%d", len(args)+1)
+		args = append(args, *filter.PriceLevelID)
 	}
 	if filter.CustomerID != nil {
 		where += fmt.Sprintf(" AND cpr.customer_id = $%d", len(args)+1)
@@ -827,7 +925,7 @@ func (r *PostgresCategoryRepository) ListCategoryRulesPage(ctx context.Context, 
 		args = append(args, *after, *afterID)
 	}
 	query := `
-		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.tier, cpr.category_id,
+		SELECT cpr.id, cpr.target_type, cpr.customer_id, cpr.price_profile_id, cpr.price_level_id, cpr.category_id,
 		       cpr.rule_type, cpr.rule_value::text, cpr.margin_floor_pct::text,
 		       cpr.starts_at, cpr.expires_at, cpr.is_active, cpr.priority,
 		       cpr.created_by, cpr.revision, cpr.created_at, cpr.updated_at,

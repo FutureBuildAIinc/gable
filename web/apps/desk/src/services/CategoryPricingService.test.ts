@@ -58,9 +58,10 @@ afterEach(() => {
 
 const RULE: CategoryPricingRule = {
   id: 'r-1',
-  target_type: 'tier',
+  target_type: 'level',
   customer_id: null,
-  tier: 'GOLD',
+  price_level_id: 'lvl-1',
+  price_profile_id: null,
   category_id: 'cat-1',
   rule_type: 'markdown',
   value_ten_thousandths: null,
@@ -79,8 +80,8 @@ const RULE: CategoryPricingRule = {
 describe('buildRuleQuery', () => {
   it('sends the lowercase filters and the paging names only', () => {
     expect(buildRuleQuery()).toBe('')
-    const q = new URLSearchParams(buildRuleQuery({ target_type: 'account', tier: 'GOLD', customer_id: 'c', category_id: 'k', is_active: false, limit: 200, cursor: 'x', includeTotal: true }).slice(1))
-    expect(Object.fromEntries(q)).toEqual({ target_type: 'account', tier: 'GOLD', customer_id: 'c', category_id: 'k', is_active: 'false', limit: '200', cursor: 'x', include: 'total' })
+    const q = new URLSearchParams(buildRuleQuery({ target_type: 'account', customer_id: 'c', category_id: 'k', is_active: false, limit: 200, cursor: 'x', includeTotal: true }).slice(1))
+    expect(Object.fromEntries(q)).toEqual({ target_type: 'account', customer_id: 'c', category_id: 'k', is_active: 'false', limit: '200', cursor: 'x', include: 'total' })
     expect(buildRuleQuery({ cursor: null })).toBe('')
   })
 })
@@ -145,9 +146,9 @@ describe('ruleUpdateFromRule', () => {
 describe('rules', () => {
   it('lists the envelope', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [RULE], next_cursor: null, limit: 50 }))
-    const page = await categoryPricingService.listRules({ target_type: 'tier' })
+    const page = await categoryPricingService.listRules({ target_type: 'level' })
     expect(lastUrl().pathname).toBe('/api/v1/pricing/category-rules')
-    expect(lastUrl().search).toBe('?target_type=tier')
+    expect(lastUrl().search).toBe('?target_type=level')
     expect(page.items[0].value_pct).toBe('15.0000')
   })
 
@@ -164,11 +165,11 @@ describe('rules', () => {
   })
 
   it('creates with POST, no If-Match', async () => {
-    await categoryPricingService.createRule({ target_type: 'tier', tier: 'GOLD', category_id: 'cat-1', rule_type: 'markup', value_pct: '10', is_active: true })
+    await categoryPricingService.createRule({ target_type: 'level', price_level_id: 'lvl-1', category_id: 'cat-1', rule_type: 'markup', value_pct: '10', is_active: true })
     expect(lastUrl().pathname).toBe('/api/v1/pricing/category-rules')
     expect(lastInit().method).toBe('POST')
     expect(lastHeader('If-Match')).toBeUndefined()
-    expect(lastBody()).toEqual({ target_type: 'tier', tier: 'GOLD', category_id: 'cat-1', rule_type: 'markup', value_pct: '10', is_active: true })
+    expect(lastBody()).toEqual({ target_type: 'level', price_level_id: 'lvl-1', category_id: 'cat-1', rule_type: 'markup', value_pct: '10', is_active: true })
   })
 
   it('updates with PUT and the quoted revision', async () => {
@@ -190,8 +191,8 @@ describe('rules', () => {
   it('bulk upserts an array whose elements may carry the id they replace', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ count: 2 }))
     const result = await categoryPricingService.bulkUpsertRules([
-      { id: 'r-1', target_type: 'tier', tier: 'GOLD', category_id: 'cat-1', rule_type: 'markdown', value_pct: '5' },
-      { target_type: 'tier', tier: 'SILVER', category_id: 'cat-1', rule_type: 'markdown', value_pct: '5' },
+      { id: 'r-1', target_type: 'level', price_level_id: 'lvl-1', category_id: 'cat-1', rule_type: 'markdown', value_pct: '5' },
+      { target_type: 'level', price_level_id: 'lvl-2', category_id: 'cat-1', rule_type: 'markdown', value_pct: '5' },
     ])
     expect(lastUrl().pathname).toBe('/api/v1/pricing/category-rules/bulk')
     expect(lastInit().method).toBe('POST')
@@ -222,8 +223,8 @@ describe('categories, audit, matrix and resolve', () => {
   })
 
   it('turns the matrix nulls into empty arrays', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ categories: null, tiers: null, cells: null }))
-    expect(await categoryPricingService.getMatrix()).toEqual({ categories: [], tiers: [], cells: [] })
+    fetchMock.mockResolvedValueOnce(jsonResponse({ categories: null, levels: null, cells: null }))
+    expect(await categoryPricingService.getMatrix()).toEqual({ categories: [], levels: [], cells: [] })
   })
 
   it('resolves with the product, customer and tier', async () => {

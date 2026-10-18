@@ -314,6 +314,15 @@ type CartItemDTO struct {
 	UnitPrice   float64   `json:"unit_price"`
 	LineTotal   float64   `json:"line_total"`
 	Available   float64   `json:"available"`
+
+	// The line shape's unit fields (ADR 0006 section 7.6): the quantity is
+	// in the item's uom, the price is per price_uom, and the pair between
+	// them was resolved when the item was added. The portal's float wire
+	// keeps its shape until C5-1; these ride the stored columns.
+	UOM         string  `json:"uom"`
+	PriceUOM    string  `json:"price_uom"`
+	UOMQty      float64 `json:"uom_qty"`
+	PriceUOMQty float64 `json:"price_uom_qty"`
 }
 
 // AddToCartRequest is the payload for adding an item to the cart.

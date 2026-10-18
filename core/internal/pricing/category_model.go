@@ -12,12 +12,13 @@ import (
 )
 
 // TargetType determines if a category pricing rule targets a specific
-// account or a tier; lowercase on the wire.
+// account, a profile or a level; lowercase on the wire.
 type TargetType string
 
 const (
 	TargetTypeAccount TargetType = "ACCOUNT"
-	TargetTypeTier    TargetType = "TIER"
+	TargetTypeProfile TargetType = "PROFILE"
+	TargetTypeLevel   TargetType = "LEVEL"
 )
 
 // MarshalText writes the lowercase wire name.
@@ -27,7 +28,7 @@ func (t TargetType) MarshalText() ([]byte, error) {
 
 // ParseTargetType maps a lowercase wire name to its target type.
 func ParseTargetType(name string) (TargetType, bool) {
-	for _, t := range []TargetType{TargetTypeAccount, TargetTypeTier} {
+	for _, t := range []TargetType{TargetTypeAccount, TargetTypeProfile, TargetTypeLevel} {
 		if strings.ToLower(string(t)) == name {
 			return t, true
 		}
@@ -85,7 +86,8 @@ type CategoryPricingRule struct {
 	ID             uuid.UUID        `json:"id"`
 	TargetType     TargetType       `json:"target_type"`
 	CustomerID     *uuid.UUID       `json:"customer_id"`
-	Tier           string           `json:"tier"`
+	PriceProfileID *uuid.UUID       `json:"price_profile_id"`
+	PriceLevelID   *uuid.UUID       `json:"price_level_id"`
 	CategoryID     uuid.UUID        `json:"category_id"`
 	RuleType       CategoryRuleType `json:"rule_type"`
 	ValuePrice     *httpx.Price     `json:"value_ten_thousandths"`
@@ -104,6 +106,8 @@ type CategoryPricingRule struct {
 	CategoryName string `json:"category_name,omitempty"`
 	CategoryPath string `json:"category_path,omitempty"`
 	CustomerName string `json:"customer_name,omitempty"`
+	LevelCode    string `json:"level_code,omitempty"`
+	ProfileCode  string `json:"profile_code,omitempty"`
 }
 
 // ValueRat is the rule's value as an exact rational, whatever reading its
@@ -121,7 +125,7 @@ func (r *CategoryPricingRule) ValueRat() *big.Rat {
 // ResolvedCategoryPrice is the output of the category resolution algorithm.
 type ResolvedCategoryPrice struct {
 	Rule         *CategoryPricingRule `json:"rule,omitempty"`
-	MatchType    string               `json:"match_type"` // "account_exact", "account_ancestor", "tier_exact", "tier_ancestor", "none"
+	MatchType    string               `json:"match_type"` // "account_exact", "account_ancestor", "profile_exact", "profile_ancestor", "level_exact", "level_ancestor", "none"
 	CategoryPath string               `json:"category_path"`
 	CostPrice    httpx.Price          `json:"cost_price_ten_thousandths"` // product's average unit cost for MARKUP/MARGIN rules
 }
@@ -131,7 +135,7 @@ type MatrixCell struct {
 	CategoryID   uuid.UUID            `json:"category_id"`
 	CategoryName string               `json:"category_name"`
 	CategoryPath string               `json:"category_path"`
-	Tier         string               `json:"tier"`
+	Level        string               `json:"level"`
 	Rule         *CategoryPricingRule `json:"rule,omitempty"`
 	Inherited    bool                 `json:"inherited"`
 	SourcePath   string               `json:"source_path,omitempty"`
@@ -140,30 +144,33 @@ type MatrixCell struct {
 // MatrixResponse is the admin API response for the full pricing matrix.
 type MatrixResponse struct {
 	Categories []ProductCategory `json:"categories"`
-	Tiers      []string          `json:"tiers"`
+	Levels     []string          `json:"levels"`
 	Cells      []MatrixCell      `json:"cells"`
 }
 
 // CategoryRuleFilter is used to filter category pricing rules in list queries.
 type CategoryRuleFilter struct {
-	TargetType *TargetType `json:"target_type,omitempty"`
-	Tier       string      `json:"tier,omitempty"`
-	CustomerID *uuid.UUID  `json:"customer_id,omitempty"`
-	CategoryID *uuid.UUID  `json:"category_id,omitempty"`
-	IsActive   *bool       `json:"is_active,omitempty"`
+	TargetType     *TargetType `json:"target_type,omitempty"`
+	PriceProfileID *uuid.UUID  `json:"price_profile_id,omitempty"`
+	PriceLevelID   *uuid.UUID  `json:"price_level_id,omitempty"`
+	CustomerID     *uuid.UUID  `json:"customer_id,omitempty"`
+	CategoryID     *uuid.UUID  `json:"category_id,omitempty"`
+	IsActive       *bool       `json:"is_active,omitempty"`
 }
 
 // CategoryPricingAudit represents a row in the audit trail table.
 type CategoryPricingAudit struct {
-	ID          uuid.UUID       `json:"id"`
-	RuleID      uuid.UUID       `json:"rule_id"`
-	Action      string          `json:"action"`
-	OldValues   map[string]any  `json:"old_values,omitempty"`
-	NewValues   map[string]any  `json:"new_values,omitempty"`
-	PerformedBy string          `json:"performed_by"`
-	PerformedAt httpx.Timestamp `json:"performed_at"`
-	CategoryID  *uuid.UUID      `json:"category_id,omitempty"`
-	TargetType  string          `json:"target_type,omitempty"`
-	Tier        string          `json:"tier,omitempty"`
-	CustomerID  *uuid.UUID      `json:"customer_id,omitempty"`
+	ID             uuid.UUID       `json:"id"`
+	RuleID         uuid.UUID       `json:"rule_id"`
+	Action         string          `json:"action"`
+	OldValues      map[string]any  `json:"old_values,omitempty"`
+	NewValues      map[string]any  `json:"new_values,omitempty"`
+	PerformedBy    string          `json:"performed_by"`
+	PerformedAt    httpx.Timestamp `json:"performed_at"`
+	CategoryID     *uuid.UUID      `json:"category_id,omitempty"`
+	TargetType     string          `json:"target_type,omitempty"`
+	Tier           string          `json:"tier,omitempty"`
+	PriceProfileID *uuid.UUID      `json:"price_profile_id,omitempty"`
+	PriceLevelID   *uuid.UUID      `json:"price_level_id,omitempty"`
+	CustomerID     *uuid.UUID      `json:"customer_id,omitempty"`
 }
