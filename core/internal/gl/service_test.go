@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 // --- Mock Repository ---
 
 type MockRepository struct {
@@ -87,11 +86,11 @@ func (m *MockRepository) ControlBalance(ctx context.Context, code string, asOf t
 	return 0, nil
 }
 
-func (m *MockRepository) ARSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+func (m *MockRepository) ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	return 0, nil
 }
 
-func (m *MockRepository) APSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+func (m *MockRepository) APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	return 0, nil
 }
 
@@ -236,7 +235,7 @@ func TestCreateJournalEntry_Balanced(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Test sale",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},      // $100.00 DR
 			{AccountID: revenueID, Debit: 0, Credit: 10000}, // $100.00 CR
@@ -263,7 +262,7 @@ func TestCreateJournalEntry_Unbalanced(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Unbalanced entry",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},     // $100.00 DR
 			{AccountID: revenueID, Debit: 0, Credit: 5000}, // $50.00 CR — UNBALANCED!
@@ -283,7 +282,7 @@ func TestCreateJournalEntry_TooFewLines(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Single line entry",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},
 		},
@@ -303,7 +302,7 @@ func TestPostJournalEntry_Success(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), // In open period
 		Memo:      "Postable entry",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},
@@ -333,7 +332,7 @@ func TestPostJournalEntry_ClosedPeriod(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2025, 12, 15, 0, 0, 0, 0, time.UTC), // In CLOSED period
 		Memo:      "Should fail",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},
@@ -394,7 +393,7 @@ func TestVoidJournalEntry(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		Memo:      "To be voided",
-		BranchID: testBranchID,
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},

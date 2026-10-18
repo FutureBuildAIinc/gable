@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -428,16 +429,30 @@ func TestYearEndCloseZeroesEachBranchIntoRetainedEarnings(t *testing.T) {
 	}
 
 	for _, branch := range []uuid.UUID{a, b} {
-		// After the close the year's revenue and expense read zero at the
-		// branch (the closing entry zeroed them into 3020), and 3020 holds
-		// exactly the branch's own net.
+		// After the close the year's income statement still reads what the
+		// year earned (closing entries are not trading), while the revenue
+		// and expense accounts themselves hold zero at the branch (the
+		// closing entry zeroed them into 3020), and 3020 holds exactly the
+		// branch's own net.
 		pnl, err := svc.GetProfitAndLoss(ctx, fmt.Sprintf("%d-01-01", year), fmt.Sprintf("%d-12-31", year), "USD", &branch)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if pnl.TotalRevenue != 0 || pnl.TotalCOGS != 0 || pnl.NetIncome != 0 {
-			t.Errorf("branch %v after the close revenue %d cogs %d net %d, want all zero (zeroed into 3020)",
-				branch, pnl.TotalRevenue, pnl.TotalCOGS, pnl.NetIncome)
+		if pnl.NetIncome != nets[branch] {
+			t.Errorf("branch %v income statement after the close nets %d, want the year's %d", branch, pnl.NetIncome, nets[branch])
+		}
+		var held int64
+		if err := db.Pool.QueryRow(ctx, `
+			SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint
+			FROM gl_journal_lines l
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+			JOIN gl_accounts a ON a.id = l.account_id
+			WHERE e.status = 'POSTED' AND a.type IN ('REVENUE', 'EXPENSE') AND l.branch_id = $1
+			  AND e.entry_date BETWEEN make_date($2, 1, 1) AND make_date($2, 12, 31)`, branch, year).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		if held != 0 {
+			t.Errorf("branch %v revenue and expense accounts hold %d after the close, want zero", branch, held)
 		}
 		var toRetained int64
 		if err := db.Pool.QueryRow(ctx, `
@@ -470,6 +485,9 @@ func TestTieOutAnswersItsDifferencesInCents(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, cust) })
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_transactions (customer_id, type, amount, balance_after, currency) VALUES ($1, 'ADJUSTMENT', 4000, 4000, 'USD')`, cust); err != nil {
+		t.Fatal(err)
+	}
 
 	day := time.Date(2034, 5, 2, 0, 0, 0, 0, time.UTC)
 	post(t, db, svc, branch, day, memo,
@@ -491,6 +509,11 @@ func TestTieOutAnswersItsDifferencesInCents(t *testing.T) {
 	}
 	if report.AP.DifferenceCents != 0 {
 		t.Errorf("AP difference %d, want 0 (nothing owed)", report.AP.DifferenceCents)
+	}
+	// The subledgers hold only their current balances, so an earlier day is
+	// refused rather than answered wrongly.
+	if _, err := svc.TieOut(ctx, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), "USD", &branch); !errors.Is(err, gl.ErrTieOutHistoric) {
+		t.Errorf("tie out of a past day = %v, want ErrTieOutHistoric", err)
 	}
 }
 

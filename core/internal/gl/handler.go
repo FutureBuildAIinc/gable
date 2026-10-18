@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -82,14 +83,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 // branch named) needs every branch's reach, so a caller held to one branch
 // is refused rather than handed a silent partial sum.
 func (h *Handler) branchRead(w http.ResponseWriter, r *http.Request, raw string) (*uuid.UUID, bool) {
-	ctx := r.Context()
 	if raw == "" {
-		if middleware.BranchIDForQuery(ctx) != nil || middleware.GrantsSubForQuery(ctx) != nil {
-			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: "a consolidated read needs every branch reach",
-				Details: []httpx.FieldError{{Field: "branch_id", Message: "name a branch you may read, or drop the branch header for the consolidated view"}}})
-			return nil, false
-		}
-		return nil, true
+		return nil, h.everyBranch(w, r, "a consolidated read")
 	}
 	id, err := uuid.Parse(raw)
 	if err != nil {
@@ -97,13 +92,72 @@ func (h *Handler) branchRead(w http.ResponseWriter, r *http.Request, raw string)
 			httpx.FieldError{Field: "branch_id", Message: "must be a branch id"}))
 		return nil, false
 	}
+	if !h.inReach(w, r, id) {
+		return nil, false
+	}
+	return &id, true
+}
+
+// inReach holds a named branch to the caller's reach: the request's branch
+// header names the one branch it may touch, and without one the caller's
+// grants decide. A refusal is written.
+func (h *Handler) inReach(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	ctx := r.Context()
+	if b := middleware.BranchIDForQuery(ctx); b != nil && *b != id {
+		h.writeGuardError(w, r, middleware.ErrPayloadBranchRefused)
+		return false
+	}
 	if h.guard != nil {
 		if err := h.guard.CheckGrantsBranch(ctx, &id); err != nil {
 			h.writeGuardError(w, r, err)
+			return false
+		}
+	}
+	return true
+}
+
+// entryInReach loads the entry the path names and holds it to the caller's
+// reach: another branch's entry reads as missing, as the by-id read always
+// has.
+func (h *Handler) entryInReach(w http.ResponseWriter, r *http.Request) (*JournalEntry, bool) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
+		return nil, false
+	}
+	entry, err := h.svc.GetJournalEntry(r.Context(), id)
+	if err != nil {
+		h.writeActError(w, r, err)
+		return nil, false
+	}
+	if b := middleware.BranchIDForQuery(r.Context()); b != nil && *b != entry.BranchID {
+		httpx.WriteError(w, r, httpx.NotFound("journal entry not found"))
+		return nil, false
+	}
+	if h.guard != nil {
+		branch := entry.BranchID
+		if err := h.guard.CheckGrantsBranch(r.Context(), &branch); err != nil {
+			if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+				httpx.WriteError(w, r, httpx.NotFound("journal entry not found"))
+			} else {
+				httpx.WriteError(w, r, err)
+			}
 			return nil, false
 		}
 	}
-	return &id, true
+	return entry, true
+}
+
+// everyBranch refuses a caller held to one branch (or to a grant list) an act
+// that spans the company: a consolidated read, a period close, the year end.
+func (h *Handler) everyBranch(w http.ResponseWriter, r *http.Request, act string) bool {
+	ctx := r.Context()
+	if middleware.BranchIDForQuery(ctx) != nil || middleware.GrantsSubForQuery(ctx) != nil {
+		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: act + " needs every branch reach",
+			Details: []httpx.FieldError{{Field: "branch_id", Message: "this act spans every branch; a caller held to some branches may not make it"}}})
+		return false
+	}
+	return true
 }
 
 // branchWrite holds a written branch to the caller's reach the same way.
@@ -131,16 +185,15 @@ func (h *Handler) writeGuardError(w http.ResponseWriter, r *http.Request, err er
 
 // HandleReverseJournalEntry posts a net-zero reversal of a posted entry.
 func (h *Handler) HandleReverseJournalEntry(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
+	entry, ok := h.entryInReach(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
 		Reason string `json:"reason"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	revID, err := h.svc.ReverseJournalEntry(r.Context(), id, body.Reason)
+	revID, err := h.svc.ReverseJournalEntry(r.Context(), entry.ID, body.Reason)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to reverse journal entry", http.StatusBadRequest, err)
 		return
@@ -228,7 +281,7 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 	current, err := h.svc.GetAccount(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "account not found", http.StatusNotFound, err)
+		h.writeActError(w, r, err)
 		return
 	}
 	var req createAccountRequest
@@ -309,32 +362,12 @@ func (h *Handler) HandleListJournalEntries(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) HandleGetJournalEntry(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
-		return
-	}
-
-	entry, err := h.svc.GetJournalEntry(r.Context(), id)
-	if err != nil {
-		httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, err)
-		return
-	}
 	// The by-id read is walled like the list: a caller held to one branch
 	// finds another branch's entry missing rather than read.
-	if b := middleware.BranchIDForQuery(r.Context()); b != nil && *b != entry.BranchID {
-		httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, nil)
+	entry, ok := h.entryInReach(w, r)
+	if !ok {
 		return
 	}
-	if h.guard != nil {
-		branch := entry.BranchID
-		if err := h.guard.CheckGrantsBranch(r.Context(), &branch); err != nil {
-			httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, nil)
-			return
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entry)
 }
@@ -371,7 +404,11 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	entryDate := time.Now()
+	entryDate, err := h.svc.BusinessDay(r.Context(), &branchID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to read the business day", http.StatusInternalServerError, err)
+		return
+	}
 	if req.EntryDate != "" {
 		parsed, err := time.Parse("2006-01-02", req.EntryDate)
 		if err != nil {
@@ -427,14 +464,12 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) HandlePostJournalEntry(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
+	entry, ok := h.entryInReach(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.svc.PostJournalEntry(r.Context(), id); err != nil {
+	if err := h.svc.PostJournalEntry(r.Context(), entry.ID); err != nil {
 		httputil.RespondError(w, r, "failed to post journal entry", http.StatusBadRequest, err)
 		return
 	}
@@ -444,14 +479,12 @@ func (h *Handler) HandlePostJournalEntry(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) HandleVoidJournalEntry(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
+	entry, ok := h.entryInReach(w, r)
+	if !ok {
 		return
 	}
 
-	if err := h.svc.VoidJournalEntry(r.Context(), id); err != nil {
+	if err := h.svc.VoidJournalEntry(r.Context(), entry.ID); err != nil {
 		httputil.RespondError(w, r, "failed to void journal entry", http.StatusBadRequest, err)
 		return
 	}
@@ -502,10 +535,14 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	now := time.Now()
+	now, err := h.svc.BusinessDay(r.Context(), branch)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to read the business day", http.StatusInternalServerError, err)
+		return
+	}
 	startStr := r.URL.Query().Get("start")
 	if startStr == "" {
-		startStr = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+		startStr = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
 	}
 	endStr := r.URL.Query().Get("end")
 	if endStr == "" {
@@ -534,10 +571,19 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	report, err := h.svc.GetProfitAndLossFor(r.Context(), startStr, endStr, currency, branch,
-		r.URL.Query().Get("compare_start"), r.URL.Query().Get("compare_end"))
+	compareStart, compareEnd := r.URL.Query().Get("compare_start"), r.URL.Query().Get("compare_end")
+	if compareStart != "" || compareEnd != "" {
+		cs, errS := time.Parse("2006-01-02", compareStart)
+		ce, errE := time.Parse("2006-01-02", compareEnd)
+		if errS != nil || errE != nil || ce.Before(cs) {
+			httpx.WriteError(w, r, httpx.BadRequest("the comparison period needs a valid compare_start and compare_end",
+				httpx.FieldError{Field: "compare_start", Message: "both bounds are YYYY-MM-DD and the end is not before the start"}))
+			return
+		}
+	}
+	report, err := h.svc.GetProfitAndLossFor(r.Context(), startStr, endStr, currency, branch, compareStart, compareEnd)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusBadRequest, err)
+		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -553,11 +599,17 @@ func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	asOfStr := r.URL.Query().Get("as_of")
-	if asOfStr != "" {
-		if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
-			httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+	if asOfStr == "" {
+		day, err := h.svc.BusinessDay(r.Context(), branch)
+		if err != nil {
+			httputil.RespondError(w, r, "failed to read the business day", http.StatusInternalServerError, err)
 			return
 		}
+		asOfStr = day.Format("2006-01-02")
+	}
+	if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
+		httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
 	}
 
 	currency, ok := currencyParam(w, r)
@@ -566,7 +618,7 @@ func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.svc.GetBalanceSheetFor(r.Context(), asOfStr, currency, branch)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusBadRequest, err)
+		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -631,6 +683,11 @@ func (h *Handler) HandleTieOut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	report, err := h.svc.TieOut(r.Context(), asOf, currency, branch)
+	if errors.Is(err, ErrTieOutHistoric) {
+		httpx.WriteError(w, r, httpx.BadRequest("the tie out compares current balances",
+			httpx.FieldError{Field: "as_of", Message: "must be the business day or later"}))
+		return
+	}
 	if err != nil {
 		httputil.RespondError(w, r, "failed to tie out", http.StatusInternalServerError, err)
 		return
@@ -652,6 +709,9 @@ func (h *Handler) HandleListFiscalPeriods(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request) {
+	if !h.everyBranch(w, r, "closing or reopening a fiscal period") {
+		return
+	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
@@ -659,7 +719,7 @@ func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request
 	}
 	period, err := h.svc.GetFiscalPeriod(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "fiscal period not found", http.StatusNotFound, err)
+		h.writeActError(w, r, err)
 		return
 	}
 	if err := httpx.CheckRevision(period.Revision, r.Header.Get("If-Match"), nil); err != nil {
@@ -677,6 +737,9 @@ func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Request) {
+	if !h.everyBranch(w, r, "closing or reopening a fiscal period") {
+		return
+	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
@@ -693,7 +756,7 @@ func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Reques
 	}
 	period, err := h.svc.GetFiscalPeriod(r.Context(), id)
 	if err != nil {
-		httputil.RespondError(w, r, "fiscal period not found", http.StatusNotFound, err)
+		h.writeActError(w, r, err)
 		return
 	}
 	if err := httpx.CheckRevision(period.Revision, r.Header.Get("If-Match"), nil); err != nil {
@@ -713,6 +776,9 @@ func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Reques
 // HandleCloseYear zeroes the year's revenue and expense accounts into
 // Retained Earnings, per branch.
 func (h *Handler) HandleCloseYear(w http.ResponseWriter, r *http.Request) {
+	if !h.everyBranch(w, r, "the year end close") {
+		return
+	}
 	year, err := strconv.Atoi(r.PathValue("year"))
 	if err != nil {
 		httputil.RespondError(w, r, "invalid year", http.StatusBadRequest, err)
@@ -736,6 +802,15 @@ func (h *Handler) writeActError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, ErrReopenReason):
 		httpx.WriteError(w, r, httpx.BadRequest("a period is reopened with a reason",
 			httpx.FieldError{Field: "reason", Message: "is required to reopen a fiscal period"}))
+	case errors.Is(err, ErrPeriodNotFound):
+		httpx.WriteError(w, r, httpx.NotFound("fiscal period not found"))
+	case errors.Is(err, ErrEntryNotFound):
+		httpx.WriteError(w, r, httpx.NotFound("journal entry not found"))
+	case errors.Is(err, ErrAccountNotFound):
+		httpx.WriteError(w, r, httpx.NotFound("account not found"))
+	case errors.Is(err, ErrPeriodState):
+		httpx.WriteError(w, r, httpx.InvalidStateTransition("the fiscal period is not in the state this act needs",
+			httpx.Blocker("period_state", "close acts on an open period and reopen on a closed one")))
 	case errors.Is(err, ErrPeriodClosed):
 		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
 			Message: "the year end close would post into a closed fiscal period",
@@ -747,8 +822,8 @@ func (h *Handler) writeActError(w http.ResponseWriter, r *http.Request, err erro
 
 // actorOf answers the caller's actor for the audit rows.
 func actorOf(r *http.Request) string {
-	if a := r.Header.Get("X-Actor"); a != "" {
-		return a
+	if id := actor.FromContext(r.Context()).ID; id != "" {
+		return id
 	}
 	return "system"
 }

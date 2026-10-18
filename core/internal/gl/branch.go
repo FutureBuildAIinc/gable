@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
@@ -26,19 +27,19 @@ const AccountCodeRetainedEarnings = "3020"
 // GLDetailRow is one posted ledger line behind a statement row: the account,
 // its entry, the branch and the entry's business date.
 type GLDetailRow struct {
-	EntryID      uuid.UUID `json:"entry_id"`
-	EntryNumber  int       `json:"entry_number"`
-	EntryDate    time.Time `json:"entry_date"`
-	Memo         string    `json:"memo"`
-	Source       string    `json:"source"`
-	LineID       uuid.UUID `json:"line_id"`
-	AccountID    uuid.UUID `json:"account_id"`
-	AccountCode  string    `json:"account_code"`
-	AccountName  string    `json:"account_name"`
-	Description  string    `json:"description"`
-	BranchID     uuid.UUID `json:"branch_id"`
-	DebitCents   int64     `json:"debit_cents"`
-	CreditCents  int64     `json:"credit_cents"`
+	EntryID     uuid.UUID `json:"entry_id"`
+	EntryNumber int       `json:"entry_number"`
+	EntryDate   time.Time `json:"entry_date"`
+	Memo        string    `json:"memo"`
+	Source      string    `json:"source"`
+	LineID      uuid.UUID `json:"line_id"`
+	AccountID   uuid.UUID `json:"account_id"`
+	AccountCode string    `json:"account_code"`
+	AccountName string    `json:"account_name"`
+	Description string    `json:"description"`
+	BranchID    uuid.UUID `json:"branch_id"`
+	DebitCents  int64     `json:"debit_cents"`
+	CreditCents int64     `json:"credit_cents"`
 }
 
 // TieOutLeg is one control account against its subledger, the difference
@@ -53,11 +54,11 @@ type TieOutLeg struct {
 // (1020) against the customers' balances, the AP control account (2010)
 // against the open vendor bills, each per branch or consolidated.
 type TieOutReport struct {
-	AsOf     string    `json:"as_of"`
-	Currency string    `json:"currency"`
+	AsOf     string     `json:"as_of"`
+	Currency string     `json:"currency"`
 	BranchID *uuid.UUID `json:"branch_id,omitempty"`
-	AR       TieOutLeg `json:"ar"`
-	AP       TieOutLeg `json:"ap"`
+	AR       TieOutLeg  `json:"ar"`
+	AP       TieOutLeg  `json:"ap"`
 }
 
 // ProfitAndLossComparison carries the previous period's totals beside the
@@ -88,20 +89,15 @@ func (f branchFilter) args() []any { return []any{f.Branch, f.Grants} }
 // default branch's zone answers for a consolidated read (the same definition
 // the collections reads use, no second helper).
 func (r *PostgresRepository) BranchBusinessDay(ctx context.Context, branch *uuid.UUID) (time.Time, error) {
-	zone := `COALESCE((SELECT l.timezone FROM locations l
-		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`
+	zone := collections.DefaultBranchZoneSQL
+	args := []any{}
 	if branch != nil {
 		zone = `COALESCE((SELECT l.timezone FROM locations l WHERE l.id = $1), 'UTC')`
+		args = append(args, *branch)
 	}
 	var day time.Time
-	q := fmt.Sprintf(`SELECT (NOW() AT TIME ZONE %s)::date`, zone)
-	var err error
-	if branch != nil {
-		err = r.db.GetExecutor(ctx).QueryRow(ctx, q, *branch).Scan(&day)
-	} else {
-		err = r.db.GetExecutor(ctx).QueryRow(ctx, q).Scan(&day)
-	}
-	if err != nil {
+	q := `SELECT (NOW() AT TIME ZONE ` + zone + `)::date`
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, q, args...).Scan(&day); err != nil {
 		return time.Time{}, fmt.Errorf("failed to read the branch business day: %w", err)
 	}
 	return day, nil
@@ -113,17 +109,17 @@ func (r *PostgresRepository) BranchBusinessDay(ctx context.Context, branch *uuid
 // at the caller's reach, for one branch or consolidated.
 func (r *PostgresRepository) GetTrialBalanceFor(ctx context.Context, asOfDate time.Time, currency string, f branchFilter) ([]TrialBalanceRow, error) {
 	query := `
-		SELECT a.id, a.code, a.name, a.type, e.currency, e.branch_id,
+		SELECT a.id, a.code, a.name, a.type, e.currency, l.branch_id,
 		       COALESCE(SUM(l.debit) * 100, 0)::bigint AS total_debit,
 		       COALESCE(SUM(l.credit) * 100, 0)::bigint AS total_credit
 		FROM gl_accounts a
 		JOIN gl_journal_lines l ON l.account_id = a.id
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED' AND e.entry_date <= $1
 		WHERE a.is_active = TRUE AND ($2 = '' OR e.currency = $2)
-		  AND ` + middleware.Wall("e", 3, 4) + `
-		GROUP BY a.id, a.code, a.name, a.type, e.currency, e.branch_id
+		  AND ` + middleware.Wall("l", 3, 4) + `
+		GROUP BY a.id, a.code, a.name, a.type, e.currency, l.branch_id
 		HAVING SUM(l.debit) > 0 OR SUM(l.credit) > 0
-		ORDER BY e.currency, a.code
+		ORDER BY e.currency, a.code, l.branch_id
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency, f.Branch, f.Grants)
 	if err != nil {
@@ -157,8 +153,9 @@ func (r *PostgresRepository) GetAccountActivityFor(ctx context.Context, start *t
 		  AND e.entry_date <= $1
 		  AND ($2::date IS NULL OR e.entry_date >= $2::date)
 		  AND a.type = ANY($3)
+		  AND ($2::date IS NULL OR e.source <> 'CLOSING')
 		  AND e.currency = $4
-		  AND ` + middleware.Wall("e", 5, 6) + `
+		  AND ` + middleware.Wall("l", 5, 6) + `
 		GROUP BY a.id, a.code, a.name, a.type, a.subtype
 		ORDER BY a.code
 	`
@@ -194,7 +191,7 @@ func (r *PostgresRepository) GetGLDetail(ctx context.Context, accountID uuid.UUI
 		WHERE e.status = 'POSTED'
 		  AND l.account_id = $1
 		  AND e.entry_date >= $2::date AND e.entry_date <= $3::date
-		  AND ` + middleware.Wall("e", 4, 5) + `
+		  AND ` + middleware.Wall("l", 4, 5) + `
 		ORDER BY e.entry_date, e.entry_number, l.id
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, accountID, from, to, f.Branch, f.Grants)
@@ -222,8 +219,15 @@ func (r *PostgresRepository) GetGLDetail(ctx context.Context, accountID uuid.UUI
 // per account, grouped by branch: the input of the year end close, which
 // zeroes each branch's own accounts into its own Retained Earnings.
 func (r *PostgresRepository) YearActivityByBranch(ctx context.Context, year int, currency string) (map[uuid.UUID][]AccountActivity, error) {
+	// One year end close of a year and currency at a time: a second closer
+	// waits here and then reads the first one's closing entries, so it finds
+	// nothing left to close. Held until the closing transaction ends.
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('gl-year-close:' || $1::int::text || ':' || $2::text, 0))`, year, currency); err != nil {
+		return nil, fmt.Errorf("failed to lock the year end close: %w", err)
+	}
 	query := `
-		SELECT e.branch_id, a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''),
+		SELECT l.branch_id, a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''),
 		       COALESCE(ROUND(SUM(l.debit) * 100), 0)::bigint  AS debit_cents,
 		       COALESCE(ROUND(SUM(l.credit) * 100), 0)::bigint AS credit_cents
 		FROM gl_accounts a
@@ -233,7 +237,7 @@ func (r *PostgresRepository) YearActivityByBranch(ctx context.Context, year int,
 		  AND e.entry_date >= make_date($1, 1, 1) AND e.entry_date <= make_date($1, 12, 31)
 		  AND a.type IN ('REVENUE', 'EXPENSE')
 		  AND e.currency = $2
-		GROUP BY e.branch_id, a.id, a.code, a.name, a.type, a.subtype
+		GROUP BY l.branch_id, a.id, a.code, a.name, a.type, a.subtype
 		ORDER BY a.code
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, year, currency)
@@ -267,37 +271,42 @@ func (r *PostgresRepository) ControlBalance(ctx context.Context, code string, as
 		JOIN gl_journal_lines l ON l.account_id = a.id
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		WHERE a.code = $1 AND e.status = 'POSTED' AND e.entry_date <= $2::date AND e.currency = $3
-		  AND ` + middleware.Wall("e", 4, 5) + `
+		  AND ` + middleware.Wall("l", 4, 5) + `
 	`
 	var cents int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, code, asOf, currency, f.Branch, f.Grants).Scan(&cents)
 	return cents, err
 }
 
-// arSubledger answers the customers' balance_due sum in cents, one branch's
-// customers (their primary branch) or every branch's.
-func (r *PostgresRepository) ARSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+// ARSubledgerCents answers the customer subledger's sum in cents (the rows
+// customers.balance_due is moved by), in one currency. The subledger carries
+// no branch of its own, so one branch's figure is its customers' (their
+// primary branch); the consolidated figure is the exact one.
+func (r *PostgresRepository) ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	query := `
-		SELECT COALESCE(ROUND(SUM(c.balance_due * 100)), 0)::bigint
-		FROM customers c
-		WHERE ($1::uuid IS NULL OR c.primary_branch_id = $1)
+		SELECT COALESCE(SUM(t.amount), 0)::bigint
+		FROM customer_transactions t
+		JOIN customers c ON c.id = t.customer_id
+		WHERE t.currency = $2
+		  AND ($1::uuid IS NULL OR c.primary_branch_id = $1)
 	`
 	var cents int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch).Scan(&cents)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch, currency).Scan(&cents)
 	return cents, err
 }
 
 // apSubledger answers the open vendor bills' amount_open sum in cents, one
 // branch's bills or every branch's.
-func (r *PostgresRepository) APSubledgerCents(ctx context.Context, f branchFilter) (int64, error) {
+func (r *PostgresRepository) APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	query := `
 		SELECT COALESCE(ROUND(SUM(vi.amount_open * 100)), 0)::bigint
 		FROM vendor_invoices vi
 		WHERE vi.status IN ('APPROVED', 'PARTIAL', 'PAID')
+		  AND vi.currency = $2
 		  AND ($1::uuid IS NULL OR vi.branch_id = $1)
 	`
 	var cents int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch).Scan(&cents)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch, currency).Scan(&cents)
 	return cents, err
 }
 

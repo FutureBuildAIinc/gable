@@ -175,19 +175,19 @@ type AccountLineItem struct {
 
 // ProfitAndLossReport is an income statement covering [StartDate, EndDate].
 type ProfitAndLossReport struct {
-	Currency      string            `json:"currency"`
-	BranchID      *uuid.UUID        `json:"branch_id,omitempty"`
-	StartDate     string            `json:"start_date"`
-	EndDate       string            `json:"end_date"`
+	Currency      string                   `json:"currency"`
+	BranchID      *uuid.UUID               `json:"branch_id,omitempty"`
+	StartDate     string                   `json:"start_date"`
+	EndDate       string                   `json:"end_date"`
 	Comparison    *ProfitAndLossComparison `json:"comparison,omitempty"`
-	Revenue       []AccountLineItem `json:"revenue"`
-	COGS          []AccountLineItem `json:"cogs"`
-	Expenses      []AccountLineItem `json:"expenses"`
-	TotalRevenue  int64             `json:"total_revenue"`  // Cents
-	TotalCOGS     int64             `json:"total_cogs"`     // Cents
-	GrossProfit   int64             `json:"gross_profit"`   // Cents
-	TotalExpenses int64             `json:"total_expenses"` // Cents, excludes COGS
-	NetIncome     int64             `json:"net_income"`     // Cents
+	Revenue       []AccountLineItem        `json:"revenue"`
+	COGS          []AccountLineItem        `json:"cogs"`
+	Expenses      []AccountLineItem        `json:"expenses"`
+	TotalRevenue  int64                    `json:"total_revenue"`  // Cents
+	TotalCOGS     int64                    `json:"total_cogs"`     // Cents
+	GrossProfit   int64                    `json:"gross_profit"`   // Cents
+	TotalExpenses int64                    `json:"total_expenses"` // Cents, excludes COGS
+	NetIncome     int64                    `json:"net_income"`     // Cents
 }
 
 // BalanceSheetReport is a statement of financial position as of a date.

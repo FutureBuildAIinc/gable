@@ -37,8 +37,8 @@ type Repository interface {
 	YearActivityByBranch(ctx context.Context, year int, currency string) (map[uuid.UUID][]AccountActivity, error)
 	BranchBusinessDay(ctx context.Context, branch *uuid.UUID) (time.Time, error)
 	ControlBalance(ctx context.Context, code string, asOf time.Time, currency string, f branchFilter) (int64, error)
-	ARSubledgerCents(ctx context.Context, f branchFilter) (int64, error)
-	APSubledgerCents(ctx context.Context, f branchFilter) (int64, error)
+	ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error)
+	APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error)
 	DefaultCurrency(ctx context.Context) (string, error)
 
 	// Fiscal Periods
@@ -124,7 +124,7 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("account not found")
+			return nil, ErrAccountNotFound
 		}
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
@@ -255,7 +255,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("journal entry not found")
+			return nil, ErrEntryNotFound
 		}
 		return nil, fmt.Errorf("failed to get journal entry: %w", err)
 	}
@@ -392,7 +392,7 @@ func (r *PostgresRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPer
 		}
 		periods = append(periods, p)
 	}
-	return periods, nil
+	return periods, rows.Err()
 }
 
 func (r *PostgresRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error) {
@@ -407,7 +407,7 @@ func (r *PostgresRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) 
 		&p.Revision, &p.ReopenReason, &p.ReopenedBy, &p.ReopenedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("fiscal period not found")
+			return nil, ErrPeriodNotFound
 		}
 		return nil, fmt.Errorf("failed to get fiscal period: %w", err)
 	}
@@ -439,7 +439,7 @@ func (r *PostgresRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID
 		return fmt.Errorf("failed to close fiscal period: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("fiscal period not found or already closed")
+		return ErrPeriodState
 	}
 	return nil
 }
@@ -454,7 +454,7 @@ func (r *PostgresRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUI
 		return fmt.Errorf("failed to reopen fiscal period: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("fiscal period not found or not closed")
+		return ErrPeriodState
 	}
 	return nil
 }
