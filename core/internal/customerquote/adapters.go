@@ -74,7 +74,7 @@ func (p *PortalCostSource) DealerQuote(ctx context.Context, customerID, quoteID 
 	}
 	rows, err := ex.Query(ctx, `
 		SELECT ql.id, ql.product_id, ql.sku, ql.description, ql.uom::text, p.category_id, ROUND(ql.quantity * 10000)::bigint,
-			ROUND(ql.line_total * 10000 / ql.quantity)::bigint
+			ROUND(ql.line_total * 10000 / ql.quantity)::bigint, ROUND(ql.line_total * 100)::bigint
 		FROM quote_lines ql JOIN products p ON p.id = ql.product_id
 		WHERE ql.quote_id = $1 AND ql.quantity > 0 ORDER BY ql.position, ql.id`, quoteID)
 	if err != nil {
@@ -84,7 +84,7 @@ func (p *PortalCostSource) DealerQuote(ctx context.Context, customerID, quoteID 
 	for rows.Next() {
 		var l SourceQuoteLine
 		var qty int64
-		if err := rows.Scan(&l.ID, &l.ProductID, &l.SKU, &l.Description, &l.UOM, &l.CategoryID, &qty, &l.UnitCostTenThousandths); err != nil {
+		if err := rows.Scan(&l.ID, &l.ProductID, &l.SKU, &l.Description, &l.UOM, &l.CategoryID, &qty, &l.UnitCostTenThousandths, &l.LineTotalCents); err != nil {
 			return nil, err
 		}
 		l.Quantity = httpx.Quantity(qty)

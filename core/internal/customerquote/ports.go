@@ -37,6 +37,7 @@ type SourceQuoteLine struct {
 	CategoryID             *uuid.UUID
 	Quantity               httpx.Quantity
 	UnitCostTenThousandths int64
+	LineTotalCents         int64
 }
 
 // SourceQuote is the dealer's quote the contractor builds from.
@@ -60,9 +61,10 @@ type CostSource interface {
 
 // OrderLine is one line of the order a confirmation places.
 type OrderLine struct {
-	ProductID uuid.UUID
-	Quantity  httpx.Quantity
-	UOM       string
+	ProductID           uuid.UUID
+	Quantity            httpx.Quantity
+	UOM                 string
+	DealerQuoteUnitCost *int64
 }
 
 // OrderPlacement is what a confirmation asks the dealer's order path for.

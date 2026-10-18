@@ -33,7 +33,13 @@ func (q quoteOrders) PlaceOrder(ctx context.Context, p customerquote.OrderPlacem
 	lines := make([]salesdoc.ParsedLine, 0, len(p.Lines))
 	for _, l := range p.Lines {
 		pid := l.ProductID
-		lines = append(lines, salesdoc.ParsedLine{LineType: salesdoc.LineProduct, ProductID: &pid, Quantity: httpx.Quantity(l.Quantity), UOM: l.UOM})
+		pl := salesdoc.ParsedLine{LineType: salesdoc.LineProduct, ProductID: &pid, Quantity: httpx.Quantity(l.Quantity), UOM: l.UOM}
+		if l.DealerQuoteUnitCost != nil {
+			up := httpx.Price(*l.DealerQuoteUnitCost)
+			pl.UnitPrice = &up
+			pl.OverrideReason = "dealer quote"
+		}
+		lines = append(lines, pl)
 	}
 	return q.portal.PlaceOrderFromLines(ctx, p.CustomerID, p.ProjectID, p.Reference, lines)
 }

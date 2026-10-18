@@ -623,6 +623,44 @@ paths:
           $ref: "#/components/responses/WireConflict"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/confirm-preview:
+    get:
+      operationId: customerQuoteConfirmPreview
+      tags: [customerquote]
+      summary: Preview current dealer material prices and resulting margin before confirming
+      description: >-
+        Only an approved quote. Compares each approved material line's captured
+        dealer cost against the dealer's current price for the contractor's
+        account and returns the per-line and total cost deltas and resulting
+        margin.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The confirmation price preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteConfirmPreview"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/portal/v1/customer-quotes/{id}/confirm:
     post:
       operationId: customerQuoteConfirm
@@ -632,7 +670,9 @@ paths:
         Only an approved quote. The approved material lines become a portal
         order at the dealer's own prices for the contractor's account, through
         the portal's order path, on the quote's project, in one transaction
-        with the confirmation and its approval record. The markup, labour,
+        with the confirmation and its approval record. If the dealer's price
+        moved since the quote was priced, confirming without
+        accept_price_changes=true returns 409 price_changed. The markup, labour,
         overhead and the customer's prices never reach the order.
       security:
         - PortalSession: []
@@ -643,6 +683,12 @@ paths:
           schema:
             type: string
             format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteConfirmRequest"
       responses:
         "200":
           description: The confirmed quote with its order.
@@ -2319,3 +2365,58 @@ components:
         total_cents:
           type: integer
           format: int64
+    CustomerQuoteConfirmRequest:
+      type: object
+      properties:
+        accept_price_changes:
+          type: boolean
+    CustomerQuoteConfirmPreview:
+      type: object
+      required: [price_changed, captured_material_cost_cents, current_material_cost_cents, delta_cents, captured_margin_cents, projected_margin_cents, lines]
+      properties:
+        price_changed:
+          type: boolean
+        captured_material_cost_cents:
+          type: integer
+          format: int64
+        current_material_cost_cents:
+          type: integer
+          format: int64
+        delta_cents:
+          type: integer
+          format: int64
+        captured_margin_cents:
+          type: integer
+          format: int64
+        projected_margin_cents:
+          type: integer
+          format: int64
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_id, product_id, sku, description, quantity, uom, captured_cost_cents, current_cost_cents, delta_cents]
+            properties:
+              line_id:
+                type: string
+                format: uuid
+              product_id:
+                type: string
+                format: uuid
+              sku:
+                type: string
+              description:
+                type: string
+              quantity:
+                type: string
+              uom:
+                type: string
+              captured_cost_cents:
+                type: integer
+                format: int64
+              current_cost_cents:
+                type: integer
+                format: int64
+              delta_cents:
+                type: integer
+                format: int64

@@ -534,6 +534,26 @@ func TestWire_TheLoopEndToEnd(t *testing.T) {
 		t.Fatalf("dealer before confirmation: %s", r.body)
 	}
 
+	// If the dealer's price moves before confirm, confirm-preview shows the delta and confirm refuses until accept_price_changes is true.
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE products SET base_price = 7.5000 WHERE id = $1`, s.stud); err != nil {
+		t.Fatal(err)
+	}
+	r = s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/confirm-preview", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm-preview: %d %s", r.status, r.body)
+	}
+	prev := jsonOf(t, r.body)
+	if prev["price_changed"] != true || prev["delta_cents"].(float64) != 20000 || prev["projected_margin_cents"].(float64) != 105354 {
+		t.Fatalf("confirm-preview body: %s", r.body)
+	}
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r.status != 409 || !bytes.Contains(r.body, []byte("price_changed")) {
+		t.Fatalf("confirm after price move without accept_price_changes: %d %s", r.status, r.body)
+	}
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE products SET base_price = 5.5000 WHERE id = $1`, s.stud); err != nil {
+		t.Fatal(err)
+	}
+
 	// The contractor confirms: the dealer's order appears at the dealer's prices on the project.
 	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
 	if r.status != 200 {
@@ -745,7 +765,7 @@ func TestWire_Tenancy_AnotherContractorSeesNothing(t *testing.T) {
 		{"GET", "/api/portal/v1/customer-quotes/" + id + "/approvals"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/send"},
 		{"POST", "/api/portal/v1/customer-quotes/" + id + "/link/rotate"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/link/revoke"},
 		{"POST", "/api/portal/v1/customer-quotes/" + id + "/withdraw"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/revise"},
-		{"POST", "/api/portal/v1/customer-quotes/" + id + "/confirm"},
+		{"GET", "/api/portal/v1/customer-quotes/" + id + "/confirm-preview"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/confirm"},
 	}
 	for _, p := range paths {
 		var body any

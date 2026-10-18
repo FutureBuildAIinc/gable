@@ -305,6 +305,7 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			gid := groupIDs[dl.GroupKey]
 			line.GroupID = &gid
 		}
+		var cost int64
 		switch {
 		case dl.SourceLineID != nil:
 			sl, ok := srcLines[*dl.SourceLineID]
@@ -313,12 +314,14 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			}
 			line.SKU, line.Description, line.UOM, line.CategoryID = sl.SKU, sl.Description, sl.UOM, sl.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = sl.UnitCostTenThousandths, "dealer_quote", now
+			cost, err = SourceLineCostCents(line.Quantity, sl.Quantity, sl.LineTotalCents, line.UnitCostTenThousandths)
 		case dl.ExistingID != nil && prior[*dl.ExistingID].ID != uuid.Nil &&
 			prior[*dl.ExistingID].ProductID == dl.ProductID && prior[*dl.ExistingID].Quantity == dl.Quantity:
 			p := prior[*dl.ExistingID]
 			line.ID = p.ID
 			line.SKU, line.Description, line.UOM, line.CategoryID = p.SKU, p.Description, p.UOM, p.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = p.UnitCostTenThousandths, p.PriceBasis, p.PricedAt
+			cost = p.CostCents
 		default:
 			item, err := s.costs.CatalogCost(ctx, a.CustomerID, dl.ProductID, dl.Quantity)
 			if err != nil {
@@ -329,8 +332,8 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			}
 			line.SKU, line.Description, line.UOM, line.CategoryID = item.SKU, item.Description, item.UOM, item.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = item.UnitCostTenThousandths, "catalog", now
+			cost, err = ExtendedCostCents(line.Quantity, line.UnitCostTenThousandths)
 		}
-		cost, err := ExtendedCostCents(line.Quantity, line.UnitCostTenThousandths)
 		if err != nil {
 			return nil, httpx.BadRequest("a line cannot be priced", httpx.FieldError{Field: fmt.Sprintf("lines[%d]", i), Message: err.Error()})
 		}
@@ -857,15 +860,117 @@ func (s *Service) LiveLink(ctx context.Context, q *Quote) (*Link, error) {
 
 // --- confirm to order ---
 
+func (s *Service) confirmPreviewOf(ctx context.Context, q *Quote, now time.Time) (*ConfirmPreview, map[uuid.UUID]int64, []OrderLine, error) {
+	tot, err := q.Totals()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	srcValid := false
+	if q.SourceQuoteID != nil {
+		src, err := s.costs.DealerQuote(ctx, q.CustomerID, *q.SourceQuoteID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if src != nil && (src.ExpiresAt == nil || now.Before(*src.ExpiresAt)) {
+			srcValid = true
+		}
+	}
+	prev := &ConfirmPreview{
+		CapturedMarginCents: tot.MarginCents,
+		Lines:               []ConfirmLinePreview{},
+	}
+	unitCosts := map[uuid.UUID]int64{}
+	var orderLines []OrderLine
+	for _, l := range IncludedLines(q.TotalsInput().Lines, q.States()) {
+		for _, ql := range q.Lines {
+			if ql.ID != l.ID || ql.Selection != SelectionApproved {
+				continue
+			}
+			var curUnit, curCost int64
+			var protected *int64
+			if ql.PriceBasis == "dealer_quote" && srcValid {
+				curUnit = ql.UnitCostTenThousandths
+				curCost = ql.CostCents
+				u := curUnit
+				protected = &u
+			} else {
+				item, err := s.costs.CatalogCost(ctx, q.CustomerID, ql.ProductID, ql.Quantity)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				if item == nil {
+					return nil, nil, nil, httpx.BadRequest("an approved product is no longer available")
+				}
+				curUnit = item.UnitCostTenThousandths
+				curCost, err = ExtendedCostCents(ql.Quantity, curUnit)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+			}
+			delta := curCost - ql.CostCents
+			if delta != 0 {
+				prev.PriceChanged = true
+			}
+			prev.CapturedMaterialCostCents += ql.CostCents
+			prev.CurrentMaterialCostCents += curCost
+			prev.Lines = append(prev.Lines, ConfirmLinePreview{
+				LineID:            ql.ID,
+				ProductID:         ql.ProductID,
+				SKU:               ql.SKU,
+				Description:       ql.Description,
+				Quantity:          ql.Quantity,
+				UOM:               ql.UOM,
+				CapturedCostCents: ql.CostCents,
+				CurrentCostCents:  curCost,
+				DeltaCents:        delta,
+			})
+			unitCosts[ql.ID] = curUnit
+			orderLines = append(orderLines, OrderLine{
+				ProductID:           ql.ProductID,
+				Quantity:            ql.Quantity,
+				UOM:                 ql.UOM,
+				DealerQuoteUnitCost: protected,
+			})
+		}
+	}
+	prev.DeltaCents = prev.CurrentMaterialCostCents - prev.CapturedMaterialCostCents
+	prev.ProjectedMarginCents = tot.MarginCents - prev.DeltaCents
+	return prev, unitCosts, orderLines, nil
+}
+
+// ConfirmPreview checks whether the dealer's material prices have moved since
+// the quote was priced.
+func (s *Service) ConfirmPreview(ctx context.Context, a Actor, id uuid.UUID) (*ConfirmPreview, error) {
+	if err := s.needQuoting(a); err != nil {
+		return nil, err
+	}
+	if !s.caps.Has(a, CapSeeMoney) {
+		return nil, ErrForbidden
+	}
+	q, err := s.store.GetQuote(ctx, id, &a.CustomerID, false)
+	if err != nil {
+		return nil, err
+	}
+	if q.Status != StatusApproved {
+		return nil, ErrInvalidState
+	}
+	prev, _, _, err := s.confirmPreviewOf(ctx, q, s.now())
+	return prev, err
+}
+
 // Confirm turns the customer's approval into the dealer's order: the approved
 // material lines, at the dealer's prices, through the portal's order path, in
 // one transaction with the quote's confirmation and its approval record.
-func (s *Service) Confirm(ctx context.Context, a Actor, id uuid.UUID) (*Quote, error) {
+func (s *Service) Confirm(ctx context.Context, a Actor, id uuid.UUID, opts ...ConfirmInput) (*Quote, error) {
 	if err := s.needQuoting(a); err != nil {
 		return nil, err
 	}
 	if s.orders == nil {
 		return nil, httpx.Unavailable("the order path is not configured")
+	}
+	var in ConfirmInput
+	if len(opts) > 0 {
+		in = opts[0]
 	}
 	var out *Quote
 	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
@@ -876,24 +981,35 @@ func (s *Service) Confirm(ctx context.Context, a Actor, id uuid.UUID) (*Quote, e
 		if q.Status != StatusApproved || q.ProjectID == nil {
 			return ErrInvalidState
 		}
-		var lines []OrderLine
-		for _, l := range IncludedLines(q.TotalsInput().Lines, q.States()) {
-			for _, ql := range q.Lines {
-				if ql.ID == l.ID && ql.Selection == SelectionApproved {
-					lines = append(lines, OrderLine{ProductID: ql.ProductID, Quantity: ql.Quantity, UOM: ql.UOM})
-				}
-			}
+		now := s.now()
+		prev, unitCosts, lines, err := s.confirmPreviewOf(ctx, q, now)
+		if err != nil {
+			return err
 		}
 		if len(lines) == 0 {
 			// Only labour and overhead were approved: nothing for the dealer to order.
 			return httpx.InvalidStateTransition("no approved material to order")
+		}
+		if prev.PriceChanged && !in.AcceptPriceChanges {
+			return ErrPriceChanged
+		}
+		var note string
+		if prev.PriceChanged {
+			for _, lp := range prev.Lines {
+				if lp.DeltaCents != 0 {
+					if err := s.store.UpdateLineCost(ctx, lp.LineID, unitCosts[lp.LineID], lp.CurrentCostCents, now); err != nil {
+						return err
+					}
+				}
+			}
+			note = fmt.Sprintf("dealer material cost changed from %d to %d cents (delta %+d cents); projected margin %d cents",
+				prev.CapturedMaterialCostCents, prev.CurrentMaterialCostCents, prev.DeltaCents, prev.ProjectedMarginCents)
 		}
 		orderID, err := s.orders.PlaceOrder(ctx, OrderPlacement{CustomerID: q.CustomerID, ProjectID: *q.ProjectID,
 			Reference: q.Reference, SiteAddress: q.JobSiteAddress, Lines: lines})
 		if err != nil {
 			return err
 		}
-		now := s.now()
 		moved, err := s.store.Transition(ctx, q.ID, StatusApproved, StatusConfirmed, "confirmed_at = $4, confirmed_by = $5, order_id = $6", now, a.UserID, orderID)
 		if err != nil {
 			return err
@@ -906,7 +1022,7 @@ func (s *Service) Confirm(ctx context.Context, a Actor, id uuid.UUID) (*Quote, e
 			ref = a.UserID.String()
 		}
 		if err := s.store.AppendLog(ctx, &ApprovalEntry{QuoteID: q.ID, QuoteRevision: q.Revision, Step: StepContractorConfirmed,
-			ActorKind: ActorContractor, ActorName: a.Name, ActorContact: a.Email, ActorRef: ref, OccurredAt: now}); err != nil {
+			ActorKind: ActorContractor, ActorName: a.Name, ActorContact: a.Email, ActorRef: ref, OccurredAt: now, Note: note}); err != nil {
 			return err
 		}
 		out, err = s.store.GetQuote(ctx, id, &a.CustomerID, false)

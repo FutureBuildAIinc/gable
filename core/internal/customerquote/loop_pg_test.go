@@ -610,6 +610,50 @@ func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) 
 	}
 }
 
+func TestConfirm_RefusesWhenDealerPriceMovedUntilAccepted(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	if _, err := w.acceptAll(token, typed("Pat Homeowner"), ""); err != nil {
+		t.Fatal(err)
+	}
+	// The dealer raises the stud price from 5.50 (55000) to 7.50 (75000): +20000 cents on 100 studs.
+	it := w.costs.items[w.stud]
+	it.UnitCostTenThousandths = 75000
+	w.costs.items[w.stud] = it
+
+	prev, err := w.svc.ConfirmPreview(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatalf("confirm preview: %v", err)
+	}
+	if !prev.PriceChanged || prev.CapturedMaterialCostCents != 101050 || prev.CurrentMaterialCostCents != 121050 ||
+		prev.DeltaCents != 20000 || prev.CapturedMarginCents != 125354 || prev.ProjectedMarginCents != 105354 {
+		t.Fatalf("preview %+v", prev)
+	}
+	if _, err := w.svc.Confirm(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrPriceChanged) {
+		t.Fatalf("confirm without accept_price_changes: %v, want ErrPriceChanged", err)
+	}
+	if w.orders.calls != 0 {
+		t.Fatalf("order placed on refused confirm: %d calls", w.orders.calls)
+	}
+
+	done, err := w.svc.Confirm(ctx, w.a, q.ID, customerquote.ConfirmInput{AcceptPriceChanges: true})
+	if err != nil {
+		t.Fatalf("confirm with accept_price_changes: %v", err)
+	}
+	tot, err := done.Totals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tot.MaterialCostCents != 121050 || tot.MarginCents != 105354 {
+		t.Errorf("confirmed totals after price move: cost %d margin %d, want 121050 and 105354", tot.MaterialCostCents, tot.MarginCents)
+	}
+	log, err := w.svc.Approvals(ctx, w.a, q.ID)
+	if err != nil || len(log) != 2 || !strings.Contains(log[1].Note, "20000") {
+		t.Errorf("approval log note after price move: %+v, %v", log, err)
+	}
+}
+
 func TestDealer_SeesTheSharedProjectAndAcceptsOnce(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()

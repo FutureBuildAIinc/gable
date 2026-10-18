@@ -214,12 +214,17 @@ func TestValidUntil_BoundedByTheSourceDealerQuote(t *testing.T) {
 	})
 	exp := w.now.Add(36 * time.Hour)
 	w.costs.source[srcID] = &customerquote.SourceQuote{ID: srcID, ExpiresAt: &exp, Lines: []customerquote.SourceQuoteLine{
-		{ID: uuid.New(), ProductID: w.stud, SKU: "S", Description: "2x4 stud", UOM: "EA", Quantity: qty(t, "100"), UnitCostTenThousandths: 50000},
+		{ID: uuid.New(), ProductID: w.stud, SKU: "S", Description: "2x4 stud", UOM: "EA", Quantity: qty(t, "100"), UnitCostTenThousandths: 50000, LineTotalCents: 50000},
+		{ID: uuid.New(), ProductID: w.ply, SKU: "P", Description: "plywood sheet", UOM: "EA", Quantity: qty(t, "1000"), UnitCostTenThousandths: 12346, LineTotalCents: 123456},
 	}}
 	in := w.basicInput()
 	in.SourceQuoteID = sp(srcID.String())
 	srcLine := w.costs.source[srcID].Lines[0].ID.String()
-	in.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "100"), SourceLineID: &srcLine}}
+	srcLinePly := w.costs.source[srcID].Lines[1].ID.String()
+	in.Lines = []customerquote.LineInput{
+		{ProductID: w.stud.String(), Quantity: qty(t, "100"), SourceLineID: &srcLine},
+		{ProductID: w.ply.String(), Quantity: qty(t, "1000"), SourceLineID: &srcLinePly},
+	}
 	in.ValidUntil = tsOf(w.now.Add(20 * 24 * time.Hour))
 	q, err := w.svc.Create(ctx, w.a, in)
 	if err != nil {
@@ -230,6 +235,9 @@ func TestValidUntil_BoundedByTheSourceDealerQuote(t *testing.T) {
 	}
 	if q.Lines[0].PriceBasis != "dealer_quote" || q.Lines[0].UnitCostTenThousandths != 50000 || q.Lines[0].CostCents != 50000 {
 		t.Errorf("the source line was not taken at the dealer quote's price: %+v", q.Lines[0])
+	}
+	if q.Lines[1].CostCents != 123456 {
+		t.Errorf("source line reconciliation: got CostCents %d, want 123456 (exact dealer line total 1,234.56 for 1000 units)", q.Lines[1].CostCents)
 	}
 	// A source quote the account does not own is refused.
 	in.SourceQuoteID = sp(uuid.New().String())

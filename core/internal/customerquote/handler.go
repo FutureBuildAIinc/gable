@@ -81,6 +81,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, portal func(http.Handler) h
 	mux.Handle("POST "+contractorBase+"/{id}/link/revoke", portal(http.HandlerFunc(h.Revoke)))
 	mux.Handle("POST "+contractorBase+"/{id}/withdraw", portal(http.HandlerFunc(h.Withdraw)))
 	mux.Handle("POST "+contractorBase+"/{id}/revise", portal(http.HandlerFunc(h.Revise)))
+	mux.Handle("GET "+contractorBase+"/{id}/confirm-preview", portal(http.HandlerFunc(h.ConfirmPreview)))
 	mux.Handle("POST "+contractorBase+"/{id}/confirm", portal(http.HandlerFunc(h.Confirm)))
 }
 
@@ -407,9 +408,35 @@ func (h *Handler) Revise(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ConfirmPreview(w http.ResponseWriter, r *http.Request) {
+	a, err := actorOf(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	id, err := idOf(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	prev, err := h.svc.ConfirmPreview(r.Context(), a, id)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prev)
+}
+
 func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 	h.transition(w, r, func(h *Handler, r *http.Request, a Actor, id uuid.UUID) (*Quote, error) {
-		return h.svc.Confirm(r.Context(), a, id)
+		var in ConfirmInput
+		if r.ContentLength != 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+			if err := httpx.DecodeJSON(r, &in); err != nil {
+				return nil, err
+			}
+		}
+		return h.svc.Confirm(r.Context(), a, id, in)
 	})
 }
 

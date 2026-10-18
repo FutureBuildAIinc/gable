@@ -19,6 +19,7 @@ const (
 	CodeCodeLocked          = "code_locked"
 	CodeCodeBudgetExhausted = "code_budget_exhausted"
 	CodeSelectionsChanged   = "selections_changed"
+	CodePriceChanged        = "price_changed"
 	CodeIncomplete          = "selections_incomplete"
 	CodeCodesUnavailable    = "codes_unavailable"
 )
@@ -39,6 +40,10 @@ func wireErr(err error) error {
 		return &httpx.Error{Status: http.StatusConflict, Code: CodeSelectionsChanged,
 			Message: "the selections changed since you viewed the quote: review the updated total and sign again",
 			Details: []httpx.FieldError{{Field: "selections_version", Code: CodeSelectionsChanged, Message: "review the updated total and sign again"}}}
+	case errors.Is(err, ErrPriceChanged):
+		return &httpx.Error{Status: http.StatusConflict, Code: CodePriceChanged,
+			Message: err.Error(),
+			Details: []httpx.FieldError{{Field: "accept_price_changes", Code: CodePriceChanged, Message: "review confirm-preview and set accept_price_changes to true to confirm at current dealer prices"}}}
 	case errors.Is(err, ErrLinkUnavailable):
 		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired"}
 	case errors.Is(err, ErrRateLimited):

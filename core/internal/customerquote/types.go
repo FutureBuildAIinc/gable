@@ -47,6 +47,7 @@ var (
 	ErrInvalidState      = errors.New("the quote is not in a state that allows this")
 	ErrStaleRevision     = errors.New("the quote changed after it was read")
 	ErrSelectionsChanged = errors.New("the selections changed since you viewed the quote: review the updated total and sign again")
+	ErrPriceChanged      = errors.New("dealer material prices changed since the quote was priced: review confirm-preview and accept price changes to confirm")
 	ErrLinkUnknown       = errors.New("unknown link")
 	ErrLinkUnavailable   = errors.New("the link is expired or revoked")
 	ErrRateLimited       = errors.New("too many requests")
@@ -317,4 +318,36 @@ func (RoleCapabilities) Has(a Actor, c Capability) bool {
 		return c == CapQuoteCustomers || c == CapSeeMoney
 	}
 	return false
+}
+
+// ConfirmInput is the optional body of a confirmation.
+type ConfirmInput struct {
+	AcceptPriceChanges bool `json:"accept_price_changes"`
+}
+
+// ConfirmLinePreview compares one approved material line's captured dealer
+// cost against the current dealer cost at confirmation time.
+type ConfirmLinePreview struct {
+	LineID            uuid.UUID      `json:"line_id"`
+	ProductID         uuid.UUID      `json:"product_id"`
+	SKU               string         `json:"sku"`
+	Description       string         `json:"description"`
+	Quantity          httpx.Quantity `json:"quantity"`
+	UOM               string         `json:"uom"`
+	CapturedCostCents int64          `json:"captured_cost_cents"`
+	CurrentCostCents  int64          `json:"current_cost_cents"`
+	DeltaCents        int64          `json:"delta_cents"`
+}
+
+// ConfirmPreview shows the contractor whether the dealer's material prices
+// have moved since the quote was priced, and what the resulting margin would
+// be if confirmed now.
+type ConfirmPreview struct {
+	PriceChanged              bool                 `json:"price_changed"`
+	CapturedMaterialCostCents int64                `json:"captured_material_cost_cents"`
+	CurrentMaterialCostCents  int64                `json:"current_material_cost_cents"`
+	DeltaCents                int64                `json:"delta_cents"`
+	CapturedMarginCents       int64                `json:"captured_margin_cents"`
+	ProjectedMarginCents      int64                `json:"projected_margin_cents"`
+	Lines                     []ConfirmLinePreview `json:"lines"`
 }

@@ -881,3 +881,16 @@ func (s *Store) StaffName(ctx context.Context, email string) (string, error) {
 	}
 	return n, err
 }
+
+// UpdateLineCost updates a material line's dealer cost at confirmation time
+// when the contractor explicitly accepts a dealer price move.
+func (s *Store) UpdateLineCost(ctx context.Context, lineID uuid.UUID, unitCostTenThousandths, costCents int64, pricedAt time.Time) error {
+	_, err := s.exec(ctx).Exec(ctx, `
+		UPDATE pro_customer_quote_lines
+		SET unit_cost_ten_thousandths = $2, cost_cents = $3, priced_at = $4
+		WHERE id = $1`, lineID, unitCostTenThousandths, costCents, pricedAt)
+	if err != nil {
+		return fmt.Errorf("update line cost: %w", err)
+	}
+	return nil
+}
