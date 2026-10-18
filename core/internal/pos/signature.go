@@ -16,6 +16,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
 )
@@ -189,6 +190,127 @@ func (s *Service) StartReceiptPrint(ctx context.Context, saleID uuid.UUID) (docu
 func (s *Service) CancelReceiptPrint(ctx context.Context, saleID uuid.UUID) {
 	if err := s.repo.UnbumpPrintCount(context.WithoutCancel(ctx), saleID); err != nil {
 		s.logger.Error("the print count of a failed render was not given back", "sale_id", saleID, "error", err)
+	}
+}
+
+// ThermalReceipt builds the plain 80mm receipt input for the completed counter
+// sale that owns invoiceID and the given print facts.
+func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print document.ReceiptPrint) (uuid.UUID, document.ThermalReceipt, error) {
+	facts, err := s.repo.ReceiptSaleByInvoice(ctx, invoiceID)
+	if err != nil {
+		return uuid.Nil, document.ThermalReceipt{}, err
+	}
+	sale := &facts.sale
+	lines, err := s.repo.GetLines(ctx, sale.ID)
+	if err != nil {
+		return uuid.Nil, document.ThermalReceipt{}, err
+	}
+	tenders, err := s.repo.GetTenders(ctx, sale.ID)
+	if err != nil {
+		return uuid.Nil, document.ThermalReceipt{}, err
+	}
+	soldAt := sale.CreatedAt.Time
+	if sale.CompletedAt != nil {
+		soldAt = sale.CompletedAt.Time
+	}
+	cashier := facts.cashierName
+	if cashier == "" && sale.CashierID != uuid.Nil {
+		cashier = sale.CashierID.String()[:8]
+	}
+	r := document.ThermalReceipt{
+		SaleNumber:    sale.Number,
+		SoldAt:        soldAt,
+		Cashier:       cashier,
+		Customer:      facts.customerName,
+		AccountNumber: facts.accountNumber,
+		PONumber:      derefString(sale.CustomerPO),
+		JobName:       facts.jobName,
+		SubtotalCents: sale.SubtotalCents,
+		TaxCents:      sale.TaxCents,
+		TotalCents:    sale.TotalCents,
+	}
+	for i := range lines {
+		l := &lines[i]
+		if l.LineType == salesdoc.LineText || l.Quantity == nil || l.UnitPrice == nil || l.LineTotal == nil {
+			continue
+		}
+		sku := derefString(l.SKU)
+		if sku == "" {
+			sku = derefString(l.ChargeCode)
+		}
+		uom := derefString(l.UOM)
+		priceUOM := derefString(l.PriceUOM)
+		if priceUOM == "" {
+			priceUOM = uom
+		}
+		r.Lines = append(r.Lines, document.ThermalLine{
+			SKU:         sku,
+			Description: l.Description,
+			Quantity:    *l.Quantity,
+			UOM:         uom,
+			UnitPrice:   *l.UnitPrice,
+			PriceUOM:    priceUOM,
+			LineTotal:   *l.LineTotal,
+		})
+	}
+	changeLeft := sale.ChangeCents
+	var accountCents int64
+	for i := range tenders {
+		t := &tenders[i]
+		tt := document.ThermalTender{
+			Method:      string(t.Method),
+			AmountCents: t.AmountCents,
+			LastFour:    derefString(t.CardLast4),
+		}
+		if t.Method == TenderCash && changeLeft > 0 {
+			if t.PaymentID != nil {
+				tt.AmountCents += changeLeft
+			}
+			tt.ChangeCents = changeLeft
+			changeLeft = 0
+		}
+		if t.Method == TenderAccount {
+			accountCents += int64(t.AmountCents)
+		}
+		r.Tenders = append(r.Tenders, tt)
+	}
+	if accountCents > 0 {
+		r.BalanceCents = httpx.Cents(accountCents)
+		if sale.CustomerID != nil {
+			if open, oerr := s.repo.OpenReceivableCents(ctx, *sale.CustomerID); oerr == nil && open > 0 {
+				r.BalanceCents = httpx.Cents(open)
+			}
+		}
+	}
+	if print.Signature != nil {
+		prefix := print.Signature.SealHex
+		if len(prefix) > 12 {
+			prefix = prefix[:12]
+		}
+		r.Signature = &document.ThermalSignature{
+			Name:       print.Signature.SignerName,
+			SignedAt:   print.Signature.SignedAt,
+			SealPrefix: prefix,
+			PNG:        print.Signature.PNG,
+		}
+	}
+	if print.Reprint() {
+		r.Reprint = &document.ThermalReprint{PrintNumber: print.Number}
+	}
+	return sale.BranchID, r, nil
+}
+
+// ThermalRenderer adapts the counter's ThermalReceipt builder to doc.GenerateThermalReceiptPDF.
+func (s *Service) ThermalRenderer(doc *document.Service) document.ThermalRenderer {
+	if doc == nil {
+		return nil
+	}
+	return func(ctx context.Context, invoiceID uuid.UUID, print document.ReceiptPrint) ([]byte, error) {
+		branch, r, err := s.ThermalReceipt(ctx, invoiceID, print)
+		if err != nil {
+			return nil, err
+		}
+		return doc.GenerateThermalReceiptPDF(ctx, branch, r)
 	}
 }
 

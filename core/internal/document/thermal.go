@@ -116,9 +116,10 @@ type ThermalSignature struct {
 	PNG        []byte // optional
 }
 
-// ThermalReprint carries the print ordinal for a reprint: 1 for the first
-// reprint, 2 for the second, and so on. A nil pointer renders the original
-// print, with no banner at the head of the paper.
+// ThermalReprint carries the print number for a reprint: 2 for the second
+// print (the first reprint), 3 for the third, and so on, matching
+// ReceiptPrint.Number. A nil pointer renders the original print, with no
+// banner at the head of the paper.
 type ThermalReprint struct {
 	PrintNumber int
 }

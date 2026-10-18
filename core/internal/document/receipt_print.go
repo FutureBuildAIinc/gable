@@ -53,6 +53,26 @@ type ReceiptPrints interface {
 // ThermalRenderer renders the 80mm receipt of a sale's invoice for one print.
 type ThermalRenderer func(ctx context.Context, invoiceID uuid.UUID, print ReceiptPrint) ([]byte, error)
 
+// ThermalReceipts builds the plain 80mm receipt input for a sale's invoice.
+type ThermalReceipts interface {
+	ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print ReceiptPrint) (branch uuid.UUID, receipt ThermalReceipt, err error)
+}
+
+// ThermalRendererOf adapts a ThermalReceipts source to the handler's own
+// document service (GenerateThermalReceiptPDF).
+func (h *Handler) ThermalRendererOf(src ThermalReceipts) ThermalRenderer {
+	if src == nil || h.docSvc == nil {
+		return nil
+	}
+	return func(ctx context.Context, invoiceID uuid.UUID, print ReceiptPrint) ([]byte, error) {
+		branch, r, err := src.ThermalReceipt(ctx, invoiceID, print)
+		if err != nil {
+			return nil, err
+		}
+		return h.docSvc.GenerateThermalReceiptPDF(ctx, branch, r)
+	}
+}
+
 // WithReceiptPrints supplies the print count and signature lookup.
 func (h *Handler) WithReceiptPrints(p ReceiptPrints) *Handler { h.prints = p; return h }
 

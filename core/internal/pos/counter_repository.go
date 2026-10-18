@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -249,6 +250,48 @@ func (r *PostgresRepository) BumpPrintCount(ctx context.Context, saleID uuid.UUI
 func (r *PostgresRepository) UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error {
 	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET print_count = GREATEST(print_count - 1, 0) WHERE id = $1`, saleID)
 	return err
+}
+
+// receiptSaleFacts holds the completed sale and the identity facts the 80mm
+// thermal receipt prints beside it.
+type receiptSaleFacts struct {
+	sale          Sale
+	cashierName   string
+	customerName  string
+	accountNumber string
+	jobName       string
+}
+
+// ReceiptSaleByInvoice reads the completed counter sale that owns invoiceID,
+// with the cashier, customer and job names the thermal receipt prints.
+func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error) {
+	var out receiptSaleFacts
+	var completed *time.Time
+	var created time.Time
+	s := &out.sale
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT `+saleCols+`,
+			COALESCE((SELECT NULLIF(btrim(st.full_name), '') FROM staff st WHERE st.id = t.cashier_id),
+			         (SELECT NULLIF(btrim(st.email), '') FROM staff st WHERE st.id = t.cashier_id), ''),
+			COALESCE((SELECT CASE WHEN c.account_number = 'WALK-IN' THEN '' ELSE c.name END FROM customers c WHERE c.id = t.customer_id), ''),
+			COALESCE((SELECT CASE WHEN c.account_number = 'WALK-IN' THEN '' ELSE COALESCE(c.account_number, '') END FROM customers c WHERE c.id = t.customer_id), ''),
+			COALESCE((SELECT p.name FROM projects p WHERE p.id = t.job_id), '')
+		FROM pos_transactions t
+		WHERE t.invoice_id = $1 AND `+middleware.Wall("t", 2, 3),
+		invoiceID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
+		Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
+			&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
+			&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
+			&out.cashierName, &out.customerName, &out.accountNumber, &out.jobName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("sale not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the receipt's sale: %w", err)
+	}
+	s.CompletedAt = httpx.PtrTimestamp(completed)
+	s.CreatedAt = httpx.TimestampOf(created)
+	return &out, nil
 }
 
 // RestockingFeeBps reads the database wide restocking fee of each return

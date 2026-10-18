@@ -202,6 +202,7 @@ type Repository interface {
 	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)
 	BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error)
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
+	ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error)
 	RestockingFeeBps(ctx context.Context) (map[string]int, error)
 	LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error
 	LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error

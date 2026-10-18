@@ -313,6 +313,9 @@ func (w *branchWall) posReceipts(mux *http.ServeMux, h *document.Handler, sales 
 	if prints, ok := sales.(document.ReceiptPrints); ok {
 		h.WithReceiptPrints(prints)
 	}
+	if thermal, ok := sales.(document.ThermalReceipts); ok {
+		h.WithThermalReceipt(h.ThermalRendererOf(thermal))
+	}
 	h.WithSaleReceipts(sales).RegisterReceiptRoutes(mux, w.scoped(roles...))
 }
 

@@ -61,6 +61,18 @@ func withReceipts(render document.ThermalRenderer) func(*fixture) {
 	}
 }
 
+func withRealThermalReceipts() func(*fixture) {
+	return func(f *fixture) {
+		f.mounts = append(f.mounts, func(f *fixture, mux *http.ServeMux) {
+			store := document.NewStore(f.db)
+			docSvc := document.NewService(nil).WithYards(store).WithJobs(store)
+			h := document.NewHandler(docSvc, nil, nil, nil, nil).WithSaleReceipts(f.service).WithReceiptPrints(f.service)
+			h.WithThermalReceipt(h.ThermalRendererOf(f.service))
+			h.RegisterReceiptRoutes(mux, func(next http.Handler) http.Handler { return next })
+		})
+	}
+}
+
 func (f *fixture) printReceipt(saleID, query string) resp {
 	f.t.Helper()
 	path := "/api/v1/pos/transactions/" + saleID + "/receipt"
@@ -306,3 +318,47 @@ func TestRacingPrintsAreNumberedApart(t *testing.T) {
 		t.Errorf("print numbers = %v, want 1, 2 and 3 each once", numbers)
 	}
 }
+
+// RULE: GET /pos/transactions/{id}/receipt?layout=thermal80 renders a real
+// 80mm PDF through GenerateThermalReceiptPDF: the first print has no REPRINT
+// banner, the second print has REPRINT #2, and the sealed signature's name
+// and 12-character seal prefix appear in the PDF text.
+func TestTheRealThermalReceiptPDFRendersSaleSignatureAndReprint(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
+	sale, _ := completedSale(t, f)
+	saleNumber := str(t, f.getSale(t, sale), "number")
+
+	sigResp := f.sign(sale, "Pat Signer", tinyPNG)
+	if sigResp.status != http.StatusCreated {
+		t.Fatalf("sign = %d: %s", sigResp.status, sigResp.raw)
+	}
+	seal := str(t, sigResp.body, "seal")
+
+	first := f.printReceipt(sale, "layout=thermal80")
+	if first.status != http.StatusOK {
+		t.Fatalf("first print = %d: %s", first.status, first.raw)
+	}
+	if !strings.HasPrefix(string(first.raw), "%PDF-") || !strings.Contains(string(first.raw), "%%EOF") {
+		t.Fatalf("first print is not a complete PDF")
+	}
+	if strings.Contains(string(first.raw), "REPRINT") {
+		t.Errorf("first print unexpectedly contains REPRINT")
+	}
+	for _, want := range []string{saleNumber, "Counter Co", f.sku, "2x4x8 SPF", "CASH", "Signed by Pat Signer", "sealed " + seal[:12]} {
+		if !strings.Contains(string(first.raw), want) {
+			t.Errorf("first print PDF missing %q", want)
+		}
+	}
+
+	second := f.printReceipt(sale, "layout=thermal80")
+	if second.status != http.StatusOK {
+		t.Fatalf("second print = %d: %s", second.status, second.raw)
+	}
+	for _, want := range []string{"REPRINT", "#2", "Signed by Pat Signer", "sealed " + seal[:12]} {
+		if !strings.Contains(string(second.raw), want) {
+			t.Errorf("second print PDF missing %q", want)
+		}
+	}
+}
+
