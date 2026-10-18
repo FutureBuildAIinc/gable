@@ -33,7 +33,13 @@ func (q quoteOrders) PlaceOrder(ctx context.Context, p customerquote.OrderPlacem
 	lines := make([]salesdoc.ParsedLine, 0, len(p.Lines))
 	for _, l := range p.Lines {
 		pid := l.ProductID
-		lines = append(lines, salesdoc.ParsedLine{LineType: salesdoc.LineProduct, ProductID: &pid, Quantity: httpx.Quantity(l.Quantity), UOM: l.UOM})
+		pl := salesdoc.ParsedLine{LineType: salesdoc.LineProduct, ProductID: &pid, Quantity: httpx.Quantity(l.Quantity), UOM: l.UOM}
+		if l.DealerQuoteUnitCost != nil {
+			up := httpx.Price(*l.DealerQuoteUnitCost)
+			pl.UnitPrice = &up
+			pl.OverrideReason = "dealer quote"
+		}
+		lines = append(lines, pl)
 	}
 	return q.portal.PlaceOrderFromLines(ctx, p.CustomerID, p.ProjectID, p.Reference, lines)
 }
@@ -79,9 +85,15 @@ func wireCustomerQuotes(mux *http.ServeMux, d customerQuoteDeps, portalChain fun
 	customerquote.NewHandler(svc).RegisterRoutes(mux, portalChain)
 	customerquote.NewPublicHandler(svc, d.Trusted).RegisterRoutes(mux)
 	dealer := customerquote.NewDealerHandler(svc)
-	dealer.RegisterRoutes(mux,
-		middleware.RequireRole("admin", "owner", "sales"),
-		middleware.RequireRole("admin", "owner", "sales"))
+	// The dealer's desk reads the contractors' projects behind the branch
+	// wall: the role guard, the branch middleware, and in the service the
+	// customer module's own reach predicate, so a user granted another branch
+	// sees none of them.
+	deskGuard := middleware.RequireRole("admin", "owner", "sales")
+	if d.Wall != nil {
+		deskGuard = d.Wall.scoped("admin", "owner", "sales")
+	}
+	dealer.RegisterRoutes(mux, deskGuard, deskGuard)
 	if d.Wall != nil {
 		// The dealer's own quote link sits behind the quote module's role and
 		// branch wall: the quote is read under the caller's branches, so the desk

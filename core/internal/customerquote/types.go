@@ -42,18 +42,26 @@ const (
 // The sentinel errors the service answers with; the handlers map them to the
 // wire (see httpErr).
 var (
-	ErrNotFound        = errors.New("customer quote not found")
-	ErrForbidden       = errors.New("the portal role may not do this")
-	ErrInvalidState    = errors.New("the quote is not in a state that allows this")
-	ErrStaleRevision   = errors.New("the quote changed after it was read")
-	ErrLinkUnknown     = errors.New("unknown link")
-	ErrLinkUnavailable = errors.New("the link is expired or revoked")
-	ErrRateLimited     = errors.New("too many requests")
-	ErrCodeRequired    = errors.New("a verification code is required")
-	ErrDeliveryFailed  = errors.New("the code could not be delivered")
-	ErrIncomplete      = errors.New("every selection must be decided")
-	ErrNothingChosen   = errors.New("nothing is approved")
+	ErrNotFound          = errors.New("customer quote not found")
+	ErrForbidden         = errors.New("the portal role may not do this")
+	ErrInvalidState      = errors.New("the quote is not in a state that allows this")
+	ErrStaleRevision     = errors.New("the quote changed after it was read")
+	ErrSelectionsChanged = errors.New("the selections changed since you viewed the quote: review the updated total and sign again")
+	ErrPriceChanged      = errors.New("dealer material prices changed since the quote was priced: review confirm-preview and accept price changes to confirm")
+	ErrLinkUnknown       = errors.New("unknown link")
+	ErrLinkUnavailable   = errors.New("the link is expired or revoked")
+	ErrRateLimited       = errors.New("too many requests")
+	ErrCodeRequired      = errors.New("a verification code is required")
+	ErrDeliveryFailed    = errors.New("the code could not be delivered")
+	ErrIncomplete        = errors.New("every selection must be decided")
+	ErrNothingChosen     = errors.New("nothing is approved")
+	// ErrCodesUnavailable refuses a verification code the server cannot send.
+	ErrCodesUnavailable = errors.New(CodesUnavailableMessage)
 )
+
+// CodesUnavailableMessage is the one sentence every refusal about
+// verification codes carries.
+const CodesUnavailableMessage = "Verification codes need a real email or text sender on this server."
 
 // Contact is a person the quote names.
 type Contact struct {
@@ -134,33 +142,34 @@ type Overhead struct {
 
 // Quote is the whole contractor's quote, internal and contractor facing.
 type Quote struct {
-	ID               uuid.UUID
-	CustomerID       uuid.UUID
-	Reference        string
-	Title            string
-	ProjectID        *uuid.UUID
-	SourceQuoteID    *uuid.UUID
-	JobSiteAddress   string
-	EndCustomer      Contact
-	SiteContact      Contact
-	Status           Status
-	Markup           Markup
-	HideLinePrices   bool
-	Tax              Tax
-	PaymentTerms     string
-	DepositBPS       int64
-	CustomerNote     string
-	RequireCode      bool
-	ValidUntil       time.Time
-	Revision         int64
-	SentAt           *time.Time
-	ApprovedAt       *time.Time
-	DeclinedAt       *time.Time
-	ConfirmedAt      *time.Time
-	DealerAcceptedAt *time.Time
-	OrderID          *uuid.UUID
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                uuid.UUID
+	CustomerID        uuid.UUID
+	Reference         string
+	Title             string
+	ProjectID         *uuid.UUID
+	SourceQuoteID     *uuid.UUID
+	JobSiteAddress    string
+	EndCustomer       Contact
+	SiteContact       Contact
+	Status            Status
+	Markup            Markup
+	HideLinePrices    bool
+	Tax               Tax
+	PaymentTerms      string
+	DepositBPS        int64
+	CustomerNote      string
+	RequireCode       bool
+	ValidUntil        time.Time
+	Revision          int64
+	SelectionsVersion int64
+	SentAt            *time.Time
+	ApprovedAt        *time.Time
+	DeclinedAt        *time.Time
+	ConfirmedAt       *time.Time
+	DealerAcceptedAt  *time.Time
+	OrderID           *uuid.UUID
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 
 	Groups        []OptionGroup
 	Lines         []Line
@@ -267,10 +276,19 @@ type Actor struct {
 }
 
 // DealerActor is the desk user who acts on the dealer side.
+//
+// Ref is the desk user's id (the token's subject) and Name the display name
+// the record keeps. Email is only used to find the display name on the staff
+// roster; it is never stored and never shown.
 type DealerActor struct {
-	Ref  string
-	Name string
+	Ref   string
+	Name  string
+	Email string
 }
+
+// UnknownDeskUser is the display name of a desk user the staff roster does
+// not name.
+const UnknownDeskUser = "Desk user"
 
 // Capability is something a portal role may do with customer quotes.
 type Capability string
@@ -300,4 +318,36 @@ func (RoleCapabilities) Has(a Actor, c Capability) bool {
 		return c == CapQuoteCustomers || c == CapSeeMoney
 	}
 	return false
+}
+
+// ConfirmInput is the optional body of a confirmation.
+type ConfirmInput struct {
+	AcceptPriceChanges bool `json:"accept_price_changes"`
+}
+
+// ConfirmLinePreview compares one approved material line's captured dealer
+// cost against the current dealer cost at confirmation time.
+type ConfirmLinePreview struct {
+	LineID            uuid.UUID      `json:"line_id"`
+	ProductID         uuid.UUID      `json:"product_id"`
+	SKU               string         `json:"sku"`
+	Description       string         `json:"description"`
+	Quantity          httpx.Quantity `json:"quantity"`
+	UOM               string         `json:"uom"`
+	CapturedCostCents int64          `json:"captured_cost_cents"`
+	CurrentCostCents  int64          `json:"current_cost_cents"`
+	DeltaCents        int64          `json:"delta_cents"`
+}
+
+// ConfirmPreview shows the contractor whether the dealer's material prices
+// have moved since the quote was priced, and what the resulting margin would
+// be if confirmed now.
+type ConfirmPreview struct {
+	PriceChanged              bool                 `json:"price_changed"`
+	CapturedMaterialCostCents int64                `json:"captured_material_cost_cents"`
+	CurrentMaterialCostCents  int64                `json:"current_material_cost_cents"`
+	DeltaCents                int64                `json:"delta_cents"`
+	CapturedMarginCents       int64                `json:"captured_margin_cents"`
+	ProjectedMarginCents      int64                `json:"projected_margin_cents"`
+	Lines                     []ConfirmLinePreview `json:"lines"`
 }

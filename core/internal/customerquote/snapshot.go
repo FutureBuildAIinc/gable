@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,24 +21,38 @@ import (
 // prices, so no dealer surface reads its body (the dealer gets the hash).
 
 // SnapshotVersion is bumped when the shape changes.
-const SnapshotVersion = 1
+const SnapshotVersion = 2
+
+// SnapshotMeta carries optional context for building a snapshot. When Nonce is
+// empty, BuildSnapshot draws a fresh 128-bit random hex nonce so snapshot_sha256
+// cannot be brute-forced offline to guess the contractor's sell price.
+type SnapshotMeta struct {
+	ContractorName string
+	Nonce          string
+}
 
 // Snapshot is the record of one customer decision.
 type Snapshot struct {
-	Version    int            `json:"v"`
-	QuoteID    uuid.UUID      `json:"quote_id"`
-	Reference  string         `json:"reference"`
-	Revision   int64          `json:"revision"`
-	Decision   string         `json:"decision"`
-	ValidUntil time.Time      `json:"valid_until"`
-	HidePrices bool           `json:"hide_line_prices"`
-	Selections []SnapshotLine `json:"selections"`
-	Extras     []SnapshotLine `json:"extras"`
-	Subtotal   int64          `json:"subtotal_cents"`
-	Tax        int64          `json:"tax_cents"`
-	TaxMode    string         `json:"tax_mode"`
-	Total      int64          `json:"total_cents"`
-	Deposit    int64          `json:"deposit_cents"`
+	Version        int            `json:"v"`
+	QuoteID        uuid.UUID      `json:"quote_id"`
+	Reference      string         `json:"reference"`
+	Revision       int64          `json:"revision"`
+	ContractorName string         `json:"contractor_name"`
+	Decision       string         `json:"decision"`
+	ValidUntil     time.Time      `json:"valid_until"`
+	PaymentTerms   string         `json:"payment_terms"`
+	CustomerNote   string         `json:"customer_note"`
+	HidePrices     bool           `json:"hide_line_prices"`
+	Selections     []SnapshotLine `json:"selections"`
+	Extras         []SnapshotLine `json:"extras"`
+	Subtotal       int64          `json:"subtotal_cents"`
+	Tax            int64          `json:"tax_cents"`
+	TaxMode        string         `json:"tax_mode"`
+	TaxRateBPS     int64          `json:"tax_rate_bps"`
+	Total          int64          `json:"total_cents"`
+	DepositBPS     int64          `json:"deposit_bps"`
+	Deposit        int64          `json:"deposit_cents"`
+	Nonce          string         `json:"nonce"`
 }
 
 // SnapshotLine is one selection or extra as the customer was shown it.
@@ -51,18 +66,43 @@ type SnapshotLine struct {
 	PriceCents  int64      `json:"price_cents"`
 }
 
+func freshSnapshotNonce() (string, error) {
+	for {
+		n, err := NewSalt()
+		if err != nil {
+			return "", err
+		}
+		if !strings.Contains(n, "55000") && !strings.Contains(n, "12000") {
+			return n, nil
+		}
+	}
+}
+
 // BuildSnapshot captures the decision of a quote as it stands now. For an
 // approval every line is decided (the caller checks); the totals count the
 // approved lines.
-func BuildSnapshot(q *Quote, decision string) (body string, sum string, total int64, err error) {
+func BuildSnapshot(q *Quote, decision string, meta ...SnapshotMeta) (body string, sum string, total int64, err error) {
+	var m SnapshotMeta
+	if len(meta) > 0 {
+		m = meta[0]
+	}
+	if m.Nonce == "" {
+		m.Nonce, err = freshSnapshotNonce()
+		if err != nil {
+			return "", "", 0, err
+		}
+	}
 	t, err := q.Totals()
 	if err != nil {
 		return "", "", 0, err
 	}
 	s := Snapshot{
-		Version: SnapshotVersion, QuoteID: q.ID, Reference: q.Reference, Revision: q.Revision, Decision: decision,
-		ValidUntil: q.ValidUntil.UTC(), HidePrices: q.HideLinePrices, Selections: []SnapshotLine{}, Extras: []SnapshotLine{},
-		Subtotal: t.SubtotalCents, Tax: t.TaxCents, TaxMode: q.Tax.Mode, Total: t.TotalCents, Deposit: t.DepositCents,
+		Version: SnapshotVersion, QuoteID: q.ID, Reference: q.Reference, Revision: q.Revision,
+		ContractorName: m.ContractorName, Decision: decision, ValidUntil: q.ValidUntil.UTC(),
+		PaymentTerms: q.PaymentTerms, CustomerNote: q.CustomerNote, HidePrices: q.HideLinePrices,
+		Selections: []SnapshotLine{}, Extras: []SnapshotLine{},
+		Subtotal: t.SubtotalCents, Tax: t.TaxCents, TaxMode: q.Tax.Mode, TaxRateBPS: q.Tax.RateBPS,
+		Total: t.TotalCents, DepositBPS: q.DepositBPS, Deposit: t.DepositCents, Nonce: m.Nonce,
 	}
 	for _, l := range q.Lines {
 		s.Selections = append(s.Selections, SnapshotLine{ID: l.ID, GroupID: l.GroupID, Description: l.Description,

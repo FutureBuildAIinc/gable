@@ -12,12 +12,16 @@ import (
 
 // Error codes the customer quote routes add to the platform's.
 const (
-	CodeLinkUnavailable = "link_unavailable"
-	CodeCodeRequired    = "code_required"
-	CodeCodeInvalid     = "code_invalid"
-	CodeCodeExpired     = "code_expired"
-	CodeCodeLocked      = "code_locked"
-	CodeIncomplete      = "selections_incomplete"
+	CodeLinkUnavailable     = "link_unavailable"
+	CodeCodeRequired        = "code_required"
+	CodeCodeInvalid         = "code_invalid"
+	CodeCodeExpired         = "code_expired"
+	CodeCodeLocked          = "code_locked"
+	CodeCodeBudgetExhausted = "code_budget_exhausted"
+	CodeSelectionsChanged   = "selections_changed"
+	CodePriceChanged        = "price_changed"
+	CodeIncomplete          = "selections_incomplete"
+	CodeCodesUnavailable    = "codes_unavailable"
 )
 
 // wireErr maps a domain error onto the platform's one error envelope. An
@@ -32,8 +36,16 @@ func wireErr(err error) error {
 		return httpx.Forbidden("your role may not quote customers")
 	case errors.Is(err, ErrInvalidState):
 		return httpx.InvalidStateTransition("the quote is not in a state that allows this")
+	case errors.Is(err, ErrSelectionsChanged):
+		return &httpx.Error{Status: http.StatusConflict, Code: CodeSelectionsChanged,
+			Message: "the selections changed since you viewed the quote: review the updated total and sign again",
+			Details: []httpx.FieldError{{Field: "selections_version", Code: CodeSelectionsChanged, Message: "review the updated total and sign again"}}}
+	case errors.Is(err, ErrPriceChanged):
+		return &httpx.Error{Status: http.StatusConflict, Code: CodePriceChanged,
+			Message: err.Error(),
+			Details: []httpx.FieldError{{Field: "accept_price_changes", Code: CodePriceChanged, Message: "review confirm-preview and set accept_price_changes to true to confirm at current dealer prices"}}}
 	case errors.Is(err, ErrLinkUnavailable):
-		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired or been withdrawn"}
+		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired"}
 	case errors.Is(err, ErrRateLimited):
 		return httpx.RateLimited("too many requests: wait a minute and try again")
 	case errors.Is(err, ErrIncomplete):
@@ -54,6 +66,13 @@ func wireErr(err error) error {
 	case errors.Is(err, ErrCodeLocked):
 		return httpx.BadRequest("too many wrong codes: request a new code",
 			httpx.FieldError{Field: "code", Code: CodeCodeLocked, Message: "request a new code"})
+	case errors.Is(err, ErrCodeBudgetExhausted):
+		return &httpx.Error{Status: http.StatusConflict, Code: CodeCodeBudgetExhausted,
+			Message: "too many codes or wrong guesses on this link: ask the contractor to send a fresh link",
+			Details: []httpx.FieldError{{Field: "code", Code: CodeCodeBudgetExhausted, Message: "ask the contractor to send a fresh link"}}}
+	case errors.Is(err, ErrCodesUnavailable):
+		return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: CodesUnavailableMessage,
+			Details: []httpx.FieldError{{Code: CodeCodesUnavailable, Message: CodesUnavailableMessage}}}
 	case errors.Is(err, ErrDeliveryFailed):
 		return httpx.Unavailable("the code could not be delivered")
 	}

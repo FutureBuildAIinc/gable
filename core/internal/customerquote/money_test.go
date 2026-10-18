@@ -217,6 +217,36 @@ func TestLabourAndOverheadTotals(t *testing.T) {
 	}
 }
 
+func TestCompute_RefusesLabourAndOverheadOverflow(t *testing.T) {
+	hours, _ := httpx.ParseQuantity("900000")
+	// Single hourly labour line past MaxCostCents.
+	if _, err := LabourTotalCents(LabourLine{RateType: RateHourly, RateCents: MaxCostCents, Hours: hours}); err == nil {
+		t.Error("an hourly labour line past MaxCostCents was accepted")
+	}
+	// Single percent overhead line past MaxCostCents.
+	if _, err := OverheadTotalCents(OverheadLine{AmountType: AmountPercent, Value: MaxMarkupBPS}, MaxCostCents); err == nil {
+		t.Error("a percent overhead line past MaxCostCents was accepted")
+	}
+	// Eleven large labour lines that would exceed MaxCostCents in Compute.
+	var manyLabour []LabourLine
+	for i := 0; i < 11; i++ {
+		manyLabour = append(manyLabour, LabourLine{RateType: RateHourly, RateCents: MaxCostCents, Hours: hours})
+	}
+	if _, err := Compute(TotalsInput{Labour: manyLabour, TaxMode: TaxAtCheckout}); err == nil {
+		t.Error("eleven huge hourly labour lines were accepted by Compute")
+	}
+	// Running sum of flat labour lines past MaxCostCents in Compute.
+	if _, err := Compute(TotalsInput{
+		Labour: []LabourLine{
+			{RateType: RateFlat, RateCents: MaxCostCents},
+			{RateType: RateFlat, RateCents: 1},
+		},
+		TaxMode: TaxAtCheckout,
+	}); err == nil {
+		t.Error("a running labour sum past MaxCostCents was accepted by Compute")
+	}
+}
+
 // totalsFixture is the quote the totals tests share: two standalone material
 // lines, one two option group, labour (one customer facing, one contractor
 // only), overhead (flat customer facing, percent contractor only).

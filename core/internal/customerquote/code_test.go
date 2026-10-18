@@ -6,6 +6,7 @@ package customerquote
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -108,21 +109,45 @@ func TestLimiter(t *testing.T) {
 	}
 }
 
-func TestLimiter_BoundedMemory(t *testing.T) {
+func TestLimiter_BoundedMemoryNeverRefusesANewCaller(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	l := NewLimiter(1, time.Minute)
 	l.now = func() time.Time { return now }
 	l.maxKeys = 10
-	for i := 0; i < 10; i++ {
-		if !l.Allow(string(rune('a' + i))) {
-			t.Fatalf("key %d refused under the cap", i)
+	// A flood of distinct keys inside one window fills the map ...
+	for i := 0; i < 1000; i++ {
+		now = now.Add(time.Millisecond)
+		if !l.Allow(fmt.Sprintf("flood-%d", i)) {
+			t.Fatalf("flood key %d was refused: a new caller must never be refused for want of room", i)
 		}
 	}
-	if l.Allow("overflow") {
-		t.Error("a key past the cap was allowed (the limiter fails closed)")
+	if len(l.hits) > l.maxKeys {
+		t.Errorf("the map holds %d keys, bound %d", len(l.hits), l.maxKeys)
 	}
-	now = now.Add(2 * time.Minute)
-	if !l.Allow("overflow") {
-		t.Error("after the window the expired keys were not released")
+	// ... and a real caller arriving in the middle of it is served.
+	if !l.Allow("a real customer") {
+		t.Fatal("a new caller was refused while the map was full")
+	}
+	// The oldest keys went first: the most recent flood key is still counted.
+	if l.Allow("flood-999") {
+		t.Error("the newest key lost its count")
+	}
+}
+
+func TestClientKey_GroupsIPv6By64(t *testing.T) {
+	a := clientKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd")
+	b := clientKey("2001:db8:1:2:1111:2222:3333:4444")
+	c := clientKey("2001:db8:1:3::1")
+	if a != b || a == c {
+		t.Errorf("keys %q %q %q: one /64 is one caller, the next /64 another", a, b, c)
+	}
+	if clientKey("203.0.113.9") == clientKey("203.0.113.10") {
+		t.Error("two IPv4 callers share a key")
+	}
+	if clientKey("::ffff:203.0.113.9") != clientKey("203.0.113.9") {
+		t.Error("a mapped IPv4 address keys differently")
+	}
+	if clientKey("not an address") == "" {
+		t.Error("an unparseable address has no key")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 )
@@ -26,6 +27,10 @@ const (
 	CodeTTL = 10 * time.Minute
 	// CodeMaxAttempts is the wrong guesses a code survives.
 	CodeMaxAttempts = 5
+	// CodeMaxLifetimeCodes is the total codes one link may issue across its life.
+	CodeMaxLifetimeCodes = 10
+	// CodeMaxLifetimeAttempts is the total wrong guesses one link survives across all codes.
+	CodeMaxLifetimeAttempts = 15
 )
 
 var codeShape = regexp.MustCompile(`^[0-9]{6}$`)
@@ -59,10 +64,11 @@ func HashCode(salt, quoteID, code string) string {
 
 // The reasons a code is refused.
 var (
-	ErrCodeWrong    = errors.New("the code is not right")
-	ErrCodeExpired  = errors.New("the code has expired")
-	ErrCodeConsumed = errors.New("the code has already been used")
-	ErrCodeLocked   = errors.New("too many wrong codes")
+	ErrCodeWrong           = errors.New("the code is not right")
+	ErrCodeExpired         = errors.New("the code has expired")
+	ErrCodeConsumed        = errors.New("the code has already been used")
+	ErrCodeLocked          = errors.New("too many wrong codes")
+	ErrCodeBudgetExhausted = errors.New("the verification code budget for this link is exhausted: ask the contractor to send a fresh link")
 )
 
 // CodeRecord is a stored code row.
@@ -98,8 +104,10 @@ func (c CodeRecord) Check(now time.Time, presented string) error {
 }
 
 // Limiter is a sliding window request limiter keyed by a string. It holds a
-// bounded number of keys and fails closed past the bound: under a flood of
-// distinct keys, new keys are refused until old ones age out.
+// bounded number of keys. It fails open for a new key: under a flood of
+// distinct keys the oldest keys are evicted to make room, and a new caller is
+// never refused for want of room (a flood must not lock out the real
+// customers). The limit itself still binds every key the limiter holds.
 type Limiter struct {
 	mu      sync.Mutex
 	max     int
@@ -122,10 +130,7 @@ func (l *Limiter) Allow(key string) bool {
 	cutoff := now.Add(-l.window)
 	h, known := l.hits[key]
 	if !known && len(l.hits) >= l.maxKeys {
-		l.sweep(cutoff)
-		if len(l.hits) >= l.maxKeys {
-			return false
-		}
+		l.makeRoom(cutoff)
 	}
 	i := 0
 	for i < len(h) && !h[i].After(cutoff) {
@@ -140,10 +145,28 @@ func (l *Limiter) Allow(key string) bool {
 	return true
 }
 
-func (l *Limiter) sweep(cutoff time.Time) {
+// makeRoom drops the keys whose window has passed and, when that is not
+// enough, a tenth of the rest, the least recently hit first.
+func (l *Limiter) makeRoom(cutoff time.Time) {
 	for k, h := range l.hits {
 		if len(h) == 0 || !h[len(h)-1].After(cutoff) {
 			delete(l.hits, k)
 		}
+	}
+	if len(l.hits) < l.maxKeys {
+		return
+	}
+	type kv struct {
+		key  string
+		last time.Time
+	}
+	all := make([]kv, 0, len(l.hits))
+	for k, h := range l.hits {
+		all = append(all, kv{k, h[len(h)-1]})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
+	drop := len(all)/10 + 1
+	for _, e := range all[:drop] {
+		delete(l.hits, e.key)
 	}
 }

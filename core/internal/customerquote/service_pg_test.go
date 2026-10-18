@@ -214,12 +214,17 @@ func TestValidUntil_BoundedByTheSourceDealerQuote(t *testing.T) {
 	})
 	exp := w.now.Add(36 * time.Hour)
 	w.costs.source[srcID] = &customerquote.SourceQuote{ID: srcID, ExpiresAt: &exp, Lines: []customerquote.SourceQuoteLine{
-		{ID: uuid.New(), ProductID: w.stud, SKU: "S", Description: "2x4 stud", UOM: "EA", Quantity: qty(t, "100"), UnitCostTenThousandths: 50000},
+		{ID: uuid.New(), ProductID: w.stud, SKU: "S", Description: "2x4 stud", UOM: "EA", Quantity: qty(t, "100"), UnitCostTenThousandths: 50000, LineTotalCents: 50000},
+		{ID: uuid.New(), ProductID: w.ply, SKU: "P", Description: "plywood sheet", UOM: "EA", Quantity: qty(t, "1000"), UnitCostTenThousandths: 12346, LineTotalCents: 123456},
 	}}
 	in := w.basicInput()
 	in.SourceQuoteID = sp(srcID.String())
 	srcLine := w.costs.source[srcID].Lines[0].ID.String()
-	in.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "100"), SourceLineID: &srcLine}}
+	srcLinePly := w.costs.source[srcID].Lines[1].ID.String()
+	in.Lines = []customerquote.LineInput{
+		{ProductID: w.stud.String(), Quantity: qty(t, "100"), SourceLineID: &srcLine},
+		{ProductID: w.ply.String(), Quantity: qty(t, "1000"), SourceLineID: &srcLinePly},
+	}
 	in.ValidUntil = tsOf(w.now.Add(20 * 24 * time.Hour))
 	q, err := w.svc.Create(ctx, w.a, in)
 	if err != nil {
@@ -230,6 +235,9 @@ func TestValidUntil_BoundedByTheSourceDealerQuote(t *testing.T) {
 	}
 	if q.Lines[0].PriceBasis != "dealer_quote" || q.Lines[0].UnitCostTenThousandths != 50000 || q.Lines[0].CostCents != 50000 {
 		t.Errorf("the source line was not taken at the dealer quote's price: %+v", q.Lines[0])
+	}
+	if q.Lines[1].CostCents != 123456 {
+		t.Errorf("source line reconciliation: got CostCents %d, want 123456 (exact dealer line total 1,234.56 for 1000 units)", q.Lines[1].CostCents)
 	}
 	// A source quote the account does not own is refused.
 	in.SourceQuoteID = sp(uuid.New().String())
@@ -346,7 +354,7 @@ func TestLink_ExpiredRevokedAndRotated(t *testing.T) {
 	if newToken == token {
 		t.Fatal("rotation reissued the same token")
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the rotated-out link answered: %v", err)
 	}
 	if _, err := w.svc.View(ctx, newToken, anon); err != nil {
@@ -362,7 +370,7 @@ func TestLink_ExpiredRevokedAndRotated(t *testing.T) {
 	if err := w.svc.Revoke(ctx, w.a, q.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.svc.View(ctx, newToken, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, newToken, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the revoked link answered: %v", err)
 	}
 	if err := w.svc.Revoke(ctx, w.a, q.ID); err == nil {
@@ -494,3 +502,57 @@ func tsOf(t time.Time) *httpxTimestamp { v := httpxTS(t); return &v }
 var _ = sha256.Sum256
 var _ = hex.EncodeToString
 var _ = base64.StdEncoding
+
+func TestLink_UnknownTokensCreateNoPerLinkKeys(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	before := w.svc.PerLinkKeys()
+	for i := 0; i < 50; i++ {
+		tok := strings.Repeat(string(rune('A'+i%26)), 42) + string(rune('a'+i%26))
+		_, _ = w.svc.View(ctx, tok, anon)
+		_, _ = w.svc.DealerQuoteView(ctx, tok, anon)
+	}
+	if after := w.svc.PerLinkKeys(); after != before {
+		t.Errorf("unknown tokens created %d per link keys: a random token must cost the limiter nothing", after-before)
+	}
+	_, token := w.createSent(w.basicInput())
+	_, _ = w.svc.View(ctx, token, anon)
+	if w.svc.PerLinkKeys() != before+1 {
+		t.Errorf("a real link did not get its key")
+	}
+}
+
+func TestUpdate_RepricesRetainedCatalogLinePastProtectionHorizon(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	draft, err := w.svc.Create(ctx, w.a, w.basicInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	origLineID := draft.Lines[0].ID
+
+	// Advance past the 30-day catalog price protection horizon and change the dealer's catalog price.
+	w.advance(31 * 24 * time.Hour)
+	it := w.costs.items[w.stud]
+	it.UnitCostTenThousandths = 60000
+	w.costs.items[w.stud] = it
+
+	in := w.basicInput()
+	lid0 := draft.Lines[0].ID.String()
+	lid1 := draft.Lines[1].ID.String()
+	lid2 := draft.Lines[2].ID.String()
+	in.Lines[0].ID = &lid0
+	in.Lines[1].ID = &lid1
+	in.Lines[2].ID = &lid2
+
+	updated, err := w.svc.Update(ctx, w.a, draft.ID, `"`+itoa(draft.Revision)+`"`, in)
+	if err != nil {
+		t.Fatalf("updating stale draft past price protection horizon: %v", err)
+	}
+	if updated.Lines[0].ID != origLineID {
+		t.Errorf("retained line ID changed: got %s, want %s", updated.Lines[0].ID, origLineID)
+	}
+	if updated.Lines[0].CostCents != 60000 || !updated.Lines[0].PricedAt.Equal(w.now) {
+		t.Errorf("retained line after horizon: cost=%d priced_at=%v, want 60000 at %v", updated.Lines[0].CostCents, updated.Lines[0].PricedAt, w.now)
+	}
+}

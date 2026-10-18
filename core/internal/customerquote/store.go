@@ -7,10 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -228,7 +231,7 @@ func (s *Store) ReplaceDraft(ctx context.Context, q *Quote) error {
 			end_customer_name = $6, end_customer_email = $7, end_customer_phone = $8, site_contact_name = $9, site_contact_phone = $10,
 			markup_kind = $11, markup_bps = $12, hide_line_prices = $13, tax_mode = $14, tax_rate_bps = $15,
 			payment_terms = $16, deposit_bps = $17, customer_note = $18, require_code = $19, valid_until = $20,
-			revision = revision + 1, updated_at = NOW()
+			revision = revision + 1, selections_version = 1, updated_at = NOW()
 		WHERE id = $1 AND status = 'draft'`,
 		q.ID, q.Title, q.ProjectID, q.SourceQuoteID, q.JobSiteAddress,
 		q.EndCustomer.Name, q.EndCustomer.Email, q.EndCustomer.Phone, q.SiteContact.Name, q.SiteContact.Phone,
@@ -252,7 +255,7 @@ func (s *Store) ReplaceDraft(ctx context.Context, q *Quote) error {
 const quoteCols = `id, customer_id, reference, title, project_id, source_quote_id, job_site_address,
 	end_customer_name, end_customer_email, end_customer_phone, site_contact_name, site_contact_phone, status,
 	markup_kind, markup_bps, hide_line_prices, tax_mode, tax_rate_bps, payment_terms, deposit_bps, customer_note,
-	require_code, valid_until, revision, sent_at, approved_at, declined_at, confirmed_at, dealer_accepted_at, order_id,
+	require_code, valid_until, revision, selections_version, sent_at, approved_at, declined_at, confirmed_at, dealer_accepted_at, order_id,
 	created_at, updated_at`
 
 func scanQuote(row pgx.Row) (*Quote, error) {
@@ -261,7 +264,7 @@ func scanQuote(row pgx.Row) (*Quote, error) {
 	err := row.Scan(&q.ID, &q.CustomerID, &q.Reference, &q.Title, &q.ProjectID, &q.SourceQuoteID, &q.JobSiteAddress,
 		&q.EndCustomer.Name, &q.EndCustomer.Email, &q.EndCustomer.Phone, &q.SiteContact.Name, &q.SiteContact.Phone, &status,
 		&mk, &q.Markup.BPS, &q.HideLinePrices, &tm, &q.Tax.RateBPS, &q.PaymentTerms, &q.DepositBPS, &q.CustomerNote,
-		&q.RequireCode, &q.ValidUntil, &q.Revision, &q.SentAt, &q.ApprovedAt, &q.DeclinedAt, &q.ConfirmedAt, &q.DealerAcceptedAt, &q.OrderID,
+		&q.RequireCode, &q.ValidUntil, &q.Revision, &q.SelectionsVersion, &q.SentAt, &q.ApprovedAt, &q.DeclinedAt, &q.ConfirmedAt, &q.DealerAcceptedAt, &q.OrderID,
 		&q.CreatedAt, &q.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -270,15 +273,45 @@ func scanQuote(row pgx.Row) (*Quote, error) {
 	return &q, nil
 }
 
+// Reach is the caller's branch reach as the branch middleware settled it: the
+// context branch, or for a user with no header the sub whose grants apply,
+// or neither for an administrator without a header (every branch).
+type Reach struct {
+	Branch *uuid.UUID
+	Grants *string
+}
+
+// ReachOf reads the reach the request's context carries.
+func ReachOf(ctx context.Context) Reach {
+	return Reach{Branch: middleware.BranchIDForQuery(ctx), Grants: middleware.GrantsSubForQuery(ctx)}
+}
+
 // GetQuote reads one quote with its children. customerID, when not nil,
 // scopes the read to the contractor account, so another account's quote is
 // not there at all. forUpdate takes the row lock.
 func (s *Store) GetQuote(ctx context.Context, id uuid.UUID, customerID *uuid.UUID, forUpdate bool) (*Quote, error) {
+	return s.getQuote(ctx, id, customerID, nil, forUpdate)
+}
+
+// GetQuoteInReach reads a quote the way the dealer's desk may: only when one
+// of its contractor's branches is inside the caller's reach, the predicate the
+// customer module holds its reads to. A quote outside it is not there.
+func (s *Store) GetQuoteInReach(ctx context.Context, id uuid.UUID, forUpdate bool) (*Quote, error) {
+	r := ReachOf(ctx)
+	return s.getQuote(ctx, id, nil, &r, forUpdate)
+}
+
+func (s *Store) getQuote(ctx context.Context, id uuid.UUID, customerID *uuid.UUID, reach *Reach, forUpdate bool) (*Quote, error) {
 	sql := `SELECT ` + quoteCols + ` FROM pro_customer_quotes WHERE id = $1 AND ($2::uuid IS NULL OR customer_id = $2)`
+	args := []any{id, customerID}
+	if reach != nil {
+		sql += ` AND EXISTS (SELECT 1 FROM customers c WHERE c.id = pro_customer_quotes.customer_id AND ` + customer.Wall("c", 3, 4) + `)`
+		args = append(args, reach.Branch, reach.Grants)
+	}
 	if forUpdate {
 		sql += ` FOR UPDATE`
 	}
-	q, err := scanQuote(s.exec(ctx).QueryRow(ctx, sql, id, customerID))
+	q, err := scanQuote(s.exec(ctx).QueryRow(ctx, sql, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -447,16 +480,18 @@ func (s *Store) ListQuotes(ctx context.Context, customerID uuid.UUID, f ListFilt
 	return out, nil
 }
 
-// ListSent lists the quotes a dealer may see (sent or later) across all
-// contractor accounts, newest first.
+// ListSent lists the quotes a dealer may see (sent or later) across the
+// contractor accounts inside the caller's branch reach, newest first.
 func (s *Store) ListSent(ctx context.Context, limit int, afterTime *time.Time, afterID uuid.UUID) ([]*Quote, error) {
 	var aid *uuid.UUID
 	if afterTime != nil {
 		aid = &afterID
 	}
+	reach := ReachOf(ctx)
 	rows, err := s.exec(ctx).Query(ctx, `SELECT `+quoteCols+` FROM pro_customer_quotes
 		WHERE status <> 'draft' AND ($1::timestamptz IS NULL OR (updated_at, id) < ($1, $2))
-		ORDER BY updated_at DESC, id DESC LIMIT $3`, afterTime, aid, limit+1)
+		  AND EXISTS (SELECT 1 FROM customers c WHERE c.id = pro_customer_quotes.customer_id AND `+customer.Wall("c", 4, 5)+`)
+		ORDER BY updated_at DESC, id DESC LIMIT $3`, afterTime, aid, limit+1, reach.Branch, reach.Grants)
 	if err != nil {
 		return nil, fmt.Errorf("list sent customer quotes: %w", err)
 	}
@@ -531,6 +566,9 @@ func (s *Store) SetSelections(ctx context.Context, quoteID uuid.UUID, states map
 		if tag.RowsAffected() != 1 {
 			return ErrNotFound
 		}
+	}
+	if _, err := s.exec(ctx).Exec(ctx, `UPDATE pro_customer_quotes SET selections_version = selections_version + 1, updated_at = NOW() WHERE id = $1`, quoteID); err != nil {
+		return fmt.Errorf("bump selections version: %w", err)
 	}
 	return nil
 }
@@ -635,9 +673,11 @@ type CodeRow struct {
 }
 
 // InsertCode stores a freshly minted code's hash.
-func (s *Store) InsertCode(ctx context.Context, quoteID uuid.UUID, linkID, channel, destination, salt, hash string, expires time.Time) error {
-	_, err := s.exec(ctx).Exec(ctx, `INSERT INTO pro_portal_verification_codes (quote_id, token_id, channel, destination, salt, code_hash, max_attempts, expires_at)
-		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8)`, quoteID, linkID, channel, destination, salt, hash, CodeMaxAttempts, expires)
+func (s *Store) InsertCode(ctx context.Context, quoteID uuid.UUID, linkID, channel, destination, salt, hash string, now, expires time.Time) error {
+	_, err := s.exec(ctx).Exec(ctx, `INSERT INTO pro_portal_verification_codes (quote_id, token_id, channel, destination, salt, code_hash, max_attempts, created_at, expires_at)
+		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7,
+			GREATEST($8::timestamptz, COALESCE((SELECT max(created_at) + interval '1 microsecond' FROM pro_portal_verification_codes WHERE token_id = $2::uuid), $8::timestamptz)),
+			$9)`, quoteID, linkID, channel, destination, salt, hash, CodeMaxAttempts, now, expires)
 	if err != nil {
 		return fmt.Errorf("store verification code: %w", err)
 	}
@@ -666,6 +706,13 @@ func (s *Store) CountCodesSince(ctx context.Context, linkID string, since time.T
 	var n int
 	err := s.exec(ctx).QueryRow(ctx, `SELECT count(*) FROM pro_portal_verification_codes WHERE token_id = $1::uuid AND created_at >= $2`, linkID, since).Scan(&n)
 	return n, err
+}
+
+// LinkCodeUsage counts the total codes issued and total wrong attempts across
+// the lifetime of a link.
+func (s *Store) LinkCodeUsage(ctx context.Context, linkID string) (codes, attempts int, err error) {
+	err = s.exec(ctx).QueryRow(ctx, `SELECT count(*), COALESCE(sum(attempts), 0) FROM pro_portal_verification_codes WHERE token_id = $1::uuid`, linkID).Scan(&codes, &attempts)
+	return codes, attempts, err
 }
 
 // BumpCodeAttempts counts one try against a code.
@@ -819,4 +866,31 @@ func (s *Store) ListProjects(ctx context.Context, customerID uuid.UUID) ([]Expor
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// StaffName is the display name the dealer's staff roster holds for an email
+// address, "" when it names no one.
+func (s *Store) StaffName(ctx context.Context, email string) (string, error) {
+	if strings.TrimSpace(email) == "" {
+		return "", nil
+	}
+	var n string
+	err := s.exec(ctx).QueryRow(ctx, `SELECT full_name FROM staff WHERE lower(email) = lower($1) LIMIT 1`, email).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return n, err
+}
+
+// UpdateLineCost updates a material line's dealer cost at confirmation time
+// when the contractor explicitly accepts a dealer price move.
+func (s *Store) UpdateLineCost(ctx context.Context, lineID uuid.UUID, unitCostTenThousandths, costCents int64, pricedAt time.Time) error {
+	_, err := s.exec(ctx).Exec(ctx, `
+		UPDATE pro_customer_quote_lines
+		SET unit_cost_ten_thousandths = $2, cost_cents = $3, priced_at = $4
+		WHERE id = $1`, lineID, unitCostTenThousandths, costCents, pricedAt)
+	if err != nil {
+		return fmt.Errorf("update line cost: %w", err)
+	}
+	return nil
 }

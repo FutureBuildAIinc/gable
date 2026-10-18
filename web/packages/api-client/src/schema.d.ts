@@ -1245,7 +1245,7 @@ export interface paths {
         get: operations["customerQuoteSettingsGet"];
         /**
          * Save the contractor's defaults
-         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code.
+         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code. Turning the code on is a 409 ("Verification codes need a real email or text sender on this server.") while the server's only email sender is the log only one and text is the stub; so is a quote or a send that asks for a code, a code request and an acceptance on such a quote.
          */
         put: operations["customerQuoteSettingsPut"];
         post?: never;
@@ -1457,6 +1457,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portal/v1/customer-quotes/{id}/confirm-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview current dealer material prices and resulting margin before confirming
+         * @description Only an approved quote. Compares each approved material line's captured dealer cost against the dealer's current price for the contractor's account and returns the per-line and total cost deltas and resulting margin.
+         */
+        get: operations["customerQuoteConfirmPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portal/v1/customer-quotes/{id}/confirm": {
         parameters: {
             query?: never;
@@ -1468,7 +1488,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm the customer's approval into the dealer's order
-         * @description Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. The markup, labour, overhead and the customer's prices never reach the order.
+         * @description Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. If the dealer's price moved since the quote was priced, confirming without accept_price_changes=true returns 409 price_changed. The markup, labour, overhead and the customer's prices never reach the order.
          */
         post: operations["customerQuoteConfirm"];
         delete?: never;
@@ -9722,6 +9742,10 @@ export interface components {
             };
             requires_code: boolean;
             can_decide: boolean;
+            /** Format: int64 */
+            selections_version: number;
+            /** @description Present when the quote cannot be accepted yet: the contractor asked for a verification code and the server cannot send one. It says so in plain words; declining stays possible. */
+            notice?: string;
             approval?: {
                 /** @enum {string} */
                 decision: "approved" | "declined";
@@ -9752,10 +9776,14 @@ export interface components {
                 png_base64?: string;
             };
             code?: string;
+            /** Format: int64 */
+            selections_version: number;
         };
         CustomerQuoteDeclineRequest: {
             full_name: string;
             reason?: string;
+            /** Format: int64 */
+            selections_version?: number;
         };
         /** @description The strict allowlist of price wall 1. The materials are at the dealer's own prices; there is no field for the contractor's markup, basis points, labour, overhead, margin or the customer's sell prices. */
         CustomerQuoteDealerProject: {
@@ -9862,6 +9890,38 @@ export interface components {
             freight_cents: number;
             /** Format: int64 */
             total_cents: number;
+        };
+        CustomerQuoteConfirmRequest: {
+            accept_price_changes?: boolean;
+        };
+        CustomerQuoteConfirmPreview: {
+            price_changed: boolean;
+            /** Format: int64 */
+            captured_material_cost_cents: number;
+            /** Format: int64 */
+            current_material_cost_cents: number;
+            /** Format: int64 */
+            delta_cents: number;
+            /** Format: int64 */
+            captured_margin_cents: number;
+            /** Format: int64 */
+            projected_margin_cents: number;
+            lines: {
+                /** Format: uuid */
+                line_id: string;
+                /** Format: uuid */
+                product_id: string;
+                sku: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                /** Format: int64 */
+                captured_cost_cents: number;
+                /** Format: int64 */
+                current_cost_cents: number;
+                /** Format: int64 */
+                delta_cents: number;
+            }[];
         };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
@@ -19677,6 +19737,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
             403: components["responses"]["CustomerQuoteForbidden"];
+            409: components["responses"]["WireConflict"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -20021,7 +20082,7 @@ export interface operations {
             500: components["responses"]["InternalErrorEither"];
         };
     };
-    customerQuoteConfirm: {
+    customerQuoteConfirmPreview: {
         parameters: {
             query?: never;
             header?: never;
@@ -20031,6 +20092,38 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description The confirmation price preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteConfirmPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteConfirmRequest"];
+            };
+        };
         responses: {
             /** @description The confirmed quote with its order. */
             200: {

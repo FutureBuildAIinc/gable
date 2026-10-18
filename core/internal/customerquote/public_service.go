@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -33,8 +34,8 @@ const (
 )
 
 // resolve turns a presented token into its live link and quote, after the
-// rate limits. A token that never existed answers ErrLinkUnknown; one that
-// did and is expired or revoked answers ErrLinkUnavailable. Compares are on
+// rate limits. A token that never existed, or was revoked or rotated, answers
+// ErrLinkUnknown; one that expired answers ErrLinkUnavailable. Compares are on
 // hashes, in constant time.
 func (s *Service) resolve(ctx context.Context, token string, c Caller) (*Link, *Quote, error) {
 	if !s.perAddr.Allow(clientKey(c.Address)) {
@@ -47,19 +48,21 @@ func (s *Service) resolve(ctx context.Context, token string, c Caller) (*Link, *
 		return nil, nil, ErrLinkUnknown
 	}
 	hash := HashToken(token)
-	if !s.perLink.Allow("link:" + hash) {
-		return nil, nil, ErrRateLimited
-	}
 	link, err := s.store.LinkByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, err
 	}
 	// A link to a dealer quote opens nothing here: to this route it never existed.
-	if link == nil || !HashesEqual(link.Hash, hash) || link.QuoteID == "" {
+	// An unknown, revoked or rotated token is charged to the address's miss budget
+	// alone; it creates no per link key and answers as if it never existed.
+	if link == nil || !HashesEqual(link.Hash, hash) || link.QuoteID == "" || link.RevokedAt != nil {
 		if !s.misses.Allow(clientKey(c.Address)) {
 			return nil, nil, ErrRateLimited
 		}
 		return nil, nil, ErrLinkUnknown
+	}
+	if !s.perLink.Allow("link:" + hash) {
+		return nil, nil, ErrRateLimited
 	}
 	if !link.Live(s.now()) {
 		return nil, nil, ErrLinkUnavailable
@@ -191,11 +194,22 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if err != nil {
 			return err
 		}
-		if !link.Live(s.now()) || q.Effective(s.now()) != StatusSent {
+		now := s.now()
+		if !link.Live(now) || q.Effective(now) != StatusSent {
 			return ErrInvalidState
 		}
 		if !q.RequireCode {
 			return httpx.BadRequest("this quote does not use a verification code")
+		}
+		if s.mail == nil {
+			return ErrCodesUnavailable
+		}
+		ch := s.mail.Channels()
+		if !ch.Any() {
+			return ErrCodesUnavailable
+		}
+		if !ch.Has(channel) && (channel == "email" || channel == "sms") {
+			return httpx.BadRequest("that channel is not available", httpx.FieldError{Field: "channel", Message: "this server cannot send a code that way"})
 		}
 		switch channel {
 		case "email":
@@ -208,7 +222,14 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if dest == "" {
 			return httpx.BadRequest("the contractor has no address for that channel", httpx.FieldError{Field: "channel", Message: "has no destination on this quote"})
 		}
-		n, err := s.store.CountCodesSince(ctx, link.ID, s.now().Add(-codeRequestWindow))
+		totalCodes, totalAttempts, err := s.store.LinkCodeUsage(ctx, link.ID)
+		if err != nil {
+			return err
+		}
+		if totalCodes >= CodeMaxLifetimeCodes || totalAttempts >= CodeMaxLifetimeAttempts {
+			return ErrCodeBudgetExhausted
+		}
+		n, err := s.store.CountCodesSince(ctx, link.ID, now.Add(-codeRequestWindow))
 		if err != nil {
 			return err
 		}
@@ -223,7 +244,7 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if err != nil {
 			return err
 		}
-		return s.store.InsertCode(ctx, q.ID, link.ID, channel, dest, salt, HashCode(salt, q.ID.String(), code), s.now().Add(CodeTTL))
+		return s.store.InsertCode(ctx, q.ID, link.ID, channel, dest, salt, HashCode(salt, q.ID.String(), code), now, now.Add(CodeTTL))
 	})
 	if err != nil {
 		return err
@@ -252,11 +273,12 @@ type Signature struct {
 
 // AcceptInput is the body of a sign off.
 type AcceptInput struct {
-	FullName  string    `json:"full_name"`
-	Email     string    `json:"email"`
-	Phone     string    `json:"phone"`
-	Signature Signature `json:"signature"`
-	Code      string    `json:"code"`
+	FullName          string    `json:"full_name"`
+	Email             string    `json:"email"`
+	Phone             string    `json:"phone"`
+	Signature         Signature `json:"signature"`
+	Code              string    `json:"code"`
+	SelectionsVersion int64     `json:"selections_version"`
 }
 
 var pngMagic = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
@@ -330,7 +352,13 @@ func decided(q *Quote) error {
 			return ErrIncomplete
 		}
 	}
-	if approved == 0 && len(q.Labour) == 0 {
+	customerLabour := 0
+	for _, l := range q.Labour {
+		if !l.ContractorOnly {
+			customerLabour++
+		}
+	}
+	if approved == 0 && customerLabour == 0 {
 		return ErrNothingChosen
 	}
 	return nil
@@ -361,13 +389,26 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 		if !link.Live(now) || cur.Effective(now) != StatusSent {
 			return ErrInvalidState
 		}
+		if cur.RequireCode && !s.codesAvailable() {
+			return ErrCodesUnavailable
+		}
 		if err := decided(cur); err != nil {
 			return err
+		}
+		if in.SelectionsVersion != cur.SelectionsVersion {
+			return ErrSelectionsChanged
 		}
 		verified := false
 		if cur.RequireCode {
 			if in.Code == "" {
 				return ErrCodeRequired
+			}
+			totalCodes, totalAttempts, err := s.store.LinkCodeUsage(ctx, link.ID)
+			if err != nil {
+				return err
+			}
+			if totalAttempts >= CodeMaxLifetimeAttempts {
+				return ErrCodeBudgetExhausted
 			}
 			row, err := s.store.LatestCodeForUpdate(ctx, link.ID)
 			if err != nil {
@@ -384,6 +425,10 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 						return err
 					}
 				}
+				if cerr == ErrCodeLocked && totalCodes >= CodeMaxLifetimeCodes {
+					wrong = ErrCodeBudgetExhausted
+					return nil
+				}
 				wrong = cerr
 				return nil
 			}
@@ -395,7 +440,11 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 			}
 			verified = true
 		}
-		body, sum, total, err := BuildSnapshot(cur, "approved")
+		cname, _, err := s.store.ContractorName(ctx, cur.CustomerID)
+		if err != nil {
+			return err
+		}
+		body, sum, total, err := BuildSnapshot(cur, "approved", SnapshotMeta{ContractorName: cname})
 		if err != nil {
 			return err
 		}
@@ -427,8 +476,9 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 
 // DeclineInput is the body of a decline.
 type DeclineInput struct {
-	FullName string `json:"full_name"`
-	Reason   string `json:"reason"`
+	FullName          string `json:"full_name"`
+	Reason            string `json:"reason"`
+	SelectionsVersion int64  `json:"selections_version"`
 }
 
 // Decline records that the customer declines the quote.
@@ -455,7 +505,14 @@ func (s *Service) Decline(ctx context.Context, token string, c Caller, in Declin
 		if !link.Live(now) || cur.Effective(now) != StatusSent {
 			return ErrInvalidState
 		}
-		body, sum, total, err := BuildSnapshot(cur, "declined")
+		if in.SelectionsVersion > 0 && in.SelectionsVersion != cur.SelectionsVersion {
+			return ErrSelectionsChanged
+		}
+		cname, _, err := s.store.ContractorName(ctx, cur.CustomerID)
+		if err != nil {
+			return err
+		}
+		body, sum, total, err := BuildSnapshot(cur, "declined", SnapshotMeta{ContractorName: cname})
 		if err != nil {
 			return err
 		}
@@ -481,5 +538,17 @@ func (s *Service) Decline(ctx context.Context, token string, c Caller, in Declin
 	return s.publicViewOf(ctx, q)
 }
 
-// clientKey is the limiter key of a source address.
-func clientKey(ip string) string { return "ip:" + ip }
+// clientKey is the limiter key of a source address: an IPv4 address itself, an
+// IPv6 address by its /64 (one subscriber commonly holds a whole /64 and can
+// rotate addresses inside it at will).
+func clientKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return "ip:" + ip
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return "ip:" + a.String()
+	}
+	return "ip:" + netip.PrefixFrom(a.WithZone(""), 64).Masked().String()
+}

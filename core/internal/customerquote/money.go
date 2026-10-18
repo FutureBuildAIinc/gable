@@ -174,6 +174,26 @@ func ExtendedCostCents(qty httpx.Quantity, unitCostTenThousandths int64) (int64,
 	return int64(c), nil
 }
 
+// SourceLineCostCents reconciles a dealer-quote sourced line's extended cost
+// to the dealer quote's own line total (scaled by qty / sourceQty when
+// sourceLineTotalCents and sourceQty are positive).
+func SourceLineCostCents(qty, sourceQty httpx.Quantity, sourceLineTotalCents, unitCostTenThousandths int64) (int64, error) {
+	if qty <= 0 {
+		return 0, errors.New("a quantity must be positive")
+	}
+	if sourceLineTotalCents > 0 && sourceQty > 0 {
+		c, err := mulDivHalfUp(sourceLineTotalCents, int64(qty), int64(sourceQty))
+		if err != nil {
+			return 0, err
+		}
+		if c < 0 || c > MaxCostCents {
+			return 0, fmt.Errorf("a line cost must be between 0 and %d cents", MaxCostCents)
+		}
+		return c, nil
+	}
+	return ExtendedCostCents(qty, unitCostTenThousandths)
+}
+
 // MaterialLine is the pricing view of a dealer product line.
 type MaterialLine struct {
 	ID         uuid.UUID
@@ -254,7 +274,11 @@ func LabourTotalCents(l LabourLine) (int64, error) {
 		if l.Hours <= 0 {
 			return 0, errors.New("an hourly labour line needs positive hours")
 		}
-		return mulDivHalfUp(l.RateCents, int64(l.Hours), 10_000)
+		v, err := mulDivHalfUp(l.RateCents, int64(l.Hours), 10_000)
+		if err != nil || v > MaxCostCents {
+			return 0, fmt.Errorf("a labour line must be at most %d cents", MaxCostCents)
+		}
+		return v, nil
 	default:
 		return 0, fmt.Errorf("labour rate type %q is neither flat nor hourly", l.RateType)
 	}
@@ -292,7 +316,14 @@ func OverheadTotalCents(o OverheadLine, baseCents int64) (int64, error) {
 		if o.Value > MaxMarkupBPS {
 			return 0, fmt.Errorf("an overhead percentage must be at most %d basis points", MaxMarkupBPS)
 		}
-		return mulDivHalfUp(baseCents, o.Value, BPSWhole)
+		if baseCents < 0 || baseCents > MaxCostCents {
+			return 0, fmt.Errorf("an overhead base must be between 0 and %d cents", MaxCostCents)
+		}
+		v, err := mulDivHalfUp(baseCents, o.Value, BPSWhole)
+		if err != nil || v > MaxCostCents {
+			return 0, fmt.Errorf("an overhead amount must be at most %d cents", MaxCostCents)
+		}
+		return v, nil
 	default:
 		return 0, fmt.Errorf("overhead amount type %q is neither flat nor percent", o.AmountType)
 	}
@@ -390,6 +421,13 @@ func IncludedLines(lines []MaterialLine, states map[uuid.UUID]SelectionState) []
 	return out
 }
 
+func addBounded(a, b int64) (int64, error) {
+	if a < 0 || b < 0 || a > MaxCostCents || b > MaxCostCents-a {
+		return 0, fmt.Errorf("a quote total must be at most %d cents", MaxCostCents)
+	}
+	return a + b, nil
+}
+
 // Compute totals a quote under its selections.
 func Compute(in TotalsInput) (Totals, error) {
 	var t Totals
@@ -405,9 +443,14 @@ func Compute(in TotalsInput) (Totals, error) {
 	default:
 		return t, fmt.Errorf("tax mode %q is not site_rate, included or at_checkout", in.TaxMode)
 	}
+	var err error
 	for _, l := range IncludedLines(in.Lines, in.States) {
-		t.MaterialCostCents += l.CostCents
-		t.MaterialSellCents += l.SellCents
+		if t.MaterialCostCents, err = addBounded(t.MaterialCostCents, l.CostCents); err != nil {
+			return t, err
+		}
+		if t.MaterialSellCents, err = addBounded(t.MaterialSellCents, l.SellCents); err != nil {
+			return t, err
+		}
 	}
 	for _, l := range in.Labour {
 		v, err := LabourTotalCents(l)
@@ -415,24 +458,37 @@ func Compute(in TotalsInput) (Totals, error) {
 			return t, err
 		}
 		if l.ContractorOnly {
-			t.ContractorCostCents += v
+			if t.ContractorCostCents, err = addBounded(t.ContractorCostCents, v); err != nil {
+				return t, err
+			}
 		} else {
-			t.LabourCents += v
+			if t.LabourCents, err = addBounded(t.LabourCents, v); err != nil {
+				return t, err
+			}
 		}
 	}
-	base := t.MaterialSellCents + t.LabourCents
+	base, err := addBounded(t.MaterialSellCents, t.LabourCents)
+	if err != nil {
+		return t, err
+	}
 	for _, o := range in.Overhead {
 		v, err := OverheadTotalCents(o, base)
 		if err != nil {
 			return t, err
 		}
 		if o.ContractorOnly {
-			t.ContractorCostCents += v
+			if t.ContractorCostCents, err = addBounded(t.ContractorCostCents, v); err != nil {
+				return t, err
+			}
 		} else {
-			t.OverheadCents += v
+			if t.OverheadCents, err = addBounded(t.OverheadCents, v); err != nil {
+				return t, err
+			}
 		}
 	}
-	t.SubtotalCents = t.MaterialSellCents + t.LabourCents + t.OverheadCents
+	if t.SubtotalCents, err = addBounded(base, t.OverheadCents); err != nil {
+		return t, err
+	}
 	if in.TaxMode == TaxSiteRate {
 		tax, err := mulDivHalfUp(t.MaterialSellCents, in.TaxRateBPS, BPSWhole)
 		if err != nil {
@@ -440,7 +496,9 @@ func Compute(in TotalsInput) (Totals, error) {
 		}
 		t.TaxCents = tax
 	}
-	t.TotalCents = t.SubtotalCents + t.TaxCents
+	if t.TotalCents, err = addBounded(t.SubtotalCents, t.TaxCents); err != nil {
+		return t, err
+	}
 	dep, err := mulDivHalfUp(t.TotalCents, in.DepositBPS, BPSWhole)
 	if err != nil {
 		return t, err

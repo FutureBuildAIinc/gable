@@ -73,8 +73,50 @@ the two walls that keep the money apart. The contract is
 
 The status flows back: the customer's page shows the order's fulfilment
 state only, the contractor's quote shows the order, the dealer's project
-shows the order. The approval record keeps every step with who and when,
-and the database refuses to update, delete or truncate it.
+shows the order. The approval record keeps every step with who and when;
+a row trigger refuses `UPDATE` and `DELETE` on `pro_customer_quote_approval_log`,
+while `TRUNCATE` is reserved for the dev seed reset (`core/internal/app/seed/seed.go`).
+
+## Decisions
+
+Plain words for the choices a reader should see before merge.
+
+- **A `contractor_only` line is the contractor's own cost.** It counts against
+  the margin the contractor sees. It never enters a price, a total, the
+  customer's page or PDF, the snapshot, or anything the dealer reads.
+- **Negative markup and negative margin are refused.** Every markup or margin
+  rule must be between `0` and `9999` basis points (`margin`) or `0` and
+  `100000` basis points (`markup`); discounting a material line below the
+  dealer's cost is refused.
+- **The markup applies to materials only.** Labour and overhead lines are
+  priced as the contractor enters them, with no markup on top. A percentage
+  overhead is a percentage of the customer-facing materials plus labour.
+  Customer-facing labour and overhead count in the subtotal as revenue unless
+  paired with a matching `contractor_only` cost line.
+- **The site tax rate applies to materials only.** Labour and overhead carry
+  no tax in the total. The other two tax treatments ("tax included" and
+  "material tax at checkout") add no tax line; under `included` tax, gross
+  margin is computed on the tax-inclusive subtotal.
+- **Under `hide_line_prices`, per-line prices are omitted while totals and
+  selection deltas remain visible.** When `tax.mode` is `site_rate`, the
+  material tax figure appears in the totals, and toggling optional material
+  selections updates the subtotal by the option's sell price. Price wall 2
+  still holds: the dealer's cost and the contractor's markup never appear.
+- **The deposit is a percentage of the total including tax.**
+- **A verification code never goes to a sender that writes message bodies to
+  a log, and never to the text stub.** While the server's only email sender is
+  the log-only one and text is the stub, the contractor's "require a code"
+  toggle refuses to turn on ("Verification codes need a real email or text
+  sender on this server."), a code request answers the same sentence, and a
+  quote whose toggle was already on cannot be accepted until the contractor
+  turns the toggle off; the customer's page says so in plain words. Declining
+  stays possible.
+- **The dealer's acceptance records the desk user's id and display name.**
+  Contractors and customers see the dealer's business name and that display
+  name, never a staff email address.
+- **Roles.** Today's portal roles map as: `Admin` and `Buyer` may quote and see
+  money, `View-Only` may do neither. The portal roles of the pro portal branch
+  replace this one rule at merge.
 
 ## The two price walls
 

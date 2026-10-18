@@ -19,24 +19,26 @@ import (
 
 // PublicView is what the customer sees at their link.
 type PublicView struct {
-	Reference      string           `json:"reference"`
-	Title          string           `json:"title"`
-	Status         string           `json:"status"`
-	Contractor     PublicContractor `json:"contractor"`
-	CustomerName   string           `json:"customer_name"`
-	JobSiteAddress string           `json:"job_site_address"`
-	ValidUntil     httpx.Timestamp  `json:"valid_until"`
-	Note           string           `json:"note"`
-	PaymentTerms   string           `json:"payment_terms"`
-	HidePrices     bool             `json:"hide_line_prices"`
-	Groups         []PublicGroup    `json:"groups"`
-	Lines          []PublicLine     `json:"lines"`
-	Extras         []PublicExtra    `json:"extras"`
-	Totals         PublicTotals     `json:"totals"`
-	RequiresCode   bool             `json:"requires_code"`
-	CanDecide      bool             `json:"can_decide"`
-	Approval       *PublicApproval  `json:"approval,omitempty"`
-	Fulfilment     *string          `json:"fulfilment,omitempty"`
+	Reference         string           `json:"reference"`
+	Title             string           `json:"title"`
+	Status            string           `json:"status"`
+	SelectionsVersion int64            `json:"selections_version"`
+	Contractor        PublicContractor `json:"contractor"`
+	CustomerName      string           `json:"customer_name"`
+	JobSiteAddress    string           `json:"job_site_address"`
+	ValidUntil        httpx.Timestamp  `json:"valid_until"`
+	Note              string           `json:"note"`
+	PaymentTerms      string           `json:"payment_terms"`
+	HidePrices        bool             `json:"hide_line_prices"`
+	Groups            []PublicGroup    `json:"groups"`
+	Lines             []PublicLine     `json:"lines"`
+	Extras            []PublicExtra    `json:"extras"`
+	Totals            PublicTotals     `json:"totals"`
+	RequiresCode      bool             `json:"requires_code"`
+	CanDecide         bool             `json:"can_decide"`
+	Notice            string           `json:"notice,omitempty"`
+	Approval          *PublicApproval  `json:"approval,omitempty"`
+	Fulfilment        *string          `json:"fulfilment,omitempty"`
 }
 
 // PublicContractor is the contractor's mark.
@@ -115,6 +117,10 @@ func FulfilmentOf(orderStatus string) string {
 	}
 }
 
+// CodesBlockedNotice is what the customer's page says when the contractor asks
+// for a verification code the server cannot send.
+const CodesBlockedNotice = "This quote cannot be accepted yet. The contractor asked for a verification code, and this server cannot send one. Ask the contractor to turn off the code requirement and send the quote again."
+
 // taxNote words the tax treatment for the customer.
 func taxNote(t Tax) string {
 	switch t.Mode {
@@ -134,6 +140,10 @@ type PublicInputs struct {
 	OrderStatus    string // the linked order's status, "" when none
 	Approval       *ApprovalEntry
 	Now            time.Time
+	// CodesBlocked: the quote asks for a verification code and the server
+	// cannot send one, so it cannot be accepted until the contractor turns the
+	// requirement off.
+	CodesBlocked bool
 }
 
 func publicStatus(q *Quote, now time.Time) string {
@@ -158,22 +168,27 @@ func BuildPublicView(q *Quote, in PublicInputs) (*PublicView, error) {
 	if err != nil {
 		return nil, err
 	}
+	ver := q.SelectionsVersion
+	if ver < 1 {
+		ver = 1
+	}
 	v := &PublicView{
-		Reference:      q.Reference,
-		Title:          q.Title,
-		Status:         publicStatus(q, in.Now),
-		Contractor:     PublicContractor{Name: in.ContractorName, HasLogo: in.HasLogo},
-		CustomerName:   q.EndCustomer.Name,
-		JobSiteAddress: q.JobSiteAddress,
-		ValidUntil:     httpx.TimestampOf(q.ValidUntil),
-		Note:           q.CustomerNote,
-		PaymentTerms:   q.PaymentTerms,
-		HidePrices:     q.HideLinePrices,
-		Groups:         []PublicGroup{},
-		Lines:          []PublicLine{},
-		Extras:         []PublicExtra{},
-		RequiresCode:   q.RequireCode,
-		CanDecide:      q.Effective(in.Now) == StatusSent,
+		Reference:         q.Reference,
+		Title:             q.Title,
+		Status:            publicStatus(q, in.Now),
+		SelectionsVersion: ver,
+		Contractor:        PublicContractor{Name: in.ContractorName, HasLogo: in.HasLogo},
+		CustomerName:      q.EndCustomer.Name,
+		JobSiteAddress:    q.JobSiteAddress,
+		ValidUntil:        httpx.TimestampOf(q.ValidUntil),
+		Note:              q.CustomerNote,
+		PaymentTerms:      q.PaymentTerms,
+		HidePrices:        q.HideLinePrices,
+		Groups:            []PublicGroup{},
+		Lines:             []PublicLine{},
+		Extras:            []PublicExtra{},
+		RequiresCode:      q.RequireCode,
+		CanDecide:         q.Effective(in.Now) == StatusSent,
 		Totals: PublicTotals{
 			SubtotalCents: t.SubtotalCents, TaxCents: t.TaxCents, TotalCents: t.TotalCents,
 			DepositCents: t.DepositCents, TaxMode: q.Tax.Mode, TaxNote: taxNote(q.Tax),
@@ -222,6 +237,9 @@ func BuildPublicView(q *Quote, in PublicInputs) (*PublicView, error) {
 			e.PriceCents = &amt
 		}
 		v.Extras = append(v.Extras, e)
+	}
+	if in.CodesBlocked {
+		v.Notice = CodesBlockedNotice
 	}
 	if in.Approval != nil {
 		decision := "approved"

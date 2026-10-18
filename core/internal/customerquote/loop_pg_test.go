@@ -44,10 +44,11 @@ func (w *world) acceptAll(token string, sig customerquote.Signature, code string
 		}
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	if _, err := w.svc.Choose(ctx, token, anon, choices); err != nil {
+	view, err = w.svc.Choose(ctx, token, anon, choices)
+	if err != nil {
 		w.t.Fatalf("choose: %v", err)
 	}
-	return w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: sig, Code: code})
+	return w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: sig, Code: code, SelectionsVersion: view.SelectionsVersion})
 }
 
 func TestSelections_ApproveDeclineAndChooseOneOfAGroup(t *testing.T) {
@@ -109,7 +110,7 @@ func TestSelections_ApproveDeclineAndChooseOneOfAGroup(t *testing.T) {
 
 	// The total counts approved lines only: stud 68750 + nail 6000 + option B (30 nails) 45000 vs cost.
 	// 30 x $12.00 = $360.00 cost, +25% = 45000.
-	res, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner")})
+	res, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +118,58 @@ func TestSelections_ApproveDeclineAndChooseOneOfAGroup(t *testing.T) {
 	wantSub := wantMaterials + 104000 + 15000
 	if res.Totals.SubtotalCents != wantSub {
 		t.Errorf("subtotal %d, want %d", res.Totals.SubtotalCents, wantSub)
+	}
+}
+
+func TestAccept_RefusesWhenSelectionsMovedSinceView(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	in := w.basicInput()
+	in.Groups = []customerquote.GroupInput{{Key: "decking", Label: "Decking"}}
+	g := "decking"
+	in.Lines = []customerquote.LineInput{
+		{ProductID: w.ply.String(), Quantity: qty(t, "10"), GroupKey: &g},
+		{ProductID: w.nail.String(), Quantity: qty(t, "30"), GroupKey: &g},
+	}
+	q, token := w.createSent(in)
+	optA, optB := q.Lines[0].ID, q.Lines[1].ID
+
+	v0, err := w.svc.View(ctx, token, anon)
+	if err != nil || v0.SelectionsVersion != 1 {
+		t.Fatalf("initial view version %d, %v", v0.SelectionsVersion, err)
+	}
+	// Caller 1 chooses option A -> selections_version becomes 2.
+	v1, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{{LineID: optA, State: customerquote.SelectionApproved}})
+	if err != nil || v1.SelectionsVersion != 2 {
+		t.Fatalf("after first choice version %d, %v", v1.SelectionsVersion, err)
+	}
+	// Caller 2 swaps to option B -> selections_version becomes 3.
+	v2, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{{LineID: optB, State: customerquote.SelectionApproved}})
+	if err != nil || v2.SelectionsVersion != 3 {
+		t.Fatalf("after second choice version %d, %v", v2.SelectionsVersion, err)
+	}
+	// Caller 1 attempts to accept with stale selections_version = 1 or 2 -> refused with ErrSelectionsChanged.
+	for _, stale := range []int64{0, 1, v1.SelectionsVersion} {
+		_, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{
+			FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: stale,
+		})
+		if !errors.Is(err, customerquote.ErrSelectionsChanged) {
+			t.Fatalf("accept with selections_version=%d: %v, want ErrSelectionsChanged", stale, err)
+		}
+	}
+	if _, err := w.svc.Decline(ctx, token, anon, customerquote.DeclineInput{FullName: "Pat Homeowner", SelectionsVersion: v1.SelectionsVersion}); !errors.Is(err, customerquote.ErrSelectionsChanged) {
+		t.Fatalf("decline with stale selections_version: %v, want ErrSelectionsChanged", err)
+	}
+	// Re-reading and passing the current selections_version succeeds.
+	vNow, err := w.svc.View(ctx, token, anon)
+	if err != nil || vNow.SelectionsVersion != 3 {
+		t.Fatalf("re-read version %d, %v", vNow.SelectionsVersion, err)
+	}
+	res, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{
+		FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: vNow.SelectionsVersion,
+	})
+	if err != nil || res.Status != "approved" {
+		t.Fatalf("accept with current selections_version: %+v, %v", res, err)
 	}
 }
 
@@ -187,10 +240,11 @@ func TestAccept_ValidatesTheSignOff(t *testing.T) {
 	for _, l := range q.Lines {
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	if _, err := w.svc.Choose(ctx, token, anon, choices); err != nil {
+	view, err := w.svc.Choose(ctx, token, anon, choices)
+	if err != nil {
 		t.Fatal(err)
 	}
-	good := customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner")}
+	good := customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion}
 	bad := map[string]func(*customerquote.AcceptInput){
 		"no name":         func(a *customerquote.AcceptInput) { a.FullName = "" },
 		"one letter name": func(a *customerquote.AcceptInput) { a.FullName = "P" },
@@ -244,7 +298,7 @@ func TestDecline_RecordsTheDecisionAndTheSnapshot(t *testing.T) {
 	if err != nil || rev.Status != customerquote.StatusDraft {
 		t.Fatalf("revise: %v %v", rev, err)
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the old link after revising: %v", err)
 	}
 	log, _ = w.svc.Approvals(ctx, w.a, q.ID)
@@ -264,11 +318,12 @@ func TestCode_GatesAcceptanceAndIsHashedSingleUseShortLivedAndAttemptLimited(t *
 	for _, l := range q.Lines {
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	if _, err := w.svc.Choose(ctx, token, anon, choices); err != nil {
+	view, err := w.svc.Choose(ctx, token, anon, choices)
+	if err != nil {
 		t.Fatal(err)
 	}
 	accept := func(code string) error {
-		_, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code})
+		_, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code, SelectionsVersion: view.SelectionsVersion})
 		return err
 	}
 
@@ -353,9 +408,9 @@ func TestCode_ExpiresAndIsSingleUse(t *testing.T) {
 	for _, l := range q.Lines {
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	_, _ = w.svc.Choose(ctx, token, anon, choices)
+	view, _ := w.svc.Choose(ctx, token, anon, choices)
 	accept := func(code string) error {
-		_, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code})
+		_, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code, SelectionsVersion: view.SelectionsVersion})
 		return err
 	}
 	if err := w.svc.RequestCode(ctx, token, anon, "sms"); err != nil {
@@ -420,6 +475,79 @@ func TestCode_RequestsAreLimitedAndGoOnlyToTheContactOnFile(t *testing.T) {
 	}
 }
 
+func TestCode_LifetimeBudgetRefusesAcrossWindows(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	in := w.basicInput()
+	req := true
+	in.RequireCode = &req
+	q, token := w.createSent(in)
+	var choices []customerquote.Choice
+	for _, l := range q.Lines {
+		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
+	}
+	view, err := w.svc.Choose(ctx, token, anon, choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := func(tok, code string) error {
+		_, err := w.svc.Accept(ctx, tok, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code, SelectionsVersion: view.SelectionsVersion})
+		return err
+	}
+
+	// Across windows, 3 codes x 5 wrong guesses = 15 lifetime wrong attempts exhaust the link.
+	for c := 0; c < 3; c++ {
+		if err := w.svc.RequestCode(ctx, token, anon, "email"); err != nil {
+			t.Fatalf("code %d: %v", c+1, err)
+		}
+		wrong := "000000"
+		if w.mail.lastCode() == wrong {
+			wrong = "111111"
+		}
+		for a := 0; a < customerquote.CodeMaxAttempts; a++ {
+			if err := accept(token, wrong); !errors.Is(err, customerquote.ErrCodeWrong) {
+				t.Fatalf("code %d guess %d: %v", c+1, a+1, err)
+			}
+		}
+		w.advance(11 * time.Minute)
+	}
+	if err := w.svc.RequestCode(ctx, token, anon, "email"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("request after 15 wrong guesses across windows: %v, want ErrCodeBudgetExhausted", err)
+	}
+	if err := accept(token, "000000"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("guess after 15 wrong guesses: %v, want ErrCodeBudgetExhausted", err)
+	}
+
+	// Rotating the link issues a fresh token with its own budget.
+	rot, err := w.svc.Rotate(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshToken := strings.TrimPrefix(rot.Path, "/q/")
+	// Request 10 codes across four windows: the 10th succeeds, the 11th is refused.
+	for win := 0; win < 4; win++ {
+		wantCodes := 3
+		if win == 3 {
+			wantCodes = 1
+		}
+		for i := 0; i < wantCodes; i++ {
+			if err := w.svc.RequestCode(ctx, freshToken, anon, "email"); err != nil {
+				t.Fatalf("window %d code %d: %v", win+1, i+1, err)
+			}
+		}
+		if win < 3 {
+			w.advance(11 * time.Minute)
+		}
+	}
+	if err := w.svc.RequestCode(ctx, freshToken, anon, "email"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("11th code request on link: %v, want ErrCodeBudgetExhausted", err)
+	}
+	// The 10th code itself can still be verified while its attempts remain.
+	if err := accept(freshToken, w.mail.lastCode()); err != nil {
+		t.Fatalf("accepting with the 10th code: %v", err)
+	}
+}
+
 func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
@@ -429,14 +557,15 @@ func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) 
 		t.Fatalf("confirming before the customer approves: %v", err)
 	}
 	// Approve the studs and nails, decline the plywood.
-	if _, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{
+	view, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{
 		{LineID: q.Lines[0].ID, State: customerquote.SelectionApproved},
 		{LineID: q.Lines[1].ID, State: customerquote.SelectionDeclined},
 		{LineID: q.Lines[2].ID, State: customerquote.SelectionApproved},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner")}); err != nil {
+	if _, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion}); err != nil {
 		t.Fatal(err)
 	}
 	done, err := w.svc.Confirm(ctx, w.a, q.ID)
@@ -465,7 +594,7 @@ func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) 
 		t.Errorf("confirming twice: %v", err)
 	}
 	// The customer's link shows the fulfilment state of the order, and no more.
-	view, err := w.svc.View(ctx, token, anon)
+	view, err = w.svc.View(ctx, token, anon)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,6 +607,50 @@ func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) 
 	view, _ = w.svc.View(ctx, token, anon)
 	if view.Fulfilment == nil || *view.Fulfilment != customerquote.FulfilmentFulfilled {
 		t.Errorf("fulfilment after the order is fulfilled: %v", view.Fulfilment)
+	}
+}
+
+func TestConfirm_RefusesWhenDealerPriceMovedUntilAccepted(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	if _, err := w.acceptAll(token, typed("Pat Homeowner"), ""); err != nil {
+		t.Fatal(err)
+	}
+	// The dealer raises the stud price from 5.50 (55000) to 7.50 (75000): +20000 cents on 100 studs.
+	it := w.costs.items[w.stud]
+	it.UnitCostTenThousandths = 75000
+	w.costs.items[w.stud] = it
+
+	prev, err := w.svc.ConfirmPreview(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatalf("confirm preview: %v", err)
+	}
+	if !prev.PriceChanged || prev.CapturedMaterialCostCents != 101050 || prev.CurrentMaterialCostCents != 121050 ||
+		prev.DeltaCents != 20000 || prev.CapturedMarginCents != 125354 || prev.ProjectedMarginCents != 105354 {
+		t.Fatalf("preview %+v", prev)
+	}
+	if _, err := w.svc.Confirm(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrPriceChanged) {
+		t.Fatalf("confirm without accept_price_changes: %v, want ErrPriceChanged", err)
+	}
+	if w.orders.calls != 0 {
+		t.Fatalf("order placed on refused confirm: %d calls", w.orders.calls)
+	}
+
+	done, err := w.svc.Confirm(ctx, w.a, q.ID, customerquote.ConfirmInput{AcceptPriceChanges: true})
+	if err != nil {
+		t.Fatalf("confirm with accept_price_changes: %v", err)
+	}
+	tot, err := done.Totals()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tot.MaterialCostCents != 121050 || tot.MarginCents != 105354 {
+		t.Errorf("confirmed totals after price move: cost %d margin %d, want 121050 and 105354", tot.MaterialCostCents, tot.MarginCents)
+	}
+	log, err := w.svc.Approvals(ctx, w.a, q.ID)
+	if err != nil || len(log) != 2 || !strings.Contains(log[1].Note, "20000") {
+		t.Errorf("approval log note after price move: %+v, %v", log, err)
 	}
 }
 
@@ -552,7 +725,8 @@ func TestConcurrency_TwoAcceptancesOfOneLinkGiveOneApproval(t *testing.T) {
 	for _, l := range q.Lines {
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	if _, err := w.svc.Choose(ctx, token, anon, choices); err != nil {
+	view, err := w.svc.Choose(ctx, token, anon, choices)
+	if err != nil {
 		t.Fatal(err)
 	}
 	for round := 0; round < 1; round++ {
@@ -565,7 +739,7 @@ func TestConcurrency_TwoAcceptancesOfOneLinkGiveOneApproval(t *testing.T) {
 				defer wg.Done()
 				<-start
 				_, errs[i] = w.svc.Accept(ctx, token, customerquote.Caller{Address: "203.0.113.9"}, customerquote.AcceptInput{
-					FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner")})
+					FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion})
 			}()
 		}
 		close(start)
@@ -598,7 +772,7 @@ func TestConcurrency_AcceptAndDeclineRaceGivesOneDecision(t *testing.T) {
 	for _, l := range q.Lines {
 		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
 	}
-	_, _ = w.svc.Choose(ctx, token, anon, choices)
+	view, _ := w.svc.Choose(ctx, token, anon, choices)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	errs := make([]error, 3)
@@ -608,10 +782,10 @@ func TestConcurrency_AcceptAndDeclineRaceGivesOneDecision(t *testing.T) {
 			defer wg.Done()
 			<-start
 			if i == 0 {
-				_, errs[i] = w.svc.Decline(ctx, token, anon, customerquote.DeclineInput{FullName: "Pat Homeowner"})
+				_, errs[i] = w.svc.Decline(ctx, token, anon, customerquote.DeclineInput{FullName: "Pat Homeowner", SelectionsVersion: view.SelectionsVersion})
 				return
 			}
-			_, errs[i] = w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner")})
+			_, errs[i] = w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion})
 		}()
 	}
 	close(start)
@@ -740,7 +914,7 @@ func TestWithdraw_KillsTheLinkAndTheQuoteStopsBeingShared(t *testing.T) {
 	if err != nil || out.Status != customerquote.StatusWithdrawn {
 		t.Fatalf("withdraw: %v %v", out, err)
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("a withdrawn quote's link: %v", err)
 	}
 	if _, err := w.svc.Withdraw(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrInvalidState) {
@@ -829,5 +1003,79 @@ func TestExport_CSVDefusesSpreadsheetFormulas(t *testing.T) {
 	}
 	if err := ex.WriteCSV(&sb, "nope"); err == nil {
 		t.Error("an unknown kind was accepted")
+	}
+}
+
+func TestConfirm_LabourOnlyQuoteConfirmsWithoutPlacingMaterialOrder(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	// A quote whose only labour is contractor_only cannot be accepted when all materials are declined.
+	inOnlyInternal := w.basicInput()
+	inOnlyInternal.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "10")}}
+	inOnlyInternal.Labour = []customerquote.LabourInput{{Description: "Own travel", RateType: customerquote.RateFlat, RateCents: 12000, ContractorOnly: true}}
+	qInt, tokInt := w.createSent(inOnlyInternal)
+	viewInt, err := w.svc.Choose(ctx, tokInt, anon, []customerquote.Choice{{LineID: qInt.Lines[0].ID, State: customerquote.SelectionDeclined}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Accept(ctx, tokInt, anon, customerquote.AcceptInput{
+		FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: viewInt.SelectionsVersion,
+	}); !errors.Is(err, customerquote.ErrNothingChosen) {
+		t.Fatalf("accepting with only contractor_only labour: %v, want ErrNothingChosen", err)
+	}
+
+	// A quote with customer-facing labour and declined materials can be accepted and confirmed with order_id = nil.
+	inLabour := w.basicInput()
+	inLabour.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "10")}}
+	q, token := w.createSent(inLabour)
+	view, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{{LineID: q.Lines[0].ID, State: customerquote.SelectionDeclined}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{
+		FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion,
+	}); err != nil {
+		t.Fatalf("accepting customer-facing labour quote: %v", err)
+	}
+	done, err := w.svc.Confirm(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatalf("confirming labour-only quote: %v", err)
+	}
+	if done.Status != customerquote.StatusConfirmed || done.OrderID != nil || done.ConfirmedAt == nil {
+		t.Fatalf("confirmed labour-only quote: status=%s order_id=%v confirmed_at=%v", done.Status, done.OrderID, done.ConfirmedAt)
+	}
+	if w.orders.calls != 0 {
+		t.Errorf("dealer order placed for labour-only quote: %d calls", w.orders.calls)
+	}
+	log, err := w.svc.Approvals(ctx, w.a, q.ID)
+	if err != nil || len(log) != 2 || log[1].Step != customerquote.StepContractorConfirmed {
+		t.Errorf("approval log for labour-only confirm: %+v, %v", log, err)
+	}
+}
+
+func TestExport_ConfirmedQuoteIncludesOrderStatus(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	if _, err := w.acceptAll(token, typed("Pat Homeowner"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Confirm(ctx, w.a, q.ID); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := w.svc.Export(ctx, w.a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.Quotes) != 1 || ex.Quotes[0].Order == nil || ex.Quotes[0].Order.Fulfilment != customerquote.FulfilmentOrdered {
+		t.Fatalf("exported confirmed quote order: %+v", ex.Quotes)
+	}
+	var sb strings.Builder
+	if err := ex.WriteCSV(&sb, "quotes"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sb.String(), string(customerquote.FulfilmentOrdered)) {
+		t.Errorf("quotes CSV lacks order_status %q:\n%s", customerquote.FulfilmentOrdered, sb.String())
 	}
 }

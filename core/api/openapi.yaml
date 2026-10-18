@@ -3231,7 +3231,7 @@ paths:
       tags: [customerquote]
       summary: Save the contractor's defaults
       description: >-
-        Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code.
+        Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code. Turning the code on is a 409 ("Verification codes need a real email or text sender on this server.") while the server's only email sender is the log only one and text is the stub; so is a quote or a send that asks for a code, a code request and an acceptance on such a quote.
       security:
         - PortalSession: []
       requestBody:
@@ -3253,6 +3253,8 @@ paths:
           $ref: "#/components/responses/LegacyUnauthorized"
         "403":
           $ref: "#/components/responses/CustomerQuoteForbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/portal/v1/customer-quotes/settings/logo:
@@ -3659,13 +3661,13 @@ paths:
           $ref: "#/components/responses/WireConflict"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
-  /api/portal/v1/customer-quotes/{id}/confirm:
-    post:
-      operationId: customerQuoteConfirm
+  /api/portal/v1/customer-quotes/{id}/confirm-preview:
+    get:
+      operationId: customerQuoteConfirmPreview
       tags: [customerquote]
-      summary: Confirm the customer's approval into the dealer's order
+      summary: Preview current dealer material prices and resulting margin before confirming
       description: >-
-        Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. The markup, labour, overhead and the customer's prices never reach the order.
+        Only an approved quote. Compares each approved material line's captured dealer cost against the dealer's current price for the contractor's account and returns the per-line and total cost deltas and resulting margin.
       security:
         - PortalSession: []
       parameters:
@@ -3675,6 +3677,47 @@ paths:
           schema:
             type: string
             format: uuid
+      responses:
+        "200":
+          description: The confirmation price preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteConfirmPreview"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/CustomerQuoteForbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/portal/v1/customer-quotes/{id}/confirm:
+    post:
+      operationId: customerQuoteConfirm
+      tags: [customerquote]
+      summary: Confirm the customer's approval into the dealer's order
+      description: >-
+        Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. If the dealer's price moved since the quote was priced, confirming without accept_price_changes=true returns 409 price_changed. The markup, labour, overhead and the customer's prices never reach the order.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerQuoteConfirmRequest"
       responses:
         "200":
           description: The confirmed quote with its order.
@@ -20718,7 +20761,7 @@ components:
             $ref: "#/components/schemas/CustomerQuoteView"
     CustomerQuotePublicView:
       type: object
-      required: [reference, title, status, contractor, customer_name, job_site_address, valid_until, note, payment_terms, hide_line_prices, groups, lines, extras, totals, requires_code, can_decide]
+      required: [reference, title, status, contractor, customer_name, job_site_address, valid_until, note, payment_terms, hide_line_prices, groups, lines, extras, totals, requires_code, can_decide, selections_version]
       description: >-
         The strict allowlist of price wall 2. There is no field for the dealer's cost, a markup, basis points (the customer site tax rate excepted), a margin or a contractor only line. With hide_line_prices no line or extra carries a price and the totals are the lump sum.
       properties:
@@ -20832,6 +20875,14 @@ components:
           type: boolean
         can_decide:
           type: boolean
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
+        notice:
+          type: string
+          description: >-
+            Present when the quote cannot be accepted yet: the contractor asked for a verification code and the server cannot send one. It says so in plain words; declining stays possible.
         approval:
           type: object
           required: [decision, signed_by, at]
@@ -20867,7 +20918,7 @@ components:
                 enum: [pending, approved, declined]
     CustomerQuoteAcceptRequest:
       type: object
-      required: [full_name, signature]
+      required: [full_name, signature, selections_version]
       properties:
         full_name:
           type: string
@@ -20892,6 +20943,10 @@ components:
         code:
           type: string
           pattern: "^[0-9]{6}$"
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
     CustomerQuoteDeclineRequest:
       type: object
       required: [full_name]
@@ -20900,6 +20955,10 @@ components:
           type: string
         reason:
           type: string
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
     CustomerQuoteDealerProject:
       type: object
       required: [id, reference, contractor, project, job_site_address, customer, site_contact, status, selections, materials, material_cents, order, dealer_accepted_at, updated_at]
@@ -21094,6 +21153,61 @@ components:
         total_cents:
           type: integer
           format: int64
+    CustomerQuoteConfirmRequest:
+      type: object
+      properties:
+        accept_price_changes:
+          type: boolean
+    CustomerQuoteConfirmPreview:
+      type: object
+      required: [price_changed, captured_material_cost_cents, current_material_cost_cents, delta_cents, captured_margin_cents, projected_margin_cents, lines]
+      properties:
+        price_changed:
+          type: boolean
+        captured_material_cost_cents:
+          type: integer
+          format: int64
+        current_material_cost_cents:
+          type: integer
+          format: int64
+        delta_cents:
+          type: integer
+          format: int64
+        captured_margin_cents:
+          type: integer
+          format: int64
+        projected_margin_cents:
+          type: integer
+          format: int64
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_id, product_id, sku, description, quantity, uom, captured_cost_cents, current_cost_cents, delta_cents]
+            properties:
+              line_id:
+                type: string
+                format: uuid
+              product_id:
+                type: string
+                format: uuid
+              sku:
+                type: string
+              description:
+                type: string
+              quantity:
+                type: string
+              uom:
+                type: string
+              captured_cost_cents:
+                type: integer
+                format: int64
+              current_cost_cents:
+                type: integer
+                format: int64
+              delta_cents:
+                type: integer
+                format: int64
     DashboardSummary:
       type: object
       description: dashboard.DashboardSummary. Money is int64 cents.

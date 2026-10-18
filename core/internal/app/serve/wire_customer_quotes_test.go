@@ -45,6 +45,7 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -63,6 +64,7 @@ func (s *cqSyncBuf) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s
 
 // cqMail records what the notifier is asked to send.
 type cqMail struct {
+	down  bool
 	mu    sync.Mutex
 	links []string
 	codes []string
@@ -81,6 +83,15 @@ func (m *cqMail) SendCode(_ context.Context, _, _, _, code string) error {
 	m.codes = append(m.codes, code)
 	return nil
 }
+
+func (m *cqMail) Channels() customerquote.CodeChannels {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return customerquote.CodeChannels{Email: !m.down, SMS: !m.down}
+}
+
+// setDown makes the server unable to send a code, as with a log only sender.
+func (m *cqMail) setDown(v bool) { m.mu.Lock(); m.down = v; m.mu.Unlock() }
 
 func (m *cqMail) lastCode() string {
 	m.mu.Lock()
@@ -109,10 +120,14 @@ type cqStack struct {
 	nail   uuid.UUID
 }
 
-func newCQStack(t *testing.T) *cqStack {
+func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 	t.Helper()
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
+	if len(multiBranch) > 0 && multiBranch[0] {
+		setSetting(t, db, "multi_branch_enabled", "true")
+		setSetting(t, db, "default_branch_required", "false")
+	}
 	ctx := context.Background()
 	s := &cqStack{t: t, db: db, logs: &cqSyncBuf{}, mail: &cqMail{}}
 	must := func(sql string, args ...any) {
@@ -131,6 +146,7 @@ func newCQStack(t *testing.T) *cqStack {
 	}{{s.custA, "Wire Contractor A"}, {s.custB, "Wire Contractor B"}} {
 		must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`, c.id, c.name, "CQW-"+c.id.String()[:8], s.branch)
 	}
+	must(`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $3), ($2, $3)`, s.custA, s.custB, s.branch)
 	must(`INSERT INTO projects (id, customer_id, name, status) VALUES ($1, $2, 'Maple Street Deck', 'Active'), ($3, $4, 'Other Job', 'Active')`, s.projA, s.custA, s.projB, s.custB)
 	s.catLum = uuid.New()
 	must(`INSERT INTO product_categories (id, name, slug, path) VALUES ($1, 'cqw lumber', $2::text, replace($2::text, '-', '_')::ltree)`, s.catLum, "cqw_"+s.catLum.String()[:8])
@@ -163,6 +179,7 @@ func newCQStack(t *testing.T) *cqStack {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = ANY($1)`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM projects WHERE customer_id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = ANY($1)`, []uuid.UUID{s.stud, s.ply, s.nail})
@@ -212,7 +229,7 @@ func newCQStack(t *testing.T) *cqStack {
 	wall.orders(mux, orderSvc)
 
 	h := buildChain(ChainDeps{Mux: mux, DB: db, Logger: logger, AuditLog: audit.NewLogger(db)})
-	s.srv = httptest.NewServer(asRole(h))
+	s.srv = httptest.NewServer(deskClaims(h))
 	t.Cleanup(s.srv.Close)
 	return s
 }
@@ -256,7 +273,7 @@ var (
 	asA      = map[string]string{"X-Test-Contractor": "a"}
 	asB      = map[string]string{"X-Test-Contractor": "b"}
 	asViewer = map[string]string{"X-Test-Contractor": "viewer"}
-	asDesk   = map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "desk-user-1"}
+	asDesk   = map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "desk-user-1", "X-Test-Email": deskEmail}
 )
 
 func (s *cqStack) quoteBody(hide bool, requireCode bool) map[string]any {
@@ -387,7 +404,7 @@ var publicKeys = []string{
 	"reference", "title", "status", "contractor", "name", "has_logo", "customer_name", "job_site_address", "valid_until", "note",
 	"payment_terms", "hide_line_prices", "groups", "id", "label", "lines", "group_id", "description", "quantity", "uom", "price_cents",
 	"selection", "extras", "kind", "totals", "subtotal_cents", "tax_cents", "total_cents", "deposit_cents", "tax_mode", "tax_rate_bps",
-	"tax_note", "requires_code", "can_decide", "approval", "decision", "signed_by", "at", "fulfilment",
+	"tax_note", "requires_code", "can_decide", "selections_version", "notice", "approval", "decision", "signed_by", "at", "fulfilment",
 }
 
 var dealerKeys = []string{
@@ -481,7 +498,7 @@ func TestWire_TheLoopEndToEnd(t *testing.T) {
 	}
 
 	// Acceptance is refused without the code; the code is requested and entered.
-	sign := map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}}
+	sign := map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}
 	r = s.do("POST", s.pub(token)+"/accept", nil, sign)
 	if r.status != 400 || !bytes.Contains(r.body, []byte("code_required")) {
 		t.Fatalf("accept without a code: %d %s", r.status, r.body)
@@ -515,6 +532,26 @@ func TestWire_TheLoopEndToEnd(t *testing.T) {
 	d := jsonOf(t, r.body)
 	if d["order"] != nil || d["status"] != "approved" {
 		t.Fatalf("dealer before confirmation: %s", r.body)
+	}
+
+	// If the dealer's price moves before confirm, confirm-preview shows the delta and confirm refuses until accept_price_changes is true.
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE products SET base_price = 7.5000 WHERE id = $1`, s.stud); err != nil {
+		t.Fatal(err)
+	}
+	r = s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/confirm-preview", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm-preview: %d %s", r.status, r.body)
+	}
+	prev := jsonOf(t, r.body)
+	if prev["price_changed"] != true || prev["delta_cents"].(float64) != 20000 || prev["projected_margin_cents"].(float64) != 105354 {
+		t.Fatalf("confirm-preview body: %s", r.body)
+	}
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r.status != 409 || !bytes.Contains(r.body, []byte("price_changed")) {
+		t.Fatalf("confirm after price move without accept_price_changes: %d %s", r.status, r.body)
+	}
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE products SET base_price = 5.5000 WHERE id = $1`, s.stud); err != nil {
+		t.Fatal(err)
 	}
 
 	// The contractor confirms: the dealer's order appears at the dealer's prices on the project.
@@ -618,7 +655,7 @@ func TestWire_PriceWall2_NothingOfTheContractorsCostOrMarkupReachesTheCustomer(t
 		}
 		check("selections", s.do("PUT", base+"/selections", nil, map[string]any{"choices": lines}))
 		check("accept", s.do("POST", base+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
-			"signature": map[string]any{"kind": "drawn", "png_base64": base64.StdEncoding.EncodeToString(tinyPNG)}}))
+			"signature": map[string]any{"kind": "drawn", "png_base64": base64.StdEncoding.EncodeToString(tinyPNG)}, "selections_version": 2}))
 		check("view after accept", s.do("GET", base, nil, nil))
 
 		// The customer PDF is built from the same allowlist: its text carries none of it either.
@@ -668,7 +705,7 @@ func TestWire_PriceWall1_NothingOfTheContractorsMarkupReachesTheDealer(t *testin
 	}
 	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
 	if r := s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
-		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}}); r.status != 200 {
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}); r.status != 200 {
 		t.Fatalf("accept: %d %s", r.status, r.body)
 	}
 	conf := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
@@ -728,7 +765,7 @@ func TestWire_Tenancy_AnotherContractorSeesNothing(t *testing.T) {
 		{"GET", "/api/portal/v1/customer-quotes/" + id + "/approvals"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/send"},
 		{"POST", "/api/portal/v1/customer-quotes/" + id + "/link/rotate"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/link/revoke"},
 		{"POST", "/api/portal/v1/customer-quotes/" + id + "/withdraw"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/revise"},
-		{"POST", "/api/portal/v1/customer-quotes/" + id + "/confirm"},
+		{"GET", "/api/portal/v1/customer-quotes/" + id + "/confirm-preview"}, {"POST", "/api/portal/v1/customer-quotes/" + id + "/confirm"},
 	}
 	for _, p := range paths {
 		var body any
@@ -813,6 +850,9 @@ func TestWire_TheTokenNeverReachesALogLineOrAMetricsLabel(t *testing.T) {
 	s.do("POST", s.pub(token)+"/code", nil, map[string]any{"channel": "email"})
 	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": []any{}})
 	s.do("GET", s.pub(token+"x"), nil, nil)
+	s.do("GET", "/api/public/v1/customer-quotes//"+token, nil, nil)
+	s.do("GET", "/api/public/v1/./customer-quotes/"+token, nil, nil)
+	s.do("GET", s.pub(token), map[string]string{"X-Agent-Tool": strings.Repeat("t", 300)}, nil)
 	s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/link/rotate", asA, nil)
 	s.do("GET", s.pub(token), nil, nil)
 	logs := s.logs.String()
@@ -1038,7 +1078,7 @@ func TestWire_DealerQuoteLink_DeclineAndReissue(t *testing.T) {
 	if first == second {
 		t.Fatal("the same token was issued twice")
 	}
-	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+first, nil, nil); r.status != 410 {
+	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+first, nil, nil); r.status != 404 {
 		t.Errorf("the replaced link: %d", r.status)
 	}
 	r := s.do("POST", "/api/public/v1/dealer-quotes/"+second+"/decline", nil, map[string]any{"full_name": "Pat Contractor", "reason": "too dear"})
@@ -1049,5 +1089,191 @@ func TestWire_DealerQuoteLink_DeclineAndReissue(t *testing.T) {
 	_ = s.db.Pool.QueryRow(context.Background(), `SELECT state::text FROM quotes WHERE id = $1`, qid).Scan(&state)
 	if state != "REJECTED" {
 		t.Errorf("the quote is %s", state)
+	}
+}
+
+// deskEmail is the desk user's work address. It must appear in no response a
+// contractor or a customer can read.
+const deskEmail = "dana.deskwell@dealer-staff.example"
+
+// deskClaims is asRole with the desk user's email on the claims.
+func deskClaims(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role := r.Header.Get("X-Test-Role")
+		claims := &middleware.UserClaims{RegisteredClaims: jwt.RegisteredClaims{Subject: r.Header.Get("X-Test-Sub")},
+			Email: r.Header.Get("X-Test-Email"), Role: role, Roles: []string{role}}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims)))
+	})
+}
+
+func TestWire_Codes_RefusedWhenTheServerCannotSendThem(t *testing.T) {
+	s := newCQStack(t)
+	const sentence = "Verification codes need a real email or text sender on this server."
+	body := s.quoteBody(false, true)
+	id, token := s.createAndSend(body) // while codes can be sent
+
+	s.mail.setDown(true)
+	r := s.do("PUT", "/api/portal/v1/customer-quotes/settings", asA, map[string]any{"tax": map[string]any{"mode": "at_checkout", "rate_bps": 0},
+		"markup": map[string]any{"kind": "markup", "bps": 0}, "require_code": true})
+	if r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Fatalf("the toggle: %d %s", r.status, r.body)
+	}
+	r = s.do("PUT", "/api/portal/v1/customer-quotes/settings", asA, map[string]any{"tax": map[string]any{"mode": "at_checkout", "rate_bps": 0},
+		"markup": map[string]any{"kind": "markup", "bps": 0}, "require_code": false})
+	if r.status != 200 {
+		t.Fatalf("turning it off: %d %s", r.status, r.body)
+	}
+	pub := s.pub(token)
+	view := s.do("GET", pub, nil, nil)
+	assertKeysWithin(t, "the blocked page", view.body, publicKeys)
+	if n, _ := jsonOf(t, view.body)["notice"].(string); !strings.Contains(n, "cannot be accepted") {
+		t.Errorf("the page's notice: %s", view.body)
+	}
+	if r := s.do("POST", pub+"/code", nil, map[string]any{"channel": "email"}); r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Errorf("a code request: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", pub+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example",
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "code": "123456"}); r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Errorf("an acceptance: %d %s", r.status, r.body)
+	}
+	if len(s.mail.codes) != 0 {
+		t.Errorf("a code was sent: %v", s.mail.codes)
+	}
+	_ = id
+}
+
+func TestWire_TheDesksEmailReachesNoContractorCustomerOrPdfResponse(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO staff (email, full_name) VALUES ($1, 'Dana Deskwell') ON CONFLICT (email) DO UPDATE SET full_name = 'Dana Deskwell'`, deskEmail); err != nil {
+		t.Fatal(err)
+	}
+	var oldTrading string
+	_ = s.db.Pool.QueryRow(ctx, `SELECT trading_name FROM dealer_profile WHERE id = 1`).Scan(&oldTrading)
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE dealer_profile SET trading_name = 'Granite Test Yard' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM staff WHERE email = $1`, deskEmail)
+		_, _ = s.db.Pool.Exec(ctx, `UPDATE dealer_profile SET trading_name = $1 WHERE id = 1`, oldTrading)
+	})
+
+	id, token := s.createAndSend(s.quoteBody(false, false))
+	var lines []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2})
+	s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", asDesk, nil); r.status != 200 {
+		t.Fatalf("dealer accept: %d %s", r.status, r.body)
+	}
+	// The dealer's own quote link, issued and accepted by the same desk user.
+	dq := s.dealerQuote("SENT")
+	issue := s.do("POST", "/api/v1/quotes/"+dq.String()+"/share-link", asDesk, nil)
+	dtoken := strings.TrimPrefix(jsonOf(t, issue.body)["path"].(string), "/dq/")
+
+	// The record keeps the desk user's id and display name, not the address.
+	var ref, name string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT actor_ref, actor_name FROM pro_customer_quote_approval_log WHERE quote_id = $1 AND step = 'dealer_accepted'`, id).Scan(&ref, &name); err != nil {
+		t.Fatal(err)
+	}
+	if ref != "desk-user-1" || name != "Dana Deskwell" {
+		t.Errorf("the record holds %q and %q", ref, name)
+	}
+
+	local := strings.Split(deskEmail, "@")[0]
+	responses := map[string]cqResp{
+		"contractor quote":     s.do("GET", "/api/portal/v1/customer-quotes/"+id, asA, nil),
+		"contractor list":      s.do("GET", "/api/portal/v1/customer-quotes", asA, nil),
+		"contractor approvals": s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/approvals", asA, nil),
+		"contractor preview":   s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/preview", asA, nil),
+		"contractor pdf":       s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/pdf", asA, nil),
+		"export json":          s.do("GET", "/api/portal/v1/customer-quotes/export", asA, nil),
+		"export csv":           s.do("GET", "/api/portal/v1/customer-quotes/export?format=csv&kind=quotes", asA, nil),
+		"public view":          s.do("GET", s.pub(token), nil, nil),
+		"public pdf":           s.do("GET", s.pub(token)+"/pdf", nil, nil),
+		"dealer quote page":    s.do("GET", "/api/public/v1/dealer-quotes/"+dtoken, nil, nil),
+		"link issue answer":    issue,
+	}
+	for what, r := range responses {
+		if r.status != 200 {
+			t.Errorf("%s: %d", what, r.status)
+			continue
+		}
+		if bytes.Contains(r.body, []byte(deskEmail)) || bytes.Contains(r.body, []byte(local)) || bytes.Contains(r.body, []byte("dealer-staff")) {
+			t.Errorf("%s carries the desk user's address: %s", what, truncate(r.body))
+		}
+	}
+	// The contractor reads who accepted: the display name and the dealer's business name.
+	items := jsonOf(t, responses["contractor approvals"].body)["items"].([]any)
+	last := items[len(items)-1].(map[string]any)
+	if last["step"] != "dealer_accepted" || last["actor_name"] != "Dana Deskwell, Granite Test Yard" || last["actor_contact"] != "" {
+		t.Errorf("the contractor's view of the dealer step: %v", last)
+	}
+	// The dealer's own desk sees the display name too, not the address.
+	det := s.do("GET", "/api/v1/pro-projects/"+id, asDesk, nil)
+	if bytes.Contains(det.body, []byte(deskEmail)) || !bytes.Contains(det.body, []byte("Dana Deskwell")) {
+		t.Errorf("the desk's view: %s", truncate(det.body))
+	}
+}
+
+func TestWire_TheDealersPipelineIsHeldToTheCallersBranches(t *testing.T) {
+	s := newCQStack(t, true)
+	ctx := context.Background()
+	other := uuid.New()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'cq other branch')`, []any{other, "cqo-" + other.String()[:8]}},
+		{`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('u-cq-other', $1, TRUE, 'test'), ('u-cq-home', $2, TRUE, 'test')`, []any{other, s.branch}},
+	} {
+		if _, err := s.db.Pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub IN ('u-cq-other', 'u-cq-home')`)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, other)
+	})
+	id, token := s.createAndSend(s.quoteBody(false, false))
+	var lines []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2})
+	if r := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil); r.status != 200 {
+		t.Fatalf("confirm: %d %s", r.status, r.body)
+	}
+
+	foreign := map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "u-cq-other"}
+	home := map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "u-cq-home"}
+	list := s.do("GET", "/api/v1/pro-projects", foreign, nil)
+	if list.status != 200 || bytes.Contains(list.body, []byte(id)) || bytes.Contains(list.body, []byte("pat@homeowner.example")) {
+		t.Errorf("another branch's list: %d %s", list.status, truncate(list.body))
+	}
+	if r := s.do("GET", "/api/v1/pro-projects/"+id, foreign, nil); r.status != 404 {
+		t.Errorf("another branch's project: %d %s", r.status, truncate(r.body))
+	}
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", foreign, nil); r.status != 404 {
+		t.Errorf("another branch's acceptance: %d %s", r.status, truncate(r.body))
+	}
+	var accepted *string
+	_ = s.db.Pool.QueryRow(ctx, `SELECT dealer_accepted_at::text FROM pro_customer_quotes WHERE id = $1`, id).Scan(&accepted)
+	if accepted != nil {
+		t.Error("another branch's user recorded the dealer's acceptance")
+	}
+	// The branch that holds the contractor sees it.
+	if r := s.do("GET", "/api/v1/pro-projects", home, nil); r.status != 200 || !bytes.Contains(r.body, []byte(id)) {
+		t.Errorf("the home branch's list: %d %s", r.status, truncate(r.body))
+	}
+	if r := s.do("GET", "/api/v1/pro-projects/"+id, home, nil); r.status != 200 {
+		t.Errorf("the home branch's project: %d", r.status)
+	}
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", home, nil); r.status != 200 {
+		t.Errorf("the home branch's acceptance: %d %s", r.status, r.body)
 	}
 }
