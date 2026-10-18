@@ -60,7 +60,7 @@ const METHOD_CODES: readonly SignInMethodCode[] = [
 const KINDS: readonly SignInMethodKind[] = ['form', 'passkey', 'link', 'redirect'];
 
 const DEGRADED_NOTICE =
-  'The sign in methods could not be read from the server; email and password is offered alone.';
+  "We could not load this dealer's sign in options, so only email and password is shown.";
 
 /** The fail closed config: email and password only, with its notice. */
 export function degradedAuthMethodsConfig(): AuthMethodsRuntimeConfig {

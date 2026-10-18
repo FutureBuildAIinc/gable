@@ -323,13 +323,36 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
   });
 
-  it('fails closed to email and password with the visible notice when the config call fails', async () => {
+  it('fails closed to email and password with a warning notice box and Retry action that re-reads the config', async () => {
     authConfig.devMode = false;
     stubConfig({}, 500);
     const el = await mount();
     await settle(el);
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('email and password');
+    const alertBox = el.querySelector<HTMLElement>('[role="alert"]');
+    expect(alertBox).not.toBeNull();
+    expect(alertBox?.textContent).toContain("We could not load this dealer's sign in options, so only email and password is shown.");
+    expect(alertBox?.className).toContain('border-amber-300/40');
+    expect(alertBox?.className).toContain('bg-amber-300/10');
     expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+
+    const retryBtn = alertBox?.querySelector<HTMLButtonElement>('button');
+    expect(retryBtn).not.toBeNull();
+    expect(retryBtn?.textContent?.trim()).toBe('Retry');
+
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: null,
+      methods: [
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+      ],
+    });
+    retryBtn!.click();
+    await settle(el);
+
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Northridge Lumber');
+    expect(el.querySelector('button[aria-label="Sign in with Google"]')).not.toBeNull();
   });
 
   it('shows the server\'s plain refusal inline when a method is not built yet', async () => {

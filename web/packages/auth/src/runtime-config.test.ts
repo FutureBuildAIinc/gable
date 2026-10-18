@@ -91,7 +91,9 @@ describe('authMethodsConfig', () => {
     const unreachable = vi.fn(async () => { throw new Error('network down'); });
     const cfg = await authMethodsConfig('', unreachable);
     expect(cfg.degraded).toBe(true);
-    expect(cfg.notice).toContain('email and password');
+    expect(cfg.notice).toBe(
+      "We could not load this dealer's sign in options, so only email and password is shown.",
+    );
     expect(cfg.methods).toHaveLength(1);
     expect(cfg.methods[0].method).toBe('email_password');
 

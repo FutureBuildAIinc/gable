@@ -31,12 +31,12 @@ import { customElement, state } from 'lit/decorators.js';
 import {
   Building2, ClipboardList, CreditCard, FileText, Fingerprint, Hammer, Mail, ScrollText, LayoutDashboard,
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
-  Store, Tags, Truck, Users, Globe, Monitor,
+  Store, Tags, TriangleAlert, Truck, Users, Globe, Monitor,
 } from 'lucide';
 import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/design-system';
 import {
   authCustody, authConfig, InvalidTokenError,
-  authMethodsConfig, recordIdentity, readIdentity, forgetIdentity,
+  authMethodsConfig, resetAuthMethodsCache, recordIdentity, readIdentity, forgetIdentity,
   type AuthMethodsRuntimeConfig, type SignInMethodCode, type SignInMethodConfig, type TappedIdentity,
 } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
@@ -128,6 +128,11 @@ export class GableFrontDoor extends LitElement {
 
   private async _loadAuthConfig() {
     this._authCfg = await authMethodsConfig(import.meta.env.VITE_API_URL || '');
+  }
+
+  private async _retryAuthConfig() {
+    resetAuthMethodsCache();
+    await this._loadAuthConfig();
   }
 
   /** One method's start attempt: the server's plain refusal shows inline. */
@@ -501,7 +506,22 @@ export class GableFrontDoor extends LitElement {
       : null;
     return html`
       ${this._authCfg.degraded && this._authCfg.notice ? html`
-        <p role="alert" class="text-sm text-amber-300">${this._authCfg.notice}</p>
+        <div
+          role="alert"
+          class="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2.5 flex items-start justify-between gap-2.5 text-sm text-amber-300"
+        >
+          <div class="flex items-start gap-2 min-w-0">
+            <span class="shrink-0 mt-0.5">${icon(TriangleAlert, 16)}</span>
+            <span>${this._authCfg.notice}</span>
+          </div>
+          <button
+            type="button"
+            @click=${() => void this._retryAuthConfig()}
+            class="shrink-0 rounded border border-amber-300/50 bg-amber-300/15 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-300/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       ` : nothing}
       ${last ? html`
         <button
