@@ -235,7 +235,6 @@ export class GableShellHeader extends LitElement {
 
   render() {
     const app = appById(this.apps, this.currentAppId);
-    const crumb = app === undefined ? 'Apps' : this.frameTitle !== '' ? `${app.name} · ${this.frameTitle}` : app.name;
     const initials = initialsOf(this.userName);
     return html`
       <header
@@ -274,7 +273,7 @@ export class GableShellHeader extends LitElement {
             : nothing}
         </div>
 
-        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[46vw]">
+        <div class="flex-1 min-w-0 flex justify-center px-1 sm:flex-none sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-w-[46vw] sm:px-0">
           <button
             type="button"
             data-action="selector"
@@ -284,7 +283,10 @@ export class GableShellHeader extends LitElement {
             @keydown=${this._onSelectorKeydown}
             class="flex items-center gap-2 h-9 max-w-full px-3 rounded-lg border border-white/5 bg-slate-steel/50 text-sm font-medium text-zinc-200 hover:border-gable-green/30 hover:bg-slate-steel transition-colors"
           >
-            <span class="truncate">${crumb}</span>
+            <span class="truncate">
+            ${app === undefined ? 'Apps' : app.name}${''}
+            <span class="hidden sm:inline">${this.frameTitle !== '' ? ` · ${this.frameTitle}` : ''}</span>
+          </span>
             <span class="text-zinc-500 shrink-0">${icon(ChevronDown, 14)}</span>
           </button>
         </div>

@@ -161,11 +161,15 @@ export class GableWorkShell extends LitElement {
     const [dealer, yards] = await Promise.all([loadDealerBrand(), loadYards()]);
     this._dealer = dealer;
     this._yards = yards;
-    // A stored yard the person can no longer see falls to their home yard.
-    if (this._currentYardId !== null && !yards.some((y) => y.id === this._currentYardId)) {
-      const home = yards.find((y) => y.is_home) ?? yards[0];
-      this._currentYardId = home?.id ?? null;
-      storeYard(this._currentYardId);
+    // The yard the frame opens on: the stored pick while it is still granted,
+    // otherwise the home yard (the desk's BranchContext answers the same way).
+    const stored = this._currentYardId !== null && yards.some((y) => y.id === this._currentYardId)
+      ? this._currentYardId
+      : null;
+    const next = stored ?? (yards.find((y) => y.is_home) ?? yards[0])?.id ?? null;
+    if (next !== this._currentYardId) {
+      this._currentYardId = next;
+      storeYard(next);
     }
   }
 

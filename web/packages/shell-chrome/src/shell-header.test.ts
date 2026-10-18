@@ -51,7 +51,7 @@ describe('gable-shell-header', () => {
     });
     await el.updateComplete;
     const control = el.querySelector<HTMLButtonElement>('button[data-action="selector"]');
-    expect(control?.textContent).toContain('Desk · Orders');
+    expect(control?.textContent?.replace(/\s+/g, ' ')).toContain('Desk · Orders');
     cleanup();
   });
 
