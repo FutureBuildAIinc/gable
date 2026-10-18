@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 const PORT = Number(process.env.PORT ?? 18395);
 const APP = fileURLToPath(new URL('..', import.meta.url));
 const SHELL_DIST = join(APP, 'dist');
+const WORK_SHELL_DIST = join(APP, '..', 'work-shell', 'dist');
+const DOOR_DIST = join(APP, '..', 'front-door', 'dist');
 const DESK_DIST = join(APP, '..', 'desk', 'dist');
 
 const TYPES = {
@@ -57,6 +59,36 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname;
 
+  if (path === '/') {
+    await send(res, join(DOOR_DIST, 'index.html'));
+    return;
+  }
+  if (path.startsWith('/door/')) {
+    const file = under(DOOR_DIST, path);
+    if (file === null) {
+      res.writeHead(403).end();
+      return;
+    }
+    await send(res, file);
+    return;
+  }
+  if (path === '/shell') {
+    res.writeHead(308, { location: '/shell/' }).end();
+    return;
+  }
+  if (path === '/shell/') {
+    await send(res, join(WORK_SHELL_DIST, 'index.html'));
+    return;
+  }
+  if (path.startsWith('/shell/')) {
+    const file = under(WORK_SHELL_DIST, path.slice('/shell/'.length));
+    if (file === null) {
+      res.writeHead(403).end();
+      return;
+    }
+    await send(res, file);
+    return;
+  }
   if (path === '/field') {
     res.writeHead(308, { location: '/field/' }).end();
     return;
@@ -90,5 +122,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`screens preview on http://127.0.0.1:${PORT} (field-shell: ${SHELL_DIST}, desk: ${DESK_DIST})`);
+  console.log(`screens preview on http://127.0.0.1:${PORT} (door: ${DOOR_DIST}, field-shell: ${SHELL_DIST}, desk: ${DESK_DIST})`);
 });
