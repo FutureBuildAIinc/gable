@@ -271,9 +271,22 @@ describe('front door runtime sign in methods (S8)', () => {
     const el = await mount();
     await settle(el);
     expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
+    // The subtitle speaks to the methods shown, not the token paste.
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Sign in with your work account');
     expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+    // The form's submit is the card's one primary button, named Sign in.
+    const primary = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Sign in');
+    expect(primary).toBeDefined();
+    expect(primary?.className).toContain('bg-gable-green');
+    // The quiet divider between the form and the other methods.
+    expect(el.textContent).toContain('or');
     const methodButtons = [...el.querySelectorAll('button[aria-label^="Sign in with"]')] as HTMLButtonElement[];
     expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual(['Sign in with Google']);
+    // Each method button leads with a mark in the icon style.
+    expect(methodButtons[0].querySelector('svg')).not.toBeNull();
+    // The token sentence moved inside the disclosure.
+    expect(el.querySelector('h1 + p')?.textContent).not.toContain('bearer token');
+    expect(el.querySelector('details')?.textContent).toContain('bearer token');
   });
 
   it('renders a different allowlist the same way (allowlist two)', async () => {
@@ -283,6 +296,8 @@ describe('front door runtime sign in methods (S8)', () => {
       methods: [
         { method: 'oidc', kind: 'redirect', label: 'Dealer SSO', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
         { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
+        { method: 'magic_link', kind: 'link', label: 'Email a sign in link', start_url: '/api/v1/auth/start/magic_link', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
@@ -291,7 +306,17 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual([
       'Sign in with Dealer SSO',
       'Sign in with Passkey',
+      'Sign in with Email a sign in link',
+      'Sign in with Microsoft',
     ]);
+    for (const btn of methodButtons) {
+      expect(btn.querySelector('svg')).not.toBeNull();
+    }
+    // With only redirect style methods, the choice leads the subtitle and no
+    // divider shows (one kind only).
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Choose how you sign in');
+    const orDividers = [...el.querySelectorAll('span')].filter((s) => s.textContent?.trim() === 'or');
+    expect(orDividers).toHaveLength(0);
     // No email form: the dealer allows no form method.
     expect(el.querySelector('input[aria-label="Email"]')).toBeNull();
     // The out of band token paste stays available either way.

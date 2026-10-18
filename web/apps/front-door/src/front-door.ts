@@ -29,11 +29,11 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
-  Building2, ClipboardList, CreditCard, FileText, Hammer, ScrollText, LayoutDashboard,
+  Building2, ClipboardList, CreditCard, FileText, Fingerprint, Hammer, Mail, ScrollText, LayoutDashboard,
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
-import { icon, cn, useThemeSubject } from '@gable/design-system';
+import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/design-system';
 import {
   authCustody, authConfig, InvalidTokenError,
   authMethodsConfig, recordIdentity, readIdentity, forgetIdentity,
@@ -390,13 +390,25 @@ export class GableFrontDoor extends LitElement {
             <p class="text-sm text-zinc-400">
               ${dev
                 ? 'This is the local demo. Each card signs in as that person, shaping what the screens offer.'
-                : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
+                : this._signInSubtitle()}
             </p>
           </div>
           ${dev ? this._renderPersonaCards() : this._renderMethodsSignIn()}
         </div>
       </div>
     `;
+  }
+
+  /**
+   * The production sign in's word: the form leads ("your work account");
+   * with only redirect style methods on the card, the choice leads.
+   */
+  private _signInSubtitle(): string {
+    const cfg = this._authCfg;
+    if (cfg !== null && !cfg.degraded && !cfg.methods.some((m) => m.kind === 'form')) {
+      return 'Choose how you sign in.';
+    }
+    return 'Sign in with your work account.';
   }
 
   /**
@@ -419,8 +431,8 @@ export class GableFrontDoor extends LitElement {
         <p role="alert" class="text-sm text-amber-300">${this._authCfg.notice}</p>
       ` : nothing}
       ${last ? html`
-        <div class="rounded-xl border border-white/10 bg-slate-steel/60 px-4 py-3 flex items-center gap-3">
-          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-[11px] font-mono font-bold text-gable-green">
+        <div class="rounded-xl border border-zinc-500 bg-surface-2 px-4 py-3 flex items-center gap-3">
+          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green">
             ${initialsFor(last.displayName)}
           </div>
           <div class="leading-tight">
@@ -432,16 +444,19 @@ export class GableFrontDoor extends LitElement {
         </div>
       ` : nothing}
       <div class="space-y-2.5">
-        ${this._authCfg.methods.map((m) => this._renderMethod(m))}
+        ${this._renderMethodList(this._authCfg.methods)}
       </div>
       ${this._signInError ? html`
         <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
       ` : nothing}
-      <details class="border-t border-white/10 pt-4">
+      <details class="border-t border-white/15 pt-4">
         <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none">
           Use a bearer token instead
         </summary>
         <div class="pt-3 space-y-3">
+          <p class="text-xs text-zinc-400">
+            Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.
+          </p>
           <label class="block space-y-1.5">
             <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
             <textarea
@@ -450,18 +465,52 @@ export class GableFrontDoor extends LitElement {
               rows="4"
               aria-label="Bearer token"
               placeholder="Paste the token"
-              class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             ></textarea>
           </label>
           <button
+            type="button"
             @click=${() => this._signIn()}
-            class="w-full rounded-lg bg-white/5 border border-white/10 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green/40 transition-all"
+            class="w-full rounded-lg bg-surface-2 border border-zinc-500 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green transition-all"
           >
             Sign in with the token
           </button>
         </div>
       </details>
     `;
+  }
+
+  /**
+   * The methods in the server's order, with a quiet "or" divider between the
+   * form and the other kinds; no divider when only one kind shows.
+   */
+  private _renderMethodList(methods: readonly SignInMethodConfig[]) {
+    const out: unknown[] = [];
+    for (let i = 0; i < methods.length; i++) {
+      if (i > 0 && (methods[i - 1].kind === 'form') !== (methods[i].kind === 'form')) {
+        out.push(html`
+          <div class="flex items-center gap-3 py-1" role="presentation">
+            <span class="h-px flex-1 bg-white/15"></span>
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">or</span>
+            <span class="h-px flex-1 bg-white/15"></span>
+          </div>
+        `);
+      }
+      out.push(this._renderMethod(methods[i]));
+    }
+    return out;
+  }
+
+  /** One allowed method's leading mark, in the icon style the door already uses. */
+  private _methodIcon(m: SignInMethodConfig) {
+    switch (m.method) {
+      case 'passkey': return icon(Fingerprint, 18);
+      case 'magic_link': return icon(Mail, 18);
+      case 'google': return googleGlyph(18);
+      case 'microsoft': return microsoftGlyph(18);
+      case 'oidc': return icon(Building2, 18);
+      default: return nothing;
+    }
   }
 
   /** One allowed method: the form, or the button that starts it. */
@@ -478,7 +527,7 @@ export class GableFrontDoor extends LitElement {
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
               aria-label="Email"
               autocomplete="username"
-              class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             />
           </label>
           <label class="block space-y-1.5">
@@ -490,14 +539,15 @@ export class GableFrontDoor extends LitElement {
               @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
               aria-label="Password"
               autocomplete="current-password"
-              class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
             />
           </label>
           <button
+            type="button"
             @click=${() => void this._signInEmailPassword()}
-            class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+            class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
           >
-            ${m.label}
+            Sign in
           </button>
         </div>
       `;
@@ -507,9 +557,10 @@ export class GableFrontDoor extends LitElement {
         type="button"
         @click=${() => void this._startMethod(m)}
         aria-label="Sign in with ${m.label}"
-        class="w-full rounded-lg border border-white/10 bg-slate-steel/50 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green/40 hover:bg-slate-steel transition-all"
+        class="w-full flex items-center justify-center gap-2.5 rounded-lg border border-zinc-500 bg-surface-2 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 transition-all"
       >
-        ${m.label}
+        <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
+        <span>${m.label}</span>
       </button>
     `;
   }
@@ -536,7 +587,7 @@ export class GableFrontDoor extends LitElement {
         ` : nothing}
         <button
           @click=${() => this._signIn()}
-          class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+          class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
         >
           Sign in
         </button>
