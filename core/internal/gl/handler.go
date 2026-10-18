@@ -665,7 +665,11 @@ func (h *Handler) HandleGLDetail(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "invalid to date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
 		return
 	}
-	rows, err := h.svc.GetGLDetail(r.Context(), accountID, from, to, branch)
+	currency, ok := currencyParam(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.svc.GetGLDetail(r.Context(), accountID, from, to, branch, currency)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get gl detail", http.StatusInternalServerError, err)
 		return

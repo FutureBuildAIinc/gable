@@ -16,7 +16,6 @@ import (
 
 	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/middleware"
-	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -77,8 +76,9 @@ type ProfitAndLossComparison struct {
 // own branch (nil reads consolidated) beside the caller's reach, the same
 // predicate shape the reporting surface uses.
 type branchFilter struct {
-	Branch *uuid.UUID
-	Grants *string
+	Branch   *uuid.UUID
+	Grants   *string
+	Currency string
 }
 
 func (f branchFilter) args() []any { return []any{f.Branch, f.Grants} }
@@ -191,10 +191,11 @@ func (r *PostgresRepository) GetGLDetail(ctx context.Context, accountID uuid.UUI
 		WHERE e.status = 'POSTED'
 		  AND l.account_id = $1
 		  AND e.entry_date >= $2::date AND e.entry_date <= $3::date
-		  AND ` + middleware.Wall("l", 4, 5) + `
+		  AND ($4 = '' OR e.currency = $4)
+		  AND ` + middleware.Wall("l", 5, 6) + `
 		ORDER BY e.entry_date, e.entry_number, l.id
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, accountID, from, to, f.Branch, f.Grants)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, accountID, from, to, f.Currency, f.Branch, f.Grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gl detail: %w", err)
 	}
@@ -352,12 +353,13 @@ func (r *PostgresRepository) ListAccountsPage(ctx context.Context, limit int, af
 		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''), a.parent_id,
 		       a.normal_balance, a.is_active, COALESCE(a.description, ''),
 		       COALESCE(
-		           (SELECT SUM(l.debit) - SUM(l.credit)
+		           (SELECT ROUND((SUM(l.debit) - SUM(l.credit)) * 100)
 		            FROM gl_journal_lines l
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		            WHERE l.account_id = a.id AND e.status = 'POSTED'
+		              AND e.currency = COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
 		              AND ` + middleware.Wall("l", 3, 4) + `), 0
-		       ) AS balance,
+		       )::bigint AS balance,
 		       a.created_at, a.updated_at, a.revision
 		FROM gl_accounts a
 		WHERE ($1 = '' OR a.code > $1)
@@ -376,16 +378,14 @@ func (r *PostgresRepository) ListAccountsPage(ctx context.Context, limit int, af
 	var accounts []GLAccount
 	for rows.Next() {
 		var a GLAccount
-		var balanceFloat float64
 		if err := rows.Scan(
 			&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 			&a.NormalBalance, &a.IsActive, &a.Description,
-			&balanceFloat,
+			&a.Balance,
 			&a.CreatedAt, &a.UpdatedAt, &a.Revision,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
-		a.Balance = money.DollarsToCents(balanceFloat)
 		accounts = append(accounts, a)
 	}
 	return accounts, rows.Err()
@@ -398,8 +398,8 @@ func (r *PostgresRepository) ListJournalEntriesPage(ctx context.Context, limit i
 	query := `
 		SELECT e.id, e.entry_number, e.entry_date, e.memo, e.source, e.source_ref_id, e.branch_id,
 		       e.status, COALESCE(e.posted_by, ''),
-		       COALESCE((SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_debit,
-		       COALESCE((SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_credit,
+		       COALESCE((SELECT ROUND(SUM(l.debit) * 100) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0)::bigint AS total_debit,
+		       COALESCE((SELECT ROUND(SUM(l.credit) * 100) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0)::bigint AS total_credit,
 		       e.created_at, e.updated_at
 		FROM gl_journal_entries e
 		WHERE ($1 = 0 OR e.entry_number < $1)
@@ -416,17 +416,14 @@ func (r *PostgresRepository) ListJournalEntriesPage(ctx context.Context, limit i
 	var entries []JournalEntry
 	for rows.Next() {
 		var e JournalEntry
-		var totalDebitFloat, totalCreditFloat float64
 		if err := rows.Scan(
 			&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source, &e.SourceRefID, &e.BranchID,
 			&e.Status, &e.PostedBy,
-			&totalDebitFloat, &totalCreditFloat,
+			&e.TotalDebit, &e.TotalCredit,
 			&e.CreatedAt, &e.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan journal entry: %w", err)
 		}
-		e.TotalDebit = money.DollarsToCents(totalDebitFloat)
-		e.TotalCredit = money.DollarsToCents(totalCreditFloat)
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()

@@ -166,8 +166,18 @@ func (s *Service) GetBalanceSheetFor(ctx context.Context, asOfDate, currency str
 
 // GetGLDetail answers the posted lines behind a statement row: one account,
 // a date window, one branch or every branch, at the caller's reach.
-func (s *Service) GetGLDetail(ctx context.Context, accountID uuid.UUID, from, to time.Time, branch *uuid.UUID) ([]GLDetailRow, error) {
-	return s.repo.GetGLDetail(ctx, accountID, from, to, filterFor(ctx, branch))
+func (s *Service) GetGLDetail(ctx context.Context, accountID uuid.UUID, from, to time.Time, branch *uuid.UUID, currency ...string) ([]GLDetailRow, error) {
+	var cur string
+	if len(currency) > 0 {
+		cur = currency[0]
+	}
+	cur, err := s.reportCurrency(ctx, cur)
+	if err != nil {
+		return nil, err
+	}
+	f := filterFor(ctx, branch)
+	f.Currency = cur
+	return s.repo.GetGLDetail(ctx, accountID, from, to, f)
 }
 
 // --- Tie out (GL-02) ---

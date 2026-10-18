@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './BalanceSheet'
 import './ProfitAndLoss'
 import './TrialBalance'
+import './JournalEntries'
 import './branch-scope'
 import type { LitElement } from 'lit'
 import type { AccountLineItem, ProfitAndLossReport, TrialBalanceRow, GLDetailRow } from '../../types/gl'
@@ -263,6 +264,78 @@ describe('trial balance by branch', () => {
     const detail = fetchMock.mock.calls.find(([u]) => u.includes('/gl/detail'))!
     expect(detail[0]).toContain('account_id=a-1010')
     expect(detail[0]).toContain(`branch_id=${VERNON}`)
+    expect(detail[0]).toContain('currency=USD')
     expect(text(el)).toContain('$3,000.00')
   })
+
+  it('does not mix multiple currencies into the trial balance totals', async () => {
+    serve({
+      '/gl/trial-balance': [
+        row('1010', KELOWNA, 500_000, 0),
+        row('4010', KELOWNA, 0, 500_000),
+        { ...row('1010', KELOWNA, 900_000, 0), currency: 'CAD' },
+        { ...row('4010', KELOWNA, 0, 900_000), currency: 'CAD' },
+      ],
+    })
+    const el = await mountAsync<LitElement>('gable-trial-balance')
+
+    expect(text(el)).toContain('$5,000.00')
+    expect(text(el)).not.toContain('$14,000.00')
+  })
 })
+
+describe('balance sheet retained earnings label and journal entries scope/void guards', () => {
+  it('labels synthetic retained_earnings row Current Period Earnings when equity already includes 3020', async () => {
+    const sheet = {
+      as_of_date: '2026-08-31',
+      currency: 'USD',
+      assets: [line('1010', 'Cash', 500_000)],
+      liabilities: [],
+      equity: [line('3020', 'Retained Earnings', 300_000)],
+      total_assets: 500_000,
+      total_liabilities: 0,
+      total_equity: 500_000,
+      retained_earnings: 200_000,
+    }
+    serve({ '/gl/balance-sheet': sheet })
+    const el = await mountAsync<LitElement>('gable-balance-sheet')
+
+    expect(text(el)).toContain('Current Period Earnings')
+  })
+
+  it('wires branch-scope on JournalEntries and only shows Void on POSTED MANUAL entries', async () => {
+    const fetchMock = serve({
+      '/gl/journal-entries': {
+        items: [
+          {
+            id: 'je-manual', entry_number: 1, entry_date: '2026-08-10', memo: 'Manual adj',
+            source: 'MANUAL', branch_id: KELOWNA, status: 'POSTED', posted_by: 'u1',
+            total_debit: 10000, total_credit: 10000, created_at: '2026-08-10', updated_at: '2026-08-10',
+          },
+          {
+            id: 'je-invoice', entry_number: 2, entry_date: '2026-08-11', memo: 'Auto invoice',
+            source: 'INVOICE', branch_id: KELOWNA, status: 'POSTED', posted_by: 'system',
+            total_debit: 20000, total_credit: 20000, created_at: '2026-08-11', updated_at: '2026-08-11',
+          },
+        ],
+      },
+      '/gl/accounts': { items: [] },
+    })
+    const el = await mountAsync<LitElement>('gable-journal-entries')
+
+    const jeCall = fetchMock.mock.calls.find(([u]) => u.includes('/gl/journal-entries'))!
+    expect(headerOf(jeCall[1], 'X-Branch-Id')).toBe('')
+
+    await choose(el, VERNON)
+    const jeBranchCall = [...fetchMock.mock.calls].reverse().find(([u]) => u.includes('/gl/journal-entries'))!
+    expect(jeBranchCall[0]).toContain(`branch_id=${VERNON}`)
+    expect(headerOf(jeBranchCall[1], 'X-Branch-Id')).toBe(VERNON)
+
+    const rows = Array.from(el.querySelectorAll('tbody tr'))
+    const manualRow = rows.find(r => text(r).includes('JE-1'))!
+    const invoiceRow = rows.find(r => text(r).includes('JE-2'))!
+    expect(text(manualRow)).toContain('Void')
+    expect(text(invoiceRow)).not.toContain('Void')
+  })
+})
+

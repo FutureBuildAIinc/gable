@@ -6182,6 +6182,13 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: ISO 4217 code, three capital letters; defaults to the dealer's default currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
         - name: branch_id
           in: query
           required: false

@@ -222,7 +222,7 @@ export class BalanceSheet extends LitElement {
                                     <!-- Retained Earnings -->
                                     <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                                         <td class="px-4 py-2.5 font-mono text-purple-400/70 pl-8">—</td>
-                                        <td class="px-4 py-2.5 text-white italic">Retained Earnings</td>
+                                        <td class="px-4 py-2.5 text-white italic">${report.equity?.some(e => e.account_code === '3020') ? 'Current Period Earnings' : 'Retained Earnings'}</td>
                                         <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${formatStatementCents(report.retained_earnings)}</td>
                                     </tr>
                                     ${this._renderSubtotalRow('Total Equity', report.total_equity)}
@@ -248,6 +248,7 @@ export class BalanceSheet extends LitElement {
                             from="1900-01-01"
                             to=${report.as_of_date}
                             branch-id=${this.scope}
+                            currency=${report.currency ?? ''}
                             @gl-detail-close=${() => { this.drill = null; }}
                         ></gable-gl-detail>
                     ` : nothing}

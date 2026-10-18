@@ -20800,6 +20800,8 @@ export interface operations {
                 from: string;
                 /** @description Last day, YYYY-MM-DD. */
                 to: string;
+                /** @description ISO 4217 code, three capital letters; defaults to the dealer's default currency. */
+                currency?: string;
                 /** @description One branch's lines. Absent reads the X-Branch-Id branch when the header is sent, else every branch, which needs every branch reach. */
                 branch_id?: string;
             };

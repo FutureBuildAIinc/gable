@@ -61,7 +61,7 @@ export class TrialBalance extends LitElement {
     @state() private asOfDate = todayDay();
     /** The branch id the books are cut to, empty for the consolidated view. */
     @state() private scope = branchContext.currentId ?? '';
-    @state() private drill: { id: string; label: string } | null = null;
+    @state() private drill: { id: string; label: string; currency: string } | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -81,12 +81,18 @@ export class TrialBalance extends LitElement {
         }
     }
 
+    private get _visibleRows(): TrialBalanceRow[] {
+        const cur = this.rows[0]?.currency ?? '';
+        if (!cur) return this.rows;
+        return this.rows.filter(r => (r.currency ?? '') === cur);
+    }
+
     private get _totalDebit() {
-        return this.rows.reduce((sum, r) => sum + r.debit, 0);
+        return this._visibleRows.reduce((sum, r) => sum + r.debit, 0);
     }
 
     private get _totalCredit() {
-        return this.rows.reduce((sum, r) => sum + r.credit, 0);
+        return this._visibleRows.reduce((sum, r) => sum + r.credit, 0);
     }
 
     private get _isBalanced() {
@@ -95,7 +101,7 @@ export class TrialBalance extends LitElement {
 
     render() {
         const groupedRows = TYPE_ORDER.reduce((acc, type) => {
-            acc[type] = this.rows.filter(r => r.account_type === type);
+            acc[type] = this._visibleRows.filter(r => r.account_type === type);
             return acc;
         }, {} as Record<string, TrialBalanceRow[]>);
 
@@ -192,7 +198,7 @@ export class TrialBalance extends LitElement {
                                                 <tr
                                                     class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer"
                                                     title="Show the ledger lines"
-                                                    @click=${() => { this.drill = { id: row.account_id, label: `${row.account_code} ${row.account_name}` }; }}
+                                                    @click=${() => { this.drill = { id: row.account_id, label: `${row.account_code} ${row.account_name}`, currency: row.currency ?? '' }; }}
                                                 >
                                                     <td class="px-4 py-2.5 font-mono text-emerald-400 pl-8">${row.account_code}</td>
                                                     <td class="px-4 py-2.5 text-white">${row.account_name}</td>
@@ -238,6 +244,7 @@ export class TrialBalance extends LitElement {
                         from="1900-01-01"
                         to=${this.asOfDate}
                         branch-id=${this.scope}
+                        currency=${this.drill.currency}
                         @gl-detail-close=${() => { this.drill = null; }}
                     ></gable-gl-detail>
                 ` : nothing}

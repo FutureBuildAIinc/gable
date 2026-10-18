@@ -269,6 +269,7 @@ export class ProfitAndLoss extends LitElement {
                             from=${report.start_date}
                             to=${report.end_date}
                             branch-id=${this.scope}
+                            currency=${report.currency ?? ''}
                             @gl-detail-close=${() => { this.drill = null; }}
                         ></gable-gl-detail>
                     ` : nothing}

@@ -27,6 +27,7 @@ export class GlDetail extends LitElement {
     @property({ type: String }) to = '';
     /** The branch id, empty for every branch. */
     @property({ type: String, attribute: 'branch-id' }) branchId = '';
+    @property({ type: String }) currency = '';
 
     @state() private rows: GLDetailRow[] = [];
     @state() private loading = true;
@@ -34,7 +35,7 @@ export class GlDetail extends LitElement {
     private _key = '';
 
     willUpdate() {
-        const key = [this.accountId, this.from, this.to, this.branchId].join('|');
+        const key = [this.accountId, this.from, this.to, this.branchId, this.currency].join('|');
         if (key !== this._key && this.accountId) {
             this._key = key;
             this._load();
@@ -44,7 +45,7 @@ export class GlDetail extends LitElement {
     private async _load() {
         this.loading = true;
         try {
-            this.rows = await fetchGLDetail(this.accountId, this.from, this.to, this.branchId || undefined);
+            this.rows = await fetchGLDetail(this.accountId, this.from, this.to, this.branchId || undefined, this.currency || undefined);
         } catch (err) {
             console.error(err);
             ToastService.show('Failed to load the ledger lines', 'error');

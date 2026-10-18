@@ -7,6 +7,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
 import '../../components/ui/gable-date-field.ts';
+import './branch-scope.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatDay, todayDay } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -46,6 +47,8 @@ export class JournalEntries extends LitElement {
     @state() private showCreate = false;
     @state() private memo = '';
     @state() private entryDate = todayDay();
+    /** The branch id the journal entries list is cut to, empty for consolidated. */
+    @state() private scope = branchContext.currentId ?? '';
     /** The branch the entry is booked to; every entry belongs to one. */
     @state() private branchId = branchContext.currentId ?? branchContext.branches[0]?.id ?? '';
     @state() private lines: LineForm[] = [
@@ -61,7 +64,10 @@ export class JournalEntries extends LitElement {
 
     private async _load() {
         try {
-            const [entryData, acctData] = await Promise.all([fetchJournalEntries(), fetchAccounts()]);
+            const [entryData, acctData] = await Promise.all([
+                fetchJournalEntries(this.scope || undefined),
+                fetchAccounts(),
+            ]);
             this.entries = entryData || [];
             this.accounts = acctData || [];
         } catch (err) {
@@ -176,13 +182,19 @@ export class JournalEntries extends LitElement {
                             ${this.entries.length} entries -- Double-entry accounting ledger
                         </p>
                     </div>
-                    <button
-                        @click=${() => this.showCreate = true}
-                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors"
-                    >
-                        ${icon(Plus, 16, 'w-4 h-4')}
-                        New Entry
-                    </button>
+                    <div class="flex items-center gap-3">
+                        <gable-branch-scope
+                            .value=${this.scope}
+                            @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this._load(); }}
+                        ></gable-branch-scope>
+                        <button
+                            @click=${() => this.showCreate = true}
+                            class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors"
+                        >
+                            ${icon(Plus, 16, 'w-4 h-4')}
+                            New Entry
+                        </button>
+                    </div>
                 </div>
 
                 ${this.showCreate ? html`
@@ -341,7 +353,7 @@ export class JournalEntries extends LitElement {
                                                     ${icon(Check, 12, 'w-3 h-3')} Post
                                                 </button>
                                             ` : nothing}
-                                            ${e.status === 'POSTED' ? html`
+                                            ${e.status === 'POSTED' && e.source === 'MANUAL' ? html`
                                                 <button @click=${() => this._handleVoid(e.id)} class="h-7 text-xs text-red-400 hover:bg-red-500/10 px-2 py-1 rounded transition-colors inline-flex items-center gap-1">
                                                     ${icon(Ban, 12, 'w-3 h-3')} Void
                                                 </button>

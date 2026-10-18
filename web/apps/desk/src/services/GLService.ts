@@ -69,7 +69,7 @@ export async function updateAccount(id: string, data: CreateAccountRequest, revi
 export async function fetchJournalEntries(branchId?: string): Promise<JournalEntry[]> {
     const params = new URLSearchParams({ limit: '200' });
     if (branchId) params.set('branch_id', branchId);
-    const res = await fetchWithAuth(`${API}/api/v1/gl/journal-entries?${params.toString()}`, branchId ? scope(branchId) : {});
+    const res = await fetchWithAuth(`${API}/api/v1/gl/journal-entries?${params.toString()}`, scope(branchId));
     if (!res.ok) throw new Error('Failed to fetch journal entries');
     const page = await res.json();
     return page.items || [];
@@ -103,10 +103,11 @@ export async function voidJournalEntry(id: string): Promise<void> {
 
 // --- Trial Balance ---
 
-export async function fetchTrialBalance(asOfDate?: string, branchId?: string): Promise<TrialBalanceRow[]> {
+export async function fetchTrialBalance(asOfDate?: string, branchId?: string, currency?: string): Promise<TrialBalanceRow[]> {
     const params = new URLSearchParams();
     if (asOfDate) params.set('as_of', asOfDate);
     if (branchId) params.set('branch_id', branchId);
+    if (currency) params.set('currency', currency);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const res = await fetchWithAuth(`${API}/api/v1/gl/trial-balance${qs}`, scope(branchId));
     if (!res.ok) throw new GLRequestError('Failed to fetch trial balance', res.status);
@@ -114,9 +115,10 @@ export async function fetchTrialBalance(asOfDate?: string, branchId?: string): P
 }
 
 /** The GL detail drill down of one account over a date window. */
-export async function fetchGLDetail(accountId: string, from: string, to: string, branchId?: string): Promise<GLDetailRow[]> {
+export async function fetchGLDetail(accountId: string, from: string, to: string, branchId?: string, currency?: string): Promise<GLDetailRow[]> {
     const params = new URLSearchParams({ account_id: accountId, from, to });
     if (branchId) params.set('branch_id', branchId);
+    if (currency) params.set('currency', currency);
     const res = await fetchWithAuth(`${API}/api/v1/gl/detail?${params.toString()}`, scope(branchId));
     if (!res.ok) throw new GLRequestError('Failed to fetch GL detail', res.status);
     return res.json();

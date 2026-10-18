@@ -846,3 +846,104 @@ func TestPeriodAndAccountGuardsOnJournalAndAccountActs(t *testing.T) {
 	}
 }
 
+// TestGLDetailAndAccountBalancesRespectCurrency verifies that GetGLDetail and
+// GET /api/v1/gl/detail filter by currency (defaulting to dealer default), and
+// that GetAccount and ListAccountsPage compute exact integer cents in the
+// default currency without mixing foreign currencies or rounding negative balances
+// toward zero.
+func TestGLDetailAndAccountBalancesRespectCurrency(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := wiredService(db)
+	branch := secondBranch(t, db, "M6-CUR")
+	h := gl.NewHandler(svc).WithBranchGuard(middleware.NewBranchGuard(db))
+
+	acctCode := "9" + strings.ReplaceAll(uuid.NewString()[:5], "-", "1")
+	acct := &gl.GLAccount{Code: acctCode, Name: "m6 cur acct", Type: gl.AccountTypeAsset}
+	if err := svc.CreateAccount(ctx, acct); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id = $1 OR entity_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $2)`, acct.ID, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = $1 OR entity_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $2)`, acct.ID, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE branch_id = $1 OR journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE branch_id = $1`, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_accounts WHERE id = $1`, acct.ID)
+	})
+
+	day := time.Date(2039, 5, 10, 0, 0, 0, 0, time.UTC)
+	if err := db.RunInTx(ctx, func(ctx context.Context) error {
+		if _, err := svc.PostEntry(ctx, gl.PostingInput{
+			EntryDate: day, Memo: "m6 cur usd", Source: gl.SourceManual,
+			BranchID: branch, Currency: "USD", PostedBy: "t",
+			Legs: []gl.Leg{
+				{AccountCode: gl.AccountCodeAR, Debit: 10000},
+				{AccountCode: acctCode, Credit: 10000},
+			},
+		}); err != nil {
+			return err
+		}
+		_, err := svc.PostEntry(ctx, gl.PostingInput{
+			EntryDate: day, Memo: "m6 cur cad", Source: gl.SourceManual,
+			BranchID: branch, Currency: "CAD", PostedBy: "t",
+			Legs: []gl.Leg{
+				{AccountCode: acctCode, Debit: 25000},
+				{AccountCode: gl.AccountCodeRevenue, Credit: 25000},
+			},
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default GetGLDetail returns only USD lines (not CAD).
+	usdRows, err := svc.GetGLDetail(ctx, acct.ID, day, day, &branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usdRows) != 1 || usdRows[0].CreditCents != 10000 {
+		t.Errorf("GetGLDetail default (USD) rows = %+v, want 1 row with credit 10000", usdRows)
+	}
+
+	// HTTP GET /api/v1/gl/detail?currency=CAD returns only CAD lines.
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/gl/detail?account_id=%s&from=2039-05-01&to=2039-05-31&branch_id=%s&currency=CAD", acct.ID, branch), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/gl/detail?currency=CAD = %d, want 200: %s", w.Code, w.Body)
+	}
+	var cadRows []gl.GLDetailRow
+	if err := json.Unmarshal(w.Body.Bytes(), &cadRows); err != nil {
+		t.Fatal(err)
+	}
+	if len(cadRows) != 1 || cadRows[0].DebitCents != 25000 {
+		t.Errorf("GET /api/v1/gl/detail?currency=CAD rows = %+v, want 1 row with debit 25000", cadRows)
+	}
+
+	// GetAccount and ListAccountsPage compute exact -10000 cents in default USD without CAD mixing or -9999 float rounding bug.
+	gotAcct, err := svc.GetAccount(ctx, acct.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAcct.Balance != -10000 {
+		t.Errorf("GetAccount balance = %d, want -10000", gotAcct.Balance)
+	}
+	page, err := svc.ListAccountsPage(ctx, 500, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *gl.GLAccount
+	for i := range page {
+		if page[i].ID == acct.ID {
+			found = &page[i]
+			break
+		}
+	}
+	if found == nil || found.Balance != -10000 {
+		t.Errorf("ListAccountsPage account = %+v, want balance -10000", found)
+	}
+}
+
+

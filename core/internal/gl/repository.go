@@ -107,23 +107,23 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''), a.parent_id,
 		       a.normal_balance, a.is_active, COALESCE(a.description, ''),
 		       COALESCE(
-		           (SELECT SUM(l.debit) - SUM(l.credit)
+		           (SELECT ROUND((SUM(l.debit) - SUM(l.credit)) * 100)
 		            FROM gl_journal_lines l
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		            WHERE l.account_id = a.id AND e.status = 'POSTED'
+		              AND e.currency = COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
 		              AND ` + middleware.Wall("l", 2, 3) + `), 0
-		       ) AS balance,
+		       )::bigint AS balance,
 		       a.created_at, a.updated_at, a.revision
 		FROM gl_accounts a
 		WHERE a.id = $1
 	`
 	var a GLAccount
-	var balanceFloat float64
 	f := filterFor(ctx, nil)
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, f.Branch, f.Grants).Scan(
 		&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 		&a.NormalBalance, &a.IsActive, &a.Description,
-		&balanceFloat,
+		&a.Balance,
 		&a.CreatedAt, &a.UpdatedAt, &a.Revision,
 	)
 	if err != nil {
@@ -132,7 +132,6 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 		}
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
-	a.Balance = money.DollarsToCents(balanceFloat)
 	return &a, nil
 }
 
