@@ -30,7 +30,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
@@ -59,11 +59,15 @@
             "id": "<id-6>",
             "image_url": "",
             "line_total": 9.5,
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
             "product_id": "<id-4>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 9.5
@@ -111,11 +115,15 @@
             "id": "<id-8>",
             "image_url": "",
             "line_total": 4.75,
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
             "product_id": "<id-4>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 1,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 4.75
@@ -187,6 +195,7 @@
             "parent_line_id": null,
             "position": 0,
             "price_adjusted_by": null,
+            "price_basis": "CONTRACT",
             "price_source": "price_list",
             "price_uom": "PCS",
             "price_uom_qty": "1",
@@ -200,6 +209,9 @@
             "revenue_account_code": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "2",
+            "stock_uom": "PCS",
+            "tally": null,
             "taxable": true,
             "unit_price_ten_thousandths": 47500,
             "uom": "PCS",
@@ -323,7 +335,8 @@
         "status": "UNPAID",
         "subtotal": 9.5,
         "tax_amount": 1.14,
-        "total_amount": 10.64
+        "total_amount": 10.64,
+        "updated_at": "<ts-106751d>"
       }
     }
   },
@@ -465,6 +478,7 @@
         "status": "PENDING",
         "stop_sequence": 1,
         "total_stops": 1,
+        "updated_at": "<ts-106751d>",
         "vehicle_name": "Truck 1 - Flatbed",
         "vehicle_photo_url": null
       }

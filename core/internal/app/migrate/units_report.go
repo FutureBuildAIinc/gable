@@ -151,9 +151,32 @@ func unitsReport(db *sql.DB) int {
 		}
 	}
 
+	// The pricing pre flight (P1 of migration 122): a level whose
+	// multiplier is negative has no meaning as a price and aborts the
+	// pricing migration, so the report names such levels before the
+	// operator upgrades.
+	var levelAborts []entry
+	levelRows, err := db.Query(`SELECT name, id::text, multiplier::text FROM price_levels WHERE multiplier < 0 ORDER BY created_at, id`)
+	if err == nil {
+		for levelRows.Next() {
+			var name, id, mult string
+			if err := levelRows.Scan(&name, &id, &mult); err != nil {
+				levelRows.Close()
+				log.Fatalf("scan price_levels: %v", err)
+			}
+			levelAborts = append(levelAborts, entry{
+				value: fmt.Sprintf("price level %q (%s) carries the negative multiplier %s", name, id, mult), n: 1,
+			})
+		}
+		levelRows.Close()
+		if err := levelRows.Err(); err != nil {
+			log.Fatalf("read price_levels: %v", err)
+		}
+	} // a database before price_levels exists reports nothing
+
 	fmt.Println()
-	if len(newUnits) == 0 && len(aborts) == 0 {
-		fmt.Println("Every stored unit value is already a unit of the catalogue.")
+	if len(newUnits) == 0 && len(aborts) == 0 && len(levelAborts) == 0 {
+		fmt.Println("Every stored unit value is already a unit of the catalogue, and no price level carries a negative multiplier.")
 		return 0
 	}
 	if len(newUnits) > 0 {
@@ -167,6 +190,13 @@ func unitsReport(db *sql.DB) int {
 			fmt.Printf("  %s (%d rows across the columns above)\n", code, newUnits[code])
 		}
 		fmt.Println()
+	}
+	if len(levelAborts) > 0 {
+		fmt.Println("Price levels that would ABORT the pricing migration (a negative multiplier has no meaning as a price); correct them first:")
+		for _, a := range levelAborts {
+			fmt.Printf("  %s\n", a.value)
+		}
+		return 1
 	}
 	if len(aborts) > 0 {
 		fmt.Println("Values that would ABORT the migration (they do not match ^[A-Z]{1,6}$); correct them first:")

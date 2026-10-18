@@ -45,11 +45,10 @@ export class GableResolutionPreview extends LitElement {
     this._loading = true;
     this._error = null;
     try {
-      const tier = this._selectedCustomer?.price_level?.name;
       const res = await categoryPricingService.resolvePreview(
         this._selectedProduct.id,
         this._selectedCustomer?.id,
-        tier || undefined
+        undefined
       );
       this._result = res;
     } catch (err) {
@@ -83,9 +82,9 @@ export class GableResolutionPreview extends LitElement {
 
         ${this._selectedCustomer ? html`
           <div class="text-xs text-slate-500">
-            Auto-detected tier:${' '}
+            Customer:${' '}
             <span class="text-gable-green font-mono font-medium">
-              ${this._selectedCustomer.price_level?.name || 'RETAIL'}
+              ${this._selectedCustomer.name}
             </span>
           </div>
         ` : nothing}

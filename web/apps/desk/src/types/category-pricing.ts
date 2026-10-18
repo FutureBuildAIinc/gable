@@ -29,6 +29,6 @@ export type CategoryRuleType = CategoryPricingRule['rule_type'];
 /** The matrix with its three lists made arrays (the wire sends null for an empty list). */
 export interface MatrixResponse {
   categories: ProductCategory[];
-  tiers: string[];
+  levels: string[];
   cells: MatrixCell[];
 }

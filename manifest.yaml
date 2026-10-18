@@ -43,3 +43,6 @@ frontends:
   - id: field-shell
     name: Field Shell
     path: web/apps/field-shell
+  - id: pro-portal
+    name: Contractor Pro Portal
+    path: web/apps/pro-portal

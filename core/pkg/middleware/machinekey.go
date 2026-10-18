@@ -86,6 +86,10 @@ const (
 var machineKeyExcludedSegments = map[string]string{
 	"a2a":  "agent-to-agent JWS seam; keeps its own authentication",
 	"auth": "the sign in seam itself: the config and start routes are public paths the auth middleware never unpacks, and the allowlist routes are the dealer's admin setting, not a module a scoped key addresses",
+	// The contractors' shared project pipeline is a desk surface: the dealer's
+	// acceptance is recorded against a named desk user, so a machine key is
+	// not a principal there.
+	"pro-projects": "desk surface for named users; the dealer's acceptance is recorded against the desk user",
 }
 
 // machineKeyModules is the scope vocabulary: every first path segment under
@@ -127,13 +131,13 @@ var machineKeyModules = map[string]struct{}{
 	"payment-terms":    {},
 	"payments":         {},
 	"pos":              {},
-	"price_levels":     {},
 	"pricing":          {},
 	"products":         {},
 	"purchase-orders":  {},
 	"quotes":           {},
 	"reports":          {},
 	"reporting":        {},
+	"scheduling":       {},
 	"sales-team":       {},
 	"charge-codes":     {},
 	"ship-tos":         {},

@@ -908,16 +908,51 @@ func scanStop(row pgx.Row) (*Stop, error) {
 }
 
 func (r *PostgresRepository) CreateDelivery(ctx context.Context, d *Stop) error {
+	ex := r.db.GetExecutor(ctx)
+	instructions := d.DeliveryInstructions
+	if instructions == nil {
+		var siteInstr *string
+		_ = ex.QueryRow(ctx, `SELECT NULLIF(site_delivery_instructions, '') FROM orders WHERE id = $1`, d.OrderID).Scan(&siteInstr)
+		instructions = siteInstr
+	}
+	var schedStart, schedEnd *time.Time
+	var holdDate, tz string
+	var startMin, endMin float64
+	if hErr := ex.QueryRow(ctx, `
+		SELECT h.hold_date::text,
+		       EXTRACT(EPOCH FROM w.start_time) / 60,
+		       EXTRACT(EPOCH FROM w.end_time) / 60,
+		       COALESCE(l.timezone, 'UTC')
+		FROM portal_schedule_holds h
+		JOIN yard_schedule_windows w ON w.id = h.window_id
+		JOIN locations l ON l.id = w.yard_id
+		WHERE h.order_id = $1 AND h.status = 'held'
+		ORDER BY h.updated_at DESC LIMIT 1
+	`, d.OrderID).Scan(&holdDate, &startMin, &endMin, &tz); hErr == nil {
+		if day, pErr := time.ParseInLocation("2006-01-02", holdDate, time.UTC); pErr == nil {
+			loc, lErr := time.LoadLocation(tz)
+			if lErr != nil {
+				loc = time.UTC
+			}
+			sm, em := int(startMin), int(endMin)
+			s := time.Date(day.Year(), day.Month(), day.Day(), sm/60, sm%60, 0, 0, loc).UTC()
+			e := time.Date(day.Year(), day.Month(), day.Day(), em/60, em%60, 0, 0, loc).UTC()
+			schedStart = &s
+			schedEnd = &e
+		}
+	}
 	var created, updated time.Time
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		INSERT INTO deliveries (route_id, order_id, stop_sequence, status, delivery_instructions, latitude, longitude)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	err := ex.QueryRow(ctx, `
+		INSERT INTO deliveries (route_id, order_id, stop_sequence, status, delivery_instructions, latitude, longitude, scheduled_start, scheduled_end)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, revision, created_at, updated_at`,
-		d.RouteID, d.OrderID, d.StopSequence, d.Status, d.DeliveryInstructions, d.Latitude, d.Longitude,
+		d.RouteID, d.OrderID, d.StopSequence, d.Status, instructions, d.Latitude, d.Longitude, schedStart, schedEnd,
 	).Scan(&d.ID, &d.Revision, &created, &updated)
 	if err != nil {
 		return mapWriteError(err, "failed to create delivery")
 	}
+	d.DeliveryInstructions = instructions
+	d.ScheduledStart, d.ScheduledEnd = httpx.PtrTimestamp(schedStart), httpx.PtrTimestamp(schedEnd)
 	d.CreatedAt, d.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
 }

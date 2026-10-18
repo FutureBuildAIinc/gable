@@ -52,7 +52,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
@@ -70,15 +70,53 @@
       "content_type": "application/json",
       "body": [
         {
+          "availability": [
+            {
+              "available": 255,
+              "in_stock": true,
+              "lead_time_days": null,
+              "on_hand": 255,
+              "yard_code": "KEL-MAIN",
+              "yard_id": "<id-4>",
+              "yard_name": "Kelowna Main Yard"
+            },
+            {
+              "available": 107,
+              "in_stock": true,
+              "lead_time_days": null,
+              "on_hand": 107,
+              "yard_code": "WK",
+              "yard_id": "<id-5>",
+              "yard_name": "West Kelowna Satellite"
+            },
+            {
+              "available": 17,
+              "in_stock": true,
+              "lead_time_days": null,
+              "on_hand": 17,
+              "yard_code": "LK",
+              "yard_id": "<id-6>",
+              "yard_name": "Lake Country Outpost"
+            },
+            {
+              "available": 0,
+              "in_stock": false,
+              "lead_time_days": null,
+              "on_hand": 0,
+              "yard_code": "GOLD",
+              "yard_id": "<id-7>",
+              "yard_name": "Golden Branch Renamed"
+            }
+          ],
           "available": 379,
           "base_price": 5.5,
           "category": "Lumber",
-          "category_id": "<id-4>",
+          "category_id": "<id-8>",
           "category_path": "lumber",
           "category_slug": "lumber",
           "customer_price": 4.75,
           "grade": "",
-          "id": "<id-5>",
+          "id": "<id-9>",
           "image_url": "",
           "in_stock": true,
           "lead_time_days": null,
@@ -97,7 +135,7 @@
       "method": "POST",
       "path": "/api/portal/v1/cart/items",
       "body": {
-        "product_id": "<id-5>",
+        "product_id": "<id-9>",
         "quantity": 2
       }
     },
@@ -105,19 +143,23 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "id": "<id-6>",
+        "id": "<id-10>",
         "item_count": 1,
         "items": [
           {
             "available": 0,
-            "id": "<id-7>",
+            "id": "<id-11>",
             "image_url": "",
             "line_total": 9.5,
-            "product_id": "<id-5>",
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
+            "product_id": "<id-9>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 9.5
@@ -134,19 +176,23 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "id": "<id-6>",
+        "id": "<id-10>",
         "item_count": 1,
         "items": [
           {
             "available": 0,
-            "id": "<id-7>",
+            "id": "<id-11>",
             "image_url": "",
             "line_total": 9.5,
-            "product_id": "<id-5>",
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
+            "product_id": "<id-9>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 9.5

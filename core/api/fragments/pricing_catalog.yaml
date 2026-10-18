@@ -1,0 +1,1076 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+paths:
+  /api/v1/pricing/levels:
+    get:
+      operationId: pricingLevelList
+      tags: [pricing]
+      summary: List price levels
+      description: >-
+        Guarded admin, owner or finance. The cursor list envelope of ADR 0001
+        section 1, newest first (created_at DESC, id DESC); items is never null.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of price levels.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevelPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingLevelCreate
+      tags: [pricing]
+      summary: Create a price level
+      description: >-
+        Guarded admin, owner or finance. code (uppercase, at most 16 characters of
+        A-Z, 0-9 and underscore) and name are required; basis defaults to base;
+        adjust_percent is a decimal string, a level at -100 or above. The response
+        is 201 with Location and the revision ETag.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingLevelWrite"
+      responses:
+        "201":
+          description: The created level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/levels/{id}:
+    get:
+      operationId: pricingLevelGet
+      tags: [pricing]
+      summary: Read one price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingLevelUpdate
+      tags: [pricing]
+      summary: Update a price level
+      description: >-
+        Guarded admin, owner or finance, at the level's revision (428 without, 409
+        stale behind it).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingLevelWrite"
+      responses:
+        "200":
+          description: The updated level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/profiles:
+    get:
+      operationId: pricingProfileList
+      tags: [pricing]
+      summary: List price profiles
+      description: The cursor list envelope, newest first.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of price profiles.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfilePage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingProfileCreate
+      tags: [pricing]
+      summary: Create a price profile
+      description: >-
+        Guarded admin, owner or finance. code and name are required;
+        price_level_id names the level the program prices from.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProfileWrite"
+      responses:
+        "201":
+          description: The created profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/profiles/{id}:
+    get:
+      operationId: pricingProfileGet
+      tags: [pricing]
+      summary: Read one price profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingProfileUpdate
+      tags: [pricing]
+      summary: Update a price profile
+      description: Guarded admin, owner or finance, at the profile's revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProfileWrite"
+      responses:
+        "200":
+          description: The updated profile.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/products/{id}/prices:
+    get:
+      operationId: pricingProductPriceList
+      tags: [pricing]
+      summary: List a product's prices
+      description: >-
+        Guarded admin, owner, finance or sales. The rows of the branch named in
+        branch_id and the caller's context branch rows and the every branch rows;
+        a caller with no context branch sees every row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The product's price rows.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProductPriceList"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingProductPriceReplace
+      tags: [pricing]
+      summary: Replace one branch slice of a product's price list
+      description: >-
+        Guarded admin, owner or finance. The PUT replaces the branch_id slice of
+        the product's price list (its branch base and its level prices for that
+        branch) at the product's revision, and touches no other branch's rows.
+        Without branch_id it replaces the every branch slice, admitted only to a
+        caller who may reach every branch. The rows carry no branch_id. While the
+        stocking unit hold of ADR 0006 section 9.1 stands, every row's price unit
+        is the product's stocking unit; a row naming another unit is a 400 naming
+        price_uom. A replace at a stale product revision is a 409 stale_revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingProductPriceReplace"
+      responses:
+        "200":
+          description: The slice as it now stands.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingProductPriceList"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-levels:
+    get:
+      operationId: pricingVendorLevelList
+      tags: [pricing]
+      summary: List vendor price levels
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of vendor levels.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevelPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingVendorLevelCreate
+      tags: [pricing]
+      summary: Create a vendor price level
+      description: Guarded admin, owner or finance; vendor_id, code and name are required.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorLevelWrite"
+      responses:
+        "201":
+          description: The created vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-levels/{id}:
+    get:
+      operationId: pricingVendorLevelGet
+      tags: [pricing]
+      summary: Read one vendor price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingVendorLevelUpdate
+      tags: [pricing]
+      summary: Update a vendor price level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorLevelWrite"
+      responses:
+        "200":
+          description: The updated vendor level.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorLevel"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-costs:
+    get:
+      operationId: pricingVendorCostList
+      tags: [pricing]
+      summary: List vendor costs
+      description: >-
+        Guarded admin, owner, finance or sales, under the filters vendor_id,
+        product_id and branch_id, and the branch wall of the caller's context.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of vendor costs.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCostPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingVendorCostCreate
+      tags: [pricing]
+      summary: Create a vendor cost
+      description: >-
+        Guarded admin, owner or finance. vendor_id, vendor_price_level_id (of the
+        same vendor), product_id, purchase_uom, unit_cost_ten_thousandths and
+        effective_from are required; the purchase unit must be a row of the
+        product's unit set, and while the stocking unit hold stands the price
+        unit hold refuses a cost the product cannot read. The payload branch
+        rule holds a branch_id the body names.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorCostWrite"
+      responses:
+        "201":
+          description: The created vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/vendor-costs/{id}:
+    get:
+      operationId: pricingVendorCostGet
+      tags: [pricing]
+      summary: Read one vendor cost
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingVendorCostUpdate
+      tags: [pricing]
+      summary: Update a vendor cost
+      description: >-
+        Guarded admin, owner or finance, at the row's revision. The update
+        checks the payload branch rule on the row's stored branch and on the
+        new one: a move out of the caller's reach is a 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingVendorCostWrite"
+      responses:
+        "200":
+          description: The updated vendor cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingVendorCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/contracts:
+    get:
+      operationId: pricingContractList
+      tags: [pricing]
+      summary: List customer contracts
+      description: Under the filters customer_id, product_id and branch_id, and the branch wall.
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: The page of contracts.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContractPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: pricingContractCreate
+      tags: [pricing]
+      summary: Create a customer contract
+      description: >-
+        Guarded admin, owner or finance. customer_id, product_id and
+        contract_price_ten_thousandths are required; the price unit is the
+        product's stocking unit while the hold stands, and a body naming another
+        unit is a 400 naming price_uom. The create does not upsert: a second
+        contract for the same customer, product and branch is a 409 duplicate
+        naming the existing row. The payload branch rule holds the branch the
+        body names; a null branch is the every branch reach. Writes
+        contract.created in the same transaction.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingContractWrite"
+      responses:
+        "201":
+          description: The created contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/contracts/{id}:
+    get:
+      operationId: pricingContractGet
+      tags: [pricing]
+      summary: Read one contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    put:
+      operationId: pricingContractUpdate
+      tags: [pricing]
+      summary: Update a contract
+      description: >-
+        Guarded admin, owner or finance, at the row's revision. Writes
+        contract.updated in the same transaction, with its audit row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+            $ref: "#/components/schemas/PricingContractWrite"
+      responses:
+        "200":
+          description: The updated contract.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingContract"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    delete:
+      operationId: pricingContractDelete
+      tags: [pricing]
+      summary: Delete a contract
+      description: >-
+        Guarded admin, owner or finance, at the row's revision in the body. A
+        contract is an agreement, not a document: it is deleted outright, with
+        an audit row carrying the deleted values and contract.deleted in the
+        same transaction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "204":
+          description: The contract is gone.
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/pricing/cost:
+    get:
+      operationId: pricingCost
+      tags: [pricing]
+      summary: Resolve a vendor cost
+      description: >-
+        ResolveCost on the wire (ADR 0006 section 5.5): rows at the requested
+        level, or the vendor's default level when none is named, in effect on
+        the date, the branch's row before the all branch row, the latest
+        effective_from first. The answer carries the cost and its purchase unit,
+        the pair between the uom named and the purchase unit, the level's code
+        and the row's id. No cost in effect is a 404: the purchase line takes a
+        manual cost.
+      parameters:
+        - name: vendor_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: vendor_level_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: on
+          in: query
+          required: false
+          description: A calendar date (YYYY-MM-DD); default today.
+          schema: {type: string}
+        - name: uom
+          in: query
+          required: false
+          description: The purchase line's unit, for the answer's pair.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The resolved cost.
+          content:
+            application/json:
+              schema:
+              $ref: "#/components/schemas/PricingResolvedCost"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+components:
+  schemas:
+      PricingLevel:
+        type: object
+        required: [id, code, name, basis, adjust_percent, position, is_active, revision, created_at, updated_at]
+        properties:
+          id: {type: string, format: uuid}
+          code: {type: string}
+          name: {type: string}
+          basis:
+            type: string
+            enum: [base, average_cost, replacement_cost]
+          adjust_percent:
+            type: string
+            description: A decimal string; -10 is ten percent off the basis.
+          position: {type: integer}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+          created_at: {type: string, format: date-time}
+          updated_at: {type: string, format: date-time}
+      PricingLevelWrite:
+        type: object
+        properties:
+          code: {type: string}
+          name: {type: string}
+          basis: {type: string}
+          adjust_percent: {type: string}
+          position: {type: integer}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+      PricingLevelPage:
+        type: object
+        required: [items, next_cursor, limit]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingLevel"
+          next_cursor:
+            type: [string, "null"]
+          limit: {type: integer}
+      PricingProfile:
+        type: object
+        required: [id, code, name, price_level_id, is_active, revision, created_at, updated_at]
+        properties:
+          id: {type: string, format: uuid}
+          code: {type: string}
+          name: {type: string}
+          price_level_id: {type: string, format: uuid}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+          created_at: {type: string, format: date-time}
+          updated_at: {type: string, format: date-time}
+      PricingProfileWrite:
+        type: object
+        properties:
+          code: {type: string}
+          name: {type: string}
+          price_level_id: {type: string, format: uuid}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+      PricingProfilePage:
+        type: object
+        required: [items, next_cursor, limit]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingProfile"
+          next_cursor:
+            type: [string, "null"]
+          limit: {type: integer}
+      PricingProductPrice:
+        type: object
+        required: [id, product_id, price_uom, unit_price_ten_thousandths, revision]
+        properties:
+          id: {type: string, format: uuid}
+          product_id: {type: string, format: uuid}
+          price_level_id:
+            type: [string, "null"]
+            format: uuid
+            description: Null on the branch's base price row.
+          branch_id:
+            type: [string, "null"]
+            format: uuid
+            description: Null on an every branch row.
+          price_uom: {type: string}
+          unit_price_ten_thousandths: {type: integer, format: int64}
+          revision: {type: integer, format: int64}
+      PricingProductPriceList:
+        type: object
+        required: [items]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingProductPrice"
+      PricingProductPriceReplace:
+        type: object
+        required: [revision, prices]
+        properties:
+          revision:
+            type: integer
+            format: int64
+            description: The product revision the list was read at.
+          prices:
+            type: array
+            description: The slice's rows; each carries its own revision for reads.
+            items:
+              type: object
+              properties:
+                price_level_id:
+                  type: [string, "null"]
+                  format: uuid
+                price_uom: {type: string}
+                unit_price_ten_thousandths: {type: integer, format: int64}
+      PricingVendorLevel:
+        type: object
+        required: [id, vendor_id, code, name, is_default, is_active, revision, created_at, updated_at]
+        properties:
+          id: {type: string, format: uuid}
+          vendor_id: {type: string, format: uuid}
+          code: {type: string}
+          name: {type: string}
+          is_default: {type: boolean}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+          created_at: {type: string, format: date-time}
+          updated_at: {type: string, format: date-time}
+      PricingVendorLevelWrite:
+        type: object
+        properties:
+          vendor_id: {type: string, format: uuid}
+          code: {type: string}
+          name: {type: string}
+          is_default: {type: boolean}
+          is_active: {type: boolean}
+          revision: {type: integer, format: int64}
+      PricingVendorLevelPage:
+        type: object
+        required: [items, next_cursor, limit]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingVendorLevel"
+          next_cursor:
+            type: [string, "null"]
+          limit: {type: integer}
+      PricingVendorCost:
+        type: object
+        required: [id, vendor_id, vendor_price_level_id, product_id, purchase_uom, unit_cost_ten_thousandths, effective_from, revision, created_at, updated_at]
+        properties:
+          id: {type: string, format: uuid}
+          vendor_id: {type: string, format: uuid}
+          vendor_price_level_id: {type: string, format: uuid}
+          product_id: {type: string, format: uuid}
+          branch_id:
+            type: [string, "null"]
+            format: uuid
+          purchase_uom: {type: string}
+          unit_cost_ten_thousandths: {type: integer, format: int64}
+          vendor_sku:
+            type: [string, "null"]
+          effective_from: {type: string}
+          effective_to:
+            type: [string, "null"]
+          revision: {type: integer, format: int64}
+          created_at: {type: string, format: date-time}
+          updated_at: {type: string, format: date-time}
+      PricingVendorCostWrite:
+        type: object
+        properties:
+          vendor_id: {type: string, format: uuid}
+          vendor_price_level_id: {type: string, format: uuid}
+          product_id: {type: string, format: uuid}
+          branch_id: {type: [string, "null"], format: uuid}
+          purchase_uom: {type: string}
+          unit_cost_ten_thousandths: {type: integer, format: int64}
+          vendor_sku: {type: [string, "null"]}
+          effective_from: {type: string}
+          effective_to: {type: [string, "null"]}
+          revision: {type: integer, format: int64}
+      PricingVendorCostPage:
+        type: object
+        required: [items, next_cursor, limit]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingVendorCost"
+          next_cursor:
+            type: [string, "null"]
+          limit: {type: integer}
+      PricingContract:
+        type: object
+        required: [id, customer_id, product_id, contract_price_ten_thousandths, price_uom, revision, created_at, updated_at]
+        properties:
+          id: {type: string, format: uuid}
+          customer_id: {type: string, format: uuid}
+          product_id: {type: string, format: uuid}
+          contract_price_ten_thousandths: {type: integer, format: int64}
+          price_uom: {type: string}
+          branch_id:
+            type: [string, "null"]
+            format: uuid
+            description: Null is the every branch row.
+          revision: {type: integer, format: int64}
+          created_at: {type: string, format: date-time}
+          updated_at: {type: string, format: date-time}
+      PricingContractWrite:
+        type: object
+        properties:
+          customer_id: {type: string, format: uuid}
+          product_id: {type: string, format: uuid}
+          branch_id: {type: [string, "null"], format: uuid}
+          contract_price_ten_thousandths: {type: integer, format: int64}
+          price_uom: {type: string}
+          revision: {type: integer, format: int64}
+      PricingContractPage:
+        type: object
+        required: [items, next_cursor, limit]
+        properties:
+          items:
+            type: array
+            items:
+            $ref: "#/components/schemas/PricingContract"
+          next_cursor:
+            type: [string, "null"]
+          limit: {type: integer}
+      PricingResolvedCost:
+        type: object
+        required: [unit_cost_ten_thousandths, purchase_uom, uom_qty, purchase_uom_qty, vendor_level_code, vendor_level_id, vendor_cost_id]
+        properties:
+          unit_cost_ten_thousandths: {type: integer, format: int64}
+          purchase_uom: {type: string}
+          uom_qty: {type: string}
+          purchase_uom_qty: {type: string}
+          vendor_level_code: {type: string}
+          vendor_level_id: {type: string, format: uuid}
+          vendor_cost_id: {type: string, format: uuid}

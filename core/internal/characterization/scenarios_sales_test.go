@@ -83,7 +83,7 @@ func customerGroups() []groupDef {
 	header := func(extras ...map[string]any) map[string]any {
 		b := map[string]any{
 			"account_number": "GOLD-001", "name": "Golden Harness Co", "email": "goldens@example.com",
-			"phone": "250-555-0199", "address": "1 Golden Way, Kelowna BC", "tier": "gold",
+			"phone": "250-555-0199", "address": "1 Golden Way, Kelowna BC",
 		}
 		for _, extra := range extras {
 			for k, v := range extra {
@@ -110,22 +110,25 @@ func customerGroups() []groupDef {
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
 			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3", maskFields: map[string]any{"balance_cents": 999999, "credit_limit_cents": 999999}},
-			// The filters filter; an unsupported parameter, a tier outside the
-			// lowercase vocabulary and a broken cursor are 400s naming the field.
-			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},
+			// The filters filter; an unsupported parameter and a broken cursor
+			// are 400s naming the field. The retired tier filter is an
+			// unsupported parameter now (the customer's pricing program is its
+			// price profile).
+			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&is_active=true&include=total"},
 			{name: "customer.list.unsupported_parameter", method: "GET", path: "/api/v1/customers?offset=0"},
 			{name: "customer.list.unsupported_tier", method: "GET", path: "/api/v1/customers?tier=GOLD"},
 			{name: "customer.list.bad_cursor", method: "GET", path: "/api/v1/customers?cursor=garbage"},
-			// Registered by the customer handler; the list envelope now.
-			{name: "price_level.list", method: "GET", path: "/api/v1/price_levels?limit=2"},
-			{name: "price_level.list.unsupported_parameter", method: "GET", path: "/api/v1/price_levels?offset=1"},
+			// The price level read retired with the tier: the levels live at
+			// /api/v1/pricing/levels (ADR 0006 section 5.6).
+			{name: "pricing.level.list", method: "GET", path: "/api/v1/pricing/levels?limit=2"},
+			{name: "pricing.level.unsupported_parameter", method: "GET", path: "/api/v1/pricing/levels?offset=1"},
 			{name: "customer.get.not_found", method: "GET", path: "/api/v1/customers/00000000-0000-0000-0000-0000000000aa"},
 			{name: "customer.get.bad_id", method: "GET", path: "/api/v1/customers/not-a-uuid"},
 			{
 				name:   "customer.create.invalid",
 				method: "POST",
 				path:   "/api/v1/customers",
-				body:   map[string]any{"tier": "GOLD", "email": "not an email", "credit_limit_cents": -1, "currency": "usd"},
+				body:   map[string]any{"email": "not an email", "credit_limit_cents": -1, "currency": "usd"},
 			},
 			{name: "customer.create.unknown_field", method: "POST", path: "/api/v1/customers",
 				body: header(map[string]any{"account_number": "GOLD-002", "balance_due": 5})},

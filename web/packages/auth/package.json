@@ -9,6 +9,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@gable/work-offline": "*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

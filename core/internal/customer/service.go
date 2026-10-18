@@ -292,7 +292,7 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Customer, error) {
 		c := &Customer{
 			ID: uuid.New(), AccountNumber: d.AccountNumber, Name: d.Name,
 			Email: d.Email, Phone: d.Phone, Address: d.Address,
-			Tier: d.Tier, IsActive: d.IsActive, PriceLevelID: d.PriceLevelID, SalespersonID: d.SalespersonID,
+			IsActive: d.IsActive, PriceProfileID: d.PriceProfileID, SalespersonID: d.SalespersonID,
 			CreditLimitCents: d.CreditLimitCents, Currency: d.Currency, POrequired: d.POrequired,
 			Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
@@ -362,8 +362,11 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		next := *cur
 		next.AccountNumber, next.Name = d.AccountNumber, d.Name
 		next.Email, next.Phone, next.Address = d.Email, d.Phone, d.Address
-		next.Tier, next.IsActive = d.Tier, d.IsActive
-		next.PriceLevelID, next.SalespersonID = d.PriceLevelID, d.SalespersonID
+		next.IsActive = d.IsActive
+		next.SalespersonID = d.SalespersonID
+		if d.PriceProfileID != nil {
+			next.PriceProfileID = d.PriceProfileID
+		}
 		next.CreditLimitCents, next.Currency, next.POrequired = d.CreditLimitCents, d.Currency, d.POrequired
 		if d.PaymentTermsID != nil {
 			next.PaymentTermsID = *d.PaymentTermsID
@@ -475,9 +478,8 @@ func diffCustomer(a, b *Customer) []string {
 	add(!eqStr(a.Email, b.Email), "email")
 	add(!eqStr(a.Phone, b.Phone), "phone")
 	add(!eqStr(a.Address, b.Address), "address")
-	add(a.Tier != b.Tier, "tier")
 	add(a.IsActive != b.IsActive, "is_active")
-	add(!eqID(a.PriceLevelID, b.PriceLevelID), "price_level_id")
+	add(!eqID(a.PriceProfileID, b.PriceProfileID), "price_profile_id")
 	add(!eqID(a.SalespersonID, b.SalespersonID), "salesperson_id")
 	add((a.CreditLimitCents == nil) != (b.CreditLimitCents == nil) ||
 		(a.CreditLimitCents != nil && *a.CreditLimitCents != *b.CreditLimitCents), "credit_limit_cents")
@@ -586,27 +588,6 @@ func (s *Service) SetEscalationPolicy(ctx context.Context, id uuid.UUID, d *Poli
 	return out, nil
 }
 
-// ListPriceLevels is one page of price levels.
-func (s *Service) ListPriceLevels(ctx context.Context, f ChildFilter, wantTotal bool) (items []PriceLevel, hasMore bool, total *int64, err error) {
-	limit := f.Limit
-	f.Limit = limit + 1
-	rows, err := s.repo.ListPriceLevels(ctx, f)
-	if err != nil {
-		return nil, false, nil, err
-	}
-	if len(rows) > limit {
-		rows, hasMore = rows[:limit], true
-	}
-	if wantTotal {
-		n, err := s.repo.CountPriceLevels(ctx)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		total = &n
-	}
-	return rows, hasMore, total, nil
-}
-
 // record writes the customer's event into the outbox through the
 // transaction's executor. part names what changed on a customer.updated.
 func (s *Service) record(ctx context.Context, c *Customer, eventType, part string, extra map[string]any) error {
@@ -697,12 +678,10 @@ func headerValue(c *Customer, field string) any {
 		return c.Name
 	case "address":
 		return c.Address
-	case "tier":
-		return string(c.Tier)
 	case "is_active":
 		return c.IsActive
-	case "price_level_id":
-		return c.PriceLevelID
+	case "price_profile_id":
+		return c.PriceProfileID
 	case "salesperson_id":
 		return c.SalespersonID
 	case "credit_limit_cents":

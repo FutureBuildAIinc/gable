@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -268,3 +269,99 @@ func TestAssign_ExposureGateRefusalAnswers409(t *testing.T) {
 		t.Errorf("audit rows = %d, want 0", got)
 	}
 }
+
+// CreateDelivery populates DeliveryInstructions, ScheduledStart, and
+// ScheduledEnd on the in-memory Stop struct and computes local window bounds
+// by wall-clock hour and minute in the yard's time zone so a DST transition day
+// does not shift the scheduled window by an hour.
+func TestCreateDelivery_PopulatesScheduleAndInstructionsAndWallClockDST(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	yardID := uuid.New()
+	custID := uuid.New()
+	orderID := uuid.New()
+	winID := uuid.New()
+	holdID := uuid.New()
+	stopID := uuid.Nil
+
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO locations (id, name, code, type, timezone) VALUES ($1, 'DST Yard', $2, 'BRANCH', 'America/New_York')`,
+		yardID, "DST-"+yardID.String()[:6]); err != nil {
+		t.Fatalf("insert yard: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'DST Customer', $2, $3)`,
+		custID, "DST-"+custID.String()[:8], yardID); err != nil {
+		t.Fatalf("insert customer: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, site_delivery_instructions)
+		 VALUES ($1, $2, $3, 'CONFIRMED', 100, 'DELIVERY', 'USD', 'Drop by north bay')`,
+		orderID, custID, yardID); err != nil {
+		t.Fatalf("insert order: %v", err)
+	}
+
+	// Find the second Sunday of March next year (the America/New_York spring-forward transition day).
+	marchFirst := time.Date(time.Now().UTC().Year()+1, time.March, 1, 0, 0, 0, 0, time.UTC)
+	offsetToFirstSunday := (7 - int(marchFirst.Weekday())) % 7
+	springForwardSunday := marchFirst.AddDate(0, 0, offsetToFirstSunday+7)
+	holdDate := springForwardSunday.Format("2006-01-02")
+
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO yard_schedule_windows (id, yard_id, kind, weekday, start_time, end_time, capacity, cutoff_minutes)
+		 VALUES ($1, $2, 'delivery', 0, '08:00', '12:00', 2, 0)`,
+		winID, yardID); err != nil {
+		t.Fatalf("insert window: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO portal_schedule_holds (id, window_id, hold_date, customer_id, order_id, status)
+		 VALUES ($1, $2, $3, $4, $5, 'held')`,
+		holdID, winID, holdDate, custID, orderID); err != nil {
+		t.Fatalf("insert hold: %v", err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		if stopID != uuid.Nil {
+			_, _ = db.Pool.Exec(c, `DELETE FROM deliveries WHERE id = $1`, stopID)
+		}
+		_, _ = db.Pool.Exec(c, `DELETE FROM portal_schedule_holds WHERE id = $1`, holdID)
+		_, _ = db.Pool.Exec(c, `DELETE FROM yard_schedule_windows WHERE id = $1`, winID)
+		_, _ = db.Pool.Exec(c, `DELETE FROM orders WHERE id = $1`, orderID)
+		_, _ = db.Pool.Exec(c, `DELETE FROM customers WHERE id = $1`, custID)
+		_, _ = db.Pool.Exec(c, `DELETE FROM locations WHERE id = $1`, yardID)
+	})
+
+	repo := delivery.NewRepository(db)
+	stop := &delivery.Stop{
+		OrderID:      orderID,
+		StopSequence: 1,
+		Status:       delivery.StopStatusPending,
+	}
+	if err := repo.CreateDelivery(ctx, stop); err != nil {
+		t.Fatalf("CreateDelivery: %v", err)
+	}
+	stopID = stop.ID
+
+	if stop.DeliveryInstructions == nil || *stop.DeliveryInstructions != "Drop by north bay" {
+		t.Errorf("in-memory stop.DeliveryInstructions = %v, want Drop by north bay", stop.DeliveryInstructions)
+	}
+	if stop.ScheduledStart == nil || stop.ScheduledEnd == nil {
+		t.Errorf("in-memory stop.ScheduledStart=%v ScheduledEnd=%v, want non-nil", stop.ScheduledStart, stop.ScheduledEnd)
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load America/New_York: %v", err)
+	}
+	var dbStart, dbEnd time.Time
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT scheduled_start, scheduled_end FROM deliveries WHERE id = $1`, stopID).Scan(&dbStart, &dbEnd); err != nil {
+		t.Fatalf("read back scheduled bounds: %v", err)
+	}
+	if gotStart := dbStart.In(loc).Format("15:04"); gotStart != "08:00" {
+		t.Errorf("ScheduledStart in yard zone = %s, want 08:00 (not shifted by DST)", gotStart)
+	}
+	if gotEnd := dbEnd.In(loc).Format("15:04"); gotEnd != "12:00" {
+		t.Errorf("ScheduledEnd in yard zone = %s, want 12:00 (not shifted by DST)", gotEnd)
+	}
+}
+

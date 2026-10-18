@@ -9,8 +9,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "available_credit_cents": 9996858,
-        "balance_cents": 3142,
+        "available_credit_cents": 9996304,
+        "balance_cents": 3696,
         "credit_limit_cents": 10000000,
         "currency": "USD",
         "customer_id": "<id-1>",
@@ -50,8 +50,8 @@
       "body": {
         "items": [
           {
-            "amount_cents": 1142,
-            "balance_after_cents": 3142,
+            "amount_cents": 1,
+            "balance_after_cents": 3696,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
@@ -62,8 +62,8 @@
             "type": "REVERSAL"
           },
           {
-            "amount_cents": 2000,
-            "balance_after_cents": 2000,
+            "amount_cents": 1143,
+            "balance_after_cents": 3695,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
@@ -74,62 +74,86 @@
             "type": "REVERSAL"
           },
           {
-            "amount_cents": -1142,
-            "balance_after_cents": 0,
+            "amount_cents": 2000,
+            "balance_after_cents": 2552,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Reversal of an application to IN-000052",
+            "id": "<id-8>",
+            "reference_id": "<id-9>",
+            "source_kind": "application",
+            "type": "REVERSAL"
+          },
+          {
+            "amount_cents": -1,
+            "balance_after_cents": 552,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
             "description": "Payment PAY-000045 applied to IN-000052",
-            "id": "<id-8>",
+            "id": "<id-10>",
             "reference_id": "<id-5>",
             "source_kind": "application",
             "type": "PAYMENT"
           },
           {
-            "amount_cents": -2000,
-            "balance_after_cents": 1142,
+            "amount_cents": -1143,
+            "balance_after_cents": 553,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
             "description": "Payment PAY-000045 applied to IN-000052",
-            "id": "<id-9>",
+            "id": "<id-11>",
             "reference_id": "<id-7>",
             "source_kind": "application",
             "type": "PAYMENT"
           },
           {
+            "amount_cents": -2000,
+            "balance_after_cents": 1696,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "description": "Payment PAY-000045 applied to IN-000052",
+            "id": "<id-12>",
+            "reference_id": "<id-9>",
+            "source_kind": "application",
+            "type": "PAYMENT"
+          },
+          {
             "amount_cents": 75,
-            "balance_after_cents": 3142,
+            "balance_after_cents": 3696,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
             "description": "Void of credit memo CM-000003",
-            "id": "<id-10>",
-            "reference_id": "<id-11>",
+            "id": "<id-13>",
+            "reference_id": "<id-14>",
             "source_kind": "credit_memo",
             "type": "REVERSAL"
           },
           {
             "amount_cents": -75,
-            "balance_after_cents": 3067,
+            "balance_after_cents": 3621,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
             "description": "Credit memo CM-000003",
-            "id": "<id-12>",
-            "reference_id": "<id-11>",
+            "id": "<id-15>",
+            "reference_id": "<id-14>",
             "source_kind": "credit_memo",
             "type": "CREDIT_MEMO"
           },
           {
-            "amount_cents": 3142,
-            "balance_after_cents": 3142,
+            "amount_cents": 3696,
+            "balance_after_cents": 3696,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-1>",
             "description": "Invoice IN-000052",
-            "id": "<id-13>",
-            "reference_id": "<id-14>",
+            "id": "<id-16>",
+            "reference_id": "<id-17>",
             "source_kind": "invoice",
             "type": "INVOICE"
           }
@@ -160,7 +184,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -178,7 +202,7 @@
         "items": [
           {
             "currency": "USD",
-            "current_cents": 3142,
+            "current_cents": 3696,
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "days_1_30_cents": 0,
@@ -189,7 +213,7 @@
             "over_90_cents": 0,
             "ship_to_code": null,
             "ship_to_id": null,
-            "total_cents": 3142,
+            "total_cents": 3696,
             "unapplied_cents": 0
           }
         ],
@@ -211,7 +235,7 @@
         "items": [
           {
             "currency": "USD",
-            "current_cents": 3142,
+            "current_cents": 3696,
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "days_1_30_cents": 0,
@@ -222,7 +246,7 @@
             "over_90_cents": 0,
             "ship_to_code": null,
             "ship_to_id": null,
-            "total_cents": 3142,
+            "total_cents": 3696,
             "unapplied_cents": 0
           }
         ],
@@ -244,7 +268,7 @@
         "items": [
           {
             "currency": "USD",
-            "current_cents": 3142,
+            "current_cents": 3696,
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "days_1_30_cents": 0,
@@ -255,7 +279,7 @@
             "over_90_cents": 0,
             "ship_to_code": null,
             "ship_to_id": null,
-            "total_cents": 3142,
+            "total_cents": 3696,
             "unapplied_cents": 0
           }
         ],
@@ -301,7 +325,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -327,7 +351,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -353,7 +377,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -373,12 +397,12 @@
         "totals": [
           {
             "currency": "USD",
-            "current_cents": 3142,
+            "current_cents": 3696,
             "days_1_30_cents": 0,
             "days_31_60_cents": 0,
             "days_61_90_cents": 0,
             "over_90_cents": 0,
-            "total_cents": 3142,
+            "total_cents": 3696,
             "unapplied_cents": 0
           }
         ]
@@ -397,59 +421,70 @@
       "body": {
         "currencies": [
           {
-            "closing_balance_cents": 3142,
+            "closing_balance_cents": 3696,
             "currency": "USD",
             "lines": [
               {
-                "amount_cents": 3142,
-                "balance_after_cents": 3142,
+                "amount_cents": 3696,
+                "balance_after_cents": 3696,
                 "date": "<day+0>",
                 "description": "Invoice IN-000052",
-                "id": "<id-13>",
+                "id": "<id-16>",
                 "job_id": null,
-                "reference_id": "<id-14>",
+                "reference_id": "<id-17>",
                 "source_kind": "invoice",
                 "type": "INVOICE"
               },
               {
                 "amount_cents": -75,
-                "balance_after_cents": 3067,
+                "balance_after_cents": 3621,
                 "date": "<day+0>",
                 "description": "Credit memo CM-000003",
-                "id": "<id-12>",
+                "id": "<id-15>",
                 "job_id": null,
-                "reference_id": "<id-11>",
+                "reference_id": "<id-14>",
                 "source_kind": "credit_memo",
                 "type": "CREDIT_MEMO"
               },
               {
                 "amount_cents": 75,
-                "balance_after_cents": 3142,
+                "balance_after_cents": 3696,
                 "date": "<day+0>",
                 "description": "Void of credit memo CM-000003",
-                "id": "<id-10>",
+                "id": "<id-13>",
                 "job_id": null,
-                "reference_id": "<id-11>",
+                "reference_id": "<id-14>",
                 "source_kind": "credit_memo",
                 "type": "REVERSAL"
               },
               {
                 "amount_cents": -2000,
-                "balance_after_cents": 1142,
+                "balance_after_cents": 1696,
                 "date": "<day+0>",
                 "description": "Payment PAY-000045 applied to IN-000052",
-                "id": "<id-9>",
+                "id": "<id-12>",
+                "job_id": null,
+                "reference_id": "<id-9>",
+                "source_kind": "application",
+                "type": "PAYMENT"
+              },
+              {
+                "amount_cents": -1143,
+                "balance_after_cents": 553,
+                "date": "<day+0>",
+                "description": "Payment PAY-000045 applied to IN-000052",
+                "id": "<id-11>",
                 "job_id": null,
                 "reference_id": "<id-7>",
                 "source_kind": "application",
                 "type": "PAYMENT"
               },
               {
-                "amount_cents": -1142,
-                "balance_after_cents": 0,
+                "amount_cents": -1,
+                "balance_after_cents": 552,
                 "date": "<day+0>",
                 "description": "Payment PAY-000045 applied to IN-000052",
-                "id": "<id-8>",
+                "id": "<id-10>",
                 "job_id": null,
                 "reference_id": "<id-5>",
                 "source_kind": "application",
@@ -457,7 +492,18 @@
               },
               {
                 "amount_cents": 2000,
-                "balance_after_cents": 2000,
+                "balance_after_cents": 2552,
+                "date": "<day+0>",
+                "description": "Reversal of an application to IN-000052",
+                "id": "<id-8>",
+                "job_id": null,
+                "reference_id": "<id-9>",
+                "source_kind": "application",
+                "type": "REVERSAL"
+              },
+              {
+                "amount_cents": 1143,
+                "balance_after_cents": 3695,
                 "date": "<day+0>",
                 "description": "Reversal of an application to IN-000052",
                 "id": "<id-6>",
@@ -467,8 +513,8 @@
                 "type": "REVERSAL"
               },
               {
-                "amount_cents": 1142,
-                "balance_after_cents": 3142,
+                "amount_cents": 1,
+                "balance_after_cents": 3696,
                 "date": "<day+0>",
                 "description": "Reversal of an application to IN-000052",
                 "id": "<id-4>",
@@ -478,17 +524,17 @@
                 "type": "REVERSAL"
               }
             ],
-            "net_balance_cents": 3142,
+            "net_balance_cents": 3696,
             "open_documents": [
               {
                 "date": "<day+0>",
                 "due_date": "<day+30>",
-                "id": "<id-14>",
+                "id": "<id-17>",
                 "job_id": null,
                 "kind": "invoice",
                 "number": "IN-000052",
-                "open_cents": 3142,
-                "total_cents": 3142
+                "open_cents": 3696,
+                "total_cents": 3696
               }
             ],
             "opening_balance_cents": 0,
@@ -525,7 +571,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -545,7 +591,7 @@
           "message": "account not found"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -581,7 +627,7 @@
           "message": "application not found"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -608,7 +654,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-25>"
         }
       }
     }

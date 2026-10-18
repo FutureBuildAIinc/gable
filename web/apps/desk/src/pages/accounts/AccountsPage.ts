@@ -10,8 +10,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
-import { CUSTOMER_TIERS } from '../../types/customer.ts';
-import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
+import type { Customer, CustomerRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import { Search, DollarSign, Building2, User, Plus } from 'lucide';
 import './CustomerForm.ts';
 
@@ -20,7 +19,7 @@ type CreditFilter = 'all' | 'credit' | 'cash';
 /**
  * The credit/cash split is on the loaded rows, because the server has no credit filter:
  * credit means the limit is null (no limit) or above zero; cash means the limit is exactly 0
- * (no credit). Search, tier and active are server side filters of the cursor list.
+ * (no credit). Search and active are server side filters of the cursor list.
  */
 export function matchesCreditFilter(filter: CreditFilter, creditLimitCents: number | null): boolean {
     if (filter === 'credit') return creditLimitCents === null || creditLimitCents > 0;
@@ -42,7 +41,6 @@ export class GableAccountsPage extends LitElement {
     @state() private error: string | null = null;
     @state() private filter: CreditFilter = 'all';
     @state() private search = '';
-    @state() private tier: CustomerTier | '' = '';
     @state() private status: 'all' | 'active' | 'inactive' = 'all';
 
     @state() private showCreate = false;
@@ -67,7 +65,6 @@ export class GableAccountsPage extends LitElement {
     private get serverParams() {
         return {
             q: this.search,
-            tier: this.tier || undefined,
             isActive: this.status === 'all' ? undefined : this.status === 'active',
             limit: GableAccountsPage.PAGE_SIZE,
         };
@@ -210,13 +207,6 @@ export class GableAccountsPage extends LitElement {
                                 class="bg-slate-steel/50 border border-white/5 rounded-full py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 w-64"
                             />
                         </div>
-
-                        <gable-select
-                            label="Tier"
-                            .value=${this.tier}
-                            .options=${[{ value: '', label: 'All tiers' }, ...CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))]}
-                            @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier | ''; this.onServerFilterChange(); }}
-                        ></gable-select>
 
                         <gable-select
                             label="Status"

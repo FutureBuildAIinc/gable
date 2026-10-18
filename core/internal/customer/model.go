@@ -10,47 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// CustomerTier is the price tier in its storage vocabulary: the UPPERCASE
-// values of the customer_tier enum, which pricing reads. On the wire it is
-// lowercase (ADR 0001 section 6): MarshalText does the mapping at the module
-// boundary, ParseTier the reverse.
-type CustomerTier string
-
-const (
-	TierRetail   CustomerTier = "RETAIL"
-	TierSilver   CustomerTier = "SILVER"
-	TierGold     CustomerTier = "GOLD"
-	TierPlatinum CustomerTier = "PLATINUM"
-)
-
-// tierNames is the wire vocabulary in ascending order.
-var tierNames = []string{"retail", "silver", "gold", "platinum"}
-
-// MarshalText writes the lowercase wire name.
-func (t CustomerTier) MarshalText() ([]byte, error) {
-	return []byte(strings.ToLower(string(t))), nil
-}
-
-// ParseTier maps a lowercase wire name to its tier. Any other spelling, the
-// legacy uppercase included, is not a tier.
-func ParseTier(name string) (CustomerTier, bool) {
-	for _, n := range tierNames {
-		if name == n {
-			return CustomerTier(strings.ToUpper(name)), true
-		}
-	}
-	return "", false
-}
-
-// PriceLevel is a named multiplier a customer may be assigned.
-type PriceLevel struct {
-	ID         uuid.UUID       `json:"id"`
-	Name       string          `json:"name"`
-	Multiplier float64         `json:"multiplier"`
-	CreatedAt  httpx.Timestamp `json:"created_at"`
-	UpdatedAt  httpx.Timestamp `json:"updated_at"`
-}
-
 // PaymentTermsRef is the slice of a payment terms row a customer carries.
 type PaymentTermsRef struct {
 	ID   uuid.UUID `json:"id"`
@@ -62,23 +21,25 @@ type PaymentTermsRef struct {
 // integer cents; optional fields are present as null. The balance is read
 // only on the wire: the AR core is its single writer (ADR 0005 section 9.3).
 type Customer struct {
-	ID              uuid.UUID    `json:"id"`
-	AccountNumber   string       `json:"account_number"`
-	Name            string       `json:"name"`
-	Email           *string      `json:"email"`
-	Phone           *string      `json:"phone"`
-	Address         *string      `json:"address"`
-	Tier            CustomerTier `json:"tier"`
-	IsActive        bool         `json:"is_active"`
-	PrimaryBranchID uuid.UUID    `json:"primary_branch_id"`
+	ID              uuid.UUID `json:"id"`
+	AccountNumber   string    `json:"account_number"`
+	Name            string    `json:"name"`
+	Email           *string   `json:"email"`
+	Phone           *string   `json:"phone"`
+	Address         *string   `json:"address"`
+	IsActive        bool      `json:"is_active"`
+	PrimaryBranchID uuid.UUID `json:"primary_branch_id"`
 	// BranchIDs are the yards the customer trades at (ruling A): the home
 	// yard is always among them, and the first document at another yard
 	// adds it.
-	BranchIDs       []uuid.UUID `json:"branch_ids"`
-	PriceLevelID    *uuid.UUID  `json:"price_level_id"`
-	PriceLevel      *PriceLevel `json:"price_level"`
-	SalespersonID   *uuid.UUID  `json:"salesperson_id"`
-	SalespersonName *string     `json:"salesperson_name"`
+	BranchIDs []uuid.UUID `json:"branch_ids"`
+	// PriceProfileID is the customer's pricing program (ADR 0006 section
+	// 5.2): the profile names its price level and carries its category
+	// rules. Null on the wire only in the migration's back pocket; the
+	// column is NOT NULL and the create takes the default profile.
+	PriceProfileID  *uuid.UUID `json:"price_profile_id"`
+	SalespersonID   *uuid.UUID `json:"salesperson_id"`
+	SalespersonName *string    `json:"salesperson_name"`
 
 	// CreditLimitCents is null for no limit; zero is a limit of nothing.
 	CreditLimitCents *httpx.Cents `json:"credit_limit_cents"`

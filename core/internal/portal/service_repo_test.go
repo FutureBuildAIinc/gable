@@ -76,6 +76,16 @@ type fakePortalRepo struct {
 	newCartID     uuid.UUID
 	newOrderID    uuid.UUID
 
+	// the pro portal's core (M35): /me, /today, the timeline, the feeds
+	meUser        *CustomerUser
+	meRole        string
+	todayQuotes   []TodayQuoteRow
+	todayDeliveries []TodayDeliveryRow
+	todayInvoices []TodayInvoiceRow
+	todayOrders   []TodayOrderRow
+	deliveryState *orderDeliveryState
+	quotes        []PortalQuoteDTO
+
 	// failures
 	getCartErr    error
 	createCartErr error
@@ -121,6 +131,7 @@ type addedItem struct {
 	cartID, productID uuid.UUID
 	quantity          float64
 	unitPrice         float64
+	units             CartItemUnits
 }
 
 type qtyUpdate struct {
@@ -278,8 +289,8 @@ func (f *fakePortalRepo) CreateCart(_ context.Context, customerID uuid.UUID) (uu
 	return f.newCartID, nil
 }
 
-func (f *fakePortalRepo) AddCartItem(_ context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error {
-	f.addedItems = append(f.addedItems, addedItem{cartID, productID, quantity, unitPrice})
+func (f *fakePortalRepo) AddCartItem(_ context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64, units CartItemUnits) error {
+	f.addedItems = append(f.addedItems, addedItem{cartID, productID, quantity, unitPrice, units})
 	return f.addItemErr
 }
 
@@ -452,10 +463,13 @@ func (f *fakeProductRepo) UpdateLeadTime(context.Context, uuid.UUID, *int, int64
 
 type fakePricingRepo struct {
 	contracts map[uuid.UUID]httpx.Price // productID -> contract price
+	products  map[uuid.UUID]*product.Product
+	customers map[uuid.UUID]*customer.Customer
 	err       error
 }
 
 var _ pricing.Repository = (*fakePricingRepo)(nil)
+var _ pricing.ResolveRepository = (*fakePricingRepo)(nil)
 
 // portalPrice parses a fixture price the way the wire would.
 func portalPrice(f float64) httpx.Price {
@@ -474,7 +488,7 @@ func (f *fakePricingRepo) GetContract(_ context.Context, customerID, productID u
 	if !ok {
 		return nil, nil // no contract
 	}
-	return &pricing.CustomerContract{CustomerID: customerID, ProductID: productID, ContractPrice: price}, nil
+	return &pricing.CustomerContract{CustomerID: customerID, ProductID: productID, PriceUOM: "EA", ContractPrice: price}, nil
 }
 func (f *fakePricingRepo) CreateContract(context.Context, *pricing.CustomerContract) error {
 	return nil
@@ -491,6 +505,60 @@ func (f *fakePricingRepo) ListRulesPage(context.Context, *pricing.RuleCursor, in
 }
 func (f *fakePricingRepo) CountRules(context.Context) (int64, error)              { return 0, nil }
 func (f *fakePricingRepo) CreateRule(context.Context, *pricing.PricingRule) error { return nil }
+
+func (f *fakePricingRepo) ProductPricingFacts(_ context.Context, productID uuid.UUID) (*pricing.ProductPricingFacts, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	p, ok := f.products[productID]
+	if !ok {
+		return nil, errors.New("product not found")
+	}
+	uom := string(p.UOMPrimary)
+	if uom == "" {
+		uom = "EA"
+	}
+	return &pricing.ProductPricingFacts{
+		BasePrice: portalPrice(p.BasePrice),
+		PriceUOM:  uom,
+		StockUOM:  uom,
+		SaleUOM:   uom,
+	}, nil
+}
+
+func (f *fakePricingRepo) UnitSetRow(_ context.Context, _ uuid.UUID, uom string) (*pricing.UnitSetRowFact, error) {
+	if uom == "" {
+		uom = "EA"
+	}
+	return &pricing.UnitSetRowFact{UOM: uom, UnitQty: 10000, StockQty: 10000}, nil
+}
+
+func (f *fakePricingRepo) ContractForBranch(ctx context.Context, customerID, productID uuid.UUID, _ *uuid.UUID) (*pricing.CustomerContract, error) {
+	return f.GetContract(ctx, customerID, productID)
+}
+
+func (f *fakePricingRepo) ProductPrice(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) (*pricing.ProductPrice, error) {
+	return nil, nil
+}
+
+func (f *fakePricingRepo) CustomerProgram(_ context.Context, customerID uuid.UUID) (*pricing.PricingProgram, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if _, ok := f.customers[customerID]; !ok {
+		return nil, errors.New("customer not found")
+	}
+	return &pricing.PricingProgram{
+		LevelName:   "Gold",
+		LevelBasis:  "BASE",
+		LevelAdjust: -150000,
+		LevelActive: true,
+	}, nil
+}
+
+func (f *fakePricingRepo) VendorCost(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID, *uuid.UUID, time.Time) (*pricing.VendorCostRow, error) {
+	return nil, nil
+}
 
 type fakeInventoryRepo struct {
 	byProduct map[uuid.UUID][]inventory.Inventory
@@ -653,6 +721,31 @@ func (f *fakeOrderRepo) LookupKitComponents(context.Context, []uuid.UUID) (map[s
 func (f *fakeOrderRepo) LookupChargeCodes(context.Context, []string) (map[string]salesdoc.ChargeCode, error) {
 	return map[string]salesdoc.ChargeCode{}, nil
 }
+func (f *fakeOrderRepo) LookupProductUnits(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	for _, id := range ids {
+		uom := "EA"
+		if p, ok := f.products[id]; ok && p.UOMPrimary != "" {
+			uom = string(p.UOMPrimary)
+		}
+		out[id] = salesdoc.ProductUnitSet{
+			StockUOM: uom,
+			SaleUOM:  uom,
+			PriceUOM: uom,
+			Rows: []salesdoc.UnitSetRow{
+				{UOM: uom, UnitQty: 10000, StockQty: 10000, Sell: true, Purchase: true, Price: true},
+			},
+		}
+	}
+	return out, nil
+}
+func (f *fakeOrderRepo) LookupCatalogue(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
 func (f *fakeOrderRepo) CustomerFacts(_ context.Context, customerID uuid.UUID) (order.CustomerFacts, error) {
 	facts := order.CustomerFacts{Exists: true, Name: "Acme", Currency: "USD"}
 	if c, ok := f.customers[customerID]; ok {
@@ -713,6 +806,8 @@ func newPortalRig(t *testing.T) *portalRig {
 		prices:    &fakePricingRepo{contracts: map[uuid.UUID]httpx.Price{}},
 		stock:     &fakeInventoryRepo{byProduct: map[uuid.UUID][]inventory.Inventory{}},
 	}
+	rig.prices.products = rig.products.products
+	rig.prices.customers = rig.customers.customers
 	rig.orders = &fakeOrderRepo{
 		orders:   map[uuid.UUID]*order.Order{},
 		products: rig.products.products,
@@ -736,10 +831,10 @@ func newPortalRig(t *testing.T) *portalRig {
 	return rig
 }
 
-// withCustomer registers a customer so the pricing waterfall has a tier to
-// resolve against.
-func (r *portalRig) withCustomer(id uuid.UUID, tier customer.CustomerTier) *customer.Customer {
-	c := &customer.Customer{ID: id, Name: "Acme Framing", Tier: tier, IsActive: true}
+// withCustomer registers a customer so the pricing waterfall has a customer
+// id to resolve against.
+func (r *portalRig) withCustomer(id uuid.UUID) *customer.Customer {
+	c := &customer.Customer{ID: id, Name: "Acme Framing", IsActive: true}
 	r.customers.customers[id] = c
 	return c
 }
@@ -874,7 +969,7 @@ func TestAddToCart_RejectsNonPositiveQuantityBeforeAnyIO(t *testing.T) {
 func TestAddToCart_WritesTheCustomerPriceNotTheBasePrice(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 	rig.prices.contracts[productID] = portalPrice(3.95) // negotiated
 
@@ -907,7 +1002,7 @@ func TestAddToCart_WritesTheCustomerPriceNotTheBasePrice(t *testing.T) {
 func TestAddToCart_AppliesTheTierDiscount(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierGold)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 
 	if _, err := rig.svc.AddToCart(context.Background(), me,
@@ -944,7 +1039,7 @@ func TestAddToCart_UnknownCustomerFallsBackToBasePriceNotZero(t *testing.T) {
 func TestAddToCart_PricingFailureFallsBackToBasePrice(t *testing.T) {
 	rig := newPortalRig(t)
 	me, productID := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierGold)
+	rig.withCustomer(me)
 	rig.withProduct(productID, "2X4-8", 4.75)
 	rig.prices.err = errors.New("pricing rules table is unavailable")
 
@@ -961,7 +1056,7 @@ func TestAddToCart_PricingFailureFallsBackToBasePrice(t *testing.T) {
 func TestAddToCart_UnknownProductIsRefusedWithoutAWrite(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 
 	_, err := rig.svc.AddToCart(context.Background(), me,
 		AddToCartRequest{ProductID: uuid.New(), Quantity: 1})
@@ -1084,7 +1179,7 @@ func cartWith(lines ...[2]float64) *CartDTO {
 func TestCheckout_PricesTheOrderFromTheCatalog(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	stud := uuid.New()
 	screw := uuid.New()
 	rig.withProduct(stud, "P-STUD", 8.20)
@@ -1131,7 +1226,7 @@ func TestCheckout_PricesTheOrderFromTheCatalog(t *testing.T) {
 func TestCheckout_FilesAgainstTheSessionCustomerAndClearsTheCart(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	cartID := rig.repo.cart.ID
 
@@ -1174,7 +1269,7 @@ func TestCheckout_EmptyCartIsRefusedBeforeTheOrder(t *testing.T) {
 func TestCheckout_ForeignProjectIsRefusedBeforeTheOrderExists(t *testing.T) {
 	rig := newPortalRig(t)
 	me, theirProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.projectOwned = false
 
@@ -1201,7 +1296,7 @@ func TestCheckout_ForeignProjectIsRefusedBeforeTheOrderExists(t *testing.T) {
 func TestCheckout_OwnedProjectIsAttachedToTheNewOrder(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	resp, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{ProjectID: &myProject})
@@ -1229,7 +1324,7 @@ func TestCheckout_OwnedProjectIsAttachedToTheNewOrder(t *testing.T) {
 func TestCheckout_ProjectAttachFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me, myProject := uuid.New(), uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.setProjErr = errors.New("failed to set order project")
 
@@ -1251,7 +1346,7 @@ func TestCheckout_ProjectAttachFailureIsNotFatal(t *testing.T) {
 func TestCheckout_ClearFailureIsNotFatal(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 	rig.repo.clearErr = errors.New("failed to clear cart")
 
@@ -1269,7 +1364,7 @@ func TestCheckout_ClearFailureIsNotFatal(t *testing.T) {
 func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	// The cart's product is not in the rig's catalog (plain cartWith), so the
 	// order service cannot look it up and the create fails before any row is
 	// written: the failure the ERP-refusal path models.
@@ -1292,7 +1387,7 @@ func TestCheckout_OrderFailureLeavesTheCartIntact(t *testing.T) {
 func TestCheckout_DeliveryAndPaymentFieldsAreNotPersisted(t *testing.T) {
 	rig := newPortalRig(t)
 	me := uuid.New()
-	rig.withCustomer(me, customer.TierRetail)
+	rig.withCustomer(me)
 	rig.repo.cart = pricedCartWith(rig, [2]float64{2, 4.75})
 
 	if _, err := rig.svc.Checkout(context.Background(), me, CheckoutRequest{
@@ -1405,7 +1500,7 @@ func TestInviteUser_WritesTheSessionCustomerAndAFreshToken(t *testing.T) {
 
 	before := time.Now()
 	invite, err := rig.svc.InviteUser(context.Background(), me,
-		InviteUserRequest{Email: "buyer@acme.example", Role: "Buyer"})
+		InviteUserRequest{Email: "buyer@acme.example", Role: RoleProjectManager})
 	if err != nil {
 		t.Fatalf("InviteUser: %v", err)
 	}
@@ -1418,7 +1513,7 @@ func TestInviteUser_WritesTheSessionCustomerAndAFreshToken(t *testing.T) {
 	if stored.CustomerID != me {
 		t.Errorf("invite customer = %s, want the session customer %s", stored.CustomerID, me)
 	}
-	if stored.Email != "buyer@acme.example" || stored.Role != "Buyer" {
+	if stored.Email != "buyer@acme.example" || stored.Role != RoleProjectManager {
 		t.Errorf("invite = %+v, want the submitted email and role", stored)
 	}
 	if stored.Token == "" || stored.Token == stored.Email || stored.Token == stored.ID.String() {
@@ -1446,7 +1541,7 @@ func TestInviteUser_TokensAreUniquePerInvite(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 5; i++ {
 		inv, err := rig.svc.InviteUser(context.Background(), me,
-			InviteUserRequest{Email: "buyer@acme.example", Role: "Buyer"})
+			InviteUserRequest{Email: "buyer@acme.example", Role: RoleProjectManager})
 		if err != nil {
 			t.Fatalf("InviteUser: %v", err)
 		}
@@ -1480,7 +1575,7 @@ func TestInviteUser_PersistenceFailureIsReturned(t *testing.T) {
 	rig.repo.inviteErr = errors.New("failed to create invite")
 
 	inv, err := rig.svc.InviteUser(context.Background(), uuid.New(),
-		InviteUserRequest{Email: "x@acme.example", Role: "Buyer"})
+		InviteUserRequest{Email: "x@acme.example", Role: RoleEstimator})
 	if err == nil {
 		t.Fatalf("a failed invite was reported as sent: %+v", inv)
 	}
@@ -1496,7 +1591,7 @@ func TestUpdateUserRole_ScopesTheWriteToTheSessionCustomer(t *testing.T) {
 	rig := newPortalRig(t)
 	me, target := uuid.New(), uuid.New()
 
-	if err := rig.svc.UpdateUserRole(context.Background(), me, target, "Admin"); err != nil {
+	if err := rig.svc.UpdateUserRole(context.Background(), me, target, RoleOwner); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
 	if len(rig.repo.roleWrites) != 1 {
@@ -1509,7 +1604,7 @@ func TestUpdateUserRole_ScopesTheWriteToTheSessionCustomer(t *testing.T) {
 	if got.customer != me {
 		t.Errorf("scope = %s, want the session customer %s", got.customer, me)
 	}
-	if got.value != "Admin" {
+	if got.value != RoleOwner {
 		t.Errorf("role = %q, want Admin", got.value)
 	}
 }
@@ -1530,7 +1625,7 @@ func TestUpdateUserRole_InvalidRoleNeverReachesTheWrite(t *testing.T) {
 
 // CORRECTNESS: all three valid roles are accepted and written verbatim.
 func TestUpdateUserRole_AcceptsExactlyThreeRoles(t *testing.T) {
-	for _, role := range []string{"Admin", "Buyer", "View-Only"} {
+	for _, role := range PortalRoles() {
 		rig := newPortalRig(t)
 		if err := rig.svc.UpdateUserRole(context.Background(), uuid.New(), uuid.New(), role); err != nil {
 			t.Fatalf("role %q was rejected: %v", role, err)

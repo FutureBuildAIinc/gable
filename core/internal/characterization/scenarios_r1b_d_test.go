@@ -560,12 +560,14 @@ func r1bDCategoryGroups() []groupDef {
 				},
 				{name: "pricing.category_rules.list_before", method: "GET",
 					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}"},
+				// A level rule targets the migration's default level (the
+				// fixture resolves the id from system_settings).
 				{
 					name:   "pricing.category_rules.create_tier",
 					method: "POST",
 					path:   "/api/v1/pricing/category-rules",
 					body: map[string]any{
-						"target_type": "tier", "tier": "CONTRACTOR", "category_id": "{d_ruleCat}",
+						"target_type": "level", "price_level_id": "{d_level}", "category_id": "{d_ruleCat}",
 						"rule_type": "markup", "value_pct": "12.5", "margin_floor_pct": "5",
 						"is_active": true, "priority": 3,
 					},
@@ -586,7 +588,7 @@ func r1bDCategoryGroups() []groupDef {
 					method: "POST",
 					path:   "/api/v1/pricing/category-rules",
 					body: map[string]any{
-						"target_type": "tier", "tier": "CONTRACTOR", "category_id": "{d_ruleCat}",
+						"target_type": "level", "price_level_id": "{d_level}", "category_id": "{d_ruleCat}",
 						"rule_type": "markup", "value_pct": "20", "is_active": true, "priority": 3,
 					},
 				},
@@ -598,11 +600,11 @@ func r1bDCategoryGroups() []groupDef {
 					body: map[string]any{"target_type": "account", "category_id": "{d_ruleCat}", "rule_type": "markup"}},
 				{name: "pricing.category_rules.create.bad_rule_type", method: "POST",
 					path: "/api/v1/pricing/category-rules",
-					body: map[string]any{"target_type": "tier", "tier": "RETAIL", "category_id": "{d_ruleCat}", "rule_type": "nope"}},
+					body: map[string]any{"target_type": "level", "price_level_id": "{d_level}", "category_id": "{d_ruleCat}", "rule_type": "nope"}},
 				{name: "pricing.category_rules.list", method: "GET",
 					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true},
-				{name: "pricing.category_rules.list_by_tier", method: "GET",
-					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}&target_type=tier&tier=CONTRACTOR"},
+				{name: "pricing.category_rules.list_by_level", method: "GET",
+					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}&target_type=level"},
 				{name: "pricing.category_rules.list_paginated", method: "GET",
 					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}&limit=1&include=total"},
 				{name: "pricing.category_rules.list.unsupported_parameter", method: "GET",
@@ -615,7 +617,7 @@ func r1bDCategoryGroups() []groupDef {
 				{name: "pricing.category_rules.update.target_refused", method: "PUT",
 					path:    "/api/v1/pricing/category-rules/{d_rule}",
 					headers: map[string]string{"If-Match": `"1"`},
-					body:    map[string]any{"rule_type": "markup", "value_pct": "15", "tier": "OTHER"}},
+					body:    map[string]any{"rule_type": "markup", "value_pct": "15", "price_level_id": "OTHER"}},
 				{
 					name:    "pricing.category_rules.update",
 					method:  "PUT",
@@ -646,11 +648,11 @@ func r1bDCategoryGroups() []groupDef {
 					path:   "/api/v1/pricing/category-rules/bulk",
 					body: []map[string]any{
 						{
-							"target_type": "tier", "tier": "WHOLESALE", "category_id": "{d_ruleCat}",
+							"target_type": "level", "price_level_id": "{d_level}", "category_id": "{d_ruleCat}",
 							"rule_type": "margin", "value_pct": "22", "is_active": true, "priority": 2,
 						},
 						{
-							"target_type": "tier", "tier": "RETAIL", "category_id": "{d_ruleCat}",
+							"target_type": "account", "customer_id": "{myCustomer}", "category_id": "{d_ruleCat}",
 							"rule_type": "fixed", "value_ten_thousandths": 99900, "is_active": true, "priority": 2,
 						},
 					},
@@ -659,13 +661,13 @@ func r1bDCategoryGroups() []groupDef {
 					path: "/api/v1/pricing/category-rules/bulk", body: []map[string]any{}},
 				{name: "pricing.category_rules.bulk_upsert.invalid_rule", method: "POST",
 					path: "/api/v1/pricing/category-rules/bulk",
-					body: []map[string]any{{"target_type": "tier", "category_id": "{d_ruleCat}", "rule_type": "markup"}}},
+					body: []map[string]any{{"target_type": "level", "category_id": "{d_ruleCat}", "rule_type": "markup"}}},
 				{name: "pricing.category_rules.list_after_bulk", method: "GET",
 					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true},
 				{name: "pricing.matrix", method: "GET", path: "/api/v1/pricing/matrix"},
 				{name: "pricing.resolve", method: "GET",
 					path: "/api/v1/pricing/resolve?product_id={product}&customer_id={myCustomer}"},
-				{name: "pricing.resolve.tier", method: "GET",
+				{name: "pricing.resolve.bad_query", method: "GET",
 					path: "/api/v1/pricing/resolve?product_id={product}&tier=CONTRACTOR"},
 				{name: "pricing.resolve.missing_product", method: "GET", path: "/api/v1/pricing/resolve"},
 				{name: "pricing.resolve.bad_product", method: "GET", path: "/api/v1/pricing/resolve?product_id=not-a-uuid"},

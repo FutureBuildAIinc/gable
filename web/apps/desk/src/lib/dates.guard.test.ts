@@ -26,8 +26,8 @@ import { join, relative, sep } from 'node:path'
 
 const APPS_ROOT = join(__dirname, '..', '..', '..')
 
-// The one module allowed to call the date formatters.
-const EXEMPT = join('desk', 'src', 'lib', 'dates.ts')
+// The modules allowed to call the date formatters.
+const EXEMPT = new Set(['desk/src/lib/dates.ts', 'pro-portal/src/lib/format.ts'])
 
 function* sources(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -66,7 +66,7 @@ describe('date guard', () => {
     const findings: string[] = []
     for (const file of sources(APPS_ROOT)) {
       const rel = relative(APPS_ROOT, file).split(sep).join('/')
-      if (rel === EXEMPT.split(sep).join('/')) continue
+      if (EXEMPT.has(rel)) continue
       const lines = readFileSync(file, 'utf8').split('\n')
       lines.forEach((line, i) => {
         for (const rule of RULES) {

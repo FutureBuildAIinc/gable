@@ -61,8 +61,8 @@ func (w *tileWorld) counterSale(branch, product uuid.UUID, qty int) {
 	w.exec(`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, currency, completed_at)
 		VALUES ($1, 'TILEREG', $2, 'COMPLETED', $3, 'USD', NOW())`, tx, uuid.New(), branch)
 	w.exec(`INSERT INTO pos_line_items (transaction_id, product_id, description, quantity, uom, price_uom, uom_qty,
-			price_uom_qty, unit_price, line_total, line_type, price_source)
-		VALUES ($1, $2, 'sold', $3, 'PCS', 'PCS', 1, 1, 1, $3, 'PRODUCT', 'PRICE_LIST')`, tx, product, qty)
+			price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, line_type, price_source)
+		VALUES ($1, $2, 'sold', $3, 'PCS', 'PCS', 1, 1, 'PCS', $3, 1, $3, 'PRODUCT', 'PRICE_LIST')`, tx, product, qty)
 }
 
 // invoiceSale records one order invoice of one product at a yard.
@@ -76,8 +76,8 @@ func (w *tileWorld) invoiceSale(branch, customer, product uuid.UUID, qty int, st
 	w.exec(`INSERT INTO invoices (id, customer_id, status, branch_id, total_amount, amount_open, origin`+voided+`)
 		VALUES ($1, $2, $3, $4, 0, 0, $5`+map[bool]string{true: ", NOW()", false: ""}[voided != ""]+`)`, inv, customer, status, branch, origin)
 	w.exec(`INSERT INTO invoice_lines (invoice_id, product_id, description, quantity, price_each, uom, price_uom,
-			uom_qty, price_uom_qty, unit_price, line_total, line_type)
-		VALUES ($1, $2, 'billed', $3, 1, 'PCS', 'PCS', 1, 1, 1, $3, 'PRODUCT')`, inv, product, qty)
+			uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, line_type)
+		VALUES ($1, $2, 'billed', $3, 1, 'PCS', 'PCS', 1, 1, 'PCS', $3, 1, $3, 'PRODUCT')`, inv, product, qty)
 }
 
 func (w *tileWorld) setting(value string) {

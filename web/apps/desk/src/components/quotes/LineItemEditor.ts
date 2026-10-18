@@ -166,7 +166,7 @@ export class GableLineItemEditor extends LitElement {
               @input=${(e: InputEvent) => this._price = (e.target as HTMLInputElement).value}
               @change=${this._normalisePrice}
             />
-            ${this._priceDetails && this._priceDetails.price_basis !== 'retail' ? html`
+            ${this._priceDetails && this._priceDetails.price_basis !== 'base' ? html`
               <div class="text-[10px] text-gable-green whitespace-nowrap mt-1">${this._priceDetails.details}</div>
             ` : nothing}
           </div>

@@ -15,11 +15,10 @@ import type {
     CustomerPage,
     CustomerRequest,
     CustomerUpdateRequest,
-    CustomerTier,
     EscalationPolicy,
     EscalationPolicyRequest,
     PaymentTermsRecordPage,
-    PriceLevelPage,
+    PriceProfilePage,
     ShipTo,
     ShipToPage,
     ShipToRequest,
@@ -32,7 +31,6 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 export interface ListCustomersParams {
     /** Case blind match on name, account number and email (at most 100 characters). */
     q?: string;
-    tier?: CustomerTier;
     isActive?: boolean;
     salespersonId?: string;
     limit?: number;
@@ -58,7 +56,6 @@ function toQuery(entries: [string, string | undefined | null][]): string {
 export function buildCustomerQuery(params: ListCustomersParams = {}): string {
     return toQuery([
         ['q', params.q?.trim()],
-        ['tier', params.tier],
         ['is_active', params.isActive === undefined ? undefined : String(params.isActive)],
         ['salesperson_id', params.salespersonId],
         ['limit', params.limit ? String(params.limit) : undefined],
@@ -112,9 +109,8 @@ export function customerRequestFromCustomer(c: Customer): CustomerUpdateRequest 
         email: c.email,
         phone: c.phone,
         address: c.address,
-        tier: c.tier,
         is_active: c.is_active,
-        price_level_id: c.price_level_id,
+        price_profile_id: c.price_profile_id,
         salesperson_id: c.salesperson_id,
         credit_limit_cents: c.credit_limit_cents,
         currency: c.currency,
@@ -347,9 +343,10 @@ export const CustomerService = {
         return response.json();
     },
 
-    async listPriceLevels(params: ListChildParams = {}): Promise<PriceLevelPage> {
+    /** The pricing catalogue's levels (ADR 0006 section 5.6); the price levels read the customer module served moved here. */
+    async listPriceLevels(limit = 100): Promise<PriceProfilePage> {
         const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/price_levels${buildChildQuery({ ...params, isActive: undefined })}`),
+            await fetchWithAuth(`${API_URL}/api/v1/pricing/levels?limit=${limit}`),
             'Failed to fetch price levels',
         );
         return response.json();

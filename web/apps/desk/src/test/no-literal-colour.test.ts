@@ -30,6 +30,8 @@ const ALLOWED: Allowed[] = [
   { file: 'front-door/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'work-shell/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'field-shell/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
+  { file: 'pro-portal/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
+  { file: 'pro-portal/customer.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'desk/src/lib/theme-colors.ts', value: '#00FFA3', reason: "the Industrial Dark value read when the stylesheet is not loaded yet" },
   { file: 'desk/src/pages/millwork/DoorConfigurator.ts', value: '#6D2E15', reason: "the mahogany preview border is the wood's own colour, the same in both modes" },
   { file: 'desk/src/pages/millwork/ProductConfigurator.ts', value: 'rgba(184, 134, 61, 0.2)', reason: "a wood species' own tint is data, the same in both modes" },

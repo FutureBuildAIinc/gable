@@ -470,9 +470,10 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 		t.Fatalf("seed the unlinked legacy half: %v", err)
 	}
 	mig105Apply(t, conn, target)
-	// the service reads the columns migration 114 added to the sale and the
-	// invoice; the database stops at 105 for the legacy rows only
+	// the service reads the columns migrations 114 and 123 added to the sale,
+	// its lines and the invoice; the database stops at 105 for the legacy rows only
 	mig105Apply(t, conn, "../../migrations/114_pos_sale_account_refs.sql")
+	mig105Apply(t, conn, "../../migrations/123_sales_line_units.sql")
 	// the ledger columns the service stamps on every posting (migration 125
 	// also reads tables this stage of the schema has not built yet, and there
 	// is nothing to backfill here)
