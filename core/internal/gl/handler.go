@@ -13,6 +13,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/actor"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -79,11 +80,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 }
 
 // branchRead resolves a statement read's branch parameter against the
-// caller's reach: a named branch is held to it, and a consolidated read (no
-// branch named) needs every branch's reach, so a caller held to one branch
-// is refused rather than handed a silent partial sum.
+// caller's reach. A named branch is held to it. No branch named reads the
+// request's branch header's branch when it has one (the platform's scope
+// rule: the header names the yard a request is for), else it is the
+// consolidated read, which needs every branch's reach: a caller held to some
+// branches is refused rather than handed a silent partial sum.
 func (h *Handler) branchRead(w http.ResponseWriter, r *http.Request, raw string) (*uuid.UUID, bool) {
 	if raw == "" {
+		if b := middleware.BranchIDForQuery(r.Context()); b != nil {
+			return b, true
+		}
 		return nil, h.everyBranch(w, r, "a consolidated read")
 	}
 	id, err := uuid.Parse(raw)
@@ -98,12 +104,12 @@ func (h *Handler) branchRead(w http.ResponseWriter, r *http.Request, raw string)
 	return &id, true
 }
 
-// inReach holds a named branch to the caller's reach: the request's branch
-// header names the one branch it may touch, and without one the caller's
-// grants decide. A refusal is written.
+// inReach holds a named branch to the caller's reach: a caller with a branch
+// header may name only that branch (an administrator may name any), and
+// without a header the caller's grants decide. A refusal is written.
 func (h *Handler) inReach(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
 	ctx := r.Context()
-	if b := middleware.BranchIDForQuery(ctx); b != nil && *b != id {
+	if bc := branchctx.FromContext(ctx); bc != nil && bc.BranchID != nil && *bc.BranchID != id && !bc.IsAdmin {
 		h.writeGuardError(w, r, middleware.ErrPayloadBranchRefused)
 		return false
 	}
@@ -148,16 +154,18 @@ func (h *Handler) entryInReach(w http.ResponseWriter, r *http.Request) (*Journal
 	return entry, true
 }
 
-// everyBranch refuses a caller held to one branch (or to a grant list) an act
-// that spans the company: a consolidated read, a period close, the year end.
+// everyBranch refuses a caller held to some branches an act that spans the
+// company: a consolidated read, a period close, the year end. An
+// administrator, an unbound caller and a caller outside the branch middleware
+// have every branch's reach; a branch bound key or a user with grants does not.
 func (h *Handler) everyBranch(w http.ResponseWriter, r *http.Request, act string) bool {
-	ctx := r.Context()
-	if middleware.BranchIDForQuery(ctx) != nil || middleware.GrantsSubForQuery(ctx) != nil {
-		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: act + " needs every branch reach",
-			Details: []httpx.FieldError{{Field: "branch_id", Message: "this act spans every branch; a caller held to some branches may not make it"}}})
-		return false
+	bc := branchctx.FromContext(r.Context())
+	if bc == nil || bc.IsAdmin || (bc.BranchID == nil && bc.UserSub == "") {
+		return true
 	}
-	return true
+	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: act + " needs every branch reach",
+		Details: []httpx.FieldError{{Field: "branch_id", Message: "this act spans every branch; a caller held to some branches may not make it"}}})
+	return false
 }
 
 // branchWrite holds a written branch to the caller's reach the same way.

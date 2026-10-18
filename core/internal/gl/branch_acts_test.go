@@ -191,8 +191,10 @@ func TestByIdAndCompanyWideActsAreWalled(t *testing.T) {
 	t.Cleanup(func() { deleteEntriesByMemo(t, db, memo) })
 	post(t, db, svc, a, time.Date(2036, 3, 1, 0, 0, 0, 0, time.UTC), memo,
 		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 100}, gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 100})
+	post(t, db, svc, b, time.Date(2036, 3, 1, 0, 0, 0, 0, time.UTC), memo,
+		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 70}, gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 70})
 	var entryID uuid.UUID
-	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_journal_entries WHERE memo = $1`, memo).Scan(&entryID); err != nil {
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_journal_entries WHERE memo = $1 AND branch_id = $2`, memo, a).Scan(&entryID); err != nil {
 		t.Fatal(err)
 	}
 	periodID := newPeriod(t, db, "m6 wall "+uuid.NewString()[:8], "2036-04-01", "2036-04-30")
@@ -231,6 +233,23 @@ func TestByIdAndCompanyWideActsAreWalled(t *testing.T) {
 	}
 	if w := serve(header, "GET", "/api/v1/gl/trial-balance?branch_id="+b.String(), ""); w.Code != http.StatusOK {
 		t.Errorf("header branch reading its own = %d, want 200: %s", w.Code, w.Body)
+	}
+	// A header naming branch b with no branch_id reads b (the platform's scope
+	// rule), not a refusal and not the company.
+	if w := serve(header, "GET", "/api/v1/gl/trial-balance?as_of=2037-01-01", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), b.String()) || strings.Contains(w.Body.String(), a.String()) {
+		t.Errorf("header branch without branch_id = %d, want branch b's own rows: %s", w.Code, w.Body)
+	}
+	// An administrator has every branch's reach: the consolidated read, any
+	// named branch and the company wide acts.
+	admin := &branchctx.Context{UserSub: sub, IsAdmin: true}
+	if w := serve(admin, "GET", "/api/v1/gl/trial-balance?branch_id="+a.String(), ""); w.Code != http.StatusOK {
+		t.Errorf("administrator reading a named branch = %d, want 200: %s", w.Code, w.Body)
+	}
+	if w := serve(admin, "GET", "/api/v1/gl/trial-balance", ""); w.Code != http.StatusOK {
+		t.Errorf("administrator consolidated read = %d, want 200: %s", w.Code, w.Body)
+	}
+	if w := serve(admin, "POST", "/api/v1/gl/fiscal-periods/"+periodID.String()+"/close", ""); w.Code != http.StatusOK {
+		t.Errorf("administrator closing a period = %d, want 200: %s", w.Code, w.Body)
 	}
 	// An unknown entry is a 404, not a 400.
 	if w := serve(&branchctx.Context{}, "POST", "/api/v1/gl/journal-entries/"+uuid.NewString()+"/void", ""); w.Code != http.StatusNotFound {
