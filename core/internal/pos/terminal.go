@@ -5,26 +5,31 @@ package pos
 
 // The card terminal at the counter (CP-05, IX-01): a card leg goes through
 // the intent ledger, not straight at the gateway. The claim is committed
-// before any device call, the dispatch and the answer are guarded state
-// moves, the sweep turns a lease that ran out into a manager item, and the
-// C2-5 compensation and the refund claims keep their own machinery and bind
-// to the intents: every refund or void the counter takes at the gateway is
-// one terminal intent of its own beside the refund claim, so a lost answer
-// is one row a manager resolves, never a guess. The payment package's
-// terminal.go comment block writes the crash windows; the tests live in
-// terminal_counter_test.go and terminal_window_test.go.
+// before any device call, the move to pending_at_device is committed before
+// the device call too (so claimed means "never reached the device" and
+// anything that may have reached it is pending_at_device), the answer is a
+// guarded state move, the sweep turns a lease that ran out into a manager
+// item, and the C2-5 compensation and the refund claims keep their own
+// machinery and bind to the intents: every refund or void the counter takes
+// at the gateway is one terminal intent of its own beside the refund claim
+// (its leg key is the claim's id), so a lost answer is one row a manager
+// resolves, never a guess. The payment package's terminal.go comment block
+// writes the crash windows; the tests that stop the counter act at each of
+// them are terminal_crash_test.go (the claim, the dispatch move, the device
+// call and the answer) and terminal_counter_test.go.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +44,23 @@ const terminalAnswerLease = 90 * time.Second
 // pending_at_device; the cancel the desk offers is honest about the device
 // (it never claims money back), and the sweep files the manager item.
 const terminalWaitDefault = 30 * time.Second
+
+// The crash points of a card leg's act, in order. A test seam
+// (WithTerminalCrash) may stop the act at any of them to prove where the
+// intent, the sale and the money end.
+const (
+	// TerminalPointAfterClaim: the claim is committed, nothing else happened.
+	TerminalPointAfterClaim = "after_claim"
+	// TerminalPointAfterDispatchMove: the intent is pending_at_device, the
+	// device not yet called.
+	TerminalPointAfterDispatchMove = "after_dispatch_move"
+	// TerminalPointAfterDeviceCall: the device took the leg, its reference
+	// is stamped, no answer read yet.
+	TerminalPointAfterDeviceCall = "after_device_call"
+	// TerminalPointAfterAnswer: the device authorized the leg, the sale's
+	// completion transaction not yet opened.
+	TerminalPointAfterAnswer = "after_answer"
+)
 
 // WithTerminal wires the terminal device seam and its ledger. Without it the
 // counter keeps the plain gateway path (a token bearing charge through the
@@ -58,20 +80,110 @@ func (s *Service) WithTerminalWait(d time.Duration) *Service {
 	return s
 }
 
+// WithTerminalCrash wires the test seam that stops a card leg's act at one
+// of the crash points: the hook's error ends the act right there, exactly
+// as a crash would, leaving the intent, the sale and the money as they stand.
+// Production wires no hook.
+func (s *Service) WithTerminalCrash(hook func(point string) error) *Service {
+	s.terminalCrash = hook
+	return s
+}
+
+// crashAt runs the crash seam at a point of the act.
+func (s *Service) crashAt(point string) error {
+	if s.terminalCrash == nil {
+		return nil
+	}
+	return s.terminalCrash(point)
+}
+
 // terminalWired says the counter runs its card legs through the ledger.
 func (s *Service) terminalWired() bool { return s.terminal != nil && s.terminalLedger != nil }
 
+// firstNonEmpty answers the first non empty string.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// resultOfLeg reads an authorized leg as the charge the completion records.
+func resultOfLeg(in *payment.TerminalIntent) *chargeResult {
+	return &chargeResult{GatewayTxID: firstNonEmpty(in.AnswerProviderRef, in.ProviderRef), AuthCode: in.AnswerAuthCode,
+		Last4: in.AnswerLast4, Brand: in.AnswerBrand, IntentID: in.ID}
+}
+
+// attemptOf reads the attempt number of a leg key (card-0 is attempt 0,
+// card-0#2 is attempt 2).
+func attemptOf(legKey string) int {
+	if i := strings.IndexByte(legKey, '#'); i >= 0 {
+		n := 0
+		fmt.Sscanf(legKey[i+1:], "%d", &n)
+		return n
+	}
+	return 0
+}
+
+// nextCardAttempt settles which leg key a card tender claims: the first
+// attempt, a retry after a decline or a closed claim, or the authorized leg
+// a manager's resolution left on the open sale (reused, never charged
+// again). A leg that is claimed or at the device, or lost with its manager
+// item unresolved, refuses a second charge.
+func (s *Service) nextCardAttempt(ctx context.Context, sale *Sale, base string, amountCents int64) (legKey string, reuse *payment.TerminalIntent, err error) {
+	prior, err := s.terminalLedger.LatestLeg(ctx, sale.ID, base, payment.TerminalKindSale)
+	if err != nil {
+		return "", nil, err
+	}
+	if prior == nil {
+		return base, nil, nil
+	}
+	switch prior.State {
+	case payment.TerminalClaimed, payment.TerminalPendingAtDevice:
+		return "", nil, conflict("terminal_leg_in_flight",
+			"a terminal intent already holds this card leg: settle it before charging the card again")
+	case payment.TerminalAuthorized:
+		if prior.SpentAt == nil {
+			if prior.AmountCents != amountCents {
+				return "", nil, conflict("terminal_leg_amount",
+					fmt.Sprintf("the terminal already authorized %d cents for this card leg: complete the sale with that amount", prior.AmountCents))
+			}
+			return "", prior, nil
+		}
+	case payment.TerminalLost:
+		item, err := s.terminalLedger.LostItemOfIntent(ctx, prior.ID)
+		if err != nil {
+			return "", nil, err
+		}
+		if item != nil && (item.State == "open" || item.State == "resolving") {
+			return "", nil, conflict("terminal_answer_unresolved",
+				"the terminal's answer for this card leg was lost and awaits a manager: resolve it before charging the card again")
+		}
+	}
+	return fmt.Sprintf("%s#%d", base, attemptOf(prior.LegKey)+1), nil, nil
+}
+
 // chargeCardAtTerminal takes one card tender through the intent: claim
-// (committed before any device call), dispatch, wait for the answer. The
-// verdict comes back as the charge result the completion's transaction
-// records; a decline answers the card_declined refusal; a wait that runs out
-// answers terminal_answer_pending naming the intent, and the intent stays
+// (committed before any device call), the dispatch move (committed before the
+// device call too), the device call, the wait for the answer. The verdict
+// comes back as the charge result the completion's transaction records; a
+// decline answers the card_declined refusal; a wait that runs out answers
+// terminal_answer_pending naming the intent, and the intent stays
 // pending_at_device for the sweep and the desk's waiting state.
 func (s *Service) chargeCardAtTerminal(ctx context.Context, sale *Sale, legIndex int, t *TenderIn) (*chargeResult, error) {
-	legKey := fmt.Sprintf("card-%d", legIndex)
+	amount := int64(t.AmountCents)
+	legKey, reuse, err := s.nextCardAttempt(ctx, sale, fmt.Sprintf("card-%d", legIndex), amount)
+	if err != nil {
+		return nil, err
+	}
+	if reuse != nil {
+		return resultOfLeg(reuse), nil
+	}
 	intent := &payment.TerminalIntent{
 		ID: uuid.New(), TransactionID: sale.ID, LegKey: legKey, RegisterID: sale.RegisterID,
-		BranchID: sale.BranchID, AmountCents: int64(t.AmountCents), Kind: payment.TerminalKindSale,
+		BranchID: sale.BranchID, AmountCents: amount, Kind: payment.TerminalKindSale,
 		DeviceID: sale.RegisterID, IdempotencyKey: fmt.Sprintf("sale-%s-%s", sale.ID, legKey),
 		LeaseUntil: s.now().Add(terminalAnswerLease),
 	}
@@ -82,22 +194,43 @@ func (s *Service) chargeCardAtTerminal(ctx context.Context, sale *Sale, legIndex
 		}
 		return nil, err
 	}
-	receipt, err := s.terminal.Dispatch(ctx, payment.TerminalDispatch{
+	if err := s.crashAt(TerminalPointAfterClaim); err != nil {
+		return nil, err
+	}
+	// The dispatch move is committed BEFORE the device is called: from here
+	// the intent is pending_at_device whatever the call does, so the sweep
+	// files a manager item for anything that may have reached the device,
+	// and a device answer that lands at once finds an intent it can move.
+	moved, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease))
+	if err != nil {
+		return nil, err
+	}
+	if !moved {
+		// the sweep or a cancel closed the claim before the device was
+		// reached: the device is not called
+		return nil, conflict("terminal_leg_closed",
+			"the card leg was closed before the terminal was reached: charge the card again")
+	}
+	if err := s.crashAt(TerminalPointAfterDispatchMove); err != nil {
+		return nil, err
+	}
+	receipt, derr := s.terminal.Dispatch(ctx, payment.TerminalDispatch{
 		IntentID: intent.ID, Kind: intent.Kind, AmountCents: intent.AmountCents, Currency: sale.Currency,
 		RegisterID: intent.RegisterID, DeviceID: intent.DeviceID, IdempotencyKey: intent.IdempotencyKey,
 	})
-	// The dispatched move happens on both paths: a receipt carries the
-	// device's reference, and a failed dispatch carries none, but the device
-	// may still have taken the leg (a crash after the take), so the intent
-	// never stays claimed behind a dispatch that may have reached it.
-	if _, merr := s.terminalLedger.MarkDispatched(ctx, intent.ID, receipt.ProviderRef, s.now().Add(terminalAnswerLease)); merr != nil {
-		return nil, merr
+	if serr := s.terminalLedger.StampProviderRef(context.WithoutCancel(ctx), intent.ID, receipt.ProviderRef); serr != nil {
+		s.logger.Error("the device's reference was not stamped on the terminal intent",
+			"intent_id", intent.ID, "error", serr)
 	}
-	if err != nil {
+	if err := s.crashAt(TerminalPointAfterDeviceCall); err != nil {
+		return nil, err
+	}
+	if derr != nil {
 		// the dispatch failed and no verdict exists: wait the bound anyway,
 		// because a device that took the leg before failing may still answer;
 		// the wait below lands in the same terminal_answer_pending refusal.
-		_ = err
+		s.logger.Warn("the terminal dispatch failed after the claim; the leg stays pending_at_device",
+			"intent_id", intent.ID, "error", derr)
 	}
 	deadline := s.now().Add(s.terminalWait)
 	for {
@@ -107,8 +240,10 @@ func (s *Service) chargeCardAtTerminal(ctx context.Context, sale *Sale, legIndex
 		}
 		switch fresh.State {
 		case payment.TerminalAuthorized:
-			return &chargeResult{GatewayTxID: fresh.AnswerProviderRef, AuthCode: fresh.AnswerAuthCode,
-				Last4: fresh.AnswerLast4, Brand: fresh.AnswerBrand}, nil
+			if err := s.crashAt(TerminalPointAfterAnswer); err != nil {
+				return nil, err
+			}
+			return resultOfLeg(fresh), nil
 		case payment.TerminalDeclined:
 			return nil, conflict("card_declined", "the card was declined at the terminal")
 		}
@@ -124,12 +259,39 @@ func (s *Service) chargeCardAtTerminal(ctx context.Context, sale *Sale, legIndex
 	}
 }
 
+// refuseStrayAuthorizedLegs refuses a completion that leaves behind an
+// authorized card leg of its sale (the terminal took the money, a manager's
+// resolution left the leg on the open sale): the completion must use it
+// (same tender slot, same amount), never complete the sale around it.
+func (s *Service) refuseStrayAuthorizedLegs(ctx context.Context, saleID uuid.UUID, tenders []TenderIn) error {
+	legs, err := s.terminalLedger.UnspentAuthorizedLegs(ctx, saleID)
+	if err != nil {
+		return err
+	}
+	for _, leg := range legs {
+		base := leg.LegKey
+		if i := strings.IndexByte(base, '#'); i >= 0 {
+			base = base[:i]
+		}
+		idx := -1
+		if _, err := fmt.Sscanf(base, "card-%d", &idx); err != nil {
+			idx = -1
+		}
+		if idx < 0 || idx >= len(tenders) || tenders[idx].Method != TenderCard || int64(tenders[idx].AmountCents) != leg.AmountCents {
+			return conflict("authorized_leg_unused",
+				fmt.Sprintf("the terminal holds an authorized card leg of %d cents for this sale (%s): complete the sale with that card tender in the same slot", leg.AmountCents, leg.LegKey))
+		}
+	}
+	return nil
+}
+
 // terminalRefundLeg binds one gateway refund or void the counter takes to
 // the intent ledger: the claim beside the refund claim's own, dispatched
 // before the call, the verdict applied after. A nil answer means no terminal
-// is wired and the call runs exactly as before. The idempotency key is the
-// refund claim's own id, so a retried call is the same leg at the device.
-func (s *Service) terminalRefundLeg(ctx context.Context, saleID, tenderID uuid.UUID, kind string, amountCents int64, register string) *payment.TerminalIntent {
+// is wired and the call runs exactly as before. The leg key and the
+// idempotency key name the refund claim's own id, so a retried call is the
+// same leg at the device and a resolution finds its claim by the leg.
+func (s *Service) terminalRefundLeg(ctx context.Context, saleID, claimID uuid.UUID, kind string, amountCents int64, register string) *payment.TerminalIntent {
 	if !s.terminalWired() {
 		return nil
 	}
@@ -138,9 +300,9 @@ func (s *Service) terminalRefundLeg(ctx context.Context, saleID, tenderID uuid.U
 		return nil
 	}
 	intent := &payment.TerminalIntent{
-		ID: uuid.New(), TransactionID: saleID, LegKey: tenderID.String(), RegisterID: sale.RegisterID,
+		ID: uuid.New(), TransactionID: saleID, LegKey: claimID.String(), RegisterID: sale.RegisterID,
 		BranchID: sale.BranchID, AmountCents: amountCents, Kind: kind, DeviceID: sale.RegisterID,
-		IdempotencyKey: fmt.Sprintf("%s-%s", kind, tenderID), LeaseUntil: s.now().Add(terminalAnswerLease),
+		IdempotencyKey: fmt.Sprintf("%s-%s", kind, claimID), LeaseUntil: s.now().Add(terminalAnswerLease),
 	}
 	if register != "" {
 		intent.RegisterID = register
@@ -149,7 +311,38 @@ func (s *Service) terminalRefundLeg(ctx context.Context, saleID, tenderID uuid.U
 	if err := s.terminalLedger.Claim(ctx, intent); err != nil {
 		return nil
 	}
-	if _, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease)); err != nil {
+	if ok, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease)); err != nil || !ok {
+		return nil
+	}
+	return intent
+}
+
+// compensationLegPrefix marks the leg key of a C2-5 compensation void: a
+// reversal of a sale's authorized card charge when the sale's transaction
+// refused. It names a sale intent, never a refund claim.
+const compensationLegPrefix = "comp-"
+
+// terminalCompensationLeg binds the C2-5 compensation void of one authorized
+// sale leg to the ledger: a void intent beside the sale's, keyed on the sale
+// leg. A retried compensation finds its leg again.
+func (s *Service) terminalCompensationLeg(ctx context.Context, saleLeg *payment.TerminalIntent) *payment.TerminalIntent {
+	if !s.terminalWired() {
+		return nil
+	}
+	intent := &payment.TerminalIntent{
+		ID: uuid.New(), TransactionID: saleLeg.TransactionID, LegKey: compensationLegPrefix + saleLeg.LegKey,
+		RegisterID: saleLeg.RegisterID, BranchID: saleLeg.BranchID, AmountCents: saleLeg.AmountCents,
+		Kind: payment.TerminalKindVoid, DeviceID: saleLeg.DeviceID,
+		IdempotencyKey: "void-" + saleLeg.IdempotencyKey, LeaseUntil: s.now().Add(terminalAnswerLease),
+	}
+	if err := s.terminalLedger.Claim(ctx, intent); err != nil {
+		existing, gerr := s.terminalLedger.GetByKey(ctx, intent.TransactionID, intent.LegKey, intent.Kind)
+		if gerr != nil {
+			return nil
+		}
+		return existing
+	}
+	if ok, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease)); err != nil || !ok {
 		return nil
 	}
 	return intent
@@ -183,10 +376,69 @@ func (s *Service) terminalRefundVerdict(ctx context.Context, intent *payment.Ter
 	}
 }
 
+// chargeMade is one card charge the counter took before the completion's
+// transaction opened.
+type chargeMade struct {
+	result      *chargeResult
+	amountCents int64
+}
+
+// reverseCharges puts every charge made back after the completion refused or
+// a later tender failed (C2-5): a gateway charge goes back through the
+// gateway (void first, the refund when the void is refused); a terminal leg
+// goes back the same way when a gateway is wired, bound to a compensation
+// void intent of its own, and the sale leg is then spent. With no gateway
+// wired a terminal leg is left authorized on the open sale: the retried
+// completion reuses it, and the stray leg guard refuses a completion that
+// would leave it behind. The first failure of a reversal is answered, the
+// rest are still attempted.
+func (s *Service) reverseCharges(ctx context.Context, made []chargeMade, saleID uuid.UUID, actor string, cause error) error {
+	var firstErr error
+	for _, c := range made {
+		var rerr error
+		if c.result.IntentID != uuid.Nil {
+			rerr = s.reverseTerminalLeg(ctx, c, saleID, actor, cause)
+		} else {
+			rerr = s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, cause, "")
+		}
+		if rerr != nil && firstErr == nil {
+			firstErr = rerr
+		}
+	}
+	return firstErr
+}
+
+// reverseTerminalLeg reverses one authorized terminal sale leg.
+func (s *Service) reverseTerminalLeg(ctx context.Context, c chargeMade, saleID uuid.UUID, actor string, cause error) error {
+	if s.gateway == nil {
+		s.logger.Warn("the terminal leg stays authorized on the open sale: no gateway is wired to reverse it",
+			"intent_id", c.result.IntentID, "sale_id", saleID, "amount_cents", c.amountCents, "error", cause)
+		return nil
+	}
+	leg, err := s.terminalLedger.Get(ctx, c.result.IntentID)
+	if err != nil {
+		return err
+	}
+	comp := s.terminalCompensationLeg(ctx, leg)
+	rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, cause, terminalRefundKey(comp))
+	if rerr != nil {
+		// the reversal's outcome is unknown or failed: the compensation
+		// intent stays pending_at_device, so the sweep files its manager item
+		return rerr
+	}
+	s.terminalRefundVerdict(ctx, comp, true, c.result.GatewayTxID)
+	if _, err := s.terminalLedger.MarkSpent(context.WithoutCancel(ctx), leg.ID); err != nil {
+		s.logger.Error("the reversed terminal leg was not marked spent", "intent_id", leg.ID, "error", err)
+	}
+	return nil
+}
+
 // SweepTerminalIntents is the sweep act: the scheduler or the guarded route
 // runs it, and it turns intents past their lease into lost, filing one
 // manager item per dispatched leg (a claim that never reached the device is
-// simply closed). Audit row and log line name both counts.
+// simply closed). The sweep reaches the caller's branch wall: from an HTTP
+// caller it sweeps only the caller's branches; the worker's context carries
+// no branch and sweeps every branch. Audit row and log line name both counts.
 func (s *Service) SweepTerminalIntents(ctx context.Context, actor string) (*payment.SweepResult, error) {
 	if !s.terminalWired() {
 		return &payment.SweepResult{}, nil
@@ -207,20 +459,35 @@ func (s *Service) SweepTerminalIntents(ctx context.Context, actor string) (*paym
 	return res, nil
 }
 
+// holdIntentReach holds a terminal row's branch to the caller's reach before
+// any act on it: a caller whose context names another branch finds a missing
+// row, and a caller with no branch context is held to the grants it holds.
+func (s *Service) holdIntentReach(ctx context.Context, what string, branch uuid.UUID, id uuid.UUID) error {
+	if held := middleware.BranchIDForQuery(ctx); held != nil && *held != branch {
+		return httpx.NotFound(what + " not found")
+	}
+	return s.holdRecordBranch(ctx, what, &branch, id)
+}
+
 // TerminalIntentView is the desk's waiting state: where the leg stands.
 type TerminalIntentView struct {
-	ID           uuid.UUID `json:"id"`
+	ID            uuid.UUID `json:"id"`
 	TransactionID uuid.UUID `json:"transaction_id"`
-	LegKey       string    `json:"leg_key"`
-	Kind         string    `json:"kind"`
-	State        string    `json:"state"`
-	AmountCents  int64     `json:"amount_cents"`
-	ProviderRef  string    `json:"provider_ref"`
-	AnswerVerdict string   `json:"answer_verdict"`
+	LegKey        string    `json:"leg_key"`
+	Kind          string    `json:"kind"`
+	State         string    `json:"state"`
+	AmountCents   int64     `json:"amount_cents"`
+	ProviderRef   string    `json:"provider_ref"`
+	AnswerVerdict string    `json:"answer_verdict"`
+}
+
+func viewOfIntent(in *payment.TerminalIntent) *TerminalIntentView {
+	return &TerminalIntentView{ID: in.ID, TransactionID: in.TransactionID, LegKey: in.LegKey, Kind: in.Kind,
+		State: string(in.State), AmountCents: in.AmountCents, ProviderRef: in.ProviderRef, AnswerVerdict: in.AnswerVerdict}
 }
 
 // GetTerminalIntent reads one intent for the desk's waiting state, held to
-// the caller's branch wall through the sale the intent names.
+// the caller's branch wall.
 func (s *Service) GetTerminalIntent(ctx context.Context, id uuid.UUID) (*TerminalIntentView, error) {
 	if !s.terminalWired() {
 		return nil, errTerminalNotConfigured
@@ -229,11 +496,10 @@ func (s *Service) GetTerminalIntent(ctx context.Context, id uuid.UUID) (*Termina
 	if err != nil {
 		return nil, httpx.NotFound("terminal intent not found")
 	}
-	if _, err := s.repo.GetSale(ctx, in.TransactionID); err != nil {
-		return nil, httpx.NotFound("terminal intent not found")
+	if err := s.holdIntentReach(ctx, "terminal intent", in.BranchID, id); err != nil {
+		return nil, err
 	}
-	return &TerminalIntentView{ID: in.ID, TransactionID: in.TransactionID, LegKey: in.LegKey, Kind: in.Kind,
-		State: string(in.State), AmountCents: in.AmountCents, ProviderRef: in.ProviderRef, AnswerVerdict: in.AnswerVerdict}, nil
+	return viewOfIntent(in), nil
 }
 
 // CancelTerminalIntent is the desk's cancel, honest about the device: a
@@ -248,21 +514,21 @@ func (s *Service) CancelTerminalIntent(ctx context.Context, id uuid.UUID, actor 
 	if err != nil {
 		return nil, httpx.NotFound("terminal intent not found")
 	}
-	if _, err := s.repo.GetSale(ctx, in.TransactionID); err != nil {
-		return nil, httpx.NotFound("terminal intent not found")
+	if err := s.holdIntentReach(ctx, "terminal intent", in.BranchID, id); err != nil {
+		return nil, err
 	}
 	switch in.State {
 	case payment.TerminalClaimed:
 		if err := s.terminalLedger.CloseClaimedIntent(ctx, id); err != nil {
+			if errors.Is(err, payment.ErrTerminalIntentConflict) {
+				return nil, conflict("terminal_leg_in_flight",
+					"the terminal took the card leg while it was cancelled: read its state again")
+			}
 			return nil, err
 		}
 		fresh, err := s.terminalLedger.Get(ctx, id)
 		if err != nil {
 			return nil, err
-		}
-		if fresh.State != payment.TerminalLost {
-			return nil, conflict("terminal_leg_in_flight",
-				"the terminal took the card leg while it was cancelled: read its state again")
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{Action: "pos.terminal_intent.cancelled",
@@ -271,33 +537,46 @@ func (s *Service) CancelTerminalIntent(ctx context.Context, id uuid.UUID, actor 
 				return nil, fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
-		return &TerminalIntentView{ID: fresh.ID, TransactionID: fresh.TransactionID, LegKey: fresh.LegKey,
-			Kind: fresh.Kind, State: string(fresh.State), AmountCents: fresh.AmountCents}, nil
+		return viewOfIntent(fresh), nil
 	case payment.TerminalPendingAtDevice:
 		return nil, conflict("terminal_at_device",
 			"the terminal has the card leg: a cancel cannot recall it. The money may still move; the sweep files the manager item once the lease runs out")
-	default:
-		return nil, conflict("terminal_intent_settled",
-			fmt.Sprintf("the terminal intent is %s: it has already been settled", in.State))
+	case payment.TerminalAuthorized:
+		if in.SpentAt == nil {
+			return nil, conflict("terminal_authorized",
+				"the terminal authorized this card leg and the sale has not used it: complete the sale with that card tender")
+		}
 	}
+	return nil, conflict("terminal_intent_settled",
+		fmt.Sprintf("the terminal intent is %s: it has already been settled", in.State))
 }
 
 // TerminalLostItemView is one manager item of the lost answer queue.
 type TerminalLostItemView struct {
-	ID            uuid.UUID `json:"id"`
-	IntentID      uuid.UUID `json:"intent_id"`
-	BranchID      uuid.UUID `json:"branch_id"`
-	RegisterID    string    `json:"register_id"`
-	TransactionID uuid.UUID `json:"transaction_id"`
-	Kind          string    `json:"kind"`
-	AmountCents   int64     `json:"amount_cents"`
-	DeviceID      string    `json:"device_id"`
-	ProviderRef   string    `json:"provider_ref"`
-	State         string    `json:"state"`
+	ID              uuid.UUID `json:"id"`
+	IntentID        uuid.UUID `json:"intent_id"`
+	BranchID        uuid.UUID `json:"branch_id"`
+	RegisterID      string    `json:"register_id"`
+	TransactionID   uuid.UUID `json:"transaction_id"`
+	Kind            string    `json:"kind"`
+	AmountCents     int64     `json:"amount_cents"`
+	DeviceID        string    `json:"device_id"`
+	ProviderRef     string    `json:"provider_ref"`
+	State           string    `json:"state"`
+	LateVerdict     string    `json:"late_verdict"`
+	LateProviderRef string    `json:"late_provider_ref"`
+}
+
+func viewOfItem(it *payment.TerminalLostItem) TerminalLostItemView {
+	return TerminalLostItemView{ID: it.ID, IntentID: it.IntentID, BranchID: it.BranchID, RegisterID: it.RegisterID,
+		TransactionID: it.TransactionID, Kind: it.Kind, AmountCents: it.AmountCents, DeviceID: it.DeviceID,
+		ProviderRef: it.ProviderRef, State: it.State, LateVerdict: it.LateVerdict, LateProviderRef: it.LateProviderRef}
 }
 
 // ListTerminalLostItems answers the open manager items of the lost answer
-// queue, held to the caller's branch wall.
+// queue, held to the caller's branch wall in the query itself: with a context
+// branch only that branch's rows, with none and a user only the branches the
+// user is granted.
 func (s *Service) ListTerminalLostItems(ctx context.Context) ([]TerminalLostItemView, error) {
 	if !s.terminalWired() {
 		return nil, errTerminalNotConfigured
@@ -306,282 +585,30 @@ func (s *Service) ListTerminalLostItems(ctx context.Context) ([]TerminalLostItem
 	if err != nil {
 		return nil, err
 	}
-	var out []TerminalLostItemView
-	for _, it := range items {
-		// the branch wall: an item whose sale the caller's branch context
-		// hides is not the caller's to see
-		if _, err := s.repo.GetSale(ctx, it.TransactionID); err != nil {
-			continue
-		}
-		out = append(out, TerminalLostItemView{ID: it.ID, IntentID: it.IntentID, BranchID: it.BranchID,
-			RegisterID: it.RegisterID, TransactionID: it.TransactionID, Kind: it.Kind, AmountCents: it.AmountCents,
-			DeviceID: it.DeviceID, ProviderRef: it.ProviderRef, State: it.State})
+	out := make([]TerminalLostItemView, 0, len(items))
+	for i := range items {
+		out = append(out, viewOfItem(&items[i]))
 	}
 	return out, nil
-}
-
-// ResolveTerminalLostItemIn is a manager's resolution of one lost answer.
-type ResolveTerminalLostItemIn struct {
-	Outcome   string // "authorized" or "declined"
-	Reference string // the terminal's own record the manager read
-	Reason    string
 }
 
 // errTerminalNotConfigured is the refusal of the terminal routes when the
 // counter runs no terminal.
 var errTerminalNotConfigured = httpx.Unavailable("this counter runs no card terminal")
 
-// ResolveTerminalLostItem settles one lost answer the way the terminal's own
-// record says (a manager only): authorized applies the tender to the sale it
-// belongs to, or refunds it when the sale is gone; declined closes the item
-// and moves nothing. Both legs write one audit row naming the person, the
-// item, the outcome and the reference.
-func (s *Service) ResolveTerminalLostItem(ctx context.Context, itemID uuid.UUID, in ResolveTerminalLostItemIn, actor string) (*TerminalLostItemView, error) {
-	if !s.terminalWired() || s.ar == nil {
-		return nil, errTerminalNotConfigured
-	}
-	if in.Outcome != "authorized" && in.Outcome != "declined" {
-		return nil, invalid("outcome", "must be authorized or declined")
-	}
-	item, err := s.terminalLedger.LostItem(ctx, itemID)
-	if err != nil {
-		return nil, httpx.NotFound("lost item not found")
-	}
-	// the branch wall, the record arm: the item's branch is held to the
-	// caller's grants before either leg runs
-	if err := s.holdRecordBranch(ctx, "lost item", &item.BranchID, itemID); err != nil {
-		return nil, err
-	}
-	view := TerminalLostItemView{ID: item.ID, IntentID: item.IntentID, BranchID: item.BranchID,
-		RegisterID: item.RegisterID, TransactionID: item.TransactionID, Kind: item.Kind,
-		AmountCents: item.AmountCents, DeviceID: item.DeviceID, ProviderRef: item.ProviderRef}
-	entry := audit.Entry{Action: "pos.terminal_lost_item.resolved", EntityType: "pos_transaction",
-		EntityID: item.TransactionID, UserID: actor,
-		Changes: map[string]any{"item_id": item.ID, "intent_id": item.IntentID, "kind": item.Kind,
-			"amount_cents": item.AmountCents, "outcome": in.Outcome, "reference": in.Reference, "reason": in.Reason}}
-	switch in.Outcome {
-	case "declined":
-		view.State = "resolved_declined"
-		if err := s.inTx(ctx, func(ctx context.Context) error {
-			ok, err := s.terminalLedger.ResolveLostItemDeclined(ctx, itemID, actor, in.Reference)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return conflict("lost_item_settled", "the lost item was already resolved")
-			}
-			if s.auditLog != nil {
-				if err := s.auditLog.Log(ctx, entry); err != nil {
-					return fmt.Errorf("failed to write the resolution audit row: %w", err)
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		return &view, nil
-	case "authorized":
-		view.State = "resolved_authorized"
-		intent, err := s.terminalLedger.Get(ctx, item.IntentID)
-		if err != nil {
-			return nil, err
-		}
-		sale, err := s.repo.GetSale(ctx, item.TransactionID)
-		if err != nil {
-			return nil, err
-		}
-		switch intent.Kind {
-		case payment.TerminalKindSale:
-			return s.resolveSaleIntent(ctx, item, intent, sale, in, view, entry)
-		case payment.TerminalKindRefund, payment.TerminalKindVoid:
-			return s.resolveRefundIntent(ctx, item, intent, sale, in, view, entry)
-		}
-		return nil, conflict("terminal_kind", "the intent names no kind the counter can resolve")
-	}
-	return nil, invalid("outcome", "must be authorized or declined")
+// reversalFailure is the 502 of a charge the terminal took and the gateway
+// could not put back.
+func reversalFailure(ref string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusBadGateway, Code: httpx.CodeChargeNotReversed, Operator: true,
+		Message: fmt.Sprintf("the terminal charged and the reversal failed; finance must reconcile terminal reference %s", ref)}
 }
 
-// resolveSaleIntent applies an authorized sale leg the completion never
-// took: the sale still completed through other means keeps its invoice, and
-// the money is recorded against it; a sale that never completed (or was
-// voided) gives the money back through the gateway, the C2-5 way, and only
-// then closes the item.
-func (s *Service) resolveSaleIntent(ctx context.Context, item *payment.TerminalLostItem, intent *payment.TerminalIntent,
-	sale *Sale, in ResolveTerminalLostItemIn, view TerminalLostItemView, entry audit.Entry) (*TerminalLostItemView, error) {
-	if sale.Status != StatusCompleted || sale.InvoiceID == nil {
-		// the sale is gone: the money goes back the way a refused charge goes
-		// back (the same day void first, the refund when the void is
-		// refused), outside the transaction, before the item closes
-		if intent.AnswerProviderRef == "" && intent.ProviderRef == "" {
-			return nil, conflict("no_provider_reference",
-				"the intent carries no provider reference to reverse: reconcile it by hand")
-		}
-		ref := intent.AnswerProviderRef
-		if ref == "" {
-			ref = intent.ProviderRef
-		}
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
-		defer cancel()
-		if _, voidErr := payment.VoidUnderKey(rctx, s.gateway, ref, intent.IdempotencyKey); voidErr != nil {
-			if _, refundErr := payment.RefundUnderKey(rctx, s.gateway, ref, intent.AmountCents, intent.IdempotencyKey); refundErr != nil {
-				return nil, &httpx.Error{Status: http.StatusBadGateway, Code: httpx.CodeChargeNotReversed, Operator: true,
-					Message: fmt.Sprintf("the terminal charged and the reversal failed; finance must reconcile terminal reference %s", ref)}
-			}
-		}
-		if err := s.inTx(ctx, func(ctx context.Context) error {
-			ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
-			if err != nil || !ok {
-				if err == nil {
-					return conflict("lost_item_settled", "the lost item was already resolved")
-				}
-				return err
-			}
-			return s.writeResolveAudit(ctx, entry)
-		}); err != nil {
-			return nil, err
-		}
-		return &view, nil
+// derefUUID answers the pointed id or the nil uuid.
+func derefUUID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
 	}
-	// the sale completed: record the money against its invoice and the
-	// tender row the completion never wrote, in one transaction with the
-	// item's close, the audit row and the events
-	err := s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockSale(ctx, sale.ID); err != nil {
-			return err
-		}
-		date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
-		if err != nil {
-			return err
-		}
-		// what the invoice still owes bounds the application: the rest of
-		// the money records as unapplied credit on the account (the sale
-		// may have been paid another way while the answer was lost)
-		var open int64
-		if err := s.db.GetExecutor(ctx).QueryRow(ctx,
-			`SELECT ROUND(amount_open * 100)::bigint FROM invoices WHERE id = $1`, *sale.InvoiceID).Scan(&open); err != nil {
-			return err
-		}
-		apply := intent.AmountCents
-		if apply > open {
-			apply = open
-		}
-		var applications []account.ApplyLine
-		if apply > 0 {
-			applications = append(applications, account.ApplyLine{InvoiceID: *sale.InvoiceID, AmountCents: apply})
-		}
-		customerID := derefUUID(sale.CustomerID)
-		if sale.CustomerID == nil {
-			// the walk-in customer backs a sale that names none, the way the
-			// completion's own transaction does
-			walkIn, _, err := s.repo.WalkInCustomer(ctx)
-			if err != nil {
-				return err
-			}
-			customerID = walkIn
-		}
-		payID, fx, err := s.ar.RecordPayment(ctx, account.RecordPaymentIn{
-			CustomerID: customerID, BranchID: sale.BranchID, Currency: sale.Currency,
-			Method: "CARD", AmountCents: intent.AmountCents, Reference: in.Reference, ReceivedOn: date,
-			Actor: entry.UserID, Card: &account.CardFacts{GatewayTxID: intent.AnswerProviderRef,
-				GatewayStatus: "SETTLED", Last4: intent.AnswerLast4, Brand: intent.AnswerBrand, AuthCode: intent.AnswerAuthCode},
-			Applications: applications,
-		})
-		if err != nil {
-			return err
-		}
-		tender := &Tender{SaleID: sale.ID, Method: TenderCard, AmountCents: httpx.Cents(intent.AmountCents), PaymentID: &payID}
-		g, a, l, b := intent.AnswerProviderRef, intent.AnswerAuthCode, intent.AnswerLast4, intent.AnswerBrand
-		tender.GatewayTxID, tender.AuthCode, tender.CardLast4, tender.CardBrand = &g, &a, &l, &b
-		if err := s.repo.AddTender(ctx, tender); err != nil {
-			return err
-		}
-		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return conflict("lost_item_settled", "the lost item was already resolved")
-		}
-		if err := s.writeResolveAudit(ctx, entry); err != nil {
-			return err
-		}
-		if fx != nil {
-			for _, ev := range fx.Events() {
-				if err := s.recordEvent(ctx, ev); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &view, nil
-}
-
-// resolveRefundIntent books an authorized refund or void leg the books never
-// took: the tender the leg names still holds a posted payment, and the
-// refund is recorded against it under the provider's own reference, in one
-// transaction with the item's close, the audit row and the events.
-func (s *Service) resolveRefundIntent(ctx context.Context, item *payment.TerminalLostItem, intent *payment.TerminalIntent,
-	sale *Sale, in ResolveTerminalLostItemIn, view TerminalLostItemView, entry audit.Entry) (*TerminalLostItemView, error) {
-	var out *TerminalLostItemView
-	err := s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockSale(ctx, sale.ID); err != nil {
-			return err
-		}
-		tenderID, err := uuid.Parse(intent.LegKey)
-		if err != nil {
-			return conflict("terminal_leg", "the intent's leg names no tender of the sale")
-		}
-		tenders, err := s.repo.GetTenders(ctx, sale.ID)
-		if err != nil {
-			return err
-		}
-		var tender *Tender
-		for i := range tenders {
-			if tenders[i].ID == tenderID {
-				tender = &tenders[i]
-			}
-		}
-		if tender == nil || tender.PaymentID == nil {
-			return conflict("tender_refunded", "the intent names no card tender the sale still holds")
-		}
-		date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
-		if err != nil {
-			return err
-		}
-		_, fx, err := s.ar.RefundPayment(ctx, account.RefundPaymentIn{
-			PaymentID: *tender.PaymentID, AmountCents: intent.AmountCents, Reason: in.Reason,
-			GatewayRefundID: intent.AnswerProviderRef, Actor: entry.UserID, On: date})
-		if err != nil {
-			return err
-		}
-		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return conflict("lost_item_settled", "the lost item was already resolved")
-		}
-		if err := s.writeResolveAudit(ctx, entry); err != nil {
-			return err
-		}
-		if fx != nil {
-			for _, ev := range fx.Events() {
-				if err := s.recordEvent(ctx, ev); err != nil {
-					return err
-				}
-			}
-		}
-		out = &view
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return *id
 }
 
 // writeResolveAudit writes the resolution audit row inside the leg's
@@ -594,12 +621,4 @@ func (s *Service) writeResolveAudit(ctx context.Context, entry audit.Entry) erro
 		return fmt.Errorf("failed to write the resolution audit row: %w", err)
 	}
 	return nil
-}
-
-// derefUUID answers the pointed id or the nil uuid.
-func derefUUID(id *uuid.UUID) uuid.UUID {
-	if id == nil {
-		return uuid.Nil
-	}
-	return *id
 }

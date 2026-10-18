@@ -179,7 +179,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 					ids = append(ids, id.String())
 				}
 				return conflict("terminal_intent_in_flight",
-					fmt.Sprintf("a card terminal intent of this register is still in flight (intents %s): settle each at POST /api/v1/pos/terminal-intents/{id} before closing the drawer",
+					fmt.Sprintf("a card terminal intent of this register is still in flight (intents %s): cancel a claim the terminal never reached at POST /api/v1/pos/terminal-intents/{id}/cancel, and sweep the lapsed ones at POST /api/v1/pos/terminal-intents/sweep, before closing the drawer",
 						strings.Join(ids, ", ")))
 			}
 		}

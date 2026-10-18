@@ -97,6 +97,7 @@ type Service struct {
 	terminal       payment.TerminalProvider
 	terminalLedger *payment.TerminalLedger
 	terminalWait   time.Duration
+	terminalCrash  func(point string) error
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).

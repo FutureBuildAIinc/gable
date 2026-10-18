@@ -36,6 +36,9 @@ var ErrTaxProviderUnavailable = &httpx.Error{Status: http.StatusServiceUnavailab
 // chargeResult is a gateway charge made before the transaction opened.
 type chargeResult struct {
 	GatewayTxID, AuthCode, Last4, Brand string
+	// IntentID names the terminal intent behind a charge the terminal took
+	// (the nil uuid for a gateway token charge).
+	IntentID uuid.UUID
 }
 
 // providerTax is the provider's answer, priced before the transaction with
@@ -219,9 +222,10 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	// tender whose charge is declined or fails reverses every charge the
 	// tenders before it already took (fourth review P1-3): no card is left
 	// charged behind a sale that never was.
-	type chargeMade struct {
-		result      *chargeResult
-		amountCents int64
+	if s.terminalWired() {
+		if err := s.refuseStrayAuthorizedLegs(ctx, saleID, tenders); err != nil {
+			return nil, err
+		}
 	}
 	var chargesMade []chargeMade
 	charges := make([]*chargeResult, len(tenders))
@@ -238,14 +242,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		if s.terminalWired() {
 			res, err := s.chargeCardAtTerminal(ctx, pre, i, t)
 			if err != nil {
-				var firstErr error
-				for _, c := range chargesMade {
-					if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
-						firstErr = rerr
-					}
-				}
-				if firstErr != nil {
-					return nil, firstErr
+				if rerr := s.reverseCharges(ctx, chargesMade, saleID, actor, err); rerr != nil {
+					return nil, rerr
 				}
 				return nil, err
 			}
@@ -266,14 +264,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			// every one of them (a reversal that fails must not leave the
 			// later charges standing): the first failure is answered, the
 			// rest are still attempted
-			var firstErr error
-			for _, c := range chargesMade {
-				if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
-					firstErr = rerr
-				}
-			}
-			if firstErr != nil {
-				return nil, firstErr
+			if rerr := s.reverseCharges(ctx, chargesMade, saleID, actor, err); rerr != nil {
+				return nil, rerr
 			}
 			if err != nil {
 				return nil, fmt.Errorf("card charge failed: %w", err)
@@ -292,14 +284,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		// (a reversal that fails must not leave the later charges standing)
 		// and a reversal that fails too answers 502 charge_not_reversed
 		// instead of the refusal.
-		var firstErr error
-		for _, c := range chargesMade {
-			if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
-				firstErr = rerr
-			}
-		}
-		if firstErr != nil {
-			return nil, firstErr
+		if rerr := s.reverseCharges(ctx, chargesMade, saleID, actor, err); rerr != nil {
+			return nil, rerr
 		}
 		return nil, err
 	}
@@ -664,6 +650,17 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				g, a, l, b := charges[i].GatewayTxID, charges[i].AuthCode, charges[i].Last4, charges[i].Brand
 				tender.GatewayTxID, tender.AuthCode = &g, &a
 				tender.CardLast4, tender.CardBrand = &l, &b
+				// the terminal leg's money is booked in this transaction: the
+				// leg is spent with it, so it can back no second sale
+				if charges[i].IntentID != uuid.Nil {
+					spent, err := s.terminalLedger.MarkSpent(ctx, charges[i].IntentID)
+					if err != nil {
+						return err
+					}
+					if !spent {
+						return conflict("terminal_leg_spent", "the terminal leg this tender names was already booked")
+					}
+				}
 			}
 			if err := s.repo.AddTender(ctx, tender); err != nil {
 				return err

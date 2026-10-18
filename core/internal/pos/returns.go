@@ -623,7 +623,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
-		termLeg := s.terminalRefundLeg(ctx, claim.intent.SaleID, claim.intent.TenderID, payment.TerminalKindRefund, claim.intent.AmountCents, "")
+		termLeg := s.terminalRefundLeg(ctx, claim.intent.SaleID, claim.intent.ID, payment.TerminalKindRefund, claim.intent.AmountCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
 		res, err := payment.RefundUnderKey(callCtx, s.gateway, *target.GatewayTxID, claim.intent.AmountCents, terminalRefundKey(termLeg))
 		cancel()

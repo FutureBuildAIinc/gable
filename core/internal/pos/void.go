@@ -189,7 +189,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		// beside the refund claim's own, dispatched before the call, the
 		// verdict applied after; the call itself carries the intent's
 		// idempotency key, so a retry is the same leg at the device.
-		termLeg := s.terminalRefundLeg(ctx, intents[i].SaleID, intents[i].TenderID, payment.TerminalKindVoid, intents[i].AmountCents, "")
+		termLeg := s.terminalRefundLeg(ctx, intents[i].SaleID, intents[i].ID, payment.TerminalKindVoid, intents[i].AmountCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
 		res, err := payment.RefundUnderKey(callCtx, s.gateway, intents[i].GatewayTxID, intents[i].AmountCents, terminalRefundKey(termLeg))
 		cancel()

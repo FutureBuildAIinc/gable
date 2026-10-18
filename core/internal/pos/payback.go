@@ -163,7 +163,7 @@ func (s *Service) PaybackRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	}
 	// The terminal call, bounded: every path it can take ends inside the
 	// bound, so the claim it holds never sits in flight past its lease.
-	termLeg := s.terminalRefundLeg(ctx, claim.SaleID, claim.TenderID, payment.TerminalKindRefund, claim.AmountCents, "")
+	termLeg := s.terminalRefundLeg(ctx, claim.SaleID, claim.ID, payment.TerminalKindRefund, claim.AmountCents, "")
 	callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
 	res, err := payment.RefundUnderKey(callCtx, s.gateway, claim.GatewayTxID, claim.AmountCents, terminalRefundKey(termLeg))
 	cancel()
