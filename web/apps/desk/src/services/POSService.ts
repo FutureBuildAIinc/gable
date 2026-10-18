@@ -391,6 +391,18 @@ export const posService = {
         return response.json();
     },
 
+    async reopenBranchDay(closeID: string, reason: string): Promise<BranchDay> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/${closeID}/reopen`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason }),
+            }),
+            'Failed to reopen the branch day',
+        );
+        return response.json();
+    },
+
     async depositCandidates(closeID: string): Promise<DepositCandidate[]> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/${closeID}/deposit-candidates`),

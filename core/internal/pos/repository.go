@@ -113,6 +113,7 @@ type Repository interface {
 	GetDayCloseByID(ctx context.Context, id uuid.UUID, forUpdate bool) (*DayClose, error)
 	CreateDayClose(ctx context.Context, c *DayClose) error
 	MatchDayClose(ctx context.Context, id uuid.UUID, m *DepositMatch) error
+	DeleteDayClose(ctx context.Context, id uuid.UUID) error
 	// BranchToday is the branch's business date now in its own zone.
 	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 

@@ -308,6 +308,7 @@ GET	/api/v1/pos/end-of-day	internal/pos	h.GetBranchDay
 POST	/api/v1/pos/end-of-day/close	internal/pos	h.CloseBranchDay
 GET	/api/v1/pos/end-of-day/{id}/deposit-candidates	internal/pos	h.ListDepositCandidates
 POST	/api/v1/pos/end-of-day/{id}/deposit-match	internal/pos	h.MatchDeposit
+POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
 POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent

@@ -328,3 +328,30 @@ func (h *Handler) MatchDeposit(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, c)
 }
+
+// ReopenBranchDay is POST /pos/end-of-day/{id}/reopen.
+func (h *Handler) ReopenBranchDay(w http.ResponseWriter, r *http.Request) {
+	// a reopen is a person's act, as the close is
+	if _, ok := cashierOf(w, r); !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req dayReopenRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+	day, err := h.service.ReopenBranchDay(r.Context(), id, reason, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, day)
+}

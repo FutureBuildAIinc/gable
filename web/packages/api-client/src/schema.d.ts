@@ -5226,6 +5226,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/end-of-day/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a closed branch day
+         * @description Reopens a closed branch day for a late drawer or a correction. Under the branch's day lock, the close's deposit entry is reversed (a reversal entry naming it, dated the branch's today; a closed fiscal period is 409 period_closed), the close is removed so the day closes again like any open day, and the audit row (with the reason) and till.day_reopened are written, all in one transaction. A blank reason is a 400. A day whose deposit is matched to a bank statement line cannot reopen: 409 deposit_already_matched. A close the caller's branch context hides answers 404; a caller with no branch in context and no grant for it, 403. Finance and owner only, never a machine key.
+         */
+        post: operations["posEndOfDayReopen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/end-of-day/{id}/deposit-candidates": {
         parameters: {
             query?: never;
@@ -12923,6 +12943,10 @@ export interface components {
              * @description The bank account the deposit goes to; required when cash and checks are to be deposited.
              */
             bank_account_id?: string | null;
+        };
+        PosEndOfDayReopenRequest: {
+            /** @description Why the day reopens; not blank. */
+            reason: string;
         };
         PosDepositMatchRequest: {
             /** Format: uuid */
@@ -26331,6 +26355,43 @@ export interface operations {
                 headers: {
                     /** @description The day's summary route. */
                     Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosBranchDay"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayReopen: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosEndOfDayReopenRequest"];
+            };
+        };
+        responses: {
+            /** @description The reopened branch day, close null. */
+            200: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

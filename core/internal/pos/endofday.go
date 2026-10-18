@@ -25,6 +25,7 @@ import (
 const (
 	EventBranchDayClosed   = "till.day_closed"
 	EventDepositMatched    = "till.deposit_matched"
+	EventBranchDayReopened = "till.day_reopened"
 	dayCandidateSpanBefore = 3
 	dayCandidateSpanAfter  = 10
 	dayCandidateLimit      = 20
@@ -554,4 +555,77 @@ func (s *Service) postDeposit(ctx context.Context, c *DayClose, day *BranchDay, 
 		c.GLEntryID = &entry.ID
 	}
 	return nil
+}
+
+// ReopenBranchDay reopens a closed branch day (CP-09) for a late drawer or a
+// correction: under the branch's day lock, the close's deposit entry is
+// reversed (a reversal naming it, dated the branch's today), the close is
+// removed, and the audit row (with the reason) and till.day_reopened are
+// written, all in one transaction. A day whose deposit is matched to a bank
+// statement line cannot reopen (409 deposit_already_matched): the bank
+// already holds it. The day then closes again like any open day.
+func (s *Service) ReopenBranchDay(ctx context.Context, closeID uuid.UUID, reason, actor string) (*BranchDay, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, invalid("reason", "is required: why the day reopens")
+	}
+	if err := s.holdDayCloseBranch(ctx, closeID); err != nil {
+		return nil, err
+	}
+	branch, found, err := s.repo.DayCloseBranch(ctx, closeID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, httpx.NotFound("branch day close not found")
+	}
+	var out *BranchDay
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		// the branch's day lock first, as the close and a drawer opening take it
+		if err := s.repo.LockBranchDay(ctx, branch); err != nil {
+			return err
+		}
+		c, err := s.repo.GetDayCloseByID(ctx, closeID, true)
+		if err != nil {
+			return err
+		}
+		if c.DepositMatch != nil {
+			return conflict("deposit_already_matched", "this day's deposit is already matched to a bank statement line: it cannot reopen")
+		}
+		if c.GLEntryID != nil && s.ledger != nil {
+			today, err := s.repo.BranchToday(ctx, branch)
+			if err != nil {
+				return err
+			}
+			if _, err := s.ledger.PostReversal(ctx, gl.ReversalInput{EntryID: *c.GLEntryID, EntryDate: today,
+				Reason: "branch day reopened: " + reason, PostedBy: actorOrSystem(actor)}); err != nil {
+				return ledgerRefusal(err, "failed to reverse the branch deposit")
+			}
+		}
+		if err := s.repo.DeleteDayClose(ctx, c.ID); err != nil {
+			return err
+		}
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{Action: "pos.day.reopened", EntityType: "till_day_close", EntityID: c.ID, UserID: actor,
+				Changes: map[string]any{"branch_id": branch, "business_date": c.BusinessDate, "reason": reason,
+					"deposit_slip_ref": c.DepositSlipRef, "reversed_entry_id": c.GLEntryID}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+		}
+		b := branch
+		if err := s.recordEvent(ctx, outbox.Event{Type: EventBranchDayReopened, EntityType: "till_day_close", EntityID: c.ID, BranchID: &b,
+			Data: eventJSON(map[string]any{"branch_id": branch, "business_date": c.BusinessDate, "reason": reason})}); err != nil {
+			return err
+		}
+		day, err := s.branchDay(ctx, branch, c.BusinessDate)
+		if err != nil {
+			return err
+		}
+		out = day
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

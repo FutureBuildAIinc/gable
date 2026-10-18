@@ -255,6 +255,8 @@ func ledgerRefusal(err error, what string) error {
 	switch {
 	case errors.Is(err, gl.ErrPeriodClosed) || strings.Contains(err.Error(), "closed fiscal period"):
 		return conflict("period_closed", "the entry would be dated into a closed fiscal period")
+	case errors.Is(err, gl.ErrAlreadyReversed) || errors.Is(err, gl.ErrNotPosted):
+		return conflict("deposit_entry_reversed", "the deposit entry is already reversed or no longer posted")
 	case errors.Is(err, gl.ErrAccountMissing):
 		return conflict("account_missing", "the chart of accounts lacks an account this entry posts to: "+err.Error())
 	}

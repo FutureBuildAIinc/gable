@@ -44,6 +44,8 @@ export class GableBranchDay extends LitElement {
     @state() private busy = false;
     @state() private candidates: DepositCandidate[] | null = null;
     @state() private chosen = '';
+    /** The reopen: the reason being typed, or null while the action is not open. */
+    @state() private reopening: string | null = null;
 
     private unsubscribe: (() => void) | null = null;
     /** Counts loads; an answer to an older one is dropped. */
@@ -117,6 +119,28 @@ export class GableBranchDay extends LitElement {
         }
     }
 
+    private async reopenDay() {
+        const close = this.day?.close;
+        const reason = (this.reopening ?? '').trim();
+        if (!close) return;
+        if (reason === '') {
+            this.failure = 'Say why the day reopens.';
+            return;
+        }
+        try {
+            this.busy = true;
+            this.failure = '';
+            this.day = await posService.reopenBranchDay(close.id, reason);
+            this.reopening = null;
+            this.candidates = null;
+            ToastService.show(`${formatDay(close.business_date)} reopened for the branch`, 'success');
+        } catch (err: unknown) {
+            this.failure = err instanceof Error ? err.message : 'Failed to reopen the branch day';
+        } finally {
+            this.busy = false;
+        }
+    }
+
     private async findLines() {
         const close = this.day?.close;
         if (!close) return;
@@ -168,6 +192,18 @@ export class GableBranchDay extends LitElement {
                         on ${formatDateTime(close.closed_at)}, deposit slip
                         <span class="font-mono text-white" data-testid="day-slip">${close.deposit_slip_ref}</span>.
                     </p>
+                    ${m ? nothing : this.reopening === null ? html`
+                        <button data-testid="day-reopen" @click=${() => { this.reopening = ''; this.failure = ''; }} ?disabled=${this.busy}
+                            class="px-4 py-2 rounded border border-zinc-700 text-zinc-200 text-sm font-bold">Reopen the day</button>` : html`
+                        <div class="flex flex-wrap items-center gap-3" data-testid="day-reopen-form">
+                            <input type="text" placeholder="Why the day reopens" data-testid="day-reopen-reason" .value=${this.reopening}
+                                @input=${(e: Event) => { this.reopening = (e.target as HTMLInputElement).value; }}
+                                class="flex-1 min-w-[16rem] px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white" />
+                            <button data-testid="day-reopen-confirm" @click=${() => this.reopenDay()} ?disabled=${this.busy}
+                                class="px-4 py-2 rounded bg-amber-500 text-black text-sm font-bold">Reopen</button>
+                            <button data-testid="day-reopen-cancel" @click=${() => { this.reopening = null; this.failure = ''; }}
+                                class="px-4 py-2 rounded border border-zinc-700 text-zinc-200 text-sm">Cancel</button>
+                        </div>`}
                     ${m ? html`
                         <div class="p-4 bg-black/20 rounded border border-white/5" data-testid="deposit-matched">
                             <p class="text-zinc-300">

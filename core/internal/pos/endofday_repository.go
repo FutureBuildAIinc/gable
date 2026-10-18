@@ -233,3 +233,16 @@ func (r *PostgresRepository) DayCloseBranch(ctx context.Context, id uuid.UUID) (
 	}
 	return branch, true, nil
 }
+
+// DeleteDayClose removes a close that is being reopened, inside the reopen's
+// transaction; the audit row, the event and the reversal entry keep its story.
+func (r *PostgresRepository) DeleteDayClose(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.ex(ctx).Exec(ctx, `DELETE FROM till_day_closes WHERE id = $1 AND bank_transaction_id IS NULL`, id)
+	if err != nil {
+		return fmt.Errorf("failed to reopen the branch day: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return conflict("deposit_already_matched", "this day's deposit is already matched to a bank statement line")
+	}
+	return nil
+}

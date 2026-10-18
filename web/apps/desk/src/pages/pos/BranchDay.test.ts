@@ -161,6 +161,58 @@ describe('the branch end of day', () => {
     expect(text(el)).toBe('');
   });
 
+  it('reopens a closed day with the reason, and the card is open again', async () => {
+    handler = (method) => (method === 'POST' ? jsonResponse(day()) : jsonResponse(day({ close: closed })));
+    const el = await mountAsync<GableBranchDay>('gable-branch-day');
+    // a blank reason is said, not sent
+    q<HTMLButtonElement>(el, '[data-testid="day-reopen"]').click();
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="day-reopen-confirm"]').click();
+    await flush();
+    await update(el, {});
+    expect(text(q(el, '[data-testid="branch-day-error"]'))).toContain('Say why');
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+    const reason = q<HTMLInputElement>(el, '[data-testid="day-reopen-reason"]');
+    reason.value = 'a late drawer';
+    reason.dispatchEvent(new Event('input', { bubbles: true }));
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="day-reopen-confirm"]').click();
+    await flush();
+    await update(el, {});
+    const post = requests.find((r) => r.method === 'POST');
+    expect(post?.url).toContain('/api/v1/pos/end-of-day/c-1/reopen');
+    expect(post?.body).toEqual({ reason: 'a late drawer' });
+    expect(el.querySelector('[data-testid="day-closed"]')).toBeNull();
+    expect(el.querySelector('[data-testid="day-close"]')).not.toBeNull();
+  });
+
+  it('shows the server\'s refusal of a reopen', async () => {
+    handler = (method) => (method === 'POST'
+      ? jsonResponse({ error: { code: 'conflict', message: 'this day\'s deposit is already matched to a bank statement line: it cannot reopen' }, meta: { request_id: 'r' } }, 409)
+      : jsonResponse(day({ close: closed })));
+    const el = await mountAsync<GableBranchDay>('gable-branch-day');
+    q<HTMLButtonElement>(el, '[data-testid="day-reopen"]').click();
+    await update(el, {});
+    const reason = q<HTMLInputElement>(el, '[data-testid="day-reopen-reason"]');
+    reason.value = 'too late';
+    reason.dispatchEvent(new Event('input', { bubbles: true }));
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="day-reopen-confirm"]').click();
+    await flush();
+    await update(el, {});
+    expect(text(q(el, '[data-testid="branch-day-error"]'))).toContain('already matched');
+    expect(el.querySelector('[data-testid="day-closed"]')).not.toBeNull();
+  });
+
+  it('offers no reopen once the deposit is matched', async () => {
+    handler = () => jsonResponse(day({ close: { ...closed, deposit_match: {
+      bank_transaction_id: 'bt-1', bank_amount_cents: 1150, bank_transaction_date: NEXT_DAY, bank_description: 'DEPOSIT',
+      difference_cents: 0, matched_by: 'fin-1', matched_at: `${NEXT_DAY}T14:00:00Z` } } }));
+    const el = await mountAsync<GableBranchDay>('gable-branch-day');
+    expect(el.querySelector('[data-testid="deposit-matched"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="day-reopen"]')).toBeNull();
+  });
+
   it('says so when the yard has no drawer that day', async () => {
     handler = () => jsonResponse(day({ registers: [], totals: figures({ session_count: 0, sale_count: 0, sales_total_cents: 0, expected_by_method: {}, counted_by_method: {}, over_short_cents: 0, cash_to_deposit_cents: 0 }) }));
     const el = await mountAsync<GableBranchDay>('gable-branch-day');

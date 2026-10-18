@@ -1315,6 +1315,54 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day/{id}/reopen:
+    post:
+      operationId: posEndOfDayReopen
+      tags: [pos]
+      summary: Reopen a closed branch day
+      description: >-
+        Reopens a closed branch day for a late drawer or a correction. Under the
+        branch's day lock, the close's deposit entry is reversed (a reversal
+        entry naming it, dated the branch's today; a closed fiscal period is 409
+        period_closed), the close is removed so the day closes again like any
+        open day, and the audit row (with the reason) and till.day_reopened are
+        written, all in one transaction. A blank reason is a 400. A day whose
+        deposit is matched to a bank statement line cannot reopen: 409
+        deposit_already_matched. A close the caller's branch context hides
+        answers 404; a caller with no branch in context and no grant for it, 403.
+        Finance and owner only, never a machine key.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosEndOfDayReopenRequest"
+      responses:
+        "200":
+          description: The reopened branch day, close null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosBranchDay"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/end-of-day/{id}/deposit-candidates:
     get:
       operationId: posEndOfDayDepositCandidates
@@ -2188,6 +2236,11 @@ components:
           type: [string, "null"]
           format: uuid
           description: "The bank account the deposit goes to; required when cash and checks are to be deposited."
+    PosEndOfDayReopenRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: "Why the day reopens; not blank."}
     PosDepositMatchRequest:
       type: object
       required: [bank_transaction_id]

@@ -904,6 +904,58 @@
     }
   },
   {
+    "name": "pos.eod.reopen.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/<id-5>/reopen",
+      "body": {
+        "reason": "r1b c reopen"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "branch day close not found"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.reopen.no_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/<id-5>/reopen",
+      "body": {
+        "reason": " "
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required: why the day reopens"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-33>"
+        }
+      }
+    }
+  },
+  {
     "name": "pos.eod.match.not_found",
     "request": {
       "method": "POST",
@@ -921,7 +973,7 @@
           "message": "branch day close not found"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -985,7 +1037,7 @@
       "body": {
         "branch_id": "<id-2>",
         "generated_at": "<ts+0d>",
-        "id": "<id-33>",
+        "id": "<id-35>",
         "over_short_cents": 10781,
         "payload": {
           "change_cents": 67981,
@@ -1043,7 +1095,7 @@
           "message": "no Z-report for this session"
         },
         "meta": {
-          "request_id": "<id-34>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -1061,7 +1113,7 @@
         {
           "branch_id": "<id-2>",
           "generated_at": "<ts+0d>",
-          "id": "<id-33>",
+          "id": "<id-35>",
           "over_short_cents": 10781,
           "payload": {
             "change_cents": 67981,

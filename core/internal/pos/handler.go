@@ -152,6 +152,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/close", resolveMount(h.CloseBranchDay))
 	mux.HandleFunc("GET /api/v1/pos/end-of-day/{id}/deposit-candidates", resolveMount(h.ListDepositCandidates))
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/deposit-match", resolveMount(h.MatchDeposit))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/reopen", resolveMount(h.ReopenBranchDay))
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))

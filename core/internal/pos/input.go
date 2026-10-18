@@ -634,3 +634,8 @@ func (r *depositMatchRequest) parse() (uuid.UUID, error) {
 	id, _ := v.UUID("bank_transaction_id", r.BankTransactionID, true)
 	return id, v.Err()
 }
+
+// dayReopenRequest is POST /pos/end-of-day/{id}/reopen.
+type dayReopenRequest struct {
+	Reason *string `json:"reason"`
+}
