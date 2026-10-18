@@ -23,27 +23,42 @@ CREATE TABLE dealer_signin_methods (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- At least one method always allowed: the statement level guards count the
--- rows that remain after the change and refuse the statement (rolling the
--- transaction back) when none would remain. TRUNCATE does not fire delete
--- triggers, so it has its own guard and is always refused while any row
--- exists, and the table can never be empty while the guard exists.
+-- At least one method always allowed: a before-statement guard takes a
+-- self-conflicting SHARE UPDATE EXCLUSIVE table lock (compatible with the
+-- ROW EXCLUSIVE lock Postgres already took when opening the relation for
+-- DELETE or UPDATE, so two concurrent statements never deadlock on lock
+-- upgrade) to serialise concurrent modifications before any tuple is
+-- scanned. The after-statement guard then locks at least one surviving row
+-- with FOR KEY SHARE so EvalPlanQual re-evaluates tuples deleted by an
+-- earlier committed transaction instead of trusting a pre-lock MVCC
+-- snapshot, and refuses the statement when no live row remains. TRUNCATE
+-- does not fire delete triggers, so its before-statement guard refuses
+-- whenever any row exists.
 
 CREATE FUNCTION dealer_signin_methods_keep_one() RETURNS trigger
 LANGUAGE plpgsql AS $$
-DECLARE
-    remaining INT;
 BEGIN
-    SELECT count(*) INTO remaining FROM dealer_signin_methods;
-    -- After a delete or update no row may remain; before a truncate rows
-    -- still stand, so any row at all means the truncate must be refused.
-    IF (TG_OP IN ('DELETE', 'UPDATE') AND remaining = 0)
-       OR (TG_OP = 'TRUNCATE' AND remaining > 0) THEN
+    LOCK TABLE dealer_signin_methods IN SHARE UPDATE EXCLUSIVE MODE;
+    IF TG_WHEN = 'BEFORE' THEN
+        IF TG_OP = 'TRUNCATE' THEN
+            PERFORM 1 FROM dealer_signin_methods FOR KEY SHARE;
+            IF FOUND THEN
+                RAISE EXCEPTION 'the dealer must allow at least one sign in method';
+            END IF;
+        END IF;
+        RETURN NULL;
+    END IF;
+    PERFORM 1 FROM dealer_signin_methods FOR KEY SHARE;
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'the dealer must allow at least one sign in method';
     END IF;
     RETURN NULL;
 END;
 $$;
+
+CREATE TRIGGER dealer_signin_methods_serialize_guard
+    BEFORE DELETE OR UPDATE ON dealer_signin_methods
+    FOR EACH STATEMENT EXECUTE FUNCTION dealer_signin_methods_keep_one();
 
 CREATE TRIGGER dealer_signin_methods_delete_guard
     AFTER DELETE ON dealer_signin_methods

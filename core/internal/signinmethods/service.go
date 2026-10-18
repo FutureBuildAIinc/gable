@@ -142,6 +142,9 @@ func (s *Service) Update(ctx context.Context, in []Input) (*AllowlistResponse, e
 	}
 	now := time.Now().UTC()
 	err := s.tx.RunInTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.Lock(ctx); err != nil {
+			return err
+		}
 		before, _, err := s.repo.List(ctx)
 		if err != nil {
 			return err

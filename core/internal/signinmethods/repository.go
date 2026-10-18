@@ -54,12 +54,21 @@ func (r *Repository) List(ctx context.Context) ([]Row, time.Time, error) {
 	return out, updated, nil
 }
 
-// Replace rewrites the allowlist inside the caller's transaction. The new
-// rows are written first and the rows not in the new set are deleted after,
-// so the guard trigger (the table never goes empty) can only refuse an
-// update whose own validation already failed, and a good update never trips
-// it.
+// Lock serialises concurrent allowlist writes on the transaction connection.
+func (r *Repository) Lock(ctx context.Context) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `LOCK TABLE dealer_signin_methods IN SHARE ROW EXCLUSIVE MODE`)
+	return err
+}
+
+// Replace rewrites the allowlist inside the caller's transaction. It takes a
+// table lock first so concurrent replacements serialise instead of leaving a
+// union of their methods, writes the new rows, and then deletes the rows not
+// in the new set so the never empty guard trigger never trips on a valid
+// update.
 func (r *Repository) Replace(ctx context.Context, in []Input, now time.Time) error {
+	if err := r.Lock(ctx); err != nil {
+		return err
+	}
 	exec := r.db.GetExecutor(ctx)
 	keep := make([]string, len(in))
 	for i, m := range in {

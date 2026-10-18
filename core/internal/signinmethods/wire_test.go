@@ -435,34 +435,117 @@ func TestUpdateRollbackOnFailureAfterReplace(t *testing.T) {
 }
 
 // TestReplaceConcurrency: the replace transaction runs at pool size 4 with
-// four contenders, so a transaction that reaches for a second connection
-// deadlocks the test instead of passing on a roomy pool, and the allowlist
-// is never empty however the contenders interleave.
+// four contenders carrying disjoint allowlists, so a transaction that reaches
+// for a second connection deadlocks the test instead of passing on a roomy
+// pool, and the final allowlist after every round is always one contender's
+// list in full, never an empty list or a union of two contenders.
 func TestReplaceConcurrency(t *testing.T) {
 	f := newFixture(t, 4)
-	var wg sync.WaitGroup
-	start := make(chan struct{})
 	lists := [][]signinmethods.Input{
-		{{Method: "email_password"}, {Method: "google"}},
-		{{Method: "microsoft"}, {Method: "email_password"}},
-		{{Method: "magic_link"}, {Method: "email_password"}, {Method: "passkey"}},
-		{{Method: "passkey"}, {Method: "email_password"}},
+		{{Method: "google"}},
+		{{Method: "microsoft"}},
+		{{Method: "magic_link"}, {Method: "passkey"}},
+		{{Method: "email_password"}, {Method: "oidc", OIDCIssuerURL: "https://id.example.com", OIDCClientID: "gable", OIDCLabel: "Dealer SSO"}},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, list := range lists {
-		wg.Add(1)
-		go func(list []signinmethods.Input) {
-			defer wg.Done()
-			<-start
-			if _, err := f.svc.Update(ctx, list); err != nil {
-				t.Errorf("a contender's update failed: %v", err)
+	wantOneOf := [][]string{
+		{"google"},
+		{"microsoft"},
+		{"magic_link", "passkey"},
+		{"email_password", "oidc"},
+	}
+	for round := 0; round < 5; round++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		for _, list := range lists {
+			wg.Add(1)
+			go func(list []signinmethods.Input) {
+				defer wg.Done()
+				<-start
+				if _, err := f.svc.Update(ctx, list); err != nil {
+					t.Errorf("round %d: a contender's update failed: %v", round, err)
+				}
+			}(list)
+		}
+		close(start)
+		wg.Wait()
+		cancel()
+
+		cur, err := f.svc.Allowlist(context.Background())
+		if err != nil {
+			t.Fatalf("round %d: reading allowlist: %v", round, err)
+		}
+		var got []string
+		for _, m := range cur.Methods {
+			got = append(got, m.Method)
+		}
+		matched := false
+		for _, candidate := range wantOneOf {
+			if eqStrings(got, candidate) {
+				matched = true
+				break
 			}
-		}(list)
+		}
+		if !matched {
+			t.Fatalf("round %d: allowlist after concurrent disjoint updates = %v, want one contender's list in full (%v)", round, got, wantOneOf)
+		}
 	}
-	close(start)
-	wg.Wait()
-	if !f.svc.Allowed(context.Background(), signinmethods.MethodEmailPassword) {
-		t.Error("the allowlist lost email and password after the contenders")
+}
+
+// TestConcurrentDisjointDeletesKeepOneRow: when the allowlist holds two rows
+// and two concurrent transactions each delete one of the two rows, one
+// transaction succeeds and the other is refused by the guard trigger so the
+// allowlist never goes empty.
+func TestConcurrentDisjointDeletesKeepOneRow(t *testing.T) {
+	f := newFixture(t, 4)
+	ctx := context.Background()
+
+	for round := 0; round < 5; round++ {
+		if _, err := f.svc.Update(ctx, []signinmethods.Input{{Method: "email_password"}, {Method: "google"}}); err != nil {
+			t.Fatalf("round %d: seeding two methods: %v", round, err)
+		}
+
+		var ready sync.WaitGroup
+		var done sync.WaitGroup
+		ready.Add(2)
+		done.Add(2)
+		proceed := make(chan struct{})
+		errs := make([]error, 2)
+		methods := []string{"email_password", "google"}
+
+		for i, m := range methods {
+			go func(idx int, method string) {
+				defer done.Done()
+				errs[idx] = f.db.RunInTx(ctx, func(txCtx context.Context) error {
+					ready.Done()
+					<-proceed
+					_, err := f.db.GetExecutor(txCtx).Exec(txCtx,
+						`DELETE FROM dealer_signin_methods WHERE method = $1`, method)
+					return err
+				})
+			}(i, m)
+		}
+		ready.Wait()
+		close(proceed)
+		done.Wait()
+
+		if (errs[0] == nil) == (errs[1] == nil) {
+			t.Fatalf("round %d: concurrent disjoint deletes errs = [%v, %v]; want one nil and one refused", round, errs[0], errs[1])
+		}
+		refusedErr := errs[0]
+		if refusedErr == nil {
+			refusedErr = errs[1]
+		}
+		if !strings.Contains(refusedErr.Error(), "the dealer must allow at least one sign in method") {
+			t.Errorf("round %d: refused delete error = %v, want guard trigger refusal message", round, refusedErr)
+		}
+
+		cur, err := f.svc.Allowlist(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cur.Methods) != 1 {
+			t.Fatalf("round %d: remaining methods after concurrent deletes = %v, want 1 row", round, cur.Methods)
+		}
 	}
 }

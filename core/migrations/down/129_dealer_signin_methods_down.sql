@@ -6,5 +6,6 @@
 DROP TRIGGER IF EXISTS dealer_signin_methods_truncate_guard ON dealer_signin_methods;
 DROP TRIGGER IF EXISTS dealer_signin_methods_update_guard ON dealer_signin_methods;
 DROP TRIGGER IF EXISTS dealer_signin_methods_delete_guard ON dealer_signin_methods;
+DROP TRIGGER IF EXISTS dealer_signin_methods_serialize_guard ON dealer_signin_methods;
 DROP FUNCTION IF EXISTS dealer_signin_methods_keep_one();
 DROP TABLE IF EXISTS dealer_signin_methods;
