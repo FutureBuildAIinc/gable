@@ -38,14 +38,14 @@ export class GableYardLayout extends LitElement {
     const framed = framedByShell();
     const nav = html`
       <nav class="${framed
-        ? 'sticky top-0 md:max-w-md md:mx-auto h-12 bg-slate-steel/80 backdrop-blur-md border-b border-white/10 flex items-center justify-around z-40'
+        ? 'sticky top-0 w-full h-12 bg-slate-steel/80 backdrop-blur-md border-b border-white/10 flex items-center justify-around z-40'
         : 'fixed bottom-0 left-0 right-0 md:max-w-md md:mx-auto h-16 bg-slate-steel/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around z-50'}">
         ${navItems.map(item => {
           const isActive = item.path === '/yard' ? path === '/yard' : path.startsWith(item.path);
           return html`
             <a href="${item.path}" class="${cn(
               framed
-                ? 'flex items-center gap-1.5 px-3 min-h-[40px] rounded-lg transition-colors'
+                ? 'flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg transition-colors'
                 : 'flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-colors',
               isActive ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'
             )}">

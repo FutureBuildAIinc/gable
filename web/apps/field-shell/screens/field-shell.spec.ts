@@ -50,7 +50,7 @@ const ORDERS = [
     status: 'confirmed',
     total_cents: 184500,
     invoice_ids: ['inv-1'],
-    created_at: 1700000000,
+    created_at: new Date(1776000000000).toISOString(),
   },
   {
     id: 'ord-1045',
@@ -60,7 +60,7 @@ const ORDERS = [
     status: 'confirmed',
     total_cents: 92400,
     invoice_ids: [],
-    created_at: 1700003600,
+    created_at: new Date(1776003600000).toISOString(),
   },
 ];
 
@@ -69,12 +69,40 @@ const DRIVERS = [
   { id: 'drv-2', name: 'Morgan Lee', phone: '250-555-0188', status: 'active' },
 ];
 
+const ROUTES = [
+  {
+    id: 'rt-104',
+    driver_id: 'drv-1',
+    vehicle_id: 'veh-2',
+    vehicle_name: 'Flatbed 02 - Crane',
+    scheduled_date: new Date(1776000000000).toISOString(),
+    status: 'in_transit',
+    stop_count: 4,
+    notes: 'Framing package + engineered joists',
+    revision: 1,
+    stops: [],
+  },
+  {
+    id: 'rt-108',
+    driver_id: 'drv-1',
+    vehicle_id: 'veh-4',
+    vehicle_name: 'Boom Truck 04 - Moffett',
+    scheduled_date: new Date(1776086400000).toISOString(),
+    status: 'scheduled',
+    stop_count: 3,
+    notes: 'Cedar siding & exterior trim',
+    revision: 1,
+    stops: [],
+  },
+];
+
 async function mockApi(page: Page): Promise<void> {
   // Playwright matches the LAST registered route first: the catch-all goes
   // first so the specific answers win.
   await page.route('**/api/**', (route) => route.fulfill({ json: {} }));
-  await page.route('**/api/v1/orders**', (route) => route.fulfill({ json: { data: ORDERS } }));
-  await page.route('**/api/v1/delivery/drivers**', (route) => route.fulfill({ json: DRIVERS }));
+  await page.route('**/api/v1/orders**', (route) => route.fulfill({ json: { items: ORDERS, next_cursor: null } }));
+  await page.route('**/api/v1/delivery/drivers**', (route) => route.fulfill({ json: { items: DRIVERS, next_cursor: null } }));
+  await page.route('**/api/v1/delivery/routes**', (route) => route.fulfill({ json: { items: ROUTES, next_cursor: null } }));
   await page.route('**/api/v1/me/branches', (route) => route.fulfill({ json: BRANCHES }));
   await page.route('**/api/v1/dealer-profile/locale', (route) => route.fulfill({ json: { locale: 'en-CA' } }));
   await page.route('**/api/v1/dealer-profile', (route) =>
@@ -251,6 +279,9 @@ for (const theme of ['dark', 'light'] as const) {
         await page.locator('gable-shell-tabs button[data-tab="driver"]').click();
         await frame.locator('gable-driver-route-list').waitFor();
         await expect(frame.locator('header')).toHaveCount(0);
+        await frame.locator('gable-select button').click();
+        await frame.locator('gable-select [role="option"]', { hasText: 'Riley Vance' }).click();
+        await expect(frame.locator('gable-driver-route-list')).toContainText('Flatbed 02 - Crane');
         await shot(page, `${width}-${theme}-framed-app`);
 
         // Honest offline banner (money never queues).
