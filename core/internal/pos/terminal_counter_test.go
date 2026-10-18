@@ -133,7 +133,6 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	f.openTill(0)
 	r := f.completeSale(saleID, f.cardFor())
 	requireBlocker(t, r, "terminal_answer_pending")
 	id, state, _ := f.terminalIntentOf(t, saleID)
