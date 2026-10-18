@@ -48,13 +48,22 @@ export function googleGlyph(size: number = 20, cls: string = '') {
   return glyph(size, cls, '<path d="M19.79 7.5A9 9 0 1 0 21 12h-9"/>');
 }
 
-/** Microsoft's mark: the four panes of the window, in the icon stroke style. */
+/**
+ * Microsoft's mark: four separate filled panes of the window with a narrow gap,
+ * monochrome by currentColor so it reads as the Microsoft mark at button size
+ * rather than the stroked apps grid outline.
+ */
 export function microsoftGlyph(size: number = 20, cls: string = '') {
-  return glyph(size, cls,
-    '<rect x="3" y="3" width="7.5" height="7.5" rx="1"/>' +
-    '<rect x="13.5" y="3" width="7.5" height="7.5" rx="1"/>' +
-    '<rect x="3" y="13.5" width="7.5" height="7.5" rx="1"/>' +
-    '<rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1"/>');
+  const classAttr = cls ? ` class="${cls}"` : '';
+  const body =
+    '<rect x="2" y="2" width="9" height="9" rx="0.5"/>' +
+    '<rect x="13" y="2" width="9" height="9" rx="0.5"/>' +
+    '<rect x="2" y="13" width="9" height="9" rx="0.5"/>' +
+    '<rect x="13" y="13" width="9" height="9" rx="0.5"/>';
+  return html`${unsafeHTML(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}"${classAttr} ` +
+    `fill="currentColor" stroke="none" aria-hidden="true">${body}</svg>`
+  )}`;
 }
 
 function glyph(size: number, cls: string, body: string) {

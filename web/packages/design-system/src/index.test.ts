@@ -32,15 +32,26 @@ describe('cn', () => {
 })
 
 describe('provider glyphs', () => {
-  it('draws each mark as a currentColor svg in the icon idiom', () => {
-    for (const glyph of [googleGlyph(18), microsoftGlyph(18)]) {
-      const svg = document.createElement('div');
-      render(glyph, svg);
-      const el = svg.querySelector('svg');
-      expect(el).not.toBeNull();
-      expect(el?.getAttribute('stroke')).toBe('currentColor');
-      expect(el?.getAttribute('width')).toBe('18');
-      expect(el?.getAttribute('aria-hidden')).toBe('true');
-    }
+  it('draws google as a currentColor stroke svg and microsoft as four filled currentColor squares with a gap', () => {
+    const gWrap = document.createElement('div');
+    render(googleGlyph(18), gWrap);
+    const gSvg = gWrap.querySelector('svg');
+    expect(gSvg).not.toBeNull();
+    expect(gSvg?.getAttribute('stroke')).toBe('currentColor');
+    expect(gSvg?.getAttribute('width')).toBe('18');
+    expect(gSvg?.getAttribute('aria-hidden')).toBe('true');
+
+    const mWrap = document.createElement('div');
+    render(microsoftGlyph(18), mWrap);
+    const mSvg = mWrap.querySelector('svg');
+    expect(mSvg).not.toBeNull();
+    expect(mSvg?.getAttribute('fill')).toBe('currentColor');
+    expect(mSvg?.getAttribute('stroke')).toBe('none');
+    expect(mSvg?.getAttribute('width')).toBe('18');
+    expect(mSvg?.getAttribute('aria-hidden')).toBe('true');
+    const rects = mSvg?.querySelectorAll('rect') ?? [];
+    expect(rects).toHaveLength(4);
+    expect(rects[0]?.getAttribute('width')).toBe('9');
+    expect(rects[1]?.getAttribute('x')).toBe('13');
   });
 });
