@@ -119,7 +119,7 @@ func (r *PostgresRepository) GetTrialBalanceFor(ctx context.Context, asOfDate ti
 		  AND ` + middleware.Wall("l", 3, 4) + `
 		GROUP BY a.id, a.code, a.name, a.type, e.currency, l.branch_id
 		HAVING SUM(l.debit) > 0 OR SUM(l.credit) > 0
-		ORDER BY e.currency, a.code, l.branch_id
+		ORDER BY e.currency, a.code, (SELECT b.code FROM locations b WHERE b.id = l.branch_id)
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency, f.Branch, f.Grants)
 	if err != nil {
@@ -313,7 +313,8 @@ func (r *PostgresRepository) APSubledgerCents(ctx context.Context, f branchFilte
 // --- Cursor pages of the lists (ADR 0001) ---
 
 // ListAccountsPage answers one page of the chart of accounts, oldest code
-// first, keyed on the code; afterCode resumes the page after it.
+// first, keyed on the code; afterCode resumes the page after it. Each
+// balance is the caller's reach's.
 func (r *PostgresRepository) ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error) {
 	query := `
 		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''), a.parent_id,
@@ -322,7 +323,8 @@ func (r *PostgresRepository) ListAccountsPage(ctx context.Context, limit int, af
 		           (SELECT SUM(l.debit) - SUM(l.credit)
 		            FROM gl_journal_lines l
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-		            WHERE l.account_id = a.id AND e.status = 'POSTED'), 0
+		            WHERE l.account_id = a.id AND e.status = 'POSTED'
+		              AND ` + middleware.Wall("l", 3, 4) + `), 0
 		       ) AS balance,
 		       a.created_at, a.updated_at, a.revision
 		FROM gl_accounts a
@@ -330,7 +332,10 @@ func (r *PostgresRepository) ListAccountsPage(ctx context.Context, limit int, af
 		ORDER BY a.code
 		LIMIT $2
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, afterCode, limit)
+	// The balance is the caller's reach's: a caller held to one branch sees
+	// that branch's lines, not the company's.
+	f := filterFor(ctx, nil)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, afterCode, limit, f.Branch, f.Grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list accounts: %w", err)
 	}

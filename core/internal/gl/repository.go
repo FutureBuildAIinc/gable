@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,7 @@ type Repository interface {
 	GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error)
 	ListJournalEntries(ctx context.Context) ([]JournalEntry, error)
 	ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error)
+	ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error)
 	ListJournalEntriesPage(ctx context.Context, limit, beforeNumber int, f branchFilter) ([]JournalEntry, error)
 	UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error
 
@@ -108,7 +110,8 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 		           (SELECT SUM(l.debit) - SUM(l.credit)
 		            FROM gl_journal_lines l
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-		            WHERE l.account_id = a.id AND e.status = 'POSTED'), 0
+		            WHERE l.account_id = a.id AND e.status = 'POSTED'
+		              AND ` + middleware.Wall("l", 2, 3) + `), 0
 		       ) AS balance,
 		       a.created_at, a.updated_at, a.revision
 		FROM gl_accounts a
@@ -116,7 +119,8 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 	`
 	var a GLAccount
 	var balanceFloat float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
+	f := filterFor(ctx, nil)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, f.Branch, f.Grants).Scan(
 		&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 		&a.NormalBalance, &a.IsActive, &a.Description,
 		&balanceFloat,
@@ -384,6 +388,39 @@ func (r *PostgresRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPer
 	defer rows.Close()
 
 	var periods []FiscalPeriod
+	for rows.Next() {
+		var p FiscalPeriod
+		if err := rows.Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt,
+			&p.Revision, &p.ReopenReason, &p.ReopenedBy, &p.ReopenedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan fiscal period: %w", err)
+		}
+		periods = append(periods, p)
+	}
+	return periods, rows.Err()
+}
+
+// ListFiscalPeriodsPage answers one page of the fiscal periods, earliest
+// start first, keyed on the start date; a zero afterStart is the first page.
+func (r *PostgresRepository) ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error) {
+	query := `
+		SELECT id, name, start_date, end_date, status, closed_at, COALESCE(closed_by, ''), created_at,
+		       revision, COALESCE(reopen_reason, ''), COALESCE(reopened_by, ''), reopened_at
+		FROM gl_fiscal_periods
+		WHERE ($1::date IS NULL OR start_date > $1::date)
+		ORDER BY start_date
+		LIMIT $2
+	`
+	var after *time.Time
+	if !afterStart.IsZero() {
+		after = &afterStart
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list fiscal periods: %w", err)
+	}
+	defer rows.Close()
+
+	periods := []FiscalPeriod{}
 	for rows.Next() {
 		var p FiscalPeriod
 		if err := rows.Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt,

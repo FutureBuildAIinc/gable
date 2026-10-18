@@ -98,6 +98,9 @@ func (m *MockRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*Fi
 	return nil, nil
 }
 
+func (m *MockRepository) ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error) {
+	return m.ListFiscalPeriods(ctx)
+}
 func (m *MockRepository) ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error) {
 	return nil, nil
 }

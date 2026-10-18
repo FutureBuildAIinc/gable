@@ -426,6 +426,11 @@ func (s *Service) ListJournalEntriesPage(ctx context.Context, limit, beforeNumbe
 	return s.repo.ListJournalEntriesPage(ctx, limit, beforeNumber, filterFor(ctx, branch))
 }
 
+// ListFiscalPeriodsPage answers one cursor page of the fiscal periods.
+func (s *Service) ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error) {
+	return s.repo.ListFiscalPeriodsPage(ctx, limit, afterStart)
+}
+
 // GetFiscalPeriod answers one period by id, revision carried.
 func (s *Service) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error) {
 	return s.repo.GetFiscalPeriod(ctx, id)

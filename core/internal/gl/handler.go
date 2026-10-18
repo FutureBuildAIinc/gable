@@ -698,14 +698,38 @@ func (h *Handler) HandleTieOut(w http.ResponseWriter, r *http.Request) {
 
 // --- Fiscal Periods ---
 
+const periodsCursorScope = "gl_fiscal_periods"
+
 func (h *Handler) HandleListFiscalPeriods(w http.ResponseWriter, r *http.Request) {
-	periods, err := h.svc.ListFiscalPeriods(r.Context())
+	page, err := httpx.ParseListQuery(r, periodsCursorScope)
 	if err != nil {
-		httputil.RespondError(w, r, "failed to list fiscal periods", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(periods)
+	var after time.Time
+	if len(page.Key) > 0 {
+		after, err = time.Parse("2006-01-02", page.Key[0])
+		if err != nil {
+			httpx.WriteError(w, r, httpx.BadRequest("cursor is malformed",
+				httpx.FieldError{Field: "cursor", Message: "was not minted for this ordering"}))
+			return
+		}
+	}
+	periods, err := h.svc.ListFiscalPeriodsPage(r.Context(), page.Limit+1, after)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(periods) > page.Limit {
+		periods = periods[:page.Limit]
+		next, err = httpx.MintCursor(periodsCursorScope, periods[len(periods)-1].StartDate.Format("2006-01-02"))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, periods, next, page.Limit)
 }
 
 func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request) {
