@@ -11760,7 +11760,7 @@ paths:
       tags: [pos]
       summary: Reopen a closed branch day
       description: >-
-        Reopens a closed branch day for a late drawer or a correction. Under the branch's day lock, the close's deposit entry is reversed (a reversal entry naming it, dated the branch's today; a closed fiscal period is 409 period_closed), the close is removed so the day closes again like any open day, and the audit row (with the reason) and till.day_reopened are written, all in one transaction. A blank reason is a 400. A day whose deposit is matched to a bank statement line cannot reopen: 409 deposit_already_matched. A close the caller's branch context hides answers 404; a caller with no branch in context and no grant for it, 403. Finance and owner only, never a machine key.
+        Reopens a closed branch day for a late drawer or a correction. Under the branch's day lock, the close's deposit entry is reversed (a reversal entry naming it, dated the branch's today; a closed fiscal period is 409 period_closed), the close row is marked REOPENED (keeping its frozen totals snapshot and naming the reversal entry) so the day closes again like any open day, and the audit row (with the reason) and till.day_reopened are written, all in one transaction. A blank reason is a 400. A close already reopened answers 409 day_not_closed, and a day whose deposit is matched to a bank statement line cannot reopen: 409 deposit_already_matched. A close the caller's branch context hides answers 404; a caller with no branch in context and no grant for it, 403. Finance and owner only, never a machine key.
       parameters:
         - name: id
           in: path

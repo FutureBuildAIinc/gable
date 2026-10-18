@@ -800,8 +800,9 @@ func (d *dayFixture) bankWithGL() (bank uuid.UUID, code string) {
 }
 
 // RULE (P2-2): a closed day reopens, with a reason: the deposit entry is
-// reversed (a reversal naming it), the day is open again, a drawer opens, and
-// the day closes again with a new deposit. The act is audited and evented.
+// reversed (a reversal naming it), the close row is kept with status REOPENED
+// and its frozen snapshot intact, the day is open again, a drawer opens, and
+// the day closes again with a new CLOSED row. The act is audited and evented.
 func TestAClosedDayReopensAndClosesAgain(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	d := newDayFixture(t, testutil.RequireDB(t))
@@ -831,11 +832,15 @@ func TestAClosedDayReopensAndClosesAgain(t *testing.T) {
 	if rr.body["close"] != nil || rr.body["business_date"] != day {
 		t.Errorf("the reopened day = %v, want the open day with no close", rr.body["close"])
 	}
-	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1`, a.id); got != 0 {
-		t.Errorf("%d closes remain after the reopen", got)
+	if rd := d.summary(a, day); rd.status != http.StatusOK || rd.body["close"] != nil {
+		t.Errorf("summary while reopened = %d %v, want close null", rd.status, rd.body["close"])
 	}
-	if got := countOf(t, d.db, `SELECT count(*) FROM gl_journal_entries WHERE reverses_entry_id = $1::uuid AND source = 'REVERSAL'`, entryID); got != 1 {
-		t.Errorf("%d reversals name the deposit entry, want 1", got)
+	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes c JOIN gl_journal_entries r ON r.id = c.reversal_gl_entry_id
+		WHERE c.id = $1::uuid AND c.status = 'REOPENED' AND c.reopened_by = $2 AND c.reopened_at IS NOT NULL
+		  AND c.reopen_reason = 'a late drawer' AND c.cash_to_deposit_cents = 2000 AND c.bank_account_id = $3
+		  AND c.gl_entry_id = $4::uuid AND c.totals IS NOT NULL AND r.reverses_entry_id = c.gl_entry_id AND r.source = 'REVERSAL'`,
+		closeID, manager, bank, entryID); got != 1 {
+		t.Errorf("the reopened close row with its snapshot and reversal link = %d, want 1", got)
 	}
 	for _, c := range []string{code, "1015"} {
 		if got := d.netOn(c, closeID, entryID); c == code && got != 0 {
@@ -865,14 +870,20 @@ func TestAClosedDayReopensAndClosesAgain(t *testing.T) {
 	if second["id"] == first["id"] || second["gl_entry_id"] == first["gl_entry_id"] || second["deposit_slip_ref"] != "SECOND" {
 		t.Errorf("the second close = %v, want a new record and a new entry", second)
 	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1 AND business_date = $2::date AND status = 'REOPENED'`, a.id, day); got != 1 {
+		t.Errorf("%d reopened closes for the branch day, want 1", got)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1 AND business_date = $2::date AND status = 'CLOSED'`, a.id, day); got != 1 {
+		t.Errorf("%d active closes for the branch day, want 1", got)
+	}
 	if got := d.netOn(code, closeID, entryID, str(t, second, "id"), str(t, second, "gl_entry_id")); got != 2000 {
 		t.Errorf("the bank account nets %d after the second close, want one deposit of 2000", got)
 	}
 }
 
 // RULE (P2-2): the reopen is refused without a reason, for a cashier, for a
-// machine key, for a day that does not exist and once the deposit is matched
-// to a bank line; a refusal changes nothing.
+// machine key, for a day that does not exist, for a close already reopened,
+// and once the deposit is matched to a bank line; a refusal changes nothing.
 func TestTheReopenRefusals(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	d := newDayFixture(t, testutil.RequireDB(t))
@@ -880,8 +891,8 @@ func TestTheReopenRefusals(t *testing.T) {
 	closeID, deposit := d.closedDay(a)
 	untouched := func(what string) {
 		t.Helper()
-		if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid`, closeID); got != 1 {
-			t.Errorf("%s: the close is gone", what)
+		if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND status = 'CLOSED' AND reopened_at IS NULL`, closeID); got != 1 {
+			t.Errorf("%s: the close is no longer CLOSED", what)
 		}
 		if got := countOf(t, d.db, `SELECT count(*) FROM gl_journal_entries WHERE source = 'REVERSAL' AND reverses_entry_id = (SELECT gl_entry_id FROM till_day_closes WHERE id = $1::uuid)`, closeID); got != 0 {
 			t.Errorf("%s: the deposit entry was reversed", what)
@@ -922,6 +933,25 @@ func TestTheReopenRefusals(t *testing.T) {
 		t.Errorf("blockers = %v, want deposit_already_matched", bl)
 	}
 	untouched("after the matched refusal")
+
+	// an already-reopened close cannot be reopened or matched again (409 day_not_closed)
+	b := d.makeBranch()
+	reopenedID, bDeposit := d.closedDay(b)
+	bLine := d.bankLine(bDeposit, d.today(b))
+	if rr := d.reopen(reopenedID, "first reopen", "owner", mustUUID(t)); rr.status != http.StatusOK {
+		t.Fatalf("reopen b = %d: %s", rr.status, rr.raw)
+	}
+	if r2 := d.reopen(reopenedID, "second reopen", "owner", mustUUID(t)); r2.status != http.StatusConflict {
+		t.Fatalf("reopen of an already-reopened close = %d, want 409: %s", r2.status, r2.raw)
+	} else if _, bl, _ := errorOf(t, r2); len(bl) != 1 || bl[0] != "day_not_closed" {
+		t.Errorf("blockers on second reopen = %v, want day_not_closed", bl)
+	}
+	if rm := d.do("POST", "/api/v1/pos/end-of-day/"+reopenedID+"/deposit-match", map[string]any{"bank_transaction_id": bLine.String()},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); rm.status != http.StatusConflict {
+		t.Fatalf("match of an already-reopened close = %d, want 409: %s", rm.status, rm.raw)
+	} else if _, bl, _ := errorOf(t, rm); len(bl) != 1 || bl[0] != "day_not_closed" {
+		t.Errorf("blockers on match of reopened close = %v, want day_not_closed", bl)
+	}
 }
 
 // RULE (P2-2): the reopen carries the branch wall.
@@ -950,11 +980,14 @@ func TestTheReopenCarriesTheBranchWall(t *testing.T) {
 	if r := w.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/reopen", map[string]any{"reason": "wall"}, noHdr...); r.status != http.StatusForbidden {
 		t.Errorf("another branch's reopen, naming no branch = %d, want the 403 record rule: %s", r.status, r.raw)
 	}
-	if got := countOf(t, w.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid`, closeID); got != 1 {
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND status = 'CLOSED'`, closeID); got != 1 {
 		t.Errorf("the day reopened through the wall")
 	}
 	if r := w.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/reopen", map[string]any{"reason": "own branch"}); r.status != http.StatusOK {
 		t.Errorf("the unscoped reopen = %d, want 200: %s", r.status, r.raw)
+	}
+	if got := countOf(t, w.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND status = 'REOPENED'`, closeID); got != 1 {
+		t.Errorf("the unscoped reopen did not mark the close REOPENED")
 	}
 }
 
@@ -985,18 +1018,18 @@ func TestARacingReopenAndMatchesEndConsistent(t *testing.T) {
 			}(i, line)
 		}
 		wg.Wait()
-		closes := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid`, closeID)
+		closed := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND status = 'CLOSED' AND bank_transaction_id IS NOT NULL AND reversal_gl_entry_id IS NULL`, closeID)
+		reopened := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND status = 'REOPENED' AND bank_transaction_id IS NULL AND reversal_gl_entry_id IS NOT NULL`, closeID)
 		claimed := countOf(t, d.db, `SELECT count(*) FROM bank_transactions WHERE id = ANY($1) AND status = 'MATCHED'`, lines)
-		reversals := countOf(t, d.db, `SELECT count(*) FROM gl_journal_entries WHERE source = 'REVERSAL' AND source_ref_id::text IN
-			(SELECT gl_entry_id::text FROM till_day_closes WHERE id = $1::uuid UNION SELECT e.id::text FROM gl_journal_entries e WHERE e.memo LIKE 'Branch deposit%' AND e.source_ref_id = $1::uuid)`, closeID)
+		reversals := countOf(t, d.db, `SELECT count(*) FROM gl_journal_entries WHERE source = 'REVERSAL' AND reverses_entry_id = (SELECT gl_entry_id FROM till_day_closes WHERE id = $1::uuid)`, closeID)
 		switch {
 		case statuses[0] == http.StatusOK:
-			if closes != 0 || claimed != 0 || reversals != 1 {
-				t.Errorf("round %d: reopened but %d closes, %d lines claimed, %d reversals (statuses %v)", round, closes, claimed, reversals, statuses)
+			if reopened != 1 || closed != 0 || claimed != 0 || reversals != 1 {
+				t.Errorf("round %d: reopened but %d reopened, %d closed, %d lines claimed, %d reversals (statuses %v)", round, reopened, closed, claimed, reversals, statuses)
 			}
 		case statuses[0] == http.StatusConflict:
-			if closes != 1 || claimed != 1 || reversals != 0 {
-				t.Errorf("round %d: reopen refused but %d closes, %d lines claimed, %d reversals (statuses %v)", round, closes, claimed, reversals, statuses)
+			if closed != 1 || reopened != 0 || claimed != 1 || reversals != 0 {
+				t.Errorf("round %d: reopen refused but %d closed, %d reopened, %d lines claimed, %d reversals (statuses %v)", round, closed, reopened, claimed, reversals, statuses)
 			}
 		default:
 			t.Errorf("round %d: the reopen answered %d, want 200 or 409", round, statuses[0])

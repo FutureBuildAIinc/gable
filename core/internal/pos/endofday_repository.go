@@ -47,7 +47,7 @@ func (r *PostgresRepository) LockBranchDay(ctx context.Context, branch uuid.UUID
 func (r *PostgresRepository) BranchDayClosed(ctx context.Context, branch uuid.UUID) (bool, error) {
 	var closed bool
 	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM till_day_closes
-		WHERE branch_id = $1 AND business_date = (NOW() AT TIME ZONE `+branchZoneSQL+`)::date)`, branch).Scan(&closed)
+		WHERE branch_id = $1 AND status = 'CLOSED' AND business_date = (NOW() AT TIME ZONE `+branchZoneSQL+`)::date)`, branch).Scan(&closed)
 	if err != nil {
 		return false, fmt.Errorf("failed to read the branch day: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *PostgresRepository) BranchCollectionsNet(ctx context.Context, branch uu
 	return httpx.Cents(cents), nil
 }
 
-const dayCloseCols = `c.id, c.branch_id, c.business_date::text, c.deposit_slip_ref, c.closed_by, c.closed_at,
+const dayCloseCols = `c.id, c.branch_id, c.business_date::text, c.status, c.deposit_slip_ref, c.closed_by, c.closed_at,
 	c.cash_to_deposit_cents, c.checks_to_deposit_cents, c.card_total_cents, c.totals,
 	c.bank_account_id, c.gl_entry_id, c.bank_transaction_id, b.amount, b.transaction_date::text, COALESCE(b.description, ''),
 	c.deposit_difference_cents, c.deposit_matched_by, c.deposit_matched_at`
@@ -119,7 +119,7 @@ func scanDayClose(row pgx.Row) (*DayClose, error) {
 	var bankAmount, diff *int64
 	var bankDate, bankDesc, matchedBy *string
 	var matchedAt *time.Time
-	if err := row.Scan(&c.ID, &c.BranchID, &c.BusinessDate, &c.DepositSlipRef, &c.ClosedBy, &closedAt,
+	if err := row.Scan(&c.ID, &c.BranchID, &c.BusinessDate, &c.Status, &c.DepositSlipRef, &c.ClosedBy, &closedAt,
 		&c.CashToDepositCents, &c.ChecksToDepositCents, &c.CardTotalCents, &c.Totals,
 		&c.BankAccountID, &c.GLEntryID, &bankID, &bankAmount, &bankDate, &bankDesc, &diff, &matchedBy, &matchedAt); err != nil {
 		return nil, err
@@ -144,11 +144,11 @@ func scanDayClose(row pgx.Row) (*DayClose, error) {
 
 const dayCloseFrom = ` FROM till_day_closes c LEFT JOIN bank_transactions b ON b.id = c.bank_transaction_id`
 
-// GetDayClose reads the close of a branch's business date, nil when the day is
-// open, inside the caller's wall.
+// GetDayClose reads the active close of a branch's business date, nil when the
+// day is open or reopened, inside the caller's wall.
 func (r *PostgresRepository) GetDayClose(ctx context.Context, branch uuid.UUID, date string) (*DayClose, error) {
 	c, err := scanDayClose(r.ex(ctx).QueryRow(ctx, `SELECT `+dayCloseCols+dayCloseFrom+`
-		WHERE c.branch_id = $1 AND c.business_date = $2::date AND `+middleware.Wall("c", 3, 4),
+		WHERE c.branch_id = $1 AND c.business_date = $2::date AND c.status = 'CLOSED' AND `+middleware.Wall("c", 3, 4),
 		branch, date, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -193,6 +193,7 @@ func (r *PostgresRepository) CreateDayClose(ctx context.Context, c *DayClose) er
 		}
 		return fmt.Errorf("failed to close the branch day: %w", mapWriteError(err))
 	}
+	c.Status = "CLOSED"
 	c.ClosedAt = httpx.TimestampOf(closed)
 	return nil
 }
@@ -203,7 +204,7 @@ func (r *PostgresRepository) MatchDayClose(ctx context.Context, id uuid.UUID, m 
 	var at time.Time
 	err := r.ex(ctx).QueryRow(ctx, `UPDATE till_day_closes SET bank_transaction_id = $2, deposit_difference_cents = $3,
 		deposit_matched_by = $4, deposit_matched_at = NOW()
-		WHERE id = $1 AND bank_transaction_id IS NULL RETURNING deposit_matched_at`,
+		WHERE id = $1 AND status = 'CLOSED' AND bank_transaction_id IS NULL RETURNING deposit_matched_at`,
 		id, m.BankTransactionID, int64(m.DifferenceCents), m.MatchedBy).Scan(&at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return conflict("deposit_already_matched", "this day's deposit is already matched to a bank statement line")
@@ -234,10 +235,13 @@ func (r *PostgresRepository) DayCloseBranch(ctx context.Context, id uuid.UUID) (
 	return branch, true, nil
 }
 
-// DeleteDayClose removes a close that is being reopened, inside the reopen's
-// transaction; the audit row, the event and the reversal entry keep its story.
-func (r *PostgresRepository) DeleteDayClose(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.ex(ctx).Exec(ctx, `DELETE FROM till_day_closes WHERE id = $1 AND bank_transaction_id IS NULL`, id)
+// ReopenDayClose marks an active, unmatched close REOPENED, keeping its frozen
+// totals snapshot and recording who reopened it, when, why, and the reversal
+// journal entry that undid its deposit.
+func (r *PostgresRepository) ReopenDayClose(ctx context.Context, id uuid.UUID, actor, reason string, reversalID *uuid.UUID) error {
+	tag, err := r.ex(ctx).Exec(ctx, `UPDATE till_day_closes
+		SET status = 'REOPENED', reopened_by = $2, reopened_at = NOW(), reopen_reason = $3, reversal_gl_entry_id = $4
+		WHERE id = $1 AND status = 'CLOSED' AND bank_transaction_id IS NULL`, id, actor, reason, reversalID)
 	if err != nil {
 		return fmt.Errorf("failed to reopen the branch day: %w", err)
 	}

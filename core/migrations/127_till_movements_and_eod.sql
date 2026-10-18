@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS till_day_closes (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     branch_id                UUID NOT NULL REFERENCES locations(id),
     business_date            DATE NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'CLOSED' CHECK (status IN ('CLOSED', 'REOPENED')),
     deposit_slip_ref         TEXT NOT NULL CHECK (btrim(deposit_slip_ref) <> ''),
     closed_by                TEXT NOT NULL,
     closed_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -96,11 +97,20 @@ CREATE TABLE IF NOT EXISTS till_day_closes (
     deposit_difference_cents BIGINT,
     deposit_matched_by       TEXT,
     deposit_matched_at       TIMESTAMPTZ,
-    CONSTRAINT till_day_closes_one_per_day UNIQUE (branch_id, business_date),
+    reopened_by              TEXT,
+    reopened_at              TIMESTAMPTZ,
+    reopen_reason            TEXT,
+    reversal_gl_entry_id     UUID REFERENCES gl_journal_entries(id),
     CONSTRAINT till_day_closes_match_whole CHECK (
         (bank_transaction_id IS NULL) = (deposit_difference_cents IS NULL)
-        AND (bank_transaction_id IS NULL) = (deposit_matched_at IS NULL))
+        AND (bank_transaction_id IS NULL) = (deposit_matched_at IS NULL)),
+    CONSTRAINT till_day_closes_reopen_whole CHECK (
+        (status = 'CLOSED' AND reopened_by IS NULL AND reopened_at IS NULL AND reopen_reason IS NULL AND reversal_gl_entry_id IS NULL)
+        OR (status = 'REOPENED' AND reopened_by IS NOT NULL AND reopened_at IS NOT NULL AND btrim(reopen_reason) <> ''))
 );
+-- at most one active close per branch per business date; reopened rows stay for history
+CREATE UNIQUE INDEX IF NOT EXISTS till_day_closes_one_per_day
+    ON till_day_closes (branch_id, business_date) WHERE status = 'CLOSED';
 -- a bank line backs at most one branch day
 CREATE UNIQUE INDEX IF NOT EXISTS ux_till_day_closes_bank_line
     ON till_day_closes (bank_transaction_id) WHERE bank_transaction_id IS NOT NULL;
