@@ -7,7 +7,16 @@
 // numbers. Money stays integers until the display helper.
 
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
-export type TenderMethod = 'cash' | 'check' | 'card' | 'account';
+export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
+/** The kind of ID looked at beside a check or a charge; its number is never taken. */
+export type IdType = 'drivers_license' | 'state_id' | 'passport' | 'military_id' | 'other';
+export const ID_TYPES: Array<{ value: IdType; label: string }> = [
+    { value: 'drivers_license', label: 'Driver\u2019s licence' },
+    { value: 'state_id', label: 'State or provincial ID' },
+    { value: 'passport', label: 'Passport' },
+    { value: 'military_id', label: 'Military ID' },
+    { value: 'other', label: 'Other ID' },
+];
 export type RefundMethod = 'cash' | 'card' | 'account';
 export type TillSessionStatus = 'open' | 'closed';
 export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
@@ -58,6 +67,8 @@ export interface Tender {
     card_brand: string | null;
     gateway_tx_id: string | null;
     auth_code: string | null;
+    id_checked: boolean;
+    id_type: IdType | null;
     created_at: string;
 }
 
@@ -82,6 +93,11 @@ export interface Sale {
     /** The purchase order and job a charge sale names (null until named). */
     customer_po: string | null;
     job_id: string | null;
+    /** The roster buyer a sale on account names. */
+    buyer_contact_id: string | null;
+    /** How many times the receipt has been printed. */
+    print_count: number;
+    exchange_return_id: string | null;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -104,6 +120,51 @@ export interface CounterCustomer {
     available_credit_cents: number | null;
     standing: AccountStanding;
     jobs: CounterJob[];
+}
+
+// --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
+
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+
+export interface WayForward {
+    kind: 'pay_down' | 'manager_override' | 'switch_tender';
+    available: boolean;
+    /** For a pay down, what paying would clear. */
+    amount_cents?: number;
+    message: string;
+}
+
+export interface OnAccountVerdict {
+    verdict: 'allowed' | 'blocked';
+    reason: VerdictReason;
+    message: string;
+    over_cents: number | null;
+    ways_forward: WayForward[];
+}
+
+export interface Buyer {
+    id: string;
+    name: string;
+    cap_cents: number | null;
+}
+
+/** The account as the counter reads it before a sale goes on it. */
+export interface CounterStanding {
+    customer_id: string;
+    name: string;
+    currency: string;
+    credit_limit_cents: number | null;
+    open_receivable_cents: number;
+    /** The customer's open store credit, positive. */
+    open_credit_memo_cents: number;
+    available_credit_cents: number | null;
+    on_hold: boolean;
+    terms_kind: 'net_days' | 'day_of_month' | 'due_on_receipt';
+    named_buyer_required: boolean;
+    buyers: Buyer[];
+    check_limit_cents: number | null;
+    payment_options: TenderMethod[];
+    on_account: OnAccountVerdict;
 }
 
 export interface SaleSummary {
@@ -142,6 +203,19 @@ export interface ReturnLine {
     unit_price_ten_thousandths: number | null;
     line_total_cents: number | null;
     restock: boolean;
+    reason_code: ReturnReasonCode;
+    restocking_fee_cents: number;
+}
+
+/** The closed lowercase list of return reasons; an absent reason is other. */
+export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'other';
+
+export interface ReturnReason {
+    code: ReturnReasonCode;
+    label: string;
+    /** The fee withheld from the line's refund, in basis points. */
+    restocking_fee_bps: number;
+    needs_note: boolean;
 }
 
 export interface CounterReturn {
@@ -162,7 +236,48 @@ export interface CounterReturn {
     reason: string;
     credit_memo_id: string | null;
     created_at: string;
+    /** The fee withheld from the refund; the subtotal and total already carry it. */
+    restocking_fee_cents: number;
+    exchange_sale_id: string | null;
     lines: ReturnLine[];
+}
+
+/** What an exchange comes to: the credit the return is worth, the replacement and the difference. */
+export interface ExchangeFigures {
+    returned_cents: number;
+    restocking_fee_cents: number;
+    replacement_cents: number;
+    /** Replacement less return: positive is what the customer pays, negative what goes back. */
+    difference_cents: number;
+}
+
+export interface Exchange extends ExchangeFigures {
+    return: CounterReturn;
+    sale: Sale;
+    refunded_cents: number;
+}
+
+/** A sale's sealed signature (the image is never answered). */
+export interface SealedSignature {
+    sale_id: string;
+    signer_name: string;
+    signed_at: string;
+    total_cents: number;
+    image_sha256: string;
+    seal: string;
+    captured_by: string;
+}
+
+/** A manager's one act for one sale. */
+export interface CounterOverride {
+    id: string;
+    sale_id: string;
+    kind: 'account' | 'check';
+    approved_by: string;
+    reason: string;
+    cap_cents: number;
+    created_at: string;
+    consumed_at: string | null;
 }
 
 // --- Till sessions (drawer lifecycle) ---

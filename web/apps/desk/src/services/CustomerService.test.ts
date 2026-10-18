@@ -66,6 +66,8 @@ const CUSTOMER: Customer = {
   payment_terms_id: 't-1',
   payment_terms: { id: 't-1', code: 'NET30', name: 'Net 30' },
   po_required: true,
+  named_buyer_required: false,
+  check_limit_cents: null,
   revision: 4,
   created_at: '2026-01-01T00:00:00.000000Z',
   updated_at: '2026-01-01T00:00:00.000000Z',
