@@ -158,7 +158,7 @@ export class GableProShell extends LitElement {
     if (me === null) return html``
     const tabs = visibleTabs(me.capabilities)
     const dealerName = this.config?.dealer_name || 'Gable Pro'
-    return html`<div class="pro-shell lg:flex">
+    return html`<div class="pro-shell flex flex-col lg:flex-row">
       <aside class="pro-rail" aria-label="Contractor portal">
         <div class="pro-row mb-6 px-2">
           ${this.dealerMark()}
