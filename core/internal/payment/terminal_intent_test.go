@@ -464,19 +464,30 @@ func m29BranchOf(t *testing.T, l *payment.TerminalLedger) uuid.UUID {
 	return branch
 }
 
-// TestNoCardNumberShapeAnywhere: the migration and every fixture this
-// package's tests write hold no card number shape (13 to 19 digits with no
+// TestNoCardNumberShapeAnywhere: the migration and every terminal source,
+// test and desk file hold no card number shape (13 to 19 digits with no
 // separator inside them). A CVV pattern and a track data pattern are refused
 // the same way.
 func TestNoCardNumberShapeAnywhere(t *testing.T) {
 	cardNumber := regexp.MustCompile(`\b[3-6][0-9]{12,18}\b`)
 	cvv := regexp.MustCompile(`\bcvv[": ]+[0-9]{3,4}\b`)
 	track := regexp.MustCompile(`%B[0-9]{13,19}\^`)
-	migrations, err := filepath.Glob("../../migrations/128_*.sql")
-	if err != nil || len(migrations) == 0 {
-		t.Fatalf("the migration glob: %v %v", migrations, err)
+	globs := []string{
+		"../../migrations/128_*.sql",
+		"terminal*.go",
+		"../pos/terminal*.go",
+		"../../../web/apps/desk/src/pages/pos/terminal*.ts",
+		"../../../web/apps/desk/src/pages/pos/TerminalLostAnswers*.ts",
+		"../../../web/apps/desk/src/pages/pos/POSTerminal.cardwait*.ts",
 	}
-	files := append(migrations, "terminal_intent_test.go", "terminal_store.go", "terminal.go", "terminal_simulated.go")
+	var files []string
+	for _, g := range globs {
+		matches, err := filepath.Glob(g)
+		if err != nil || len(matches) == 0 {
+			t.Fatalf("card shape scan glob %q matched nothing: %v %v", g, matches, err)
+		}
+		files = append(files, matches...)
+	}
 	for _, name := range files {
 		body, err := os.ReadFile(name)
 		if err != nil {
@@ -487,5 +498,46 @@ func TestNoCardNumberShapeAnywhere(t *testing.T) {
 				t.Fatalf("%s holds a refused card data shape at %s: %q", name, pat.String(), body[loc[0]:loc[1]])
 			}
 		}
+	}
+}
+
+// TestSimulatedTerminalSettlementBatch: SettlementBatch returns only the legs
+// whose scripted outcome approved (approve, duplicate_answer, late_answer),
+// excluding declined and no_answer legs.
+func TestSimulatedTerminalSettlementBatch(t *testing.T) {
+	ctx := context.Background()
+	sim := payment.NewSimulatedTerminal(payment.SimApprove, nil)
+	sim.Script("leg-decline", payment.SimDecline)
+	sim.Script("leg-no-answer", payment.SimNoAnswer)
+	sim.Script("leg-dup", payment.SimDuplicateAnswer)
+
+	for _, tc := range []struct {
+		key   string
+		cents int64
+	}{
+		{"leg-approve", 1200},
+		{"leg-decline", 2300},
+		{"leg-no-answer", 3400},
+		{"leg-dup", 4500},
+	} {
+		if _, err := sim.Dispatch(ctx, payment.TerminalDispatch{
+			IntentID: uuid.New(), Kind: payment.TerminalKindSale, AmountCents: tc.cents,
+			Currency: "USD", RegisterID: "REG-01", DeviceID: "REG-01", IdempotencyKey: tc.key,
+		}); err != nil {
+			t.Fatalf("dispatch %s: %v", tc.key, err)
+		}
+	}
+	batch, err := sim.SettlementBatch(ctx, "REG-01", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("settlement batch: %v", err)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("batch len = %d, wanted 2: %+v", len(batch), batch)
+	}
+	if batch[0].ProviderRef != "simterm_leg-approve" || batch[0].AmountCents != 1200 || batch[0].Verdict != "authorized" {
+		t.Fatalf("batch[0] = %+v", batch[0])
+	}
+	if batch[1].ProviderRef != "simterm_leg-dup" || batch[1].AmountCents != 4500 || batch[1].Verdict != "authorized" {
+		t.Fatalf("batch[1] = %+v", batch[1])
 	}
 }

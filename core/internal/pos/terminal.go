@@ -297,6 +297,7 @@ func (s *Service) terminalRefundLeg(ctx context.Context, saleID, claimID uuid.UU
 	}
 	sale, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
+		s.logger.Error("terminal refund leg could not read sale", "sale_id", saleID, "claim_id", claimID, "error", err)
 		return nil
 	}
 	intent := &payment.TerminalIntent{
@@ -309,9 +310,14 @@ func (s *Service) terminalRefundLeg(ctx context.Context, saleID, claimID uuid.UU
 		intent.DeviceID = register
 	}
 	if err := s.terminalLedger.Claim(ctx, intent); err != nil {
+		s.logger.Error("terminal refund leg claim failed", "sale_id", saleID, "claim_id", claimID, "kind", kind, "error", err)
 		return nil
 	}
 	if ok, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease)); err != nil || !ok {
+		s.logger.Error("terminal refund leg dispatch move failed", "intent_id", intent.ID, "claim_id", claimID, "dispatched", ok, "error", err)
+		if cerr := s.terminalLedger.CloseClaimedIntent(context.WithoutCancel(ctx), intent.ID); cerr != nil {
+			s.logger.Error("terminal refund leg claim cleanup failed", "intent_id", intent.ID, "error", cerr)
+		}
 		return nil
 	}
 	return intent
@@ -336,13 +342,19 @@ func (s *Service) terminalCompensationLeg(ctx context.Context, saleLeg *payment.
 		IdempotencyKey: "void-" + saleLeg.IdempotencyKey, LeaseUntil: s.now().Add(terminalAnswerLease),
 	}
 	if err := s.terminalLedger.Claim(ctx, intent); err != nil {
+		s.logger.Error("terminal compensation leg claim failed", "sale_leg_id", saleLeg.ID, "error", err)
 		existing, gerr := s.terminalLedger.GetByKey(ctx, intent.TransactionID, intent.LegKey, intent.Kind)
 		if gerr != nil {
+			s.logger.Error("terminal compensation leg lookup failed", "sale_leg_id", saleLeg.ID, "error", gerr)
 			return nil
 		}
 		return existing
 	}
 	if ok, err := s.terminalLedger.MarkDispatched(ctx, intent.ID, "", s.now().Add(terminalAnswerLease)); err != nil || !ok {
+		s.logger.Error("terminal compensation leg dispatch move failed", "intent_id", intent.ID, "dispatched", ok, "error", err)
+		if cerr := s.terminalLedger.CloseClaimedIntent(context.WithoutCancel(ctx), intent.ID); cerr != nil {
+			s.logger.Error("terminal compensation leg claim cleanup failed", "intent_id", intent.ID, "error", cerr)
+		}
 		return nil
 	}
 	return intent

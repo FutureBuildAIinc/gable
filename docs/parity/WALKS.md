@@ -304,9 +304,10 @@ so a production configuration runs none of this).
    would leave the leg behind is refused `authorized_leg_unused`). A sale that completed another way has the leg
    applied up to its invoice's open amount and the rest put back to the card; a sale paid in full, or voided, has the
    whole charge put back (the same day void first, the refund when the void is refused; a failed reversal is 502
-   `charge_not_reversed` and the item is open again). A stranded card void or card return settles through its refund
-   claim's own resolution, so the drawer closes after it. A second resolve of any item is 409 `lost_item_settled` and
-   calls nothing.
+   `charge_not_reversed` and the item is open again; these reversal branches require a payment gateway configured on
+   the stack, and with the simulator alone they answer 409 `no_reversal_gateway`). A stranded card void, card return
+   or payback settles through its refund claim's own resolution, so the drawer closes after it. A second resolve of
+   any item is 409 `lost_item_settled` and calls nothing.
 8. Only the manager roles resolve, and every route runs behind the branch wall: sign in as yard two's manager and
    yard one's intents and items read as missing rows (a branch header) or are refused 403 (no header and no grant),
    its queue lists none of yard one's items, and its sweep takes only yard two's expired legs.

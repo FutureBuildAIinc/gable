@@ -857,3 +857,97 @@ func TestReviewConflictItemResolvedDeclinedOnUnspentAuthorizedLeg(t *testing.T) 
 	f.assertARInvariants(t)
 }
 
+// TestResolveAuthorizedSettlesAStrandedPaybackClaim: a declined void tender's
+// credit is paid back through the payback route while the terminal is wired;
+// the payback's refund call times out, the sweep files a manager item for the
+// payback's terminal leg, and the manager's authorized resolution settles the
+// payback claim DONE and moves the unapplied credit out to the card.
+func TestResolveAuthorizedSettlesAStrandedPaybackClaim(t *testing.T) {
+	gw := &fakeGateway{
+		charges:        []*payment.GatewayResult{approvedCharge(), approvedCharge()},
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusRefunded, payment.GatewayStatusDeclined},
+		refundErrs:     []error{nil, nil, context.DeadlineExceeded},
+	}
+	f := terminalFixture(t, payment.SimApprove, gw)
+	saleID, declined, credit := declinedCreditVoid(t, f, gw, mustUUID(t))
+
+	r := f.do("POST", "/api/v1/pos/refund-intents/"+declined["id"].(string)+"/payback",
+		map[string]any{"reason": "the customer is at the counter for their card"},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusInternalServerError {
+		t.Fatalf("timed out payback = %d, wanted 500: %s", r.status, r.raw)
+	}
+	var paybackID string
+	var paybackState string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id::text, state FROM pos_refund_intents WHERE act = 'payback' AND tender_id = $1`, declined["tender_id"]).
+		Scan(&paybackID, &paybackState); err != nil {
+		t.Fatal(err)
+	}
+	if paybackState != "PENDING" {
+		t.Fatalf("payback claim = %s, wanted PENDING", paybackState)
+	}
+	var legID uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id FROM payment_terminal_intents WHERE transaction_id = $1 AND leg_key = $2 AND kind = 'refund'`,
+		saleID, paybackID).Scan(&legID); err != nil {
+		t.Fatalf("payback terminal leg: %v", err)
+	}
+	f.expireTerminalLeases(t, saleID)
+	f.sweepAsManager(t)
+	var itemID uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id FROM payment_terminal_lost_items WHERE intent_id = $1`, legID).Scan(&itemID); err != nil {
+		t.Fatalf("payback lost item: %v", err)
+	}
+	if got := f.unappliedOf(t, declined["tender_id"].(string)); got != credit {
+		t.Fatalf("credit before resolution = %d, wanted %d", got, credit)
+	}
+	if rr := f.resolveItem(itemID, "authorized", "refund-ref-payback-1"); rr.status != http.StatusOK {
+		t.Fatalf("resolve payback item = %d: %s", rr.status, rr.raw)
+	}
+	if got := f.unappliedOf(t, declined["tender_id"].(string)); got != 0 {
+		t.Fatalf("credit after resolution = %d, wanted 0", got)
+	}
+	var claimNow, refundTx string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT state, COALESCE(refund_tx_id, '') FROM pos_refund_intents WHERE id = $1`, paybackID).Scan(&claimNow, &refundTx); err != nil {
+		t.Fatal(err)
+	}
+	if claimNow != "DONE" || refundTx != "refund-ref-payback-1" {
+		t.Fatalf("payback claim = %s under %q, wanted DONE under refund-ref-payback-1", claimNow, refundTx)
+	}
+	if st, spent, _ := f.intentFacts(t, legID); st != "authorized" || !spent {
+		t.Fatalf("payback terminal leg = %s spent=%t, wanted authorized spent", st, spent)
+	}
+	f.assertARInvariants(t)
+}
+
+// TestTerminalRefundLegFailedDispatchCleansUpClaim: if MarkDispatched fails
+// after terminalRefundLeg created a new claimed row, the claimed row is closed
+// immediately so it does not hold the drawer open until the sweep.
+func TestTerminalRefundLegFailedDispatchCleansUpClaim(t *testing.T) {
+	gw := &fakeGateway{}
+	f, saleID := settledCardSale(t, gw)
+	ctx := context.Background()
+	if _, err := f.db.Pool.Exec(ctx, `ALTER TABLE payment_terminal_intents
+		ADD CONSTRAINT m29_refund_dispatch_probe CHECK (NOT (kind = 'refund' AND state = 'pending_at_device')) NOT VALID`); err != nil {
+		t.Fatalf("probe constraint: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `ALTER TABLE payment_terminal_intents DROP CONSTRAINT IF EXISTS m29_refund_dispatch_probe`)
+	})
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	if r := f.cardReturnOn(t, saleID, lineID, "1"); r.status != http.StatusCreated {
+		t.Fatalf("card return = %d, wanted 201: %s", r.status, r.raw)
+	}
+	var claimedCount int
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM payment_terminal_intents WHERE transaction_id = $1 AND kind = 'refund' AND state = 'claimed'`, saleID).
+		Scan(&claimedCount); err != nil {
+		t.Fatal(err)
+	}
+	if claimedCount != 0 {
+		t.Fatalf("refund leg left %d claimed rows holding the drawer, wanted 0", claimedCount)
+	}
+}
