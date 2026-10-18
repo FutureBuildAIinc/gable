@@ -2,19 +2,13 @@
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
 # The general ledger module, transcribed from internal/gl/handler.go,
-# model.go, service.go and repository.go as they behave today. Quirks the
-# transcription preserves: money on the response side is int64 cents but the
-# journal entry request takes float dollars (debit and credit) and converts
-# with rounding; the list routes answer bare JSON arrays with no page
-# envelope and no filters, and an empty append-built slice is null, not [];
-# the status routes answer a one key {status} object; nearly every service
-# failure (unbalanced entry, wrong status, closed period, missing row) is a
-# 400 rather than a 404 or 409; PUT /accounts/{id} never checks the row
-# exists and echoes the request with a zero created_at and balance; GET a
-# single journal entry never carries reverses_entry_id (the header query does
-# not select it) while the create echo can; every error body is the standard
-# envelope from httputil.RespondError. Every route sits behind
-# RequireRole("admin","owner"), registered in internal/app/serve/serve.go.
+# model.go, service.go, repository.go, branch.go and periods.go as they
+# behave today. The routes sit behind RequireRole("admin","owner") composed
+# with the branch middleware, and the branch wall is on every read and write
+# that names or returns a branch: a named branch is held to the caller's
+# reach (403 when it is not), and a consolidated read (no branch_id) needs
+# every branch reach. Money is int64 cents everywhere, the lists are cursor
+# paginated, and the account and period updates take If-Match on a revision.
 paths:
   /api/v1/gl/accounts:
     get:
@@ -22,16 +16,21 @@ paths:
       tags: [gl]
       summary: List the chart of accounts
       description: >-
-        Every account ordered by code, with the posted balance (debit minus
-        credit, cents) computed per account. Role guard admin or owner. The
-        body is null when the chart is empty.
+        One cursor page of the chart, ordered by code, with the posted
+        balance (debit minus credit, cents) computed per account. Role guard
+        admin or owner.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: The chart of accounts.
+          description: A page of the chart of accounts.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GlAccountList"
+                $ref: "#/components/schemas/GlAccountPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -57,7 +56,7 @@ paths:
               $ref: "#/components/schemas/GlAccountRequest"
       responses:
         "201":
-          description: The created account (balance is 0).
+          description: The created account (balance is 0, revision is 1).
           content:
             application/json:
               schema:
@@ -82,10 +81,9 @@ paths:
       description: >-
         Role guard admin or owner. Full replace of the editable columns; the
         account is always written active (is_active cannot be set false
-        here). The row is not checked for existence: an unknown id still
-        answers 200, echoing the request with a zero created_at
-        (0001-01-01T00:00:00Z) and a zero balance. A non UUID id or an
-        undecodable body is a 400; a database refusal is a 500.
+        here). If-Match (or the body revision) must carry the revision the
+        caller read: absent is 428, stale is 409, and the row's revision
+        moves on with the write. An unknown id is a 404.
       parameters:
         - name: id
           in: path
@@ -93,6 +91,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IfMatch"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -102,7 +101,7 @@ paths:
               $ref: "#/components/schemas/GlAccountRequest"
       responses:
         "200":
-          description: The account as written, not re-read.
+          description: The account as written, with its new revision.
           content:
             application/json:
               schema:
@@ -113,12 +112,16 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/gl/journal-entries:
@@ -127,16 +130,29 @@ paths:
       tags: [gl]
       summary: List journal entries
       description: >-
-        Every entry, newest entry_date first then highest entry_number. No
-        filters or paging. Headers only: lines are omitted. Role guard admin
-        or owner. The body is null when there are no entries.
+        One cursor page of the entries, highest entry_number first, at the
+        caller's branch reach. branch_id narrows the page to one branch; a
+        caller held to one branch is refused the consolidated read (no
+        branch_id) with 403. Headers only: lines are omitted.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's entries. Absent reads consolidated, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: The journal entry headers.
+          description: A page of the journal entry headers.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GlJournalEntryList"
+                $ref: "#/components/schemas/GlJournalEntryPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -148,13 +164,15 @@ paths:
       tags: [gl]
       summary: Create a draft manual journal entry
       description: >-
-        Role guard admin or owner. The request carries float dollars; each
-        amount is multiplied by 100 and rounded to int64 cents. Source is
-        always MANUAL and status DRAFT. entry_date is optional (today when
-        absent) and must be YYYY-MM-DD. Refused with 400: undecodable body,
-        malformed entry_date, a negative debit or credit, a non UUID
-        account_id, fewer than 2 lines, debits not equal to credits, all
-        zero amounts, or a database refusal such as an unknown account.
+        Role guard admin or owner. The request carries int64 cents
+        (debit_cents, credit_cents) and names its branch, which the branch
+        wall holds to the caller's reach. Source is always MANUAL and status
+        DRAFT. entry_date is optional (today when absent) and must be
+        YYYY-MM-DD. The entry, its audit row and its outbox event ride one
+        transaction. Refused with 400: undecodable body, malformed
+        entry_date, a negative amount, a non UUID account_id or branch_id,
+        fewer than 2 lines, debits not equal to credits, all zero amounts,
+        or a database refusal such as an unknown account.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -188,9 +206,10 @@ paths:
       tags: [gl]
       summary: Get one journal entry with lines
       description: >-
-        Role guard admin or owner. Lines carry account_code and account_name.
-        Any repository failure, not only a missing row, answers 404.
-        reverses_entry_id is never present on this read.
+        Role guard admin or owner, walled by the entry's branch: a caller
+        held to one branch finds another branch's entry a 404. Lines carry
+        account_code and account_name. Any repository failure, not only a
+        missing row, answers 404.
       parameters:
         - name: id
           in: path
@@ -212,7 +231,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/gl/journal-entries/{id}/post:
     post:
       operationId: glJournalEntryPost
@@ -220,8 +239,10 @@ paths:
       summary: Post a draft journal entry
       description: >-
         Role guard admin or owner. No body. Only a DRAFT entry whose date does
-        not fall in a CLOSED fiscal period can post. Every refusal, including
-        an unknown id, is a 400.
+        not fall in a CLOSED fiscal period can post. An unknown id, or an entry
+        of a branch outside the caller's reach, is a 404; every other refusal
+        is a 400. The post, its audit row and its outbox event ride one
+        transaction.
       parameters:
         - name: id
           in: path
@@ -243,6 +264,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -256,14 +279,14 @@ paths:
       summary: Reverse a posted journal entry
       description: >-
         Role guard admin or owner. Books a posted, net-zero reversing entry
-        dated today and linked by reverses_entry_id. The optional body reason
-        is appended to the memo; an undecodable or absent body is ignored.
-        Only a POSTED entry that has not already been reversed and has at
-        least 2 lines can be reversed. The reversal posts in the original
-        entry's own currency (the entry priced its legs into that currency,
-        so a reversal in the currency.default setting's code would leave the
-        control account holding both halves of one undo in different
-        currencies). Every refusal, including an unknown id, is a 400.
+        dated today and linked by reverses_entry_id, in the original entry's
+        own branch and currency, each line keeping its own branch. The
+        optional body reason is appended to the memo; an undecodable or
+        absent body is ignored. Only a POSTED entry that has not already been
+        reversed and has at least 2 lines can be reversed. An unknown id, or
+        an entry of a branch outside the caller's reach, is a 404; every other
+        refusal is a 400. The reversal, its audit row and its outbox event
+        ride one transaction.
       parameters:
         - name: id
           in: path
@@ -291,6 +314,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -304,7 +329,9 @@ paths:
       summary: Void a posted journal entry
       description: >-
         Role guard admin or owner. No body. Only a POSTED entry can be
-        voided; every refusal, including an unknown id, is a 400.
+        voided. An unknown id, or an entry of a branch outside the caller's
+        reach, is a 404; every other refusal is a 400. The void, its audit row
+        and its outbox event ride one transaction.
       parameters:
         - name: id
           in: path
@@ -326,6 +353,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -339,14 +368,16 @@ paths:
       summary: Trial balance
       description: >-
         Role guard admin or owner. Posted activity up to and including as_of
-        (default today), for active accounts with any activity, ordered by
-        code. A malformed as_of is a 400. The body is null when no account
-        has activity.
+        (default the branch's business day in its own time zone), for active
+        accounts with any activity, ordered by code. branch_id cuts the
+        report to one branch; absent reads consolidated, which needs every
+        branch reach (403 otherwise). A malformed as_of is a 400. The body is
+        null when no account has activity.
       parameters:
         - name: as_of
           in: query
           required: false
-          description: Cut-off date, YYYY-MM-DD. Defaults to today.
+          description: The branch's business day or later, YYYY-MM-DD. Defaults to the branch's business day.
           schema:
             type: string
             format: date
@@ -359,6 +390,13 @@ paths:
           schema:
             type: string
             pattern: "^[A-Z]{3}$"
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's rows. Absent reads consolidated, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: The trial balance rows.
@@ -381,9 +419,12 @@ paths:
       summary: Profit and loss statement
       description: >-
         Role guard admin or owner. start defaults to the first of the current
-        month and end to today; both are YYYY-MM-DD and inclusive. A
-        malformed date or an end before the start is a 400. The three
-        sections are never null.
+        month and end to today; both are YYYY-MM-DD and inclusive.
+        compare_start and compare_end carry the previous period beside the
+        current one. branch_id cuts the statement to one branch; absent
+        reads consolidated, the sum of the branches, which needs every branch
+        reach (403 otherwise). A malformed date or an end before the start is
+        a 400. The three sections are never null.
       parameters:
         - name: start
           in: query
@@ -399,6 +440,20 @@ paths:
           schema:
             type: string
             format: date
+        - name: compare_start
+          in: query
+          required: false
+          description: First day of the comparison period, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: compare_end
+          in: query
+          required: false
+          description: Last day of the comparison period, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
         - name: currency
           in: query
           required: false
@@ -408,6 +463,13 @@ paths:
           schema:
             type: string
             pattern: "^[A-Z]{3}$"
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's statement. Absent reads consolidated, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: The income statement in cents.
@@ -429,14 +491,16 @@ paths:
       tags: [gl]
       summary: Balance sheet
       description: >-
-        Role guard admin or owner. as_of defaults to today; a malformed value
-        is a 400. retained_earnings is already included in total_equity. The
-        three sections are never null.
+        Role guard admin or owner. as_of defaults to the branch's business
+        day in its own time zone; a malformed value is a 400.
+        retained_earnings is already included in total_equity. branch_id cuts
+        the sheet to one branch; absent reads consolidated, which needs every
+        branch reach (403 otherwise). The three sections are never null.
       parameters:
         - name: as_of
           in: query
           required: false
-          description: Statement date, YYYY-MM-DD. Defaults to today.
+          description: Statement date, YYYY-MM-DD. Defaults to the branch's business day.
           schema:
             type: string
             format: date
@@ -449,6 +513,13 @@ paths:
           schema:
             type: string
             pattern: "^[A-Z]{3}$"
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's sheet. Absent reads consolidated, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: The statement of financial position in cents.
@@ -464,21 +535,132 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/gl/detail:
+    get:
+      operationId: glDetail
+      tags: [gl]
+      summary: GL detail drill down
+      description: >-
+        Role guard admin or owner. The posted lines of one account over a
+        date window, oldest first: the drill down from a statement row.
+        branch_id cuts the detail to one branch; absent reads every branch,
+        which needs every branch reach (403 otherwise). account_id, from and
+        to are required; a malformed value is a 400.
+      parameters:
+        - name: account_id
+          in: query
+          required: true
+          description: The account whose posted lines are listed.
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          description: First day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Last day, YYYY-MM-DD.
+          schema:
+            type: string
+            format: date
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's lines. Absent reads every branch, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The posted detail lines; never null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlDetailList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/gl/tie-out:
+    get:
+      operationId: glTieOut
+      tags: [gl]
+      summary: Subledger tie out
+      description: >-
+        Role guard admin or owner. The AR control account (1020) against the
+        customer subledger and the AP control account (2010) against the open
+        vendor bills, each difference answered in cents, in one currency. The
+        subledgers hold only their current balances, so the tie out is for the
+        branch's business day: an earlier as_of is a 400. branch_id ties one
+        branch (the customer subledger carries no branch of its own, so its
+        branch figure is that branch's customers, by primary branch); absent
+        ties consolidated, which needs every branch reach (403 otherwise).
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          description: Cut-off date, YYYY-MM-DD. Defaults to the branch's business day.
+          schema:
+            type: string
+            format: date
+        - name: currency
+          in: query
+          required: false
+          description: ISO 4217 code, three capital letters; defaults to the dealer's default currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+        - name: branch_id
+          in: query
+          required: false
+          description: One branch's tie out. Absent ties consolidated, which needs every branch reach.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The tie out, differences in cents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlTieOutReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/gl/fiscal-periods:
     get:
       operationId: glFiscalPeriodList
       tags: [gl]
       summary: List fiscal periods
       description: >-
-        Role guard admin or owner. All periods ordered by start date; the
-        body is null when there are none.
+        Role guard admin or owner. One cursor page of the periods ordered by
+        start date, each with the revision its If-Match takes.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: The fiscal periods.
+          description: A page of the fiscal periods.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GlFiscalPeriodList"
+                $ref: "#/components/schemas/GlFiscalPeriodPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -491,8 +673,12 @@ paths:
       tags: [gl]
       summary: Close an open fiscal period
       description: >-
-        Role guard admin or owner. No body. A period that does not exist or
-        is not OPEN is a 400.
+        Role guard admin or owner. No body. If-Match must carry the
+        revision the caller read: absent is 428, stale is 409. The close,
+        its audit row and its outbox event ride one transaction. A period
+        that does not exist is a 404; one already closed is a 409
+        invalid_state_transition. The close spans every branch, so a caller
+        held to some branches is refused (403).
       parameters:
         - name: id
           in: path
@@ -500,34 +686,44 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IfMatch"
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
-          description: Closed. The body is a one key object with status "closed".
+          description: The closed period, revision moved on.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GlStatusResult"
+                $ref: "#/components/schemas/GlFiscalPeriod"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
   /api/v1/gl/fiscal-periods/{id}/reopen:
     post:
       operationId: glFiscalPeriodReopen
       tags: [gl]
       summary: Reopen a closed fiscal period
       description: >-
-        Role guard admin or owner. No body. A period that does not exist or
-        is not CLOSED is a 400.
+        Role guard admin or owner. The body reason is required: a period is
+        reopened with a reason, recorded on the row with the actor and the
+        time. If-Match must carry the revision the caller read (absent 428,
+        stale 409). The reopen, its audit row and its outbox event ride one
+        transaction. A period that does not exist is a 404; one not closed
+        is a 409 invalid_state_transition. The reopen spans every branch, so
+        a caller held to some branches is refused (403).
       parameters:
         - name: id
           in: path
@@ -535,14 +731,73 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/IfMatch"
         - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GlReopenRequest"
       responses:
         "200":
-          description: Reopened. The body is a one key object with status "reopened".
+          description: The reopened period with its reason, revision moved on.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GlStatusResult"
+                $ref: "#/components/schemas/GlFiscalPeriod"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+  /api/v1/gl/years/{year}/close:
+    post:
+      operationId: glYearClose
+      tags: [gl]
+      summary: Close the year
+      description: >-
+        Role guard admin or owner. Zeroes the year's revenue and expense
+        accounts into Retained Earnings (3020), one balanced CLOSING entry
+        per branch that holds activity, dated the year's last day; each
+        entry, its audit row and its outbox event ride one transaction. A
+        year whose last day falls in a closed period is refused 409
+        period_closed (reopen it with a reason first). The close spans every
+        branch, so a caller held to some branches is refused (403). The
+        income statement leaves the closing entries out, so a closed year
+        still reads what it earned.
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: currency
+          in: query
+          required: false
+          description: ISO 4217 code, three capital letters; defaults to the dealer's default currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The branches' closing entry ids.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlYearEndResult"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -550,17 +805,19 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   schemas:
     GlAccount:
       type: object
-      required: [id, code, name, type, subtype, normal_balance, is_active, description, balance, created_at, updated_at]
-      description: One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines).
+      required: [id, code, name, type, subtype, normal_balance, is_active, description, balance, revision, created_at, updated_at]
+      description: One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines); revision is the If-Match revision of the row.
       properties:
         id:
           type: string
@@ -588,20 +845,32 @@ components:
           type: integer
           format: int64
           description: Cents.
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    GlAccountList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/GlAccount"
+    GlAccountPage:
+      type: object
+      required: [items, limit]
+      description: One cursor page of the chart of accounts.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlAccount"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     GlAccountRequest:
       type: object
       required: [code, name, type]
-      description: The create and update body for an account. Unknown keys are ignored.
+      description: The create and update body for an account. The optional revision is the update's precondition beside If-Match. Unknown keys are ignored.
       properties:
         code:
           type: string
@@ -620,10 +889,13 @@ components:
           enum: [DEBIT, CREDIT]
         description:
           type: string
+        revision:
+          type: integer
+          format: int64
     GlJournalEntry:
       type: object
-      required: [id, entry_number, entry_date, memo, source, status, posted_by, total_debit, total_credit, created_at, updated_at]
-      description: A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents.
+      required: [id, entry_number, entry_date, memo, source, branch_id, status, posted_by, total_debit, total_credit, created_at, updated_at]
+      description: A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents; branch_id is the branch the entry belongs to.
       properties:
         id:
           type: string
@@ -639,6 +911,9 @@ components:
           type: string
           description: MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN, DEPOSIT, CREDIT_MEMO or WRITE_OFF.
         source_ref_id:
+          type: string
+          format: uuid
+        branch_id:
           type: string
           format: uuid
         status:
@@ -667,14 +942,23 @@ components:
         updated_at:
           type: string
           format: date-time
-    GlJournalEntryList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/GlJournalEntry"
+    GlJournalEntryPage:
+      type: object
+      required: [items, limit]
+      description: One cursor page of the journal entry headers.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlJournalEntry"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     GlJournalLine:
       type: object
       required: [id, journal_entry_id, account_id, description, debit, credit]
-      description: One debit or credit line (gl.JournalLine). debit and credit are int64 cents.
+      description: One debit or credit line (gl.JournalLine). debit and credit are int64 cents; branch_id is the line's branch, normally its entry's.
       properties:
         id:
           type: string
@@ -691,6 +975,9 @@ components:
           type: string
         description:
           type: string
+        branch_id:
+          type: string
+          format: uuid
         debit:
           type: integer
           format: int64
@@ -701,15 +988,21 @@ components:
           description: Cents.
     GlJournalEntryRequest:
       type: object
+      required: [branch_id]
       description: >-
         The create body. entry_date is YYYY-MM-DD and defaults to today.
-        debit and credit are float dollars today, rounded to cents on the
-        way in.
+        debit_cents and credit_cents are int64 cents. branch_id names the
+        branch the entry belongs to, held to the caller's reach.
       properties:
         entry_date:
           type: string
           format: date
         memo:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        posted_by:
           type: string
         lines:
           type: array
@@ -723,14 +1016,23 @@ components:
           format: uuid
         description:
           type: string
-        debit:
-          type: number
-          description: Float dollars today; must be >= 0.
-        credit:
-          type: number
-          description: Float dollars today; must be >= 0.
+        debit_cents:
+          type: integer
+          format: int64
+          description: Cents; must be >= 0.
+        credit_cents:
+          type: integer
+          format: int64
+          description: Cents; must be >= 0.
     GlReverseRequest:
       type: object
+      properties:
+        reason:
+          type: string
+    GlReopenRequest:
+      type: object
+      required: [reason]
+      description: The reopen body (a period is reopened with a reason).
       properties:
         reason:
           type: string
@@ -748,11 +1050,11 @@ components:
       properties:
         status:
           type: string
-          enum: [posted, voided, closed, reopened]
+          enum: [posted, voided]
     GlFiscalPeriod:
       type: object
-      required: [id, name, start_date, end_date, status, created_at]
-      description: An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open.
+      required: [id, name, start_date, end_date, status, revision, created_at]
+      description: An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open; reopen_reason, reopened_by and reopened_at appear once it has been reopened. revision is the If-Match revision.
       properties:
         id:
           type: string
@@ -773,17 +1075,36 @@ components:
           format: date-time
         closed_by:
           type: string
+        reopen_reason:
+          type: string
+        reopened_by:
+          type: string
+        reopened_at:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
-    GlFiscalPeriodList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/GlFiscalPeriod"
+    GlFiscalPeriodPage:
+      type: object
+      required: [items, limit]
+      description: One cursor page of the fiscal periods.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GlFiscalPeriod"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
     GlTrialBalanceRow:
       type: object
-      required: [account_id, account_code, account_name, account_type, currency, debit, credit]
-      description: One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents.
+      required: [account_id, account_code, account_name, account_type, currency, branch_id, debit, credit]
+      description: One trial balance row (gl.TrialBalanceRow), per account, currency and branch. debit and credit are int64 cents.
       properties:
         currency:
           type: string
@@ -797,6 +1118,9 @@ components:
           type: string
         account_type:
           type: string
+        branch_id:
+          type: string
+          format: uuid
         debit:
           type: integer
           format: int64
@@ -809,6 +1133,94 @@ components:
       type: [array, "null"]
       items:
         $ref: "#/components/schemas/GlTrialBalanceRow"
+    GlDetailRow:
+      type: object
+      required: [entry_id, entry_number, entry_date, memo, source, line_id, account_id, account_code, account_name, description, branch_id, debit_cents, credit_cents]
+      description: One posted ledger line behind a statement row (gl.GLDetailRow). debit_cents and credit_cents are int64 cents.
+      properties:
+        entry_id:
+          type: string
+          format: uuid
+        entry_number:
+          type: integer
+        entry_date:
+          type: string
+          format: date-time
+        memo:
+          type: string
+        source:
+          type: string
+        line_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        account_code:
+          type: string
+        account_name:
+          type: string
+        description:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        debit_cents:
+          type: integer
+          format: int64
+        credit_cents:
+          type: integer
+          format: int64
+    GlDetailList:
+      type: array
+      items:
+        $ref: "#/components/schemas/GlDetailRow"
+    GlTieOutLeg:
+      type: object
+      required: [control_cents, subledger_cents, difference_cents]
+      description: One control account against its subledger, cents.
+      properties:
+        control_cents:
+          type: integer
+          format: int64
+        subledger_cents:
+          type: integer
+          format: int64
+        difference_cents:
+          type: integer
+          format: int64
+    GlTieOutReport:
+      type: object
+      required: [as_of, currency, ar, ap]
+      description: The subledger tie out (gl.TieOutReport), AR 1020 against the customers and AP 2010 against the open bills.
+      properties:
+        as_of:
+          type: string
+          description: YYYY-MM-DD.
+        currency:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        ar:
+          $ref: "#/components/schemas/GlTieOutLeg"
+        ap:
+          $ref: "#/components/schemas/GlTieOutLeg"
+    GlYearEndResult:
+      type: object
+      required: [year, currency, entries]
+      description: The year end close's answer (gl.YearEndResult).
+      properties:
+        year:
+          type: integer
+        currency:
+          type: string
+        entries:
+          type: array
+          description: One closing entry id per branch that held activity; empty when the year held none.
+          items:
+            type: string
+            format: uuid
     GlAccountLineItem:
       type: object
       required: [account_id, account_code, account_name, amount]
@@ -824,19 +1236,48 @@ components:
           type: integer
           format: int64
           description: Cents.
+    GlProfitAndLossComparison:
+      type: object
+      required: [start_date, end_date, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
+      description: The previous period's totals beside the current ones (gl.ProfitAndLossComparison), cents.
+      properties:
+        start_date:
+          type: string
+        end_date:
+          type: string
+        total_revenue:
+          type: integer
+          format: int64
+        total_cogs:
+          type: integer
+          format: int64
+        gross_profit:
+          type: integer
+          format: int64
+        total_expenses:
+          type: integer
+          format: int64
+        net_income:
+          type: integer
+          format: int64
     GlProfitAndLossReport:
       type: object
       required: [currency, start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
-      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency.
+      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency, one branch's or the consolidated sum.
       properties:
         currency:
           type: string
+        branch_id:
+          type: string
+          format: uuid
         start_date:
           type: string
           description: YYYY-MM-DD.
         end_date:
           type: string
           description: YYYY-MM-DD.
+        comparison:
+          $ref: "#/components/schemas/GlProfitAndLossComparison"
         revenue:
           type: array
           items:
@@ -868,10 +1309,13 @@ components:
     GlBalanceSheetReport:
       type: object
       required: [currency, as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
-      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency.
+      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency, one branch's or the consolidated sum.
       properties:
         currency:
           type: string
+        branch_id:
+          type: string
+          format: uuid
         as_of_date:
           type: string
           description: YYYY-MM-DD.
