@@ -189,4 +189,29 @@ describe('customer quote builder', () => {
     const secondConfirm = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/confirm'))[1]
     expect(JSON.parse(String(secondConfirm?.[1]?.body))).toEqual({ accept_price_changes: true })
   })
+
+  it('disables rotate and revoke link actions when the user cannot edit or request quotes', async () => {
+    const sent = sentQuote(customerQuoteFixture)
+    const fetchMock = mockPortal(sent)
+    vi.stubGlobal('fetch', fetchMock)
+    const viewer = structuredClone(meFixture)
+    viewer.capabilities.request_quotes = false
+    viewer.capabilities.approve_quotes = true
+    const element = new GableProQuoteBuilder()
+    element.me = viewer
+    element.quoteId = sent.id
+    document.body.append(element)
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="rotate-link"]')).not.toBeNull())
+
+    const rotateBtn = element.querySelector<HTMLButtonElement>('[data-testid="rotate-link"]')
+    const revokeBtn = element.querySelector<HTMLButtonElement>('[data-testid="revoke-link"]')
+    expect(rotateBtn?.disabled).toBe(true)
+    expect(revokeBtn?.disabled).toBe(true)
+
+    await (element as unknown as { rotate: () => Promise<void>; revoke: () => Promise<void> }).rotate()
+    await (element as unknown as { rotate: () => Promise<void>; revoke: () => Promise<void> }).revoke()
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/link/rotate'))).toBe(false)
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/link/revoke'))).toBe(false)
+  })
 })
+

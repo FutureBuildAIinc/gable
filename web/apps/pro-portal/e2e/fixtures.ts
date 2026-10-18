@@ -3,7 +3,7 @@
 
 import type { Page, Route } from '@playwright/test'
 import type { PortalConfig, PortalMe } from '../src/types.ts'
-import { holdFixture, orderFixture, slotsFixture, testIds, timelineFixture, todayFixture } from '../src/test/fixtures.ts'
+import { day, holdFixture, orderFixture, slotsFixture, testIds, timelineFixture, todayFixture } from '../src/test/fixtures.ts'
 import { catalogFixtures, customerQuoteFixture, customerQuoteSummaryFixture, quoteIds } from '../src/test/customer-quote-fixtures.ts'
 import { publicQuoteFixture, publicToken, signedPublicQuoteFixture } from '../src/test/public-fixtures.ts'
 
@@ -17,6 +17,10 @@ export const ids = {
 
 export function iso(): string {
   return new Date().toISOString()
+}
+
+export function relIsoDays(offset = 0): string {
+  return day(offset)
 }
 
 export const meFixture: PortalMe = {
@@ -76,10 +80,12 @@ export function json(route: Route, body: unknown, status = 200, headers: Record<
 export interface MockOptions {
   signedIn?: boolean
   publicState?: 'open' | 'signed'
+  me?: PortalMe
 }
 
 export async function installPortalMocks(page: Page, options: MockOptions = {}): Promise<void> {
   let signedIn = options.signedIn ?? true
+  const activeMe = options.me ?? meFixture
   const customerQuote = structuredClone(customerQuoteFixture)
   const publicView = structuredClone(options.publicState === 'signed' ? signedPublicQuoteFixture : publicQuoteFixture)
   await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
@@ -90,11 +96,11 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
     const path = url.pathname
     if (path === '/api/portal/v1/config') return json(route, configFixture)
     if (path === '/api/portal/v1/me') {
-      return signedIn ? json(route, meFixture) : json(route, { error: 'signed out' }, 401)
+      return signedIn ? json(route, activeMe) : json(route, { error: 'signed out' }, 401)
     }
     if (path === '/api/portal/v1/login' && request.method() === 'POST') {
       signedIn = true
-      return json(route, { user: meFixture.user, config: configFixture })
+      return json(route, { user: activeMe.user, config: configFixture })
     }
     if (path === '/api/portal/v1/logout' && request.method() === 'POST') {
       signedIn = false
@@ -314,7 +320,7 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
           overdue_invoice_count: 1,
         },
         aging: {
-          as_of: '2026-06-15',
+          as_of: relIsoDays(0),
           currency: 'USD',
           current_cents: 287525,
           days_1_30_cents: 125050,
@@ -390,15 +396,15 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
       return json(route, {
         customer_id: ids.customer,
         customer_name: 'Summit Frame Works',
-        from: '2026-05-15',
-        to: '2026-06-15',
+        from: relIsoDays(-30),
+        to: relIsoDays(0),
         currency: 'USD',
         opening_balance_cents: 200000,
         closing_balance_cents: 412575,
         unapplied_cents: 15000,
         net_balance_cents: 397575,
         aging: {
-          as_of: '2026-06-15',
+          as_of: relIsoDays(0),
           currency: 'USD',
           current_cents: 287525,
           days_1_30_cents: 125050,
@@ -412,7 +418,7 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
         lines: [
           {
             id: '80000000-0000-4000-8000-000000000008',
-            date: '2026-06-01',
+            date: relIsoDays(-14),
             type: 'INVOICE',
             description: 'Invoice IN-1001',
             amount_cents: 125050,
@@ -421,8 +427,8 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
           },
         ],
         open_invoices: [
-          { kind: 'INVOICE', id: testIds.invoice, number: 'IN-1001', date: '2026-06-01', due_date: '2026-06-10', total_cents: 125050, open_cents: 125050 },
-          { kind: 'INVOICE', id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc', number: 'IN-1002', date: '2026-06-08', due_date: '2026-07-08', total_cents: 287525, open_cents: 287525 },
+          { kind: 'INVOICE', id: testIds.invoice, number: 'IN-1001', date: relIsoDays(-14), due_date: relIsoDays(-5), total_cents: 125050, open_cents: 125050 },
+          { kind: 'INVOICE', id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc', number: 'IN-1002', date: relIsoDays(-7), due_date: relIsoDays(23), total_cents: 287525, open_cents: 287525 },
         ],
       })
     }
@@ -436,7 +442,7 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
           brand: 'Visa',
           last4: '4242',
           exp_month: 12,
-          exp_year: 2028,
+          exp_year: new Date().getUTCFullYear() + 2,
           is_default: true,
           status: 'ACTIVE',
           created_at: iso(),
@@ -455,10 +461,10 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
         unapplied_cents: 0,
         card_brand: 'Visa',
         card_last4: '4242',
-        received_on: '2026-06-15',
+        received_on: relIsoDays(0),
         created_at: iso(),
         allocations: [
-          { id: '91000000-0000-4000-8000-000000000001', invoice_id: testIds.invoice, invoice_number: 'IN-1001', amount_cents: 125050, applied_on: '2026-06-15', created_at: iso() },
+          { id: '91000000-0000-4000-8000-000000000001', invoice_id: testIds.invoice, invoice_number: 'IN-1001', amount_cents: 125050, applied_on: relIsoDays(0), created_at: iso() },
         ],
       }
       return json(route, request.method() === 'POST' ? payment : [payment], request.method() === 'POST' ? 201 : 200)

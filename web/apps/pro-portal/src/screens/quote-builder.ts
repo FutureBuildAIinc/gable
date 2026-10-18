@@ -209,7 +209,7 @@ export class GableProQuoteBuilder extends LitElement {
   }
 
   private async rotate(): Promise<void> {
-    if (this.quote === null || this.busy || this.offline) return
+    if (this.quote === null || this.busy || this.offline || !can(this.me.capabilities, 'request_quotes')) return
     this.busy = true
     this.error = ''
     try {
@@ -229,7 +229,7 @@ export class GableProQuoteBuilder extends LitElement {
   }
 
   private async revoke(): Promise<void> {
-    if (this.quote === null || this.busy || this.offline) return
+    if (this.quote === null || this.busy || this.offline || !can(this.me.capabilities, 'request_quotes')) return
     this.busy = true
     this.error = ''
     try {
@@ -356,7 +356,7 @@ export class GableProQuoteBuilder extends LitElement {
         ${lines.length === 0 ? html`<div class="pro-empty"><p class="pro-text-small">Add catalog products to start the quote.</p></div>` : lines.map((line, index) => {
           const stored = this.quote?.lines.find((item) => item.id === line.id)
           const product = this.catalog.find((item) => item.id === line.product_id)
-          return html`<div class="rounded-2xl border border-zinc-800 bg-surface-2 p-3" data-testid=${`quote-line-${index}`}>
+          return html`<div class="rounded-lg border border-zinc-800 bg-surface-2 p-3" data-testid=${`quote-line-${index}`}>
             <div class="pro-row"><div class="pro-row-grow"><div class="pro-card-title">${stored?.description ?? product?.name ?? 'Catalog product'}</div><div class="pro-text-small pro-data">${stored?.sku ?? product?.sku ?? ''}</div></div>
               <button type="button" class="pro-icon-btn" aria-label="Remove line" ?disabled=${!this.canEdit || this.offline} @click=${() => this.patchInput({ lines: lines.filter((_item, itemIndex) => itemIndex !== index) })}>${icon(Trash2, 15)}</button></div>
             <div class="pro-form-grid mt-3">
@@ -427,7 +427,7 @@ export class GableProQuoteBuilder extends LitElement {
   private renderLabourOverhead(): TemplateResult {
     return html`<section class="pro-card" data-testid="labour-overhead">
       <h2 class="pro-card-title">Labour and overhead</h2>
-      ${(this.input.labour ?? []).map((line, index) => html`<div class="mt-3 rounded-xl border border-zinc-800 p-3" data-testid=${`labour-${index}`}>
+      ${(this.input.labour ?? []).map((line, index) => html`<div class="mt-3 rounded-lg border border-zinc-800 p-3" data-testid=${`labour-${index}`}>
         <div class="pro-form-grid">
           <label class="pro-field sm:col-span-2"><span class="pro-label">Labour description</span><input class="pro-input" .value=${line.description} @input=${(event: Event) => this.patchLabour(index, { description: (event.target as HTMLInputElement).value })} /></label>
           <label class="pro-field"><span class="pro-label">Rate type</span><select class="pro-select" .value=${line.rate_type} @change=${(event: Event) => this.patchLabour(index, { rate_type: (event.target as HTMLSelectElement).value === 'hourly' ? 'hourly' : 'flat' })}><option value="flat">Flat</option><option value="hourly">Hourly</option></select></label>
@@ -439,7 +439,7 @@ export class GableProQuoteBuilder extends LitElement {
       </div>`)}
       <button type="button" class="pro-btn pro-btn-secondary pro-btn-small mt-3" data-testid="add-labour" ?disabled=${!this.canEdit || this.offline} @click=${() => this.patchInput({ labour: [...(this.input.labour ?? []), { description: 'Labour', rate_type: 'flat', rate_cents: 0, hours: '', contractor_only: false }] })}>Add labour</button>
       <div class="my-4 border-t border-zinc-800"></div>
-      ${(this.input.overhead ?? []).map((line, index) => html`<div class="mt-3 rounded-xl border border-zinc-800 p-3" data-testid=${`overhead-${index}`}>
+      ${(this.input.overhead ?? []).map((line, index) => html`<div class="mt-3 rounded-lg border border-zinc-800 p-3" data-testid=${`overhead-${index}`}>
         <div class="pro-form-grid">
           <label class="pro-field sm:col-span-2"><span class="pro-label">Overhead label</span><input class="pro-input" .value=${line.label} @input=${(event: Event) => this.patchOverhead(index, { label: (event.target as HTMLInputElement).value })} /></label>
           <label class="pro-field"><span class="pro-label">Amount type</span><select class="pro-select" .value=${line.amount_type} @change=${(event: Event) => this.patchOverhead(index, { amount_type: (event.target as HTMLSelectElement).value === 'percent' ? 'percent' : 'flat', value: 0 })}><option value="flat">Flat</option><option value="percent">Percent</option></select></label>
@@ -487,8 +487,8 @@ export class GableProQuoteBuilder extends LitElement {
         <div class="mt-3 flex flex-wrap gap-2">
           <button type="button" class="pro-btn pro-btn-secondary pro-btn-small" data-testid="preview-quote" ?disabled=${this.dirty || this.busy} @click=${() => void this.showPreview()}>${icon(Eye, 14)} Preview</button>
           ${quote.status === 'draft' ? html`<button type="button" class="pro-btn pro-btn-primary pro-btn-small" data-testid="send-quote" ?disabled=${this.dirty || this.offline || this.busy || !can(this.me.capabilities, 'request_quotes')} @click=${() => void this.send()}>${icon(Send, 14)} Send</button>` : nothing}
-          ${quote.link !== null ? html`<button type="button" class="pro-btn pro-btn-secondary pro-btn-small" data-testid="rotate-link" ?disabled=${this.offline || this.busy} @click=${() => void this.rotate()}>${icon(RefreshCw, 14)} Rotate link</button>
-            <button type="button" class="pro-btn pro-btn-ghost pro-btn-small" data-testid="revoke-link" ?disabled=${this.offline || this.busy} @click=${() => void this.revoke()}>Revoke</button>` : nothing}
+          ${quote.link !== null ? html`<button type="button" class="pro-btn pro-btn-secondary pro-btn-small" data-testid="rotate-link" ?disabled=${this.offline || this.busy || !can(this.me.capabilities, 'request_quotes')} @click=${() => void this.rotate()}>${icon(RefreshCw, 14)} Rotate link</button>
+            <button type="button" class="pro-btn pro-btn-ghost pro-btn-small" data-testid="revoke-link" ?disabled=${this.offline || this.busy || !can(this.me.capabilities, 'request_quotes')} @click=${() => void this.revoke()}>Revoke</button>` : nothing}
           ${quote.status === 'approved' && can(this.me.capabilities, 'approve_quotes') ? html`<button type="button" class="pro-btn pro-btn-primary pro-btn-small" data-testid="confirm-quote" ?disabled=${this.offline || this.busy} @click=${() => void this.confirm()}>Confirm to dealer order</button>` : nothing}
         </div>
         ${this.confirmPreview !== null && quote.status === 'approved' ? html`<div class="pro-warning mt-3" data-testid="confirm-preview">
@@ -534,8 +534,8 @@ export class GableProQuoteBuilder extends LitElement {
       <p class="pro-page-kicker">Customer quotes</p>
       <h1 class="pro-page-title">Your price, your customer</h1>
       <p class="pro-page-subtitle">Build from dealer products at your cost. Your customer sees only the sell price you choose.</p>
-      <div class="pro-row mt-4">
-        <select class="pro-select max-w-md" aria-label="Open customer quote" .value=${this.quote?.id ?? ''} @change=${(event: Event) => { const id = (event.target as HTMLSelectElement).value; if (id !== '') navigate(`/quotes/${id}`) }}>
+      <div class="pro-row mt-4 flex-wrap">
+        <select class="pro-select basis-full sm:basis-auto sm:flex-1 sm:max-w-md" aria-label="Open customer quote" .value=${this.quote?.id ?? ''} @change=${(event: Event) => { const id = (event.target as HTMLSelectElement).value; if (id !== '') navigate(`/quotes/${id}`) }}>
           ${this.quote === null ? html`<option value="" selected>New customer quote</option>` : nothing}
           ${this.summaries.map((summary) => html`<option value=${summary.id} ?selected=${summary.id === this.quote?.id}>${summary.reference} · ${summary.title}</option>`)}
         </select>
@@ -558,8 +558,8 @@ export class GableProQuoteBuilder extends LitElement {
             ${this.renderTerms()}
           </fieldset>
           <fieldset class="pro-card" ?disabled=${!this.canEdit || this.offline}>
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center"><div class="pro-row-grow"><span class="pro-label">Whole quote markup</span>${this.markupEditor(this.input.markup, (markup) => this.patchInput({ markup }), 'Quote default')}</div>
-              <button type="button" class="pro-btn pro-btn-primary w-full sm:w-auto" data-testid="save-quote" ?disabled=${!this.canEdit || !this.dirty || this.busy || this.offline} @click=${() => void this.save()}>${this.busy ? 'Saving...' : 'Save and price'}</button></div>
+            <div class="flex flex-col gap-3 xl:flex-row xl:items-end"><div class="pro-row-grow"><span class="pro-label">Whole quote markup</span>${this.markupEditor(this.input.markup, (markup) => this.patchInput({ markup }), 'Quote default')}</div>
+              <button type="button" class="pro-btn pro-btn-primary w-full xl:w-auto" data-testid="save-quote" ?disabled=${!this.canEdit || !this.dirty || this.busy || this.offline} @click=${() => void this.save()}>${this.busy ? 'Saving...' : 'Save and price'}</button></div>
             ${this.dirty ? html`<p class="pro-text-small mt-2">Unsaved changes. Save to reprice and enable preview.</p>` : nothing}
           </fieldset>
         </div>

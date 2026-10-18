@@ -102,6 +102,10 @@ export class GableProOrder extends LitElement {
     return can(this.me?.capabilities ?? null, 'order')
   }
 
+  private get canSeeMoney(): boolean {
+    return can(this.me?.capabilities ?? null, 'see_money')
+  }
+
   private get canRequestQuotes(): boolean {
     return can(this.me?.capabilities ?? null, 'request_quotes')
   }
@@ -544,6 +548,7 @@ export class GableProOrder extends LitElement {
 
   private renderCatalogView(): TemplateResult {
     const cart = this.cart
+    const showMoney = this.canSeeMoney
     return html`<div class="pro-two-col" data-testid="order-catalog-view">
       <div class="grid gap-3">
         <div class="pro-card">
@@ -595,7 +600,7 @@ export class GableProOrder extends LitElement {
                       <p class="pro-text-small">${[product.species, product.grade].filter(Boolean).join(' · ') || 'Standard yard spec'}</p>
                     </div>
                     <div class="text-right">
-                      <div class="pro-money text-lg" data-testid=${`product-price-${product.id}`}>${formatDollars(product.customer_price)} <span class="pro-text-small">/${product.uom}</span></div>
+                      ${showMoney ? html`<div class="pro-money text-lg" data-testid=${`product-price-${product.id}`}>${formatDollars(product.customer_price)} <span class="pro-text-small">/${product.uom}</span></div>` : nothing}
                       <span class="pro-chip ${product.price_source === 'CONTRACT' ? 'pro-chip-green' : ''}">${product.price_source}</span>
                     </div>
                   </div>
@@ -632,9 +637,9 @@ export class GableProOrder extends LitElement {
             ${icon(ShoppingCart, 18, 'text-gable-green')}
             <div class="pro-row-grow">
               <h2 class="pro-card-title">Active cart (${cart?.item_count ?? 0})</h2>
-              <p class="pro-text-small">Priced on your contractor waterfall.</p>
+              <p class="pro-text-small">${showMoney ? 'Priced on your contractor waterfall.' : 'Materials staged for jobsite fulfillment.'}</p>
             </div>
-            <span class="pro-money text-lg" data-testid="cart-subtotal">${formatDollars(cart?.subtotal ?? 0)}</span>
+            ${showMoney ? html`<span class="pro-money text-lg" data-testid="cart-subtotal">${formatDollars(cart?.subtotal ?? 0)}</span>` : nothing}
           </div>
 
           ${(cart?.items.length ?? 0) === 0
@@ -643,7 +648,7 @@ export class GableProOrder extends LitElement {
                 ${(cart?.items ?? []).map((item) => html`<div class="pro-line" data-testid=${`cart-item-${item.id}`}>
                   <div>
                     <div class="pro-line-title">${item.product_name}</div>
-                    <div class="pro-line-meta pro-data">${item.product_sku} · ${formatDollars(item.unit_price)} each</div>
+                    <div class="pro-line-meta pro-data">${item.product_sku}${showMoney ? ` · ${formatDollars(item.unit_price)} each` : ` · Qty ${item.quantity}`}</div>
                     <div class="pro-row mt-2">
                       <label class="pro-sr-only" for=${`qty-${item.id}`}>Quantity</label>
                       <input
@@ -664,7 +669,7 @@ export class GableProOrder extends LitElement {
                       >${icon(Trash2, 14)} Remove</button>
                     </div>
                   </div>
-                  <div class="pro-money">${formatDollars(item.line_total)}</div>
+                  ${showMoney ? html`<div class="pro-money">${formatDollars(item.line_total)}</div>` : nothing}
                 </div>`)}
               </div>`}
 
@@ -727,6 +732,7 @@ export class GableProOrder extends LitElement {
 
   private renderReorderView(): TemplateResult {
     const preview = this.reorderPreview
+    const showMoney = this.canSeeMoney
     return html`<div class="pro-two-col" data-testid="order-reorder-view">
       <div class="pro-list">
         ${this.orders.length === 0
@@ -739,14 +745,14 @@ export class GableProOrder extends LitElement {
                   <p class="pro-text-small">${order.lines.length} ${order.lines.length === 1 ? 'line' : 'lines'}</p>
                 </div>
                 <div class="text-right">
-                  <div class="pro-money">${formatDollars(order.total_amount)}</div>
+                  ${showMoney ? html`<div class="pro-money">${formatDollars(order.total_amount)}</div>` : nothing}
                   <div class="mt-1">${statusChip(order.status)}</div>
                 </div>
               </div>
               <div class="pro-line-list mt-3">
                 ${order.lines.slice(0, 3).map((line) => html`<div class="pro-line">
                   <span class="pro-text-small">${line.quantity} x ${line.product_name} (${line.product_sku})</span>
-                  <span class="pro-money text-xs">${formatDollars(line.price_each)}</span>
+                  ${showMoney ? html`<span class="pro-money text-xs">${formatDollars(line.price_each)}</span>` : nothing}
                 </div>`)}
               </div>
               <div class="pro-row mt-3 flex-wrap">
@@ -793,7 +799,7 @@ export class GableProOrder extends LitElement {
                 </div>
                 <button type="button" class="pro-icon-btn" aria-label="Close reorder preview" @click=${() => { this.reorderPreview = null }}>${icon(X, 16)}</button>
               </div>
-              <div class="pro-summary-grid">
+              ${showMoney ? html`<div class="pro-summary-grid">
                 <div class="pro-stat">
                   <span class="pro-stat-value" data-testid="reorder-original-total">${formatCents(preview.original_total_cents)}</span>
                   <span class="pro-stat-label">Original order total</span>
@@ -802,19 +808,19 @@ export class GableProOrder extends LitElement {
                   <span class="pro-stat-value" data-testid="reorder-current-total">${formatCents(preview.current_total_cents)}</span>
                   <span class="pro-stat-label">Current account total (${preview.total_diff_cents >= 0 ? `+${formatCents(preview.total_diff_cents)}` : formatCents(preview.total_diff_cents)})</span>
                 </div>
-              </div>
+              </div>` : nothing}
               <div class="pro-line-list mt-3">
                 ${preview.lines.map((line) => html`<div class="pro-line" data-testid=${`reorder-line-${line.line_id}`}>
                   <div>
                     <div class="pro-line-title">${line.description}</div>
-                    <div class="pro-line-meta pro-data">${line.sku} · ${quantityWithUnit(line.quantity, line.uom)} · Was ${formatCents(line.original_unit_price_cents)} -> Now ${formatCents(line.current_unit_price_cents)}</div>
+                    <div class="pro-line-meta pro-data">${line.sku} · ${quantityWithUnit(line.quantity, line.uom)}${showMoney ? ` · Was ${formatCents(line.original_unit_price_cents)} -> Now ${formatCents(line.current_unit_price_cents)}` : ''}</div>
                   </div>
-                  <div class="text-right">
+                  ${showMoney ? html`<div class="text-right">
                     <span class="pro-money block">${formatCents(line.current_line_total_cents)}</span>
                     <span class="pro-chip ${line.line_diff_cents === 0 ? 'pro-chip-green' : 'pro-chip-amber'}">
                       ${line.line_diff_cents === 0 ? 'No change' : line.line_diff_cents > 0 ? `+${formatCents(line.line_diff_cents)}` : formatCents(line.line_diff_cents)}
                     </span>
-                  </div>
+                  </div>` : nothing}
                 </div>`)}
               </div>
               <button
@@ -823,7 +829,7 @@ export class GableProOrder extends LitElement {
                 data-testid="confirm-reorder-btn"
                 ?disabled=${!this.canOrder || this.offline || this.busy}
                 @click=${() => void this.confirmReorder(preview.source_order_id)}
-              >Place reorder at ${formatCents(preview.current_total_cents)}</button>
+              >${showMoney ? `Place reorder at ${formatCents(preview.current_total_cents)}` : 'Place reorder'}</button>
             </section>`}
       </div>
     </div>`
@@ -831,6 +837,7 @@ export class GableProOrder extends LitElement {
 
   private renderListsView(): TemplateResult {
     const active = this.lists.find((item) => item.id === this.activeListId) ?? this.lists[0] ?? null
+    const showMoney = this.canSeeMoney
     return html`<div class="pro-two-col" data-testid="order-lists-view">
       <div class="grid gap-3">
         <section class="pro-card">
@@ -889,10 +896,10 @@ export class GableProOrder extends LitElement {
                   : active.lines.map((line) => html`<div class="pro-line" data-testid=${`list-line-${line.id}`}>
                       <div>
                         <div class="pro-line-title">${line.description}</div>
-                        <div class="pro-line-meta pro-data">${quantityWithUnit(line.qty_entered, line.uom)}${line.unit_price_cents !== undefined ? ` · ${formatCents(line.unit_price_cents)}/${line.uom}` : ''}</div>
+                        <div class="pro-line-meta pro-data">${quantityWithUnit(line.qty_entered, line.uom)}${showMoney && line.unit_price_cents !== undefined ? ` · ${formatCents(line.unit_price_cents)}/${line.uom}` : ''}</div>
                       </div>
                       <div class="pro-row">
-                        ${line.line_total_cents !== undefined ? html`<span class="pro-money">${formatCents(line.line_total_cents)}</span>` : nothing}
+                        ${showMoney && line.line_total_cents !== undefined ? html`<span class="pro-money">${formatCents(line.line_total_cents)}</span>` : nothing}
                         <button
                           type="button"
                           class="pro-icon-btn size-9"
@@ -973,6 +980,7 @@ export class GableProOrder extends LitElement {
   }
 
   private renderRequestsView(): TemplateResult {
+    const showMoney = this.canSeeMoney
     return html`<div class="pro-two-col" data-testid="order-requests-view">
       <div class="grid gap-3">
         <section class="pro-card" data-testid="quote-intake-card">
@@ -1066,14 +1074,14 @@ export class GableProOrder extends LitElement {
                   <p class="pro-text-small">${quote.notes || 'Requested from dealer desk'}</p>
                 </div>
                 <div class="text-right">
-                  <div class="pro-money">${quote.priced ? formatDollars(quote.total_amount) : 'Awaiting price'}</div>
+                  ${showMoney ? html`<div class="pro-money">${quote.priced ? formatDollars(quote.total_amount) : 'Awaiting price'}</div>` : nothing}
                   <div class="mt-1">${statusChip(quote.status)}</div>
                 </div>
               </div>
               <div class="pro-line-list mt-3">
                 ${quote.lines.map((line) => html`<div class="pro-line">
                   <span class="pro-text-small">${quantityWithUnit(line.quantity, line.uom)} · ${line.description} (${line.product_sku})</span>
-                  <span class="pro-money text-xs">${quote.priced ? formatDollars(line.line_total) : 'Pending'}</span>
+                  ${showMoney ? html`<span class="pro-money text-xs">${quote.priced ? formatDollars(line.line_total) : 'Pending'}</span>` : nothing}
                 </div>`)}
               </div>
               <div class="pro-row mt-3 flex-wrap">
@@ -1113,6 +1121,7 @@ export class GableProOrder extends LitElement {
   private renderProductSheet(): TemplateResult | typeof nothing {
     const detail = this.selectedProduct
     if (detail === null) return nothing
+    const showMoney = this.canSeeMoney
     return html`<div class="pro-sheet-backdrop" @click=${() => { this.selectedProduct = null }}></div>
       <div class="pro-sheet" role="dialog" aria-modal="true" aria-label=${detail.name} data-testid="product-detail-sheet">
         <div class="pro-row">
@@ -1125,13 +1134,13 @@ export class GableProOrder extends LitElement {
         <p class="pro-text-small mt-2">
           ${[detail.species, detail.grade, detail.vendor ? `Vendor: ${detail.vendor}` : '', detail.weight_lbs ? `${detail.weight_lbs} lbs` : ''].filter(Boolean).join(' · ')}
         </p>
-        <div class="pro-summary-grid">
+        ${showMoney ? html`<div class="pro-summary-grid">
           <div class="pro-stat">
             <span class="pro-stat-value">${formatDollars(detail.customer_price)} /${detail.uom}</span>
             <span class="pro-stat-label">Your price (${detail.price_source}) · Base ${formatDollars(detail.base_price)}</span>
           </div>
-        </div>
-        ${detail.volume_breaks.length > 0
+        </div>` : nothing}
+        ${showMoney && detail.volume_breaks.length > 0
           ? html`<div class="mt-4">
               <h3 class="pro-label">Volume breaks</h3>
               <div class="pro-line-list" data-testid="product-volume-breaks">

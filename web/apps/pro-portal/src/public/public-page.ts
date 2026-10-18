@@ -313,7 +313,7 @@ export class GableCustomerQuotePage extends LitElement {
       <p class="pro-text-small">Your name, contact, signature, and the approved selections are recorded together.</p>
       <form class="mt-3" @submit=${(event: SubmitEvent) => void this.beginAccept(event)}>
         <label class="pro-field"><span class="pro-label">Full name</span><input class="pro-input" name="full_name" autocomplete="name" .value=${this.fullName} @input=${(event: Event) => { this.fullName = (event.target as HTMLInputElement).value }} required /></label>
-        <div class="pro-form-grid">
+        <div class="grid grid-cols-1 gap-x-3 xl:grid-cols-2">
           <label class="pro-field"><span class="pro-label">Email</span><input class="pro-input" type="email" autocomplete="email" .value=${this.email} @input=${(event: Event) => { this.email = (event.target as HTMLInputElement).value }} /></label>
           <label class="pro-field"><span class="pro-label">Phone</span><input class="pro-input" type="tel" autocomplete="tel" .value=${this.phone} @input=${(event: Event) => { this.phone = (event.target as HTMLInputElement).value }} /></label>
         </div>

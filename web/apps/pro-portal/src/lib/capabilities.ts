@@ -46,10 +46,86 @@ export function defaultTab(capabilities: PortalCapabilities | null): TabKey {
 export function roleLabel(role: string): string {
   const labels: Record<string, string> = {
     owner: 'Owner',
+    owner_admin: 'Owner / Admin',
     estimator: 'Estimator',
     project_manager: 'Project manager',
     site_super: 'Site supervisor',
     ap_clerk: 'Accounts payable',
+    ap_bookkeeper: 'AP / Bookkeeper',
   }
   return labels[role] ?? 'Contractor'
 }
+
+export function roleCapabilities(role: string): PortalCapabilities {
+  switch (role) {
+    case 'owner':
+    case 'owner_admin':
+      return {
+        manage_team: true,
+        see_money: true,
+        pay: true,
+        order: true,
+        request_quotes: true,
+        approve_quotes: true,
+        schedule: true,
+        edit_delivery_instructions: true,
+      }
+    case 'estimator':
+      return {
+        manage_team: false,
+        see_money: false,
+        pay: false,
+        order: true,
+        request_quotes: true,
+        approve_quotes: true,
+        schedule: true,
+        edit_delivery_instructions: true,
+      }
+    case 'project_manager':
+      return {
+        manage_team: false,
+        see_money: true,
+        pay: false,
+        order: true,
+        request_quotes: true,
+        approve_quotes: true,
+        schedule: true,
+        edit_delivery_instructions: true,
+      }
+    case 'site_super':
+      return {
+        manage_team: false,
+        see_money: false,
+        pay: false,
+        order: true,
+        request_quotes: false,
+        approve_quotes: false,
+        schedule: true,
+        edit_delivery_instructions: true,
+      }
+    case 'ap_clerk':
+    case 'ap_bookkeeper':
+      return {
+        manage_team: false,
+        see_money: true,
+        pay: true,
+        order: false,
+        request_quotes: false,
+        approve_quotes: false,
+        schedule: false,
+        edit_delivery_instructions: false,
+      }
+    default:
+      return {
+        manage_team: false,
+        see_money: false,
+        pay: false,
+        order: false,
+        request_quotes: false,
+        approve_quotes: false,
+        schedule: false,
+        edit_delivery_instructions: false,
+      }
+  }
+}
+

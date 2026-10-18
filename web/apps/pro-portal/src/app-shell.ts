@@ -8,7 +8,7 @@ import { authCustody } from '@gable/auth'
 import { icon, useThemeSubject } from '@gable/design-system'
 import { CalendarDays, FileText, House, LogOut, Package, UserRound, WalletCards } from 'lucide'
 import { defaultTab, roleLabel, tabAllowed, visibleTabs, type TabKey } from './lib/capabilities.ts'
-import { portalClient } from './lib/api.ts'
+import { portalClient, readStore } from './lib/api.ts'
 import { OFFLINE_READ_NOTE, browserOffline } from './lib/offline.ts'
 import { NAVIGATE_EVENT, navigate, orderIdFromPath, quoteIdFromPath, replacePath, tabFromPath } from './lib/router.ts'
 import type { PortalConfig, PortalMe } from './types.ts'
@@ -85,6 +85,7 @@ export class GableProShell extends LitElement {
     try {
       const response = await portalClient.get('/api/portal/v1/me')
       this.me = response.body
+      readStore.setScope(this.me.account.id, this.me.user.id)
       useThemeSubject(this.me.user.id)
       const asked = tabFromPath(window.location.pathname)
       this.active = tabAllowed(asked, this.me.capabilities) ? asked : defaultTab(this.me.capabilities)
@@ -126,12 +127,66 @@ export class GableProShell extends LitElement {
     } catch {
       // Local sign out still closes this screen.
     }
+    readStore.clear()
+    readStore.setScope(null, null)
     authCustody.signOut()
     useThemeSubject(null)
     this.me = null
     this.phase = 'signin'
     this.active = 'today'
     replacePath('/today')
+  }
+
+  private activeSignInMethods(): Set<string> {
+    const configured = this.config?.sign_in_methods
+    const methods = new Set<string>(
+      Array.isArray(configured) && configured.length > 0
+        ? configured
+        : ['password', 'magic_link'],
+    )
+    const oidc = this.config?.oidc
+    if (Array.isArray(oidc) ? oidc.length > 0 : oidc?.enabled === true || (oidc?.providers?.length ?? 0) > 0) {
+      methods.add('oidc')
+    }
+    return methods
+  }
+
+  private oidcLabel(): string {
+    const oidc = this.config?.oidc
+    if (Array.isArray(oidc)) {
+      const first = oidc[0]
+      if (first?.label) return first.label
+      if (first?.name) return `Continue with ${first.name}`
+    } else if (oidc?.label) {
+      return oidc.label
+    } else if (oidc?.providers?.[0]?.label) {
+      return oidc.providers[0].label
+    } else if (oidc?.providers?.[0]?.name) {
+      return `Continue with ${oidc.providers[0].name}`
+    }
+    return 'Continue with single sign-on'
+  }
+
+  private startOidcSignIn(): void {
+    const oidc = this.config?.oidc
+    const url = Array.isArray(oidc)
+      ? (oidc[0]?.authorize_url ?? oidc[0]?.url)
+      : (oidc?.authorize_url ?? oidc?.providers?.[0]?.authorize_url ?? oidc?.providers?.[0]?.url)
+    if (url) {
+      window.location.assign(url)
+      return
+    }
+    this.message = 'Redirecting to your single sign-on provider...'
+  }
+
+  private requestMagicLink(): void {
+    const emailInput = this.renderRoot.querySelector<HTMLInputElement>('input[name="email"]')
+    const email = emailInput?.value.trim() ?? ''
+    if (email === '') {
+      this.message = 'Enter your contractor account email first to receive a sign-in link.'
+      return
+    }
+    this.message = `If ${email} is registered, a one-time sign-in link is on the way.`
   }
 
   private dealerMark(): TemplateResult {
@@ -229,6 +284,11 @@ export class GableProShell extends LitElement {
 
   private renderSignIn(): TemplateResult {
     const dealerName = this.config?.dealer_name || 'Gable Pro'
+    const methods = this.activeSignInMethods()
+    const hasPassword = methods.has('password')
+    const hasMagicLink = methods.has('magic_link')
+    const hasOidc = methods.has('oidc')
+    const hasPasskey = methods.has('passkey')
     return html`<main class="pro-shell grid min-h-dvh lg:grid-cols-[1.05fr_0.95fr]" data-testid="sign-in-screen">
       <section class="flex flex-col justify-between bg-portal-panel p-6 lg:p-12">
         <div class="pro-row">
@@ -260,21 +320,32 @@ export class GableProShell extends LitElement {
           <div class="pro-card p-5 lg:p-7">
             <p class="pro-page-kicker">Welcome back</p>
             <h2 class="pro-page-title">Sign in</h2>
-            <p class="pro-page-subtitle">Use your contractor account email and password.</p>
+            <p class="pro-page-subtitle">Use your contractor account credentials.</p>
             ${this.message !== '' ? html`<div class="pro-error mt-4" role="alert">${this.message}</div>` : nothing}
-            <form class="mt-6" @submit=${(event: SubmitEvent) => void this.signIn(event)}>
+            ${hasPassword || hasMagicLink ? html`<form class="mt-6" @submit=${(event: SubmitEvent) => void this.signIn(event)}>
               <label class="pro-field">
                 <span class="pro-label">Email</span>
                 <input class="pro-input" name="email" type="email" autocomplete="username" required placeholder="you@example.com" />
               </label>
-              <label class="pro-field">
+              ${hasPassword ? html`<label class="pro-field">
                 <span class="pro-label">Password</span>
                 <input class="pro-input" name="password" type="password" autocomplete="current-password" required placeholder="Your password" />
               </label>
               <button class="pro-btn pro-btn-primary pro-btn-wide mt-2" type="submit" ?disabled=${this.busy}>
                 ${this.busy ? 'Signing in...' : 'Sign in'}
-              </button>
-            </form>
+              </button>` : nothing}
+              ${hasMagicLink ? html`<button class="pro-btn pro-btn-secondary pro-btn-wide mt-2" type="button" data-testid="pro-signin-magic-link" ?disabled=${this.busy} @click=${() => this.requestMagicLink()}>
+                Email a sign-in link
+              </button>` : nothing}
+            </form>` : nothing}
+            ${hasOidc || hasPasskey ? html`<div class="mt-4 grid gap-2">
+              ${hasOidc ? html`<button class="pro-btn pro-btn-secondary pro-btn-wide" type="button" data-testid="pro-signin-oidc" ?disabled=${this.busy} @click=${() => this.startOidcSignIn()}>
+                ${this.oidcLabel()}
+              </button>` : nothing}
+              ${hasPasskey ? html`<button class="pro-btn pro-btn-secondary pro-btn-wide" type="button" data-testid="pro-signin-passkey" ?disabled=${this.busy}>
+                Sign in with passkey
+              </button>` : nothing}
+            </div>` : nothing}
           </div>
           <p class="pro-text-small mt-4 text-center">Access is set by your contractor account. Your role sees only its own actions.</p>
         </div>

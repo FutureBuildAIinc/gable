@@ -102,12 +102,13 @@ export class GableProToday extends LitElement {
 
   private quoteSection(today: PortalToday): TemplateResult {
     const rows = today.quotes_awaiting_pro.first
+    const showMoney = can(this.me.capabilities, 'see_money')
     return html`<div class="pro-card mt-4" data-testid="today-list-quotes">
       ${this.sectionHead('Quotes waiting for your decision', rows.length, today.quotes_awaiting_pro.count)}
       <div class="pro-line-list">
         ${rows.length === 0 ? this.emptyRow('No dealer quote needs a decision.') : rows.map((quote) => html`<button class="pro-line w-full text-left" @click=${() => navigate(`/order?view=requests&quote=${quote.id}`)}>
           <span><span class="pro-line-title">Dealer quote</span><span class="pro-line-meta block">Sent ${shortDate(quote.sent_at)}</span></span>
-          <span class="pro-money">${formatCents(quote.total_cents)}</span>
+          ${showMoney ? html`<span class="pro-money">${formatCents(quote.total_cents)}</span>` : nothing}
         </button>`)}
       </div>
     </div>`
@@ -143,12 +144,13 @@ export class GableProToday extends LitElement {
 
   private orderSection(today: PortalToday): TemplateResult {
     const rows = today.open_orders.first
+    const showMoney = can(this.me.capabilities, 'see_money')
     return html`<div class="pro-card mt-4" data-testid="today-list-orders">
       ${this.sectionHead('Open orders', rows.length, today.open_orders.count)}
       <div class="pro-line-list">
         ${rows.length === 0 ? this.emptyRow('No open order is in motion.') : rows.map((order) => html`<button class="pro-line w-full text-left" @click=${() => navigate(`/schedule/orders/${order.id}`)}>
           <span><span class="pro-line-title pro-data">Order ${order.id.slice(0, 8)}</span><span class="pro-line-meta block">Updated ${shortDate(order.updated_at)}</span></span>
-          <span class="text-right"><span class="pro-money block">${formatCents(order.total_cents)}</span><span class="mt-1 inline-block">${statusChip(order.status)}</span></span>
+          <span class="text-right">${showMoney ? html`<span class="pro-money block">${formatCents(order.total_cents)}</span>` : nothing}<span class="${showMoney ? 'mt-1 ' : ''}inline-block">${statusChip(order.status)}</span></span>
         </button>`)}
       </div>
     </div>`

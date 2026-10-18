@@ -113,4 +113,25 @@ describe('customer public quote page', () => {
     expect(element.querySelector('[data-testid="public-signed"]')?.textContent).toContain('Customer Signoff')
     expect(element.querySelector('[data-testid="public-signoff"]')).toBeNull()
   })
+
+  it('initializes the public customer quote theme from gable.pro.theme defaulting to light without overwriting dark', async () => {
+    const { initCustomerTheme } = await import('./main.ts')
+    delete document.documentElement.dataset.theme
+    document.documentElement.classList.remove('dark')
+    localStorage.clear()
+
+    expect(initCustomerTheme()).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+
+    localStorage.setItem('gable.pro.theme', 'dark')
+    expect(initCustomerTheme()).toBe('dark')
+    expect(document.documentElement.dataset.theme).toBeUndefined()
+
+    localStorage.clear()
+    document.documentElement.classList.add('dark')
+    expect(initCustomerTheme()).toBe('dark')
+    expect(document.documentElement.dataset.theme).toBeUndefined()
+    document.documentElement.classList.remove('dark')
+  })
 })
+

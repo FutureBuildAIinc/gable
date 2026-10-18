@@ -322,4 +322,37 @@ describe('Order screen', () => {
     element.querySelector<HTMLButtonElement>('[data-testid="submit-list-rfq-btn"]')?.click()
     await vi.waitFor(() => expect(element.textContent).toContain('Material list sent to the dealer for pricing.'))
   })
+
+  it('hides prices and totals across order views when see_money is false', async () => {
+    const me = structuredClone(meFixture)
+    me.user.role = 'site_super'
+    me.capabilities.see_money = false
+    const element = new GableProOrder()
+    element.me = me
+    document.body.append(element)
+    await vi.waitFor(() => expect(element.querySelector(`[data-testid="catalog-product-${testIds.product}"]`)).not.toBeNull())
+    expect(element.textContent).not.toContain('$')
+
+    element.querySelector<HTMLButtonElement>(`[data-testid="inspect-product-${testIds.product}"]`)?.click()
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="product-detail-sheet"]')).not.toBeNull())
+    expect(element.textContent).not.toContain('$')
+    element.querySelector<HTMLButtonElement>('[aria-label="Close product sheet"]')?.click()
+    await element.updateComplete
+
+    element.querySelector<HTMLButtonElement>('[data-testid="order-tab-reorder"]')?.click()
+    await element.updateComplete
+    expect(element.textContent).not.toContain('$')
+    element.querySelector<HTMLButtonElement>(`[data-testid="reorder-preview-btn-${testIds.order}"]`)?.click()
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="reorder-preview-card"]')).not.toBeNull())
+    expect(element.textContent).not.toContain('$')
+
+    element.querySelector<HTMLButtonElement>('[data-testid="order-tab-lists"]')?.click()
+    await element.updateComplete
+    expect(element.textContent).not.toContain('$')
+
+    element.querySelector<HTMLButtonElement>('[data-testid="order-tab-requests"]')?.click()
+    await element.updateComplete
+    expect(element.textContent).not.toContain('$')
+  })
 })
+

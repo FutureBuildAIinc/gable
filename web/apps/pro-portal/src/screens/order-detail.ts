@@ -142,6 +142,7 @@ export class GableProOrderDetail extends LitElement {
   render(): TemplateResult {
     const order = this.order
     const timeline = this.timeline
+    const showMoney = can(this.me.capabilities, 'see_money')
     return html`<section data-testid="order-detail-screen">
       <button type="button" class="pro-btn pro-btn-ghost pro-btn-small mb-3" @click=${() => navigate('/schedule')}>${icon(ArrowLeft, 15)} Schedule</button>
       ${this.loading ? html`<div class="pro-empty" role="status"><p class="pro-card-title">Loading the order journey...</p></div>` : nothing}
@@ -150,7 +151,7 @@ export class GableProOrderDetail extends LitElement {
       ${order !== null && timeline !== null ? html`
         <p class="pro-page-kicker">Order ${order.id.slice(0, 8)} · ${timeline.delivery_type === 'PICKUP' ? 'Pickup' : 'Delivery'}</p>
         <h1 class="pro-page-title">${order.project_name ?? 'Your order'}</h1>
-        <p class="pro-page-subtitle">${order.lines.length} ${order.lines.length === 1 ? 'line' : 'lines'} · ${formatDollars(order.total_amount)} at your account prices</p>
+        <p class="pro-page-subtitle">${order.lines.length} ${order.lines.length === 1 ? 'line' : 'lines'}${showMoney ? ` · ${formatDollars(order.total_amount)} at your account prices` : ` · ${order.status}`}</p>
         <div class="mt-5">${this.renderTimeline(timeline)}</div>
         ${order.schedule_hold !== undefined && order.schedule_hold.status === 'held' ? html`<div class="pro-card mt-3">
           <div class="pro-row"><div class="pro-row-grow"><h2 class="pro-card-title">Held ${order.schedule_hold.kind}</h2><p class="pro-text-small">${holdWhen(this.me, order.schedule_hold)}</p></div>
@@ -161,7 +162,7 @@ export class GableProOrderDetail extends LitElement {
         <div class="pro-card mt-3">
           <h2 class="pro-card-title">Order lines</h2>
           <div class="pro-line-list mt-2">
-            ${order.lines.map((line) => html`<div class="pro-line"><span><span class="pro-line-title">${line.product_name}</span><span class="pro-line-meta block pro-data">${line.product_sku} · ${line.quantity} at ${formatDollars(line.price_each)}</span></span><span class="pro-money">${formatDollars(line.quantity * line.price_each)}</span></div>`)}
+            ${order.lines.map((line) => html`<div class="pro-line"><span><span class="pro-line-title">${line.product_name}</span><span class="pro-line-meta block pro-data">${line.product_sku} · ${showMoney ? `${line.quantity} at ${formatDollars(line.price_each)}` : `Qty ${line.quantity}`}</span></span>${showMoney ? html`<span class="pro-money">${formatDollars(line.quantity * line.price_each)}</span>` : html`<span class="pro-data text-xs text-zinc-400">Qty ${line.quantity}</span>`}</div>`)}
           </div>
         </div>
       ` : nothing}

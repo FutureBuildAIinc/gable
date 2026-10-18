@@ -115,4 +115,20 @@ describe('Schedule screen', () => {
     expect(element.querySelector('[data-testid="order-pod"]')?.textContent).toContain('Site Receiver')
     expect(element.querySelector('[data-testid="order-pod"]')?.textContent).toContain('North gate, lot 4')
   })
+
+  it('hides all dollar amounts on order detail when see_money is false (site_super)', async () => {
+    const fetchMock = mockPortal(orderFixture, timelineFixture)
+    vi.stubGlobal('fetch', fetchMock)
+    const siteSuper = structuredClone(meFixture)
+    siteSuper.user.role = 'site_super'
+    siteSuper.capabilities.see_money = false
+    const element = new GableProOrderDetail()
+    element.me = siteSuper
+    element.orderId = testIds.order
+    document.body.append(element)
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="order-timeline"]')).not.toBeNull())
+    expect(element.textContent).toContain('2x4x8 SPF Premium')
+    expect(element.textContent).not.toContain('$')
+  })
 })
+

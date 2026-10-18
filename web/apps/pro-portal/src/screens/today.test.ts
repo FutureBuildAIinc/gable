@@ -40,12 +40,19 @@ describe('Today screen', () => {
 
   it('hides money and approval actions when their capabilities are absent', async () => {
     const me = structuredClone(meFixture)
+    me.user.role = 'site_super'
     me.capabilities.see_money = false
     me.capabilities.approve_quotes = false
     const element = await mountToday(me)
     expect(element.querySelector('[data-testid="today-tile-invoices"]')).toBeNull()
     expect(element.querySelector('[data-testid="today-tile-quotes"]')).toBeNull()
-    expect(element.querySelector('[data-testid="today-tile-orders"]')).not.toBeNull()
+    const ordersTile = element.querySelector<HTMLButtonElement>('[data-testid="today-tile-orders"]')
+    expect(ordersTile).not.toBeNull()
+    ordersTile?.click()
+    await element.updateComplete
+    const ordersList = element.querySelector('[data-testid="today-list-orders"]')
+    expect(ordersList).not.toBeNull()
+    expect(ordersList?.textContent).not.toContain('$')
   })
 
   it('uses the cached read and reports a network fallback', async () => {

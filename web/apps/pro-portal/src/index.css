@@ -8,6 +8,12 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+  }
+
   html {
     @apply bg-portal-ground;
   }
@@ -54,7 +60,7 @@
   }
 
   .pro-dealer-mark {
-    @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-gable-green bg-gable-green-tint font-mono text-sm font-bold text-gable-green;
+    @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border border-gable-green bg-gable-green-tint font-mono text-sm font-bold text-gable-green;
   }
 
   .pro-dealer-name {
@@ -78,7 +84,7 @@
   }
 
   .pro-nav-item {
-    @apply flex min-h-12 min-w-14 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1 text-[11px] font-medium text-zinc-400 no-underline lg:min-h-11 lg:w-full lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-sm;
+    @apply flex min-h-12 min-w-14 flex-col items-center justify-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-zinc-400 no-underline lg:min-h-11 lg:w-full lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-sm;
   }
 
   .pro-nav-item-active {
@@ -102,7 +108,7 @@
   }
 
   .pro-card {
-    @apply rounded-2xl border border-zinc-800 bg-slate-steel p-4 shadow-elevation-1;
+    @apply rounded-lg border border-zinc-800 bg-slate-steel p-4 shadow-elevation-1;
   }
 
   .pro-card + .pro-card {
@@ -146,7 +152,7 @@
   }
 
   .pro-btn {
-    @apply inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold no-underline;
+    @apply inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-sm border px-4 text-sm font-semibold no-underline;
   }
 
   .pro-btn-primary {
@@ -174,7 +180,7 @@
   }
 
   .pro-icon-btn {
-    @apply grid size-11 shrink-0 place-items-center rounded-xl border border-zinc-400 bg-surface-2 text-zinc-300;
+    @apply grid size-11 shrink-0 place-items-center rounded-sm border border-zinc-400 bg-surface-2 text-zinc-300;
   }
 
   gable-theme-toggle button[data-testid="theme-toggle"] {
@@ -184,7 +190,7 @@
   .pro-input,
   .pro-select,
   .pro-textarea {
-    @apply min-h-11 w-full min-w-0 rounded-xl border border-zinc-400 bg-surface-2 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-gable-green;
+    @apply min-h-11 w-full min-w-0 rounded-sm border border-zinc-400 bg-surface-2 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-gable-green;
   }
 
   .pro-textarea {
@@ -228,7 +234,7 @@
   }
 
   .pro-tab {
-    @apply min-h-10 shrink-0 rounded-full border border-zinc-400 bg-transparent px-4 text-sm font-medium text-zinc-300;
+    @apply min-h-10 shrink-0 rounded-sm border border-zinc-400 bg-transparent px-4 text-sm font-medium text-zinc-300;
   }
 
   .pro-tab-active {
@@ -240,7 +246,7 @@
   }
 
   .pro-stat {
-    @apply min-w-0 rounded-2xl border border-zinc-800 bg-slate-steel p-3;
+    @apply min-w-0 rounded-lg border border-zinc-800 bg-slate-steel p-3;
   }
 
   button.pro-stat,
@@ -297,7 +303,7 @@
   }
 
   .pro-swatch {
-    @apply grid size-12 shrink-0 place-items-center rounded-xl border border-zinc-700 bg-gradient-to-br from-sage-fill to-surface-3 text-white;
+    @apply grid size-12 shrink-0 place-items-center rounded-md border border-zinc-700 bg-gradient-to-br from-sage-fill to-surface-3 text-white;
   }
 
   .pro-swatch-sheet {
@@ -313,23 +319,23 @@
   }
 
   .pro-empty {
-    @apply rounded-2xl border border-dashed border-zinc-400 bg-slate-steel p-6 text-center;
+    @apply rounded-lg border border-dashed border-zinc-400 bg-slate-steel p-6 text-center;
   }
 
   .pro-notice {
-    @apply mb-4 rounded-2xl border border-sky-400 bg-sky-950 p-3 text-sm text-sky-300;
+    @apply mb-4 rounded-lg border border-sky-400 bg-sky-950 p-3 text-sm text-sky-300;
   }
 
   .pro-warning {
-    @apply mb-4 rounded-2xl border border-amber-400 bg-amber-950 p-3 text-sm text-amber-200;
+    @apply mb-4 rounded-lg border border-amber-400 bg-amber-950 p-3 text-sm text-amber-200;
   }
 
   .pro-error {
-    @apply mb-4 rounded-2xl border border-rose-400 bg-rose-950 p-3 text-sm text-rose-200;
+    @apply mb-4 rounded-lg border border-rose-400 bg-rose-950 p-3 text-sm text-rose-200;
   }
 
   .pro-success {
-    @apply mb-4 rounded-2xl border border-gable-green bg-gable-green-tint p-3 text-sm text-gable-green;
+    @apply mb-4 rounded-lg border border-gable-green bg-gable-green-tint p-3 text-sm text-gable-green;
   }
 
   .pro-sheet-backdrop {
@@ -337,7 +343,7 @@
   }
 
   .pro-sheet {
-    @apply fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-3xl border-x border-t border-zinc-400 bg-surface-3 p-5 shadow-elevation-3 lg:left-1/2 lg:top-1/2 lg:w-full lg:max-w-2xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:border lg:pb-5;
+    @apply fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-2xl border-x border-t border-zinc-400 bg-surface-3 p-5 shadow-elevation-3 lg:left-1/2 lg:top-1/2 lg:w-full lg:max-w-2xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-2xl lg:border lg:pb-5;
   }
 
   .pro-two-col {
@@ -381,7 +387,7 @@
   }
 
   .pro-schedule-slot {
-    @apply w-full rounded-2xl border border-zinc-400 bg-slate-steel p-4 text-left hover:border-gable-green;
+    @apply w-full rounded-lg border border-zinc-400 bg-slate-steel p-4 text-left hover:border-gable-green;
   }
 
   .pro-schedule-slot-selected {
@@ -401,7 +407,7 @@
   }
 
   .pro-option {
-    @apply flex w-full items-center gap-3 rounded-2xl border border-zinc-400 bg-slate-steel p-3 text-left;
+    @apply flex w-full items-center gap-3 rounded-lg border border-zinc-400 bg-slate-steel p-3 text-left;
   }
 
   .pro-option-selected {
@@ -409,7 +415,7 @@
   }
 
   .pro-signature {
-    @apply h-40 w-full touch-none rounded-2xl border border-zinc-400 bg-surface-2;
+    @apply h-40 w-full touch-none rounded-lg border border-zinc-400 bg-surface-2;
   }
 
   .pro-sr-only {

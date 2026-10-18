@@ -5,7 +5,27 @@ import type { components } from '@gable/api-client'
 
 export type PortalMe = components['schemas']['PortalMe']
 export type PortalCapabilities = components['schemas']['PortalCapabilities']
-export type PortalConfig = components['schemas']['PortalConfig']
+export type PortalSignInMethod = 'password' | 'magic_link' | 'oidc' | 'passkey' | 'google' | 'microsoft'
+
+export interface PortalOidcProvider {
+  id?: string
+  name?: string
+  label?: string
+  authorize_url?: string
+  url?: string
+}
+
+export interface PortalOidcConfig {
+  enabled?: boolean
+  label?: string
+  authorize_url?: string
+  providers?: PortalOidcProvider[]
+}
+
+export type PortalConfig = components['schemas']['PortalConfig'] & {
+  sign_in_methods?: PortalSignInMethod[]
+  oidc?: PortalOidcConfig | PortalOidcProvider[] | null
+}
 export type PortalToday = components['schemas']['PortalToday']
 export type PortalOrder = components['schemas']['PortalOrder']
 export type PortalInvoice = components['schemas']['PortalInvoice']
