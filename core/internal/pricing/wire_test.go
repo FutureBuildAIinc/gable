@@ -31,12 +31,13 @@ import (
 )
 
 type fixture struct {
-	t          *testing.T
-	db         *database.DB
-	srv        *httptest.Server
-	customerID uuid.UUID
-	productID  uuid.UUID
-	sku        string
+	t              *testing.T
+	db             *database.DB
+	srv            *httptest.Server
+	customerID     uuid.UUID
+	productID      uuid.UUID
+	sku            string
+	defaultLevelID string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -62,7 +63,7 @@ func newFixture(t *testing.T) *fixture {
 
 	customerSvc := customer.NewService(customer.NewRepository(db))
 	productSvc := product.NewService(product.NewRepository(db))
-	svc := pricing.NewService(pricing.NewRepository(db))
+	svc := pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db))
 	h := pricing.NewHandler(svc, customerSvc, productSvc)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -145,8 +146,14 @@ func TestCalculateShape(t *testing.T) {
 	if res.body["line_total_cents"] != json.Number("16275") {
 		t.Fatalf("line_total_cents = %v, want 16275 (7 x 23.25)", res.body["line_total_cents"])
 	}
-	if res.body["price_basis"] != "retail" {
-		t.Fatalf("price_basis = %v, want retail", res.body["price_basis"])
+	// The fixture customer is on the migration's default profile, a 0
+	// percent BASE level: the answer is level, the default level's rung (the
+	// base commit answered retail).
+	if res.body["price_basis"] != "level" {
+		t.Fatalf("price_basis = %v, want level", res.body["price_basis"])
+	}
+	if res.body["branch_id"] != nil || res.body["reference_price_ten_thousandths"] != json.Number("232500") || res.body["reference_price_uom"] != "PCS" {
+		t.Fatalf("the answer names no branch (none sent) and its reference is the base: %s", res.raw)
 	}
 	if res.body["final_price"] != nil || res.body["source"] != nil {
 		t.Fatalf("legacy fields survive on the wire: %s", res.raw)

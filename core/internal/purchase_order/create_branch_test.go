@@ -214,8 +214,8 @@ func TestCreateFromSOLine_TakesTheGrantsBranch(t *testing.T) {
 		t.Fatalf("seed order: %v", err)
 	}
 	if _, err := s.db.Pool.Exec(ctx,
-		`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, description, is_special_order)
-		 VALUES ($1, $2, $3, 1, 'EA', 'EA', 1, 1, 1, 1, 'pin special', TRUE)`, soLine, ord, s.product); err != nil {
+		`INSERT INTO order_lines (id, order_id, product_id, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total, description, is_special_order)
+		 VALUES ($1, $2, $3, 1, 'EA', 'EA', 1, 1, 'EA', 1, 1, 1, 'pin special', TRUE)`, soLine, ord, s.product); err != nil {
 		t.Fatalf("seed order line: %v", err)
 	}
 	t.Cleanup(func() {

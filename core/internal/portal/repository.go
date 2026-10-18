@@ -6,6 +6,7 @@ package portal
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer/customerlink"
@@ -53,7 +54,7 @@ type Repository interface {
 	// Cart
 	GetCartByCustomer(ctx context.Context, customerID uuid.UUID) (*CartDTO, error)
 	CreateCart(ctx context.Context, customerID uuid.UUID) (uuid.UUID, error)
-	AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error
+	AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64, units CartItemUnits) error
 	UpdateCartItemQty(ctx context.Context, itemID uuid.UUID, quantity float64, customerID uuid.UUID) error
 	RemoveCartItem(ctx context.Context, itemID uuid.UUID, customerID uuid.UUID) error
 	ClearCart(ctx context.Context, cartID uuid.UUID) error
@@ -481,26 +482,51 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 		//    and kit components keep their own price.
 		_, err = r.db.GetExecutor(txCtx).Exec(txCtx, `
 			INSERT INTO order_lines (id, order_id, position, line_type, product_id, quantity, unit_price,
-				description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source,
+				description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity,
+				priced_unit_price, price_source,
 				line_total, taxable, is_special_order, vendor_id, special_order_cost)
 			SELECT gen_random_uuid(), $1,
 				c.position, c.line_type, c.product_id, c.quantity, c.unit_price,
-				c.description, c.sku, c.uom, c.price_uom, c.uom_qty, c.price_uom_qty, c.priced_unit_price, c.price_source,
-				ROUND(c.quantity * c.unit_price, 2), c.taxable, c.is_special_order, c.vendor_id, c.special_order_cost
+				c.description, c.sku, c.uom, c.price_uom, c.uom_qty, c.price_uom_qty, c.stock_uom, c.stock_quantity,
+				c.priced_unit_price, c.price_source,
+				ROUND(c.quantity * c.unit_price * c.price_uom_qty / c.uom_qty, 2), c.taxable, c.is_special_order, c.vendor_id, c.special_order_cost
 			FROM (
 				SELECT
 					ROW_NUMBER() OVER (ORDER BY ol.position, ol.id) - 1 AS position,
 					ol.line_type, ol.product_id, ol.quantity,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.unit_price END AS unit_price,
 					ol.description, ol.sku, ol.uom,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN ol.uom ELSE ol.price_uom END AS price_uom,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.uom_qty END AS uom_qty,
-					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 1 ELSE ol.price_uom_qty END AS price_uom_qty,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL THEN COALESCE(p.price_uom, p.uom_primary::text)
+						ELSE ol.price_uom
+					END AS price_uom,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.uom THEN 1
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.price_uom THEN ol.uom_qty
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND pu_u.unit_qty IS NOT NULL AND pu_p.unit_qty IS NOT NULL THEN ROUND(pu_u.unit_qty * pu_p.stock_qty / pu_u.stock_qty, 4)
+						ELSE ol.uom_qty
+					END AS uom_qty,
+					CASE
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.uom THEN 1
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND COALESCE(p.price_uom, p.uom_primary::text) = ol.price_uom THEN ol.price_uom_qty
+						WHEN ol.line_type = 'PRODUCT' AND p.id IS NOT NULL AND pu_u.unit_qty IS NOT NULL AND pu_p.unit_qty IS NOT NULL THEN pu_p.unit_qty
+						ELSE ol.price_uom_qty
+					END AS price_uom_qty,
+					CASE
+						WHEN ol.product_id IS NOT NULL THEN COALESCE(ol.stock_uom, p.uom_primary::text)
+						ELSE NULL
+					END AS stock_uom,
+					CASE
+						WHEN ol.product_id IS NOT NULL THEN COALESCE(ol.stock_quantity, ROUND(ol.quantity * COALESCE(pu_u.stock_qty, 1) / COALESCE(pu_u.unit_qty, 1), 4))
+						ELSE NULL
+					END AS stock_quantity,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN p.base_price ELSE ol.priced_unit_price END AS priced_unit_price,
 					CASE WHEN ol.line_type = 'PRODUCT' AND p.base_price IS NOT NULL THEN 'PRICE_LIST' ELSE ol.price_source END AS price_source,
 					ol.taxable, ol.is_special_order, ol.vendor_id, ol.special_order_cost
 				FROM order_lines ol
 				LEFT JOIN products p ON ol.product_id = p.id
+				LEFT JOIN product_units pu_u ON pu_u.product_id = p.id AND pu_u.uom = ol.uom
+				LEFT JOIN product_units pu_p ON pu_p.product_id = p.id AND pu_p.uom = COALESCE(p.price_uom, p.uom_primary::text)
 				WHERE ol.order_id = $2
 				  AND ol.line_type <> 'TEXT'
 			) c
@@ -661,7 +687,9 @@ func (r *PostgresRepository) GetCartByCustomer(ctx context.Context, customerID u
 	// Fetch items
 	itemRows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT ci.id, ci.product_id, COALESCE(p.sku, ''), COALESCE(p.description, ''),
-		       COALESCE(p.image_url, ''), ci.quantity, ci.unit_price
+		       COALESCE(p.image_url, ''), ci.quantity, ci.unit_price,
+		       COALESCE(ci.uom, ''), COALESCE(ci.price_uom, ''),
+		       COALESCE(ci.uom_qty, 1), COALESCE(ci.price_uom_qty, 1)
 		FROM portal_cart_items ci
 		LEFT JOIN products p ON ci.product_id = p.id
 		WHERE ci.cart_id = $1
@@ -679,10 +707,15 @@ func (r *PostgresRepository) GetCartByCustomer(ctx context.Context, customerID u
 		if err := itemRows.Scan(
 			&item.ID, &item.ProductID, &item.ProductSKU, &item.ProductName,
 			&item.ImageURL, &item.Quantity, &item.UnitPrice,
+			&item.UOM, &item.PriceUOM, &item.UOMQty, &item.PriceUOMQty,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan cart item: %w", err)
 		}
-		item.LineTotal = item.Quantity * item.UnitPrice
+		// The line total is the exact extension over the stored unit fields,
+		// the price converted into the item's own unit through its pair
+		// (ADR 0006 section 7.6): quantity x unit price x pair, as one
+		// rational, never the float product of the two floats.
+		item.LineTotal = cartLineTotal(item)
 		subtotal += item.LineTotal
 		items = append(items, item)
 	}
@@ -713,19 +746,49 @@ func (r *PostgresRepository) CreateCart(ctx context.Context, customerID uuid.UUI
 	return cartID, nil
 }
 
-// AddCartItem adds or updates a product in the cart.
-func (r *PostgresRepository) AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64) error {
+// CartItemUnits is the line shape's unit slice of one cart item (ADR 0006
+// section 7.6): the quantity's unit, the price's unit and the pair between
+// them, resolved when the item was added.
+type CartItemUnits struct {
+	UOM         string
+	PriceUOM    string
+	UOMQty      float64
+	PriceUOMQty float64
+}
+
+// AddCartItem adds or updates a product in the cart, its unit fields beside
+// the price.
+func (r *PostgresRepository) AddCartItem(ctx context.Context, cartID, productID uuid.UUID, quantity, unitPrice float64, units CartItemUnits) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		INSERT INTO portal_cart_items (cart_id, product_id, quantity, unit_price)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO portal_cart_items (cart_id, product_id, quantity, unit_price, uom, price_uom, uom_qty, price_uom_qty)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8)
 		ON CONFLICT (cart_id, product_id) DO UPDATE SET
 			quantity = portal_cart_items.quantity + EXCLUDED.quantity,
-			unit_price = EXCLUDED.unit_price
-	`, cartID, productID, quantity, unitPrice)
+			unit_price = EXCLUDED.unit_price,
+			uom = EXCLUDED.uom, price_uom = EXCLUDED.price_uom,
+			uom_qty = EXCLUDED.uom_qty, price_uom_qty = EXCLUDED.price_uom_qty
+	`, cartID, productID, quantity, unitPrice, units.UOM, units.PriceUOM, units.UOMQty, units.PriceUOMQty)
 	if err != nil {
 		return fmt.Errorf("failed to add cart item: %w", err)
 	}
 	return nil
+}
+
+// cartLineTotal is one item's exact extension: the quantity in the item's
+// unit, the price per the price unit, the pair between them, as one
+// rational rounded to a float at the end (the portal's wire stays float
+// until C5-1).
+func cartLineTotal(item CartItemDTO) float64 {
+	uq, pq := item.UOMQty, item.PriceUOMQty
+	if uq <= 0 || pq <= 0 {
+		uq, pq = 1, 1
+	}
+	r := new(big.Rat).SetFrac64(int64(item.Quantity*10000+0.5), 10000)
+	price := new(big.Rat).SetFrac64(int64(item.UnitPrice*10000+0.5), 10000)
+	r.Mul(r, price)
+	r.Mul(r, new(big.Rat).SetFrac64(int64(pq*10000+0.5), int64(uq*10000)))
+	f, _ := r.Float64()
+	return f
 }
 
 // UpdateCartItemQty updates the quantity of a specific cart item, scoped to the customer's cart.

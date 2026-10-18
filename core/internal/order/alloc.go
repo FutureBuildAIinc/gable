@@ -57,13 +57,47 @@ func stockedIndexes(lines []OrderLine) []int {
 }
 
 // unallocated is the quantity a stocked line still needs stock for: what was
-// ordered less what is allocated and what shipped.
+// ordered less what is allocated and what shipped, in the stocking unit the
+// inventory rows count (ADR 0006 section 3.4). Every inventory moving
+// quantity on a stocked line reads the stocking quantity, never the sale
+// quantity, which may be in another unit from C3-2B on.
 func unallocated(l *OrderLine) int64 {
-	n := int64(*l.Quantity) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
+	n := int64(salesdoc.StockQty(&l.Line)) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
 	if n < 0 {
 		return 0
 	}
 	return n
+}
+
+// checkStockUnits verifies that every stocked line in indexes still matches
+// its product's current stocking unit (ADR 0006 section 3.4).
+func (s *Service) checkStockUnits(ctx context.Context, lines []OrderLine, indexes []int) error {
+	var ids []uuid.UUID
+	for _, i := range indexes {
+		l := &lines[i]
+		if l.ProductID != nil && l.StockUOM != nil && *l.StockUOM != "" {
+			ids = append(ids, *l.ProductID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	refs, err := s.repo.LookupProducts(ctx, ids)
+	if err != nil {
+		return err
+	}
+	sorted := append([]int(nil), indexes...)
+	sort.Ints(sorted)
+	for _, i := range sorted {
+		l := &lines[i]
+		if l.ProductID == nil || l.StockUOM == nil || *l.StockUOM == "" {
+			continue
+		}
+		if ref, ok := refs[l.ProductID.String()]; ok && ref.UOMPrimary != "" && *l.StockUOM != ref.UOMPrimary {
+			return salesdoc.StockUnitChangedError(i, *l.StockUOM, ref.UOMPrimary)
+		}
+	}
+	return nil
 }
 
 // allocateLines allocates every stocked line of the order from the branch's
@@ -79,6 +113,9 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 	order := stockedIndexes(cur.Lines)
 	if len(order) == 0 {
 		return false, nil
+	}
+	if err := s.checkStockUnits(ctx, cur.Lines, order); err != nil {
+		return false, err
 	}
 
 	// Take every product's rows first, in product id order, and read what is
@@ -149,7 +186,7 @@ func (s *Service) allocateLines(ctx context.Context, cur *Order) (backordered bo
 	}
 	for _, i := range order {
 		l := &cur.Lines[i]
-		back := int64(*l.Quantity) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
+		back := int64(salesdoc.StockQty(&l.Line)) - int64(l.QuantityAllocated) - int64(l.QuantityFulfilled)
 		if back < 0 {
 			back = 0
 		}
@@ -232,6 +269,15 @@ func (s *Service) releaseAllocations(ctx context.Context, cur *Order) error {
 	if s.inventory == nil {
 		return nil
 	}
+	var releasing []int
+	for _, i := range stockedIndexes(cur.Lines) {
+		if cur.Lines[i].QuantityAllocated > 0 {
+			releasing = append(releasing, i)
+		}
+	}
+	if err := s.checkStockUnits(ctx, cur.Lines, releasing); err != nil {
+		return err
+	}
 	for _, i := range stockedIndexes(cur.Lines) {
 		l := &cur.Lines[i]
 		if l.QuantityAllocated > 0 {
@@ -257,7 +303,7 @@ func deriveStatus(cur *Order) OrderStatus {
 			continue
 		}
 		any = true
-		if l.QuantityFulfilled < *l.Quantity {
+		if l.QuantityFulfilled < salesdoc.StockQty(&l.Line) {
 			done = false
 		}
 		if l.IsStocked() && l.QuantityBackordered > 0 {

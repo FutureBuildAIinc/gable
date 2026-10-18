@@ -157,7 +157,7 @@ func newTestService(cust *Customer) (*Service, *fakeRepo, *fakeEvents, *callLog)
 
 func existing() *Customer {
 	return &Customer{
-		ID: uuid.New(), AccountNumber: "A-1", Name: "Existing", Tier: TierRetail, IsActive: true,
+		ID: uuid.New(), AccountNumber: "A-1", Name: "Existing", IsActive: true,
 		PaymentTermsID:    uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		EffectiveCurrency: "USD", Revision: 3, PrimaryBranchID: uuid.New(),
 	}
@@ -165,7 +165,7 @@ func existing() *Customer {
 
 func draftFor(c *Customer) *Draft {
 	terms := c.PaymentTermsID
-	return &Draft{AccountNumber: c.AccountNumber, Name: c.Name, Tier: c.Tier, IsActive: c.IsActive, PaymentTermsID: &terms,
+	return &Draft{AccountNumber: c.AccountNumber, Name: c.Name, IsActive: c.IsActive, PaymentTermsID: &terms,
 		Email: c.Email, Phone: c.Phone, Address: c.Address, Currency: c.Currency, POrequired: c.POrequired,
 		CreditLimitCents: c.CreditLimitCents}
 }
@@ -315,7 +315,7 @@ func TestUpdate_EventNamesThePartAndTheChange(t *testing.T) {
 // A create that fails to store writes no event; one that stores writes it last.
 func TestCreate_EventIsLastAndAFailedInsertWritesNone(t *testing.T) {
 	svc, repo, ev, log := newTestService(nil)
-	d := &Draft{AccountNumber: "N-1", Name: "New", Tier: TierRetail, IsActive: true}
+	d := &Draft{AccountNumber: "N-1", Name: "New", IsActive: true}
 	out, err := svc.Create(context.Background(), d)
 	if err != nil {
 		t.Fatal(err)

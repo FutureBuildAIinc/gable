@@ -164,6 +164,246 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ar/credit-holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credit holds
+         * @description The credit holds, newest first by (placed_at, id) in the cursor list envelope, each with the account's standing beside it (the limit, null for no limit, the balance, and the open invoice cents past due). status selects standing (the default: active and overridden), released or all. A customer named outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditHoldsList"];
+        put?: never;
+        /**
+         * Place a manual credit hold
+         * @description Roles admin, owner, finance. Places a hold of type manual (the default), over_limit or past_due with a required reason, and writes customers.credit_hold in the same transaction. Idempotent: an account that already carries a standing hold answers it with 200 and placed false; a new hold answers 201 with placed true. The standing hold carries the answer either way.
+         */
+        post: operations["arCreditHoldPlace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the credit hold sweep
+         * @description Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
+         */
+        post: operations["arCreditHoldsEvaluate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a credit hold
+         * @description Roles admin, owner, finance; a reason is required. Ends a standing hold (active or overridden) with who and why, and clears customers.credit_hold in the same transaction. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a time-bounded override on a credit hold
+         * @description Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/credit-limit-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's credit limit changes
+         * @description The credit limit history, newest first by (created_at, id) in the cursor list envelope: what the limit was, what it became, who asked, who approved, and when it was decided. A customer outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditLimitChangesList"];
+        put?: never;
+        /**
+         * Record (and optionally apply) a credit limit change
+         * @description Roles admin, owner, finance. Records one change with the old limit, the new one, a required reason and who asked, as pending. With approve true the same act applies the new limit to the customer, stamps who approved it and when, and answers 200; a recorded request answers 201.
+         */
+        post: operations["arCreditLimitChangeRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The controller's collections and credit worklist
+         * @description The overdue and over-limit accounts, worst first, one row per customer with any past due bucket or any balance. The severity score weighs the over 90 bucket four times, the 61 to 90 bucket twice, the 31 to 60 bucket and the over-limit amount once each, and a standing hold adds a bump that outranks any plain overdue account. Every row carries the aging buckets, the credit limit (null for no limit), the utilisation percent, the hold state and the recommended action: hold for a held, over limit or 90 day account, finance_charge for 61 to 90, call for 31 to 60, send_statement for the rest. The aging carries the caller's branch wall; limit is 10 to 500 rows.
+         */
+        get: operations["arWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List batch statement runs
+         * @description The batch statement runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arStatementRunsList"];
+        put?: never;
+        /**
+         * Generate a batch statement run
+         * @description Roles admin, owner, finance. Records one run over the customers the period names: every customer with a non-zero balance, or exactly the customers customer_ids names. Each item carries the opening balance (the subledger rows before period_start), the invoices, the payments and the finance charges of the period, the closing balance and the aging buckets of period_end, taken as of that day and never re-derived. A run writes no balance, no document and no subledger row: two runs of one period answer the same numbers. With queue_email true, every item whose closing balance is positive is marked queued with the id of its statement.queued outbox event; a zero balance is skipped. period_end defaults to today and period_start to a month before it; neither may end after today. Answers 201 with the completed run and its items.
+         */
+        post: operations["arStatementRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one batch statement run
+         * @description The run with its items, customers by name.
+         */
+        get: operations["arStatementRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the finance charge rules
+         * @description The tenant's finance charge rules: the monthly rate in basis points, the grace days, the minimum charge and the minimum overdue balance, whether the charges compound, and the income account the charge credits. Migration 124 seeds the row charges off.
+         */
+        get: operations["arFinanceChargeRulesGet"];
+        /**
+         * Write the finance charge rules
+         * @description Roles admin, owner, finance. Writes the whole policy in one act: the rate (at most 100000 basis points, 100 percent a month), the grace days (0 to 365), the two minimums, the compound flag, and an income account the chart of accounts must hold.
+         */
+        put: operations["arFinanceChargeRulesUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List finance charge runs
+         * @description The finance charge runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arFinanceChargeRunsList"];
+        put?: never;
+        /**
+         * Preview or execute a finance charge run
+         * @description Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+         */
+        post: operations["arFinanceChargeRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one finance charge run
+         * @description The run with its items, customers by name, each naming the invoice and the entry it generated when executed.
+         */
+        get: operations["arFinanceChargeRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customerId}/activities": {
         parameters: {
             query?: never;
@@ -954,13 +1194,13 @@ export interface paths {
         };
         /**
          * List customers
-         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); tier, is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a tier outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["customerList"];
         put?: never;
         /**
          * Create a customer
-         * @description Creates a customer. account_number and name are required; the terms default to NET30, the tier to retail. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
+         * @description Creates a customer. account_number and name are required; the terms default to NET30, the pricing program to the default profile. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
          */
         post: operations["customerCreate"];
         delete?: never;
@@ -1165,26 +1405,6 @@ export interface paths {
          * @description On the client's revision, carried by If-Match (a DELETE has no body). Writes customer.updated (part contact).
          */
         delete: operations["contactDelete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/price_levels": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List price levels
-         * @description The cursor list envelope, newest first.
-         */
-        get: operations["customerListPriceLevels"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5543,8 +5763,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Replay a batch of offline sales
-         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits. A sale replayed at a register with no open till session is an error entry (till_not_open): the counter takes no sale outside a drawer.
+         * Refuse the offline sale replay by rule (money never queues)
+         * @description Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -6383,6 +6603,273 @@ export interface paths {
          * @description Guarded admin or owner. A dry run: nothing is written. new_value must be positive. top_customers lists at most five customers by exposure and is null when no active escalator carries a base index.
          */
         post: operations["marketIndexRefreshPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price levels
+         * @description Guarded admin, owner or finance. The cursor list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
+         */
+        get: operations["pricingLevelList"];
+        put?: never;
+        /**
+         * Create a price level
+         * @description Guarded admin, owner or finance. code (uppercase, at most 16 characters of A-Z, 0-9 and underscore) and name are required; basis defaults to base; adjust_percent is a decimal string, a level at -100 or above. The response is 201 with Location and the revision ETag.
+         */
+        post: operations["pricingLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price level */
+        get: operations["pricingLevelGet"];
+        /**
+         * Update a price level
+         * @description Guarded admin, owner or finance, at the level's revision (428 without, 409 stale behind it).
+         */
+        put: operations["pricingLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price profiles
+         * @description The cursor list envelope, newest first.
+         */
+        get: operations["pricingProfileList"];
+        put?: never;
+        /**
+         * Create a price profile
+         * @description Guarded admin, owner or finance. code and name are required; price_level_id names the level the program prices from.
+         */
+        post: operations["pricingProfileCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price profile */
+        get: operations["pricingProfileGet"];
+        /**
+         * Update a price profile
+         * @description Guarded admin, owner or finance, at the profile's revision.
+         */
+        put: operations["pricingProfileUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/products/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a product's prices
+         * @description Guarded admin, owner, finance or sales. The rows of the branch named in branch_id and the caller's context branch rows and the every branch rows; a caller with no context branch sees every row.
+         */
+        get: operations["pricingProductPriceList"];
+        /**
+         * Replace one branch slice of a product's price list
+         * @description Guarded admin, owner or finance. The PUT replaces the branch_id slice of the product's price list (its branch base and its level prices for that branch) at the product's revision, and touches no other branch's rows. Without branch_id it replaces the every branch slice, admitted only to a caller who may reach every branch. The rows carry no branch_id. While the stocking unit hold of ADR 0006 section 9.1 stands, every row's price unit is the product's stocking unit; a row naming another unit is a 400 naming price_uom. A replace at a stale product revision is a 409 stale_revision.
+         */
+        put: operations["pricingProductPriceReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List vendor price levels */
+        get: operations["pricingVendorLevelList"];
+        put?: never;
+        /**
+         * Create a vendor price level
+         * @description Guarded admin, owner or finance; vendor_id, code and name are required.
+         */
+        post: operations["pricingVendorLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor price level */
+        get: operations["pricingVendorLevelGet"];
+        /** Update a vendor price level */
+        put: operations["pricingVendorLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List vendor costs
+         * @description Guarded admin, owner, finance or sales, under the filters vendor_id, product_id and branch_id, and the branch wall of the caller's context.
+         */
+        get: operations["pricingVendorCostList"];
+        put?: never;
+        /**
+         * Create a vendor cost
+         * @description Guarded admin, owner or finance. vendor_id, vendor_price_level_id (of the same vendor), product_id, purchase_uom, unit_cost_ten_thousandths and effective_from are required; the purchase unit must be a row of the product's unit set, and while the stocking unit hold stands the price unit hold refuses a cost the product cannot read. The payload branch rule holds a branch_id the body names.
+         */
+        post: operations["pricingVendorCostCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor cost */
+        get: operations["pricingVendorCostGet"];
+        /**
+         * Update a vendor cost
+         * @description Guarded admin, owner or finance, at the row's revision. The update checks the payload branch rule on the row's stored branch and on the new one: a move out of the caller's reach is a 403.
+         */
+        put: operations["pricingVendorCostUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customer contracts
+         * @description Under the filters customer_id, product_id and branch_id, and the branch wall.
+         */
+        get: operations["pricingContractList"];
+        put?: never;
+        /**
+         * Create a customer contract
+         * @description Guarded admin, owner or finance. customer_id, product_id and contract_price_ten_thousandths are required; the price unit is the product's stocking unit while the hold stands, and a body naming another unit is a 400 naming price_uom. The create does not upsert: a second contract for the same customer, product and branch is a 409 duplicate naming the existing row. The payload branch rule holds the branch the body names; a null branch is the every branch reach. Writes contract.created in the same transaction.
+         */
+        post: operations["pricingContractCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one contract */
+        get: operations["pricingContractGet"];
+        /**
+         * Update a contract
+         * @description Guarded admin, owner or finance, at the row's revision. Writes contract.updated in the same transaction, with its audit row.
+         */
+        put: operations["pricingContractUpdate"];
+        post?: never;
+        /**
+         * Delete a contract
+         * @description Guarded admin, owner or finance, at the row's revision in the body. A contract is an agreement, not a document: it is deleted outright, with an audit row carrying the deleted values and contract.deleted in the same transaction.
+         */
+        delete: operations["pricingContractDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a vendor cost
+         * @description ResolveCost on the wire (ADR 0006 section 5.5): rows at the requested level, or the vendor's default level when none is named, in effect on the date, the branch's row before the all branch row, the latest effective_from first. The answer carries the cost and its purchase unit, the pair between the uom named and the purchase unit, the level's code and the row's id. No cost in effect is a 404: the purchase line takes a manual cost.
+         */
+        get: operations["pricingCost"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7890,7 +8377,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "money_never_queues" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -8253,6 +8740,370 @@ export interface components {
         ArReconciliation: {
             customers: components["schemas"]["ArDriftRow"][];
             currencies: components["schemas"]["ArLedgerRow"][];
+        };
+        CreditStanding: {
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** Format: int64 */
+            current_balance_cents: number;
+            /**
+             * Format: int64
+             * @description The open invoice cents past their due date.
+             */
+            past_due_cents: number;
+        };
+        CreditHold: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            reason: string;
+            /** @enum {string} */
+            hold_type: "manual" | "over_limit" | "past_due";
+            /** @enum {string} */
+            status: "active" | "released" | "overridden";
+            /** @description null on a hold the sweep placed. */
+            placed_by: string | null;
+            /** Format: date-time */
+            placed_at: string;
+            released_by: string | null;
+            /** Format: date-time */
+            released_at: string | null;
+            release_reason: string | null;
+            /** Format: date-time */
+            override_until: string | null;
+            override_by: string | null;
+            override_reason: string | null;
+            /**
+             * Format: int64
+             * @description The order size the override window allows.
+             */
+            max_order_cents: number | null;
+            credit?: components["schemas"]["CreditStanding"];
+        };
+        CreditHoldPage: {
+            items: components["schemas"]["CreditHold"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditHoldPlaceRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            hold_type: "manual" | "over_limit" | "past_due";
+        };
+        CreditHoldReleaseRequest: {
+            reason: string;
+        };
+        CreditHoldOverrideRequest: {
+            override_reason: string;
+            /**
+             * Format: date-time
+             * @description A future instant: the window the override buys.
+             */
+            override_until: string;
+            /** Format: int64 */
+            max_order_cents?: number | null;
+        };
+        CreditHoldEvaluateRequest: {
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every active credit account; present, exactly these. */
+            customer_ids?: string[];
+        };
+        CreditHoldPlacement: {
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            hold_type: "over_limit" | "past_due";
+            reason: string;
+            /**
+             * Format: uuid
+             * @description Set on an executed sweep; empty on a dry run.
+             */
+            hold_id?: string;
+        };
+        CreditHoldReleaseRecord: {
+            /** Format: uuid */
+            hold_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+        };
+        CreditHoldEvaluation: {
+            dry_run: boolean;
+            /** @description The accounts the sweep read. */
+            evaluated: number;
+            would_place: components["schemas"]["CreditHoldPlacement"][];
+            would_release: components["schemas"]["CreditHoldReleaseRecord"][];
+            /** @description Zero on a dry run. */
+            placed: number;
+            /** @description Zero on a dry run. */
+            released: number;
+        };
+        CreditLimitChange: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: int64 */
+            old_limit_cents: number;
+            /** Format: int64 */
+            new_limit_cents: number;
+            requested_by: string | null;
+            approved_by: string | null;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            decided_at: string | null;
+        };
+        CreditLimitChangePage: {
+            items: components["schemas"]["CreditLimitChange"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditLimitChangeRequest: {
+            /** Format: int64 */
+            new_limit_cents: number;
+            reason: string;
+            /**
+             * @description true applies the limit in the same act.
+             * @default false
+             */
+            approve: boolean;
+        };
+        ArWorklistRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            past_due_cents: number;
+            /** Format: int64 */
+            over_limit_cents: number;
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** @description The balance over the limit, percent; null for no limit. */
+            credit_utilization_pct: number | null;
+            /** @enum {string} */
+            hold_status: "none" | "active" | "overridden";
+            /** Format: uuid */
+            hold_id?: string;
+            /** Format: date-time */
+            override_until?: string | null;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "hold" | "call" | "send_statement" | "finance_charge";
+        };
+        ArWorklist: {
+            /** Format: date */
+            as_of: string;
+            rows: components["schemas"]["ArWorklistRow"][];
+        };
+        ArStatementRunItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The subledger before period_start.
+             */
+            opening_balance_cents: number;
+            /** Format: int64 */
+            invoices_cents: number;
+            /** Format: int64 */
+            payments_cents: number;
+            /** Format: int64 */
+            finance_charges_cents: number;
+            /** Format: int64 */
+            closing_balance_cents: number;
+            /** @enum {string} */
+            delivery_status: "not_queued" | "queued" | "sent" | "failed" | "skipped";
+            /**
+             * Format: uuid
+             * @description The statement.queued event of a queued item.
+             */
+            outbox_id: string | null;
+            /** @description The aging as of period_end: current, days_1_30, days_31_60, days_61_90 and over_90, in cents. */
+            aging_buckets: {
+                [key: string]: number;
+            };
+        };
+        ArStatementRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            period_start: string;
+            /** Format: date */
+            period_end: string;
+            /** Format: date */
+            as_of_date: string;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed";
+            total_customers: number;
+            queued_count: number;
+            sent_count: number;
+            /** Format: int64 */
+            total_balance_cents: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @description On the by-id read and the create answer; the list read carries none. */
+            items?: components["schemas"]["ArStatementRunItem"][];
+        };
+        ArStatementRunPage: {
+            items: components["schemas"]["ArStatementRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        ArStatementRunRequest: {
+            /**
+             * Format: date
+             * @description Default a month before period_end.
+             */
+            period_start?: string;
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            period_end?: string;
+            /** @description Absent, every customer with a non-zero balance; present, exactly these. */
+            customer_ids?: string[];
+            /** @default false */
+            queue_email: boolean;
+        };
+        ArFinanceChargeRunRequest: {
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            as_of_date?: string;
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every eligible customer; present, exactly these. */
+            customer_ids?: string[];
+        };
+        ArFinanceChargeRules: {
+            /**
+             * Format: int64
+             * @description 10000 basis points is 100 percent a month.
+             */
+            monthly_rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** Format: int64 */
+            min_balance_cents: number;
+            /** @description false, the default, never charges on a finance charge invoice. */
+            compound: boolean;
+            /** @description The chart account the charge credits; 4060 by default. */
+            income_account_code: string;
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ArFinanceChargeItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The basis the charge was taken on.
+             */
+            overdue_cents: number;
+            /** Format: int64 */
+            charge_cents: number;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            invoice_id: string | null;
+            invoice_number: string | null;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            journal_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ArFinanceChargeRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            as_of_date: string;
+            /** Format: int64 */
+            rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed" | "dry_run";
+            /** Format: int64 */
+            total_charged_cents: number;
+            customer_count: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description null on a dry run: a preview never completes.
+             */
+            completed_at: string | null;
+            /** @description On the by-id read and the run answer; the list read carries none. */
+            items?: components["schemas"]["ArFinanceChargeItem"][];
+        };
+        ArFinanceChargeRunPage: {
+            items: components["schemas"]["ArFinanceChargeRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
         /**
          * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
@@ -8990,33 +9841,8 @@ export interface components {
             sku: string;
             description: string;
         };
-        /**
-         * @description The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
-         * @enum {string}
-         */
-        CustomerTier: "retail" | "silver" | "gold" | "platinum";
         /** @enum {string} */
         TermsKind: "net_days" | "day_of_month" | "due_on_receipt";
-        PriceLevel: {
-            /** Format: uuid */
-            id: string;
-            name: string;
-            /** @description A price multiplier, a rate and not money. */
-            multiplier: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
-        PriceLevelPage: {
-            items: components["schemas"]["PriceLevel"][];
-            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
-            next_cursor: string | null;
-            limit: number;
-            /** Format: int64 */
-            total?: number;
-        };
         PaymentTermsRef: {
             /** Format: uuid */
             id: string;
@@ -9032,7 +9858,6 @@ export interface components {
             phone: string | null;
             /** @description The free text billing address; delivery addresses are ship-tos. */
             address: string | null;
-            tier: components["schemas"]["CustomerTier"];
             is_active: boolean;
             /**
              * Format: uuid
@@ -9041,9 +9866,11 @@ export interface components {
             primary_branch_id: string;
             /** @description The yards the customer trades at, home yard included, in id order. Customers are dealer wide accounts (ruling A): the first document at a yard the customer is not yet linked to adds the yard here. */
             branch_ids: string[];
-            /** Format: uuid */
-            price_level_id: string | null;
-            price_level: components["schemas"]["PriceLevel"] | null;
+            /**
+             * Format: uuid
+             * @description The customer's pricing program (ADR 0006 section 5.2); the create takes the default profile.
+             */
+            price_profile_id: string | null;
             /** Format: uuid */
             salesperson_id: string | null;
             salesperson_name: string | null;
@@ -9092,15 +9919,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -9129,15 +9958,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -11485,7 +12316,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11493,6 +12324,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11504,6 +12341,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -11746,7 +12585,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11754,6 +12593,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11765,6 +12610,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -12284,7 +13131,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -12292,6 +13139,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -12303,6 +13156,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -12365,7 +13220,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -12373,6 +13228,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -12384,6 +13245,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -13358,6 +14221,10 @@ export interface components {
             /** @description Float dollars. */
             line_total: number;
             available: number;
+            uom: string;
+            price_uom: string;
+            uom_qty: number;
+            price_uom_qty: number;
         };
         PortalAddToCartRequest: {
             /** Format: uuid */
@@ -13920,6 +14787,9 @@ export interface components {
             /** @description The pair side in the sale unit; 1 and 1 when the units agree. */
             uom_qty: string | null;
             price_uom_qty: string | null;
+            stock_uom: string | null;
+            stock_quantity: string | null;
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description Scale 4; null on a text line.
@@ -13932,6 +14802,7 @@ export interface components {
             priced_unit_price_ten_thousandths: number | null;
             /** @enum {string} */
             price_source: "price_list" | "quote" | "override" | "manual" | "none";
+            price_basis: string | null;
             override_reason: string | null;
             /** @description A percent or a cents amount, never both. */
             discount_percent: string | null;
@@ -14420,27 +15291,11 @@ export interface components {
             /** @description A decimal string of the on hand quantity. */
             in_stock: string;
         };
-        PosSyncResponse: {
-            batch_id: string;
-            synced_count: number;
-            /** @description Sales already synced, by client_id. */
-            duplicate_count: number;
-            error_count: number;
-            /** @description Sales waiting on the tax provider; the sync retries them. */
-            pending_count: number;
-            errors: components["schemas"]["PosSyncItemResult"][];
-            pending: components["schemas"]["PosSyncItemResult"][];
-        };
-        PosSyncItemResult: {
-            /** Format: uuid */
-            client_id: string;
-            reason: string;
-        };
         /**
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
          * @enum {string}
          */
-        PricingSource: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account";
+        PricingSource: "contract" | "quantity_break" | "job_override" | "promotional" | "category_account" | "category_profile" | "category_level" | "level" | "branch" | "base";
         /** @enum {string} */
         PricingRuleType: "quantity_break" | "job_override" | "promotional";
         /** @description The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule. */
@@ -14461,6 +15316,17 @@ export interface components {
             price_basis: components["schemas"]["PricingSource"];
             /** @description Free text such as "Gold Tier (15%)". */
             details: string;
+            /**
+             * Format: uuid
+             * @description The branch the price answers at; null when the read named none and the caller carries no branch.
+             */
+            branch_id: string | null;
+            /**
+             * Format: int64
+             * @description The reference price (the branch base when the branch has one, else the product's base), the price a percent or markup rule acts on.
+             */
+            reference_price_ten_thousandths: number;
+            reference_price_uom: string;
         };
         PricingRule: {
             /** Format: uuid */
@@ -14494,6 +15360,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The unit a fixed price is per (the product's stocking unit while the hold stands); a percent or markup rule carries none. */
+            price_uom: string | null;
         };
         PricingRulePage: {
             items: components["schemas"]["PricingRule"][];
@@ -14591,11 +15459,13 @@ export interface components {
         PricingCategoryRule: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            target_type: "account" | "tier";
+            /**
+             * @description The customer scope the rule prices: one account, one profile's customers, or one level's customers.
+             * @enum {string}
+             */
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id: string | null;
-            tier: string;
             /** Format: uuid */
             category_id: string;
             /** @enum {string} */
@@ -14623,6 +15493,20 @@ export interface components {
             category_path?: string;
             /** @description Joined on reads. */
             customer_name?: string;
+            /**
+             * Format: uuid
+             * @description A profile rule's target.
+             */
+            price_profile_id: string | null;
+            /**
+             * Format: uuid
+             * @description A level rule's target.
+             */
+            price_level_id: string | null;
+            /** @description The target level's code, on the matrix's rows. */
+            level_code?: string | null;
+            /** @description The target profile's code, when joined. */
+            profile_code?: string | null;
         };
         PricingCategoryRulePage: {
             items: components["schemas"]["PricingCategoryRule"][];
@@ -14649,10 +15533,13 @@ export interface components {
         /** @description The create body; a field not listed is a 400. */
         PricingCategoryRuleCreateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
             /** @enum {string} */
-            target_type: "account" | "tier";
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id?: string | null;
-            tier?: string | null;
+            /** Format: uuid */
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
             /** Format: uuid */
             category_id: string;
         };
@@ -14686,9 +15573,14 @@ export interface components {
             /** Format: uuid */
             category_id?: string;
             target_type?: string;
-            tier?: string;
+            /** @description A legacy rule's tier */
+            tier?: string | null;
             /** Format: uuid */
-            customer_id?: string;
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
+            /** Format: uuid */
+            customer_id?: string | null;
         };
         PricingCategoryRuleAuditList: {
             items: components["schemas"]["PricingCategoryRuleAudit"][];
@@ -14706,14 +15598,15 @@ export interface components {
             category_id: string;
             category_name: string;
             category_path: string;
-            tier: string;
+            level: string | null;
             rule?: components["schemas"]["PricingCategoryRule"];
             inherited: boolean;
             source_path?: string;
         };
         PricingMatrix: {
             categories: components["schemas"]["PricingProductCategory"][] | null;
-            tiers: string[] | null;
+            /** @description The level codes the grid's columns answer, in place of tiers. */
+            levels: string[] | null;
             cells: components["schemas"]["PricingMatrixCell"][] | null;
         };
         PricingResolvedCategoryPrice: {
@@ -14872,6 +15765,237 @@ export interface components {
             affected_customer_count: number;
             estimated_exposure_dollars: number;
             top_customers: components["schemas"]["MarketIndexRefreshTopCustomer"][] | null;
+        };
+        PricingLevel: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @enum {string} */
+            basis: "base" | "average_cost" | "replacement_cost";
+            /** @description A decimal string; -10 is ten percent off the basis. */
+            adjust_percent: string;
+            position: number;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingLevelWrite: {
+            code?: string;
+            name?: string;
+            basis?: string;
+            adjust_percent?: string;
+            position?: number;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingLevelPage: {
+            items: components["schemas"]["PricingLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProfile: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** Format: uuid */
+            price_level_id: string;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingProfileWrite: {
+            code?: string;
+            name?: string;
+            /** Format: uuid */
+            price_level_id?: string;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingProfilePage: {
+            items: components["schemas"]["PricingProfile"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProductPrice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /**
+             * Format: uuid
+             * @description Null on the branch's base price row.
+             */
+            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Null on an every branch row.
+             */
+            branch_id?: string | null;
+            price_uom: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            revision: number;
+        };
+        PricingProductPriceList: {
+            items: components["schemas"]["PricingProductPrice"];
+        };
+        PricingProductPriceReplace: {
+            /**
+             * Format: int64
+             * @description The product revision the list was read at.
+             */
+            revision: number;
+            /** @description The slice's rows; each carries its own revision for reads. */
+            prices: {
+                /** Format: uuid */
+                price_level_id?: string | null;
+                price_uom?: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths?: number;
+            }[];
+        };
+        PricingVendorLevel: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            code: string;
+            name: string;
+            is_default: boolean;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorLevelWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            code?: string;
+            name?: string;
+            is_default?: boolean;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorLevelPage: {
+            items: components["schemas"]["PricingVendorLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingVendorCost: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            /** Format: uuid */
+            vendor_price_level_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            vendor_sku?: string | null;
+            effective_from: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorCostWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            /** Format: uuid */
+            vendor_price_level_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom?: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths?: number;
+            vendor_sku?: string | null;
+            effective_from?: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorCostPage: {
+            items: components["schemas"]["PricingVendorCost"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingContract: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: int64 */
+            contract_price_ten_thousandths: number;
+            price_uom: string;
+            /**
+             * Format: uuid
+             * @description Null is the every branch row.
+             */
+            branch_id?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingContractWrite: {
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** Format: int64 */
+            contract_price_ten_thousandths?: number;
+            price_uom?: string;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingContractPage: {
+            items: components["schemas"]["PricingContract"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingResolvedCost: {
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            purchase_uom: string;
+            uom_qty: string;
+            purchase_uom_qty: string;
+            vendor_level_code: string;
+            /** Format: uuid */
+            vendor_level_id: string;
+            /** Format: uuid */
+            vendor_cost_id: string;
         };
         KitComponent: {
             /** Format: uuid */
@@ -17135,6 +18259,546 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    arCreditHoldsList: {
+        parameters: {
+            query?: {
+                status?: "standing" | "released" | "all";
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditHoldPlace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldPlaceRequest"];
+            };
+        };
+        responses: {
+            /** @description The standing hold, already in place. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            /** @description The hold, placed. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldsEvaluate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldEvaluateRequest"];
+            };
+        };
+        responses: {
+            /** @description The sweep's answer, placed and lifted counts included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldEvaluation"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldRelease: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldReleaseRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, released. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldOverride: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, overridden until the window ends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditLimitChangesList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit limit changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChangePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditLimitChangeRequest: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditLimitChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The change, approved and applied. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            /** @description The change, recorded as pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arWorklist: {
+        parameters: {
+            query?: {
+                as_of?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArWorklist"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArStatementRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, completed, with its items. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arStatementRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRules"];
+            };
+        };
+        responses: {
+            /** @description The rules, written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arFinanceChargeRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, executed or previewed, with its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
     activityList: {
         parameters: {
             query?: {
@@ -18879,8 +20543,6 @@ export interface operations {
             query?: {
                 /** @description Search term for name, account_number and email, at most 100 characters. */
                 q?: string;
-                /** @description One lowercase tier. */
-                tier?: "retail" | "silver" | "gold" | "platinum";
                 is_active?: boolean;
                 /** @description Customers assigned to this salesperson. */
                 salesperson_id?: string;
@@ -19645,40 +21307,6 @@ export interface operations {
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["WireConflict"];
             428: components["responses"]["WirePreconditionRequired"];
-            500: components["responses"]["InternalErrorEither"];
-        };
-    };
-    customerListPriceLevels: {
-        parameters: {
-            query?: {
-                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
-                limit?: components["parameters"]["PageLimit"];
-                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
-                cursor?: components["parameters"]["Cursor"];
-                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
-                include?: components["parameters"]["Include"];
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The page of price levels. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PriceLevelPage"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -27073,7 +28701,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
+            /** @description Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -28184,18 +29812,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The batch's outcome. */
-            200: {
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosSyncResponse"];
+                    "application/json": components["schemas"]["WireError"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -29796,6 +31424,763 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    pricingLevelList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The created profile. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceList: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product's price rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceReplace: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProductPriceReplace"];
+            };
+        };
+        responses: {
+            /** @description The slice as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor costs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor cost. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractList: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of contracts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The created contract. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The contract is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingCost: {
+        parameters: {
+            query: {
+                vendor_id: string;
+                product_id: string;
+                branch_id?: string;
+                vendor_level_id?: string;
+                /** @description A calendar date (YYYY-MM-DD); default today. */
+                on?: string;
+                /** @description The purchase line's unit, for the answer's pair. */
+                uom?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolved cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     productList: {

@@ -131,7 +131,6 @@ var machineKeyModules = map[string]struct{}{
 	"payment-terms":    {},
 	"payments":         {},
 	"pos":              {},
-	"price_levels":     {},
 	"pricing":          {},
 	"products":         {},
 	"purchase-orders":  {},

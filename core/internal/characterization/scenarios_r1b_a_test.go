@@ -71,7 +71,7 @@ func r1bACustomerContactsGroups() []groupDef {
 				body: map[string]any{
 					"name": "Golden Contacts Co", "account_number": "GOLD-A-001",
 					"email": "contacts@example.com", "phone": "250-555-0177",
-					"address": "7 Golden Way, Kelowna BC", "tier": "gold",
+					"address":            "7 Golden Way, Kelowna BC",
 					"credit_limit_cents": 5000000, "primary_branch_id": "{branch}",
 				},
 				extract: map[string]string{"a_customer": "/id"},

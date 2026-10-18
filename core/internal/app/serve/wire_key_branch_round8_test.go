@@ -36,21 +36,17 @@ func TestKeyBranchPin_HiddenTillReportAnswers404(t *testing.T) {
 	}
 }
 
-// Fix round 8 (r17 P3-3): a sync batch naming a register that does not exist
-// ran its items and was logged under that register, because the batch check
-// ran only when the register resolved. An unknown batch register is now
-// refused before any item runs and before the log row, so the log never names
-// a register nobody made; the pin's own register still passes.
+// Fix round 8 (r17 P3-3), under the money never queues rule: a sync batch
+// naming a register that does not exist once ran its items and was logged
+// under that register; rounds 8 and 9 taught the module to refuse it before
+// anything was written. The rule retires the replay outright: every batch
+// that parses is refused 409 money_never_queues before any item runs and
+// before a log row is written, so the log never names a register nobody made.
 func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 	f, _, first := round5Fixture(t)
 	ctx := context.Background()
 	client := uuid.New()
 	batch := "pin-r8-" + uuid.NewString()[:8]
-	// the control's sale completes, so the pin's product needs stock
-	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, NULL, '', 50)`, f.posProd); err != nil {
-		t.Fatalf("seed stock: %v", err)
-	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
@@ -70,11 +66,11 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 		return n
 	}
 
-	// The batch register that does not exist: the whole batch is refused
+	// The batch register that does not exist: the batch is refused by rule
 	// before any item runs and before the log row is written.
 	status, buf := f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody("NOPE-PIN-R8"), nil)
-	if status != http.StatusBadRequest {
-		t.Errorf("bound key sync with a batch register that does not exist: %d %s, want the 400 refusing the batch", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key sync with a batch register that does not exist: %d %s, want the rule's 409", status, buf)
 	}
 	if n := logRows(); n != 0 {
 		t.Errorf("the refused sync wrote %d pos_sync_log rows for the batch, want none", n)
@@ -83,12 +79,12 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want none", n)
 	}
 
-	// The empty batch register names no register either (r19 P3-1), so it is
-	// refused the same 400, before any item runs and before a log row is
-	// written under a register nobody made.
+	// The empty batch register names no register either (r19 P3-1): the same
+	// refusal, before any item runs and before a log row is written under a
+	// register nobody made.
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(""), nil)
-	if status != http.StatusBadRequest {
-		t.Errorf("bound key sync with an empty batch register: %d %s, want the 400 refusing the batch", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key sync with an empty batch register: %d %s, want the rule's 409", status, buf)
 	}
 	if n := logRows(); n != 0 {
 		t.Errorf("the empty register sync wrote %d pos_sync_log rows, want none", n)
@@ -97,12 +93,13 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 		t.Errorf("the empty register sync wrote %d transactions, want none", n)
 	}
 
-	// The control: the pin's own register as the batch register still passes.
+	// The control: the pin's own register as the batch register is refused by
+	// the same rule, nothing written.
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(f.regA), nil)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("bound key sync with the pin's own batch register: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key sync with the pin's own batch register: %d %s, want the rule's 409", status, buf)
 	}
-	if n := logRows(); n != 1 {
-		t.Errorf("the control sync wrote %d pos_sync_log rows, want its one", n)
+	if n := logRows(); n != 0 {
+		t.Errorf("the refused control sync wrote %d pos_sync_log rows, want none", n)
 	}
 }

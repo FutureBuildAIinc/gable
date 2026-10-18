@@ -89,12 +89,10 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 	const fixtureCustomer = "11111111-1111-4111-8111-111111111111"
 	mustExec(t, db, `INSERT INTO customers (
 		id, name, account_number, email, phone, address,
-		price_level_id, credit_limit, balance_due, is_active,
-		tier,
+		credit_limit, balance_due, is_active,
 		created_at, updated_at, primary_branch_id
 	) VALUES ($1, 'Golden Window Fixture Co', 'GOLDEN-WIN-001', 'windows@example.com', '+1 250 555 0100', '1 Golden Row, Kelowna, BC',
-		NULL, 0, 0, true,
-		'RETAIL',
+		0, 0, true,
 		$2, $2,
 		COALESCE(NULL::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 		fixtureCustomer, stamp(0))
@@ -136,8 +134,8 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		// The shared line shape (ADR 0005 2.2): the fixture writes what the
 		// invoice repository writes for a legacy line.
 		mustExec(t, db, `INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
-				sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
-			SELECT $1, $2, $3, 1, $4, $5, p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, $4
+				sku, description, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, line_total)
+			SELECT $1, $2, $3, 1, $4, $5, p.sku, COALESCE(p.description, p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, 1, $4, $4
 			FROM products p WHERE p.id = $3`,
 			inv.lineID, inv.id, productID, inv.total, at)
 	}

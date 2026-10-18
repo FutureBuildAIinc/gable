@@ -193,10 +193,10 @@ func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 
 	productSvc := product.NewService(product.NewRepository(db))
 	customerSvc := customer.NewService(customer.NewRepository(db))
-	pricingSvc := pricing.NewService(pricing.NewRepository(db))
+	pricingSvc := pricing.NewService(pricing.NewRepository(db)).WithRepository(pricing.NewResolveRepository(db))
 	inventorySvc := inventory.NewService(inventory.NewRepository(db))
 	orderSvc := order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).
-		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc})
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc})
 	portalSvc := portal.NewService(portal.NewRepository(db), "cq-wire-test-secret", logger, pricingSvc, customerSvc, inventorySvc, orderSvc, productSvc)
 
 	mux := http.NewServeMux()

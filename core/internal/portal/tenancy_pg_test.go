@@ -99,9 +99,9 @@ func setupTenants(t *testing.T) *tenants {
 		              (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), NOW(), NOW(), 'PICKUP', 'USD')`,
 			o.id, o.cust, o.project)
 		exec(`INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
-				description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable)
+				description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, priced_unit_price, price_source, line_total, taxable)
 			SELECT $1, $2, 10, 10.00, 'PRODUCT', 0,
-				COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, 10.00, 'PRICE_LIST', 100.00, TRUE
+				COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, 10, 10.00, 'PRICE_LIST', 100.00, TRUE
 			FROM products p WHERE p.id = $2`,
 			o.id, tt.product)
 	}

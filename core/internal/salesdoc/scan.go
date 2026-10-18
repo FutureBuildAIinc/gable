@@ -19,6 +19,9 @@ import (
 func LineColumns(special string) string {
 	return `l.id, l.position, l.line_type, l.parent_line_id, l.product_id, l.charge_code_id, cc.code, l.sku, l.description,
 	ROUND(l.quantity * 10000)::bigint, l.uom, l.price_uom, ROUND(l.uom_qty * 10000)::bigint, ROUND(l.price_uom_qty * 10000)::bigint,
+	l.stock_uom, ROUND(l.stock_quantity * 10000)::bigint,
+	ROUND(l.board_thickness_in * 10000)::bigint, ROUND(l.board_width_in * 10000)::bigint,
+	l.price_basis, l.cost_source, ROUND(l.unit_cost * 10000)::bigint,
 	ROUND(l.unit_price * 10000)::bigint, ROUND(l.priced_unit_price * 10000)::bigint, l.price_source, l.override_reason,
 	ROUND(l.discount_percent * 10000)::bigint, ROUND(l.discount_amount * 100)::bigint, l.discount_reason, l.price_adjusted_by,
 	ROUND(l.line_total * 100)::bigint, l.taxable, l.revenue_account_code, ` + special + `, l.created_at`
@@ -27,7 +30,10 @@ func LineColumns(special string) string {
 // LineScan holds the nullable scale 4 integers a LineColumns row scans into
 // before Finish writes them onto the Line.
 type LineScan struct {
-	quantity, uomQty, priceUOMQty, unitPrice, priced *int64
+	quantity, uomQty, priceUOMQty                    *int64
+	stockQty, boardThick, boardWidth                 *int64
+	unitCost                                         *int64
+	unitPrice, priced                                *int64
 	discountPct, discountAmt, lineTotal, specialCost *int64
 	source                                           string
 	created                                          time.Time
@@ -38,6 +44,8 @@ func (s *LineScan) Dests(l *Line) []any {
 	return []any{
 		&l.ID, &l.Position, &l.LineType, &l.ParentLineID, &l.ProductID, &l.ChargeCodeID, &l.ChargeCode, &l.SKU, &l.Description,
 		&s.quantity, &l.UOM, &l.PriceUOM, &s.uomQty, &s.priceUOMQty,
+		&l.StockUOM, &s.stockQty, &s.boardThick, &s.boardWidth,
+		&l.PriceBasis, &l.CostSource, &s.unitCost,
 		&s.unitPrice, &s.priced, &s.source, &l.OverrideReason,
 		&s.discountPct, &s.discountAmt, &l.DiscountReason, &l.PriceAdjustedBy,
 		&s.lineTotal, &l.Taxable, &l.RevenueAccountCode, &l.IsSpecialOrder, &l.VendorID, &s.specialCost, &s.created,
@@ -49,12 +57,25 @@ func (s *LineScan) Finish(l *Line) {
 	l.PriceSource = PriceSource(s.source)
 	l.Quantity = PtrQuantity(s.quantity)
 	l.UOMQty, l.PriceUOMQty = PtrQuantity(s.uomQty), PtrQuantity(s.priceUOMQty)
+	l.StockQuantity = PtrQuantity(s.stockQty)
+	l.Tally = TallyOf(s.boardThick, s.boardWidth)
+	l.StockingUnitCost = PtrPrice(s.unitCost)
 	l.UnitPrice, l.PricedUnitPrice = PtrPrice(s.unitPrice), PtrPrice(s.priced)
 	l.DiscountPercent = PtrQuantity(s.discountPct)
 	l.DiscountAmount = PtrCents(s.discountAmt)
 	l.LineTotal = PtrCents(s.lineTotal)
 	l.SpecialOrderCost = PtrPrice(s.specialCost)
 	l.CreatedAt = httpx.TimestampOf(s.created)
+}
+
+// TallyOf rebuilds a read line's tally cross section from the two columns
+// when either is set: the rows themselves are read from line_tally_rows by
+// the owning module's repository.
+func TallyOf(thick, width *int64) *Tally {
+	if thick == nil && width == nil {
+		return nil
+	}
+	return &Tally{ThicknessIn: PtrQuantity(thick), WidthIn: PtrQuantity(width), Rows: []TallyRow{}}
 }
 
 // PtrQuantity, PtrPrice and PtrCents lift a nullable scaled integer into its

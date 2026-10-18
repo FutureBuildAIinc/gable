@@ -108,7 +108,7 @@ func pricingGroups() []groupDef {
 			{name: "pricing.rule.create.invalid", method: "POST", path: "/api/v1/pricing/rules",
 				body: map[string]any{"name": "", "rule_type": "QUANTITY_BREAK", "discount_pct": "150"}},
 			{name: "pricing.rule.create.unknown_field", method: "POST", path: "/api/v1/pricing/rules",
-				body: map[string]any{"name": "x", "rule_type": "promotional", "discount_pct": "5", "tier": "GOLD"}},
+				body: map[string]any{"name": "x", "rule_type": "promotional", "discount_pct": "5"}},
 			{name: "pricing.rules.list_after", method: "GET", path: "/api/v1/pricing/rules?limit=2&include=total"},
 			{name: "pricing.rules.list.unsupported_parameter", method: "GET", path: "/api/v1/pricing/rules?offset=1"},
 		},

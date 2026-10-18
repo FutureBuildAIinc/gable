@@ -37,19 +37,21 @@ func (p *PortalCostSource) CatalogCost(ctx context.Context, customerID, productI
 	if err != nil || prod == nil {
 		return nil, nil
 	}
-	cust, err := p.Customers.GetCustomer(ctx, customerID)
-	if err != nil {
+	if _, err := p.Customers.GetCustomer(ctx, customerID); err != nil {
 		return nil, fmt.Errorf("read contractor account: %w", err)
 	}
-	// The engine takes a float64 quantity and base price at its edge and
-	// answers an exact scale 4 price; the float never leaves this call.
-	sp, err := p.Pricing.CalculateScaled(ctx, cust, productID, prod.BasePrice, float64(qty)/10_000, nil)
+	res, err := p.Pricing.Resolve(ctx, pricing.Request{
+		CustomerID: customerID,
+		ProductID:  productID,
+		Quantity:   qty,
+		UOM:        string(prod.UOMPrimary),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("price product for the account: %w", err)
 	}
 	item := &CatalogItem{
 		ProductID: productID, SKU: prod.SKU, Description: prod.Description, UOM: string(prod.UOMPrimary),
-		UnitCostTenThousandths: int64(sp.Price),
+		UnitCostTenThousandths: int64(res.UnitPrice),
 	}
 	var cat *uuid.UUID
 	if err := p.DB.GetExecutor(ctx).QueryRow(ctx, `SELECT category_id FROM products WHERE id = $1`, productID).Scan(&cat); err != nil && !errors.Is(err, pgx.ErrNoRows) {
