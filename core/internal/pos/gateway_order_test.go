@@ -65,7 +65,7 @@ func TestAVoidTheTransactionRefusesRecordsItsGatewayRefund(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.voided"
+		f.events.setFail("pos_transaction.voided")
 	})
 	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
 	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
@@ -98,7 +98,7 @@ func TestAChargeTheTransactionRefusesIsReversed(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.completed"
+		f.events.setFail("pos_transaction.completed")
 	})
 	saleID := f.startSale(&f.customerID)
 	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
@@ -441,7 +441,7 @@ func TestARefusedCompletionAttemptsEveryChargeReversal(t *testing.T) {
 	}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.completed"
+		f.events.setFail("pos_transaction.completed")
 	})
 	saleID := f.startSale(&f.customerID)
 	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
@@ -517,7 +517,7 @@ func TestAChargeNeitherVoidNorRefundCanReverseAnswers502(t *testing.T) {
 	}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.completed"
+		f.events.setFail("pos_transaction.completed")
 	})
 	saleID := f.startSale(&f.customerID)
 	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
@@ -546,7 +546,7 @@ func TestAReturnTheTransactionRefusesRecordsItsGatewayRefund(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	f.openTill(0)
 	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
