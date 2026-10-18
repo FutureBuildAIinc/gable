@@ -148,9 +148,13 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 
 	// Dealer identity block.
 	if b.dealer != nil {
-		add(thermalRowMed, text.NewCol(thermalGridSize, b.dealer.DisplayName(), props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Center}))
-		for _, l := range b.dealerBlock()[1:] {
-			add(thermalRowTiny, text.NewCol(thermalGridSize, l, props.Text{Size: 7, Align: align.Center}))
+		if name := b.dealer.DisplayName(); name != "" {
+			add(thermalRowMed, text.NewCol(thermalGridSize, name, props.Text{Size: 11, Style: fontstyle.Bold, Align: align.Center}))
+		}
+		if db := b.dealerBlock(); len(db) > 1 {
+			for _, l := range db[1:] {
+				add(thermalRowTiny, text.NewCol(thermalGridSize, l, props.Text{Size: 7, Align: align.Center}))
+			}
 		}
 	}
 
