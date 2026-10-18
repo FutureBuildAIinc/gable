@@ -261,12 +261,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # The shells embed web/apps/front-door/dist, so the door is built first.
+      # The shells embed web/apps/front-door/dist and web/apps/field-shell/dist, so both are built first.
       - name: Build the front door
         working-directory: web
         run: |
           npm ci
           npm run build --workspace @gable/front-door
+          npm run build --workspace @gable/field-shell
 
       - name: Install Linux prerequisites
         run: |

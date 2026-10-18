@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "ai.futurebuild.gable.field",
   "build": {
-    "frontendDist": "../../web/apps/front-door/dist"
+    "frontendDist": "../../web/apps/field-shell/dist"
   },
   "app": {
     "withGlobalTauri": false,

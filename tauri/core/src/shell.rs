@@ -14,10 +14,10 @@ use std::sync::Arc;
 
 use url::Url;
 
-use crate::custody::{self, Custody};
+use crate::custody::{self, Custody, CustodyError};
 use crate::fence::{BadOrigin, OriginFence};
 use crate::profiles::Profile;
-use crate::tokens::TokenStore;
+use crate::tokens::{TokenSet, TokenStore};
 
 /// The origins the app's own commands always answer to: the bundled shell's
 /// Tauri origins. The URL override's origin joins them at startup.
@@ -97,6 +97,19 @@ impl TokenState {
     pub fn profile(&self) -> &'static Profile {
         self.profile
     }
+
+    /// Writes a fresh token pair for this state's profile from a Rust
+    /// sign-in or refresh flow. Never exposed as a webview command.
+    pub fn store_tokens(&self, tokens: &TokenSet) -> Result<(), CustodyError> {
+        self.store.store(self.profile.identifier, tokens)
+    }
+
+    /// Leaves this profile's session for `to` inside Rust: this profile's
+    /// tokens are cleared and `to` keeps whatever is already its own. Never
+    /// exposed as a webview command.
+    pub fn switch_profile(&self, to: &'static Profile) -> Result<(), CustodyError> {
+        self.store.switch(self.profile.identifier, to.identifier)
+    }
 }
 
 /// The access token for the app's own origin, or the refusal word. The
@@ -147,25 +160,45 @@ mod tests {
 
     #[test]
     fn the_state_serves_the_profile_it_was_built_for_and_no_other() {
-        // The parameterisation is the point: a work state reads work's
-        // entries, a field state never sees them.
-        let (work, _) = state_for(profiles::work());
-        work.store.store(work.profile.identifier, &pair()).unwrap();
+        // The parameterisation is the point: a work state and a field state
+        // built over the SAME TokenStore read and clear only their own
+        // profile's entries.
+        let store = TokenStore::new(Arc::new(MemoryCustody::new()));
+        let work = TokenState::build(store.clone(), profiles::work(), None).unwrap();
+        let field = TokenState::build(store, profiles::field(), None).unwrap();
+
+        work.store_tokens(&pair()).unwrap();
         let answer = core_token_answer(&work, OWN).unwrap();
         assert_eq!(answer, ACCESS);
         assert_ne!(answer, REFRESH);
 
-        let (field, _) = state_for(profiles::field());
         assert_eq!(core_token_answer(&field, OWN).unwrap_err(), ERR_NO_SESSION);
         assert_eq!(
             clear_tokens_answer(&field, OWN).unwrap(),
             (),
             "clearing field's custody never needs field's entries to exist"
         );
-        assert!(
-            work.store.read(work.profile.identifier).unwrap().is_some(),
-            "a field state's clear cannot be work's sign out"
+        assert_eq!(
+            core_token_answer(&work, OWN).unwrap(),
+            ACCESS,
+            "a field state's clear over the shared store cannot be work's sign out"
         );
+    }
+
+    #[test]
+    fn rust_token_write_and_profile_switch_hand_off_to_field_over_one_store() {
+        let store = TokenStore::new(Arc::new(MemoryCustody::new()));
+        let work = TokenState::build(store.clone(), profiles::work(), None).unwrap();
+        let field = TokenState::build(store, profiles::field(), None).unwrap();
+
+        work.store_tokens(&pair()).unwrap();
+        let field_pair =
+            TokenSet::new("field-access".to_string(), "field-refresh".to_string()).unwrap();
+        field.store_tokens(&field_pair).unwrap();
+        work.switch_profile(profiles::field()).unwrap();
+
+        assert_eq!(core_token_answer(&work, OWN).unwrap_err(), ERR_NO_SESSION);
+        assert_eq!(core_token_answer(&field, OWN).unwrap(), "field-access");
     }
 
     #[test]

@@ -4,10 +4,10 @@
 //! Gable Field: the Tauri 2 profile for the yard and driving roles (the
 //! field shell).
 //!
-//! The window opens the profile's start app: the front door bundle embedded
-//! at build time (`web/apps/front-door/dist`) until the field shell's own
-//! bundle lands, or the page named by `GABLE_FIELD_URL` when that is set (an
-//! http or https URL of a running Gable).
+//! The window opens the profile's start app: the field shell bundle embedded
+//! at build time (`web/apps/field-shell/dist`), or the page named by
+//! `GABLE_FIELD_URL` when that is set (an http or https URL of a running
+//! Gable).
 //!
 //! The shell itself lives in the core (`gable_shell_core::shell`): the
 //! managed token state, the URL override and the answers are one
@@ -16,10 +16,12 @@
 //! webview holds exactly the two commands, `core_token` and `clear_tokens`
 //! (see `capabilities/default.json`), and both answer only to the app's own
 //! origins, so a page the window was navigated to from anywhere else can
-//! neither read a token nor clear custody. The tokens themselves never
-//! leave the OS keychain: `core_token` hands the page the access token it
-//! needs for the API's Authorization header, and the refresh token never
-//! crosses the IPC at all. Nothing here logs or prints.
+//! neither read a token nor clear custody. Token writes (`TokenState::store_tokens`
+//! and `TokenState::switch_profile`) stay inside Rust and are never exposed
+//! as webview commands. The tokens themselves never leave the OS keychain:
+//! `core_token` hands the page the access token it needs for the API's
+//! Authorization header, and the refresh token never crosses the IPC at all.
+//! Nothing here logs or prints.
 
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
@@ -164,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn the_conf_names_this_profile() {
+    fn the_conf_names_this_profile_and_points_at_the_field_shell_bundle() {
         let conf: serde_json::Value =
             serde_json::from_str(TAURI_CONF).expect("tauri.conf.json parses");
         assert_eq!(conf["identifier"].as_str(), Some(profile_id()));
@@ -172,12 +174,16 @@ mod tests {
             conf["productName"].as_str(),
             Some(profiles::field().product_name)
         );
+        assert_eq!(
+            conf["build"]["frontendDist"].as_str(),
+            Some("../../web/apps/field-shell/dist")
+        );
     }
 
     #[test]
     fn the_token_command_answers_its_own_origin_with_the_access_token_only() {
-        let (state, store, _) = state();
-        store.store(profile_id(), &pair()).unwrap();
+        let (state, _, _) = state();
+        state.store_tokens(&pair()).unwrap();
         let answer = shell::core_token_answer(&state, OWN).unwrap();
         assert_eq!(answer, ACCESS);
         assert_ne!(answer, REFRESH, "the refresh token never crosses the IPC");
@@ -186,7 +192,7 @@ mod tests {
     #[test]
     fn a_wrong_origin_is_refused_and_custody_is_untouched() {
         let (state, store, _) = state();
-        store.store(profile_id(), &pair()).unwrap();
+        state.store_tokens(&pair()).unwrap();
         for refused in [
             FOREIGN,
             "tauri://evil.example/",
