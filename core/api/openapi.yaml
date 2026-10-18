@@ -11629,7 +11629,7 @@ paths:
       tags: [pos]
       summary: A branch's variance threshold
       description: >-
-        The threshold in cents a close's over or short is held to at the branch: the branch's own override, else the database wide default (system_settings till.variance_threshold_cents). source says which; none means no threshold is in force. A branch the caller may not target is 403.
+        The threshold in cents a close's over or short is held to at the branch: the branch's own override, else the database wide default (system_settings till.variance_threshold_cents). source says which; none means no threshold is in force. Finance and owner only; a branch the caller may not target is 403.
       parameters:
         - name: branch_id
           in: query
@@ -11687,7 +11687,7 @@ paths:
       tags: [pos]
       summary: The branch's end of day summary
       description: >-
-        One branch's business date (date, YYYY-MM-DD in the branch's time zone, defaulting to the branch's today): each register's sessions, tenders by method, movements, expected against counted, over and short, the cash and checks to deposit and the card total, and the branch totals, each the sum of its registers' to the cent. A session belongs to the date it opened. cash_to_deposit is the counted cash (the expected, for a drawer still open) less the opening float plus the drops and pickups; checks_to_deposit the counted checks; card_total the net card collected. collections_net_cents is the branch's net collections of the date as the Daily Till counts them. ready_to_close is true when no drawer is open or waiting for sign off. close is the day's close once it exists. A branch the caller may not target is 403; an unknown branch 404.
+        One branch's business date (date, YYYY-MM-DD in the branch's time zone, defaulting to the branch's today): each register's sessions, tenders by method, movements, expected against counted, over and short, the cash and checks to deposit and the card total, and the branch totals, each the sum of its registers' to the cent. A session belongs to the date it opened. cash_to_deposit is the counted cash (the expected, for a drawer still open) less the opening float plus the drops and pickups; checks_to_deposit the counted checks; card_total the net card collected. collections_net_cents is the branch's net collections of the date as the Daily Till counts them. ready_to_close is true when no drawer is open or waiting for sign off. close is the day's close once it exists. Finance and owner only. A branch the caller may not target is 403; an unknown branch 404.
       parameters:
         - name: branch_id
           in: query
