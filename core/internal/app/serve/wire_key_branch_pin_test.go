@@ -63,6 +63,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -182,7 +183,7 @@ var pinKeyScopes = []string{
 	"millwork:read", "millwork:write", "governance:read", "governance:write",
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"apps:read", "apps:write", "admin:settings", "admin:modules",
-	"parsing:write", "vision:write",
+	"parsing:write", "vision:write", "scheduling:read", "scheduling:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -512,6 +513,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall.delivery(mux, delivery.NewHandler(delivery.NewService(delivery.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithAudit(audit.NewLogger(db))),
 		"admin", "owner", "warehouse", "driver")
+	wall.scheduling(mux, scheduling.NewHandler(scheduling.NewService(scheduling.NewRepository(db))))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), pinPOSource{db: db}, pinAPSource{}, slog.Default()))
 	apps.NewHandler(apps.NewRegistry(db, slog.Default()).WithAudit(audit.NewLogger(db))).
 		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
