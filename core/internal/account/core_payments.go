@@ -270,11 +270,22 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	for _, p := range plans {
 		inv, l := p.inv, p.line
 		appID := uuid.New()
+		payBranch := pay.BranchID
+		invBranch := inv.BranchID
+		legs := []gl.Leg{
+			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents},
+			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents},
+		}
+		if payBranch != invBranch {
+			legs = []gl.Leg{
+				{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents, BranchID: &payBranch},
+				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Credit: l.AmountCents, BranchID: &payBranch},
+				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Debit: l.AmountCents, BranchID: &invBranch},
+				{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
+			}
+		}
 		entry, err := s.post(ctx, gl.PostingInput{EntryDate: on, Memo: fmt.Sprintf("Payment %s applied to %s", pay.Number, inv.Number),
-			Source: gl.SourcePayment, SourceRefID: &appID, BranchID: inv.BranchID, Currency: pay.Currency, PostedBy: actor, Legs: []gl.Leg{
-				{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents},
-				{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents},
-			}})
+			Source: gl.SourcePayment, SourceRefID: &appID, BranchID: inv.BranchID, Currency: pay.Currency, PostedBy: actor, Legs: legs})
 		if err != nil {
 			return err
 		}
@@ -330,8 +341,10 @@ type ApplyCreditMemoIn struct {
 	Actor  string
 }
 
-// ApplyCreditMemo uses a memo's open credit on invoices: no ledger entry (both
-// sides are in 1020) and no subledger row.
+// ApplyCreditMemo uses a memo's open credit on invoices: no ledger entry when
+// both sides share a branch (both sit in 1020 on that branch), or a balanced
+// per-branch entry moving 1020 when the memo and invoice belong to different
+// branches, and no subledger row.
 func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*Effects, error) {
 	if err := s.requireTx(ctx); err != nil {
 		return nil, err
@@ -406,8 +419,28 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	for _, l := range in.Lines {
 		inv := byID[l.InvoiceID]
 		appID := uuid.New()
+		var entry *uuid.UUID
+		if m.BranchID != inv.BranchID {
+			memoBranch := m.BranchID
+			invBranch := inv.BranchID
+			var err error
+			entry, err = s.post(ctx, gl.PostingInput{
+				EntryDate: in.On, Memo: fmt.Sprintf("Credit memo %s applied to %s", m.Number, inv.Number),
+				Source: gl.SourceCreditMemo, SourceRefID: &appID, BranchID: inv.BranchID, Currency: m.Currency, PostedBy: in.Actor,
+				Legs: []gl.Leg{
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: l.AmountCents, BranchID: &memoBranch},
+					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Credit: l.AmountCents, BranchID: &memoBranch},
+					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Debit: l.AmountCents, BranchID: &invBranch},
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			fx.entry(entry)
+		}
 		if err := s.insertApplication(ctx, &appRow{ID: appID, CustomerID: m.CustomerID, InvoiceID: inv.ID, ActID: act, Currency: m.Currency,
-			Kind: KindCreditMemo, CreditMemoID: &memoID, Amount: l.AmountCents}, in.On, in.Actor, nil, nil); err != nil {
+			Kind: KindCreditMemo, CreditMemoID: &memoID, Amount: l.AmountCents}, in.On, in.Actor, nil, entry); err != nil {
 			return nil, err
 		}
 		fx.ApplicationIDs = append(fx.ApplicationIDs, appID)
@@ -640,6 +673,14 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 			if err := s.subledger(ctx, fx, a.CustomerID, a.Currency, TransactionTypeReversal, a.Amount, a.ID, sourceApplication,
 				"Reversal of an application to "+inv.Number); err != nil {
 				return err
+			}
+		case KindCreditMemo:
+			if a.GLEntryID != nil {
+				rev, err = s.reverseEntry(ctx, gl.ReversalInput{EntryID: *a.GLEntryID, EntryDate: on, Currency: a.Currency, Reason: reason, PostedBy: actor})
+				if err != nil {
+					return err
+				}
+				fx.entry(rev)
 			}
 		}
 		if _, err := s.ex(ctx).Exec(ctx, `

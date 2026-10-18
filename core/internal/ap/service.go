@@ -777,6 +777,8 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 		// The payment's entry belongs to the first named bill's branch, the
 		// branch the money leaves (a payment has no branch of its own).
 		paymentBranch := locked[lockedIDs[0]].BranchID
+		appliedByBranch := make(map[uuid.UUID]int64)
+		var branchOrder []uuid.UUID
 		remaining := in.AmountCents
 		for _, id := range in.InvoiceIDs {
 			inv := locked[id]
@@ -799,6 +801,10 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 			if err != nil {
 				return err
 			}
+			if _, seen := appliedByBranch[inv.BranchID]; !seen {
+				branchOrder = append(branchOrder, inv.BranchID)
+			}
+			appliedByBranch[inv.BranchID] += apply
 			remaining -= apply
 			after, err := s.reloaded(ctx, id)
 			if err != nil {
@@ -819,14 +825,24 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 				httpx.Blocker("exceeds_open", fmt.Sprintf("%d cents were asked and %d cents are open", in.AmountCents, in.AmountCents-remaining)))
 		}
 		if len(locked) > 0 {
+			sort.Slice(branchOrder, func(i, j int) bool { return branchOrder[i].String() < branchOrder[j].String() })
+			legs := make([]gl.Leg, 0, len(branchOrder)*2)
+			for _, b := range branchOrder {
+				amt := appliedByBranch[b]
+				if amt <= 0 {
+					continue
+				}
+				bCopy := b
+				legs = append(legs,
+					gl.Leg{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Debit: amt, BranchID: &bCopy},
+					gl.Leg{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: amt, BranchID: &bCopy},
+				)
+			}
 			ref := p.ID
 			entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
 				EntryDate: mustDate(in.PaymentDate), Memo: "Vendor payment " + p.ID.String(),
 				Source: gl.SourceVendorPmt, SourceRefID: &ref, BranchID: paymentBranch, Currency: currency, PostedBy: who.Actor,
-				Legs: []gl.Leg{
-					{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Debit: in.AmountCents - remaining},
-					{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents - remaining},
-				},
+				Legs: legs,
 			})
 			if err != nil {
 				if errors.Is(err, gl.ErrPeriodClosed) {

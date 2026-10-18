@@ -279,34 +279,66 @@ func (r *PostgresRepository) ControlBalance(ctx context.Context, code string, as
 }
 
 // ARSubledgerCents answers the customer subledger's sum in cents (the rows
-// customers.balance_due is moved by), in one currency. The subledger carries
-// no branch of its own, so one branch's figure is its customers' (their
-// primary branch); the consolidated figure is the exact one.
+// customers.balance_due is moved by), in one currency. Each row's branch is
+// resolved from its referenced document (matching the branch 1020 AR journal
+// lines carry), falling back to the customer's primary branch only for
+// unreferenced adjustments, and live cross-branch credit-memo applications
+// shift open receivable between the memo's branch and the invoice's branch.
 func (r *PostgresRepository) ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	query := `
-		SELECT COALESCE(SUM(t.amount), 0)::bigint
-		FROM customer_transactions t
-		JOIN customers c ON c.id = t.customer_id
-		WHERE t.currency = $2
-		  AND ($1::uuid IS NULL OR c.primary_branch_id = $1)
+		SELECT COALESCE(SUM(sub.amount_cents), 0)::bigint
+		FROM (
+			SELECT t.amount AS amount_cents,
+			       t.currency AS currency,
+			       COALESCE(inv.branch_id, cm.branch_id, app_inv.branch_id, pr_cm.branch_id, pr_p.branch_id, ret.branch_id, ret_tx.branch_id, c.primary_branch_id) AS branch_id
+			FROM customer_transactions t
+			JOIN customers c ON c.id = t.customer_id
+			LEFT JOIN invoices inv ON inv.id = t.reference_id
+			LEFT JOIN credit_memos cm ON cm.id = t.reference_id
+			LEFT JOIN ar_applications app ON app.id = t.reference_id
+			LEFT JOIN invoices app_inv ON app_inv.id = app.invoice_id
+			LEFT JOIN payment_refunds pr ON pr.id = t.reference_id
+			LEFT JOIN credit_memos pr_cm ON pr_cm.id = pr.credit_memo_id
+			LEFT JOIN payments pr_p ON pr_p.id = pr.payment_id
+			LEFT JOIN pos_returns ret ON ret.id = t.reference_id
+			LEFT JOIN pos_transactions ret_tx ON ret_tx.id = ret.original_transaction_id
+			UNION ALL
+			SELECT ROUND(a.amount * 100)::bigint AS amount_cents,
+			       a.currency AS currency,
+			       cm.branch_id AS branch_id
+			FROM ar_applications a
+			JOIN credit_memos cm ON cm.id = a.credit_memo_id
+			JOIN invoices inv ON inv.id = a.invoice_id
+			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND cm.branch_id <> inv.branch_id
+			UNION ALL
+			SELECT -ROUND(a.amount * 100)::bigint AS amount_cents,
+			       a.currency AS currency,
+			       inv.branch_id AS branch_id
+			FROM ar_applications a
+			JOIN credit_memos cm ON cm.id = a.credit_memo_id
+			JOIN invoices inv ON inv.id = a.invoice_id
+			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND cm.branch_id <> inv.branch_id
+		) sub
+		WHERE sub.currency = $1
+		  AND ` + middleware.Wall("sub", 2, 3) + `
 	`
 	var cents int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch, currency).Scan(&cents)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, currency, f.Branch, f.Grants).Scan(&cents)
 	return cents, err
 }
 
 // apSubledger answers the open vendor bills' amount_open sum in cents, one
-// branch's bills or every branch's.
+// branch's bills or every branch's, at the caller's reach.
 func (r *PostgresRepository) APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
 	query := `
 		SELECT COALESCE(ROUND(SUM(vi.amount_open * 100)), 0)::bigint
 		FROM vendor_invoices vi
 		WHERE vi.status IN ('APPROVED', 'PARTIAL', 'PAID')
-		  AND vi.currency = $2
-		  AND ($1::uuid IS NULL OR vi.branch_id = $1)
+		  AND vi.currency = $1
+		  AND ` + middleware.Wall("vi", 2, 3) + `
 	`
 	var cents int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, f.Branch, currency).Scan(&cents)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, currency, f.Branch, f.Grants).Scan(&cents)
 	return cents, err
 }
 
