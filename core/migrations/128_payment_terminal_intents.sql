@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS payment_terminal_intents (
     answer_auth_code TEXT NOT NULL DEFAULT '',
     answer_provider_ref TEXT NOT NULL DEFAULT '',
     answer_verdict TEXT NOT NULL DEFAULT '' CHECK (answer_verdict IN ('', 'authorized', 'declined')),
+    -- an authorized leg is spent when its money is booked on the sale or put
+    -- back at the device; an authorized leg that is not spent still backs a
+    -- sale that has not completed (the completion reuses it, never charging
+    -- the card again)
+    spent_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT payment_terminal_intents_one_leg UNIQUE (transaction_id, leg_key, kind),
@@ -71,10 +76,26 @@ CREATE TABLE IF NOT EXISTS payment_terminal_lost_items (
     amount_cents BIGINT NOT NULL,
     device_id TEXT NOT NULL DEFAULT '',
     provider_ref TEXT NOT NULL DEFAULT '',
-    state TEXT NOT NULL CHECK (state IN ('open', 'resolved_authorized', 'resolved_declined')) DEFAULT 'open',
+    state TEXT NOT NULL CHECK (state IN ('open', 'resolving', 'resolved_authorized', 'resolved_declined')) DEFAULT 'open',
     resolved_by TEXT NOT NULL DEFAULT '',
     resolution_reference TEXT NOT NULL DEFAULT '',
     resolved_at TIMESTAMPTZ,
+    -- a resolution that calls the gateway claims the item first (state
+    -- resolving, committed) and holds it on this lease: a second or racing
+    -- resolution is refused until the first ends or the lease runs out
+    resolving_by TEXT NOT NULL DEFAULT '',
+    resolving_until TIMESTAMPTZ,
+    -- the verdict and reference of an answer that arrived after the sweep or
+    -- against a recorded verdict, kept so the manager reads the device's own
+    -- word; a late authorized answer after a declined resolution reopens the
+    -- item
+    late_verdict TEXT NOT NULL DEFAULT '' CHECK (late_verdict IN ('', 'authorized', 'declined')),
+    late_provider_ref TEXT NOT NULL DEFAULT '',
+    late_brand TEXT NOT NULL DEFAULT '',
+    late_last4 TEXT NOT NULL DEFAULT '',
+    late_auth_code TEXT NOT NULL DEFAULT '',
+    late_at TIMESTAMPTZ,
+    reopened_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

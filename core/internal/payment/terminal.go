@@ -94,6 +94,9 @@ type TerminalIntent struct {
 	AnswerAuthCode    string
 	AnswerProviderRef string
 	AnswerVerdict     string
+	// SpentAt: an authorized leg whose money the books took or the device
+	// gave back (nil while it still backs an open sale).
+	SpentAt *time.Time
 }
 
 // TerminalDispatch is one leg handed to a device.
@@ -120,12 +123,12 @@ type TerminalReceipt struct {
 // TerminalAnswer is the asynchronous verdict a device delivers. It carries
 // only safe fields.
 type TerminalAnswer struct {
-	IntentID     uuid.UUID
-	ProviderRef  string
-	Verdict      string // "authorized" or "declined"
-	Brand        string
-	Last4        string
-	AuthCode     string
+	IntentID    uuid.UUID
+	ProviderRef string
+	Verdict     string // "authorized" or "declined"
+	Brand       string
+	Last4       string
+	AuthCode    string
 }
 
 // TerminalBatchLine is one leg of a device's settlement batch.

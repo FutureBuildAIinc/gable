@@ -35,12 +35,12 @@ import (
 type SimulatedOutcome string
 
 const (
-	SimApprove           SimulatedOutcome = "approve"
-	SimDecline           SimulatedOutcome = "decline"
-	SimNoAnswer          SimulatedOutcome = "no_answer"
+	SimApprove            SimulatedOutcome = "approve"
+	SimDecline            SimulatedOutcome = "decline"
+	SimNoAnswer           SimulatedOutcome = "no_answer"
 	SimCrashAfterDispatch SimulatedOutcome = "crash_after_dispatch"
-	SimDuplicateAnswer   SimulatedOutcome = "duplicate_answer"
-	SimLateAnswer        SimulatedOutcome = "late_answer"
+	SimDuplicateAnswer    SimulatedOutcome = "duplicate_answer"
+	SimLateAnswer         SimulatedOutcome = "late_answer"
 )
 
 // AnswerSink receives the asynchronous answers the simulated device
@@ -52,12 +52,12 @@ type AnswerSink interface {
 // SimulatedTerminal is the scripted TerminalProvider of tests and demo
 // stacks. Safe for concurrent use.
 type SimulatedTerminal struct {
-	mu        sync.Mutex
-	def       SimulatedOutcome
-	script    map[string]SimulatedOutcome
-	answers   AnswerSink
+	mu         sync.Mutex
+	def        SimulatedOutcome
+	script     map[string]SimulatedOutcome
+	answers    AnswerSink
 	dispatched []TerminalDispatch
-	held      map[string]TerminalAnswer
+	held       map[string]TerminalAnswer
 }
 
 // NewSimulatedTerminal builds the driver with a default outcome and the sink

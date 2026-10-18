@@ -29,7 +29,17 @@ import (
 // sale row to point intents at, and removes both afterwards.
 func newTerminalFixture(t *testing.T) (*payment.TerminalLedger, uuid.UUID) {
 	t.Helper()
+	return newTerminalFixtureConns(t, 0)
+}
+
+// newTerminalFixtureConns is newTerminalFixture on a pool of the given size
+// (0 is the shared default pool): the concurrency proofs run at size 4.
+func newTerminalFixtureConns(t *testing.T, conns int32) (*payment.TerminalLedger, uuid.UUID) {
+	t.Helper()
 	db := testutil.RequireDB(t)
+	if conns > 0 {
+		db = testutil.RequireDBMaxConns(t, conns)
+	}
 	ctx := context.Background()
 	var branch uuid.UUID
 	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
@@ -359,9 +369,7 @@ func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 // device answer race on one lost item at pool size 4; exactly one resolution
 // closes it and the item's final state is one of the two closes.
 func TestResolveRacingLateAnswerEndsInOne(t *testing.T) {
-	l, sale := newTerminalFixture(t)
-	db := testutil.RequireDBMaxConns(t, 4)
-	_ = db
+	l, sale := newTerminalFixtureConns(t, 4)
 	ctx := context.Background()
 	in := claimIntent(t, l, sale, time.Minute)
 	if _, err := l.MarkDispatched(ctx, in.ID, "devref-res", time.Now().Add(-time.Minute)); err != nil {
@@ -411,15 +419,34 @@ func TestResolveRacingLateAnswerEndsInOne(t *testing.T) {
 		_, _ = l.ApplyDeviceAnswer(ctx, payment.TerminalAnswer{IntentID: in.ID, ProviderRef: "devref-res", Verdict: "authorized"})
 	}()
 	wg.Wait()
-	if closed.Load() != 1 {
-		t.Fatalf("%d resolutions closed the item, wanted exactly 1", closed.Load())
-	}
 	item, err := l.LostItem(ctx, itemID)
 	if err != nil {
 		t.Fatalf("item reread: %v", err)
 	}
-	if item.State != "resolved_authorized" && item.State != "resolved_declined" {
-		t.Fatalf("the item ended %s, wanted one resolved close", item.State)
+	// one resolution closes the open item; a second closes it only when the
+	// first was the declined one and the late authorized answer reopened the
+	// item in between (never two closes of one open state)
+	var reopened bool
+	if err := testutil.RequireDB(t).Pool.QueryRow(ctx,
+		`SELECT reopened_at IS NOT NULL FROM payment_terminal_lost_items WHERE id = $1`, itemID).Scan(&reopened); err != nil {
+		t.Fatalf("reopened read: %v", err)
+	}
+	if closed.Load() < 1 || closed.Load() > 2 || (closed.Load() == 2 && !reopened) {
+		t.Fatalf("%d resolutions closed the item (reopened=%t), wanted exactly one close per open state", closed.Load(), reopened)
+	}
+	// the resolution that won closed the item; the racing late authorized
+	// answer either landed on the lost intent first (the item then carries
+	// it and stays closed by the authorized resolution) or came after a
+	// declined close and reopened the item for the manager: in every order
+	// the item is in exactly one of these states
+	switch item.State {
+	case "resolved_authorized", "resolved_declined":
+	case "open":
+		if item.LateVerdict != "authorized" || item.LateProviderRef != "devref-res" {
+			t.Fatalf("the item reopened without the late answer's verdict: %q %q", item.LateVerdict, item.LateProviderRef)
+		}
+	default:
+		t.Fatalf("the item ended %s", item.State)
 	}
 }
 
