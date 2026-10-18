@@ -774,6 +774,16 @@ func Run() {
 	// unapplied cash is a declined void tender's credit applies to no invoice
 	// either (the credit is payable back only to its card, C2-5,
 	// FROM-PRINCIPAL 60).
+	// The card terminal seam (CP-05, IX-01): the intent ledger always, and
+	// the simulated terminal only when the demo stack selects it by
+	// configuration (an unset value wires no device, so production runs no
+	// simulator). A real terminal provider wires here beside it.
+	terminalLedger := payment.NewTerminalLedger(db).WithAuditLog(auditLog)
+	if sim := payment.NewSimulatedTerminalFromEnv(cfg.POSTerminalSimulator, terminalLedger); sim != nil {
+		posSvc.WithTerminal(sim, terminalLedger)
+		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
+			"script", cfg.POSTerminalSimulator)
+	}
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
 	// and the payment refund route holds the same credit to the counter's

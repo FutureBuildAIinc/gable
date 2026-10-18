@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -185,8 +186,13 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
+		// The terminal intent ledger binds this call (CP-05): the claim
+		// beside the refund claim's own, dispatched before the call, the
+		// verdict applied after; the call itself carries the intent's
+		// idempotency key, so a retry is the same leg at the device.
+		termLeg := s.terminalRefundLeg(ctx, intents[i].SaleID, intents[i].ID, payment.TerminalKindVoid, intents[i].AmountCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
-		res, err := s.gateway.Refund(callCtx, intents[i].GatewayTxID, intents[i].AmountCents)
+		res, err := payment.RefundUnderKey(callCtx, s.gateway, intents[i].GatewayTxID, intents[i].AmountCents, terminalRefundKey(termLeg))
 		cancel()
 		refundErr := err
 		verdict := refundAccepted
@@ -194,6 +200,9 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			verdict = refundVerdictOf(res)
 			if verdict != refundAccepted {
 				refundErr = conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
+			}
+			if verdict == refundDeclined {
+				s.terminalRefundVerdict(ctx, termLeg, false, res.TransactionID)
 			}
 		}
 		if refundErr != nil {
@@ -230,6 +239,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		// terminal answers and in its own committed write (seventh review
 		// P2-3), whatever state the claim is in (fourteenth review P1-1): a claim carrying
 		// a refund id is a refund that moved
+		s.terminalRefundVerdict(ctx, termLeg, true, res.TransactionID)
 		if err := s.repo.MarkRefundIntentRefunded(ctx, intents[i].ID, res.TransactionID); err != nil {
 			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",
 				"intent_id", intents[i].ID, "sale_id", saleID, "error", err)

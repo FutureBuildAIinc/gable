@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/units"
@@ -692,8 +693,9 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
+		termLeg := s.terminalRefundLeg(ctx, claim.intent.SaleID, claim.intent.ID, payment.TerminalKindRefund, claim.intent.AmountCents, "")
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
-		res, err := s.gateway.Refund(callCtx, *target.GatewayTxID, claim.intent.AmountCents)
+		res, err := payment.RefundUnderKey(callCtx, s.gateway, *target.GatewayTxID, claim.intent.AmountCents, terminalRefundKey(termLeg))
 		cancel()
 		if err != nil {
 			// no verdict came back (a timeout, a cancel): the terminal may
@@ -704,7 +706,9 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		switch refundVerdictOf(res) {
 		case refundAccepted:
+			s.terminalRefundVerdict(ctx, termLeg, true, res.TransactionID)
 		case refundDeclined:
+			s.terminalRefundVerdict(ctx, termLeg, false, res.TransactionID)
 			// a definite refusal: the terminal's own no proves nothing moved
 			s.failRefundIntent(ctx, claim.intent)
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))

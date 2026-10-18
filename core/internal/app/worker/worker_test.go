@@ -13,12 +13,15 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -132,5 +135,113 @@ func TestWorkerOrderServiceBillsWithTheConfiguredTaxProvider(t *testing.T) {
 	}
 	if tax != "450/PROVIDER" {
 		t.Errorf("delivery completion invoice tax = %q, want the provider's 450 with tax_source PROVIDER", tax)
+	}
+}
+
+// N5 (CP-05): the worker role runs the periodic terminal intent sweep over
+// every branch, closing expired claimed intents with no manager item and
+// moving expired pending_at_device intents to lost with one open manager item.
+func TestWorkerSweepsExpiredTerminalIntentsAcrossBranches(t *testing.T) {
+	testutil.LockTerminalTables(t)
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+
+	branchA, branchB := uuid.New(), uuid.New()
+	for _, b := range []uuid.UUID{branchA, branchB} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO locations (id, type, code, name, branch_id) VALUES ($1, 'BRANCH', $2, 'Worker Sweep Yard', $1)`,
+			b, "WSW-"+b.String()[:8]); err != nil {
+			t.Fatalf("seed branch: %v", err)
+		}
+	}
+	claimedID, pendingID := uuid.New(), uuid.New()
+	txA, txB := uuid.New(), uuid.New()
+	for i, pair := range []struct {
+		tx     uuid.UUID
+		branch uuid.UUID
+	}{{txA, branchA}, {txB, branchB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
+			(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
+			VALUES ($1, $2, $3, 0, 0, 0, 'OPEN', $4, 0, 1, 'USD', $5, NOW(), NOW())`,
+			pair.tx, fmt.Sprintf("REG-WSW-%d", i), uuid.New(), pair.branch, "POS-"+pair.tx.String()[:8]); err != nil {
+			t.Fatalf("seed sale: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE action = 'pos.terminal_intents.swept'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM payment_terminal_lost_items WHERE intent_id IN ($1, $2)`, claimedID, pendingID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM payment_terminal_intents WHERE id IN ($1, $2)`, claimedID, pendingID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id IN ($1, $2)`, txA, txB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, branchA, branchB)
+	})
+
+	ledger := payment.NewTerminalLedger(db)
+	pastLease := time.Now().UTC().Add(-time.Minute)
+	if err := ledger.Claim(ctx, &payment.TerminalIntent{
+		ID: claimedID, TransactionID: txA, LegKey: "card-0", RegisterID: "REG-WA",
+		BranchID: branchA, AmountCents: 1200, Kind: payment.TerminalKindSale,
+		DeviceID: "DEV-WA", IdempotencyKey: "wsw-claimed-" + claimedID.String(),
+		LeaseUntil: pastLease,
+	}); err != nil {
+		t.Fatalf("claim A: %v", err)
+	}
+	if err := ledger.Claim(ctx, &payment.TerminalIntent{
+		ID: pendingID, TransactionID: txB, LegKey: "card-0", RegisterID: "REG-WB",
+		BranchID: branchB, AmountCents: 3400, Kind: payment.TerminalKindSale,
+		DeviceID: "DEV-WB", IdempotencyKey: "wsw-pending-" + pendingID.String(),
+		LeaseUntil: time.Now().UTC().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("claim B: %v", err)
+	}
+	if ok, err := ledger.MarkDispatched(ctx, pendingID, "devref-wsw", pastLease); err != nil || !ok {
+		t.Fatalf("mark dispatched B: ok=%v err=%v", ok, err)
+	}
+
+	runner := newTerminalSweepRunner(db, slog.Default())
+	runner.interval = 10 * time.Millisecond
+	runner.Start()
+	defer runner.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		inA, err := ledger.Get(ctx, claimedID)
+		if err != nil {
+			t.Fatalf("get A: %v", err)
+		}
+		inB, err := ledger.Get(ctx, pendingID)
+		if err != nil {
+			t.Fatalf("get B: %v", err)
+		}
+		if inA.State == payment.TerminalLost && inB.State == payment.TerminalLost {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	runner.Stop()
+
+	inA, err := ledger.Get(ctx, claimedID)
+	if err != nil {
+		t.Fatalf("get A: %v", err)
+	}
+	if inA.State != payment.TerminalLost {
+		t.Fatalf("claimed intent state = %q, wanted lost", inA.State)
+	}
+	if itemA, err := ledger.LostItemOfIntent(ctx, claimedID); err != nil || itemA != nil {
+		t.Fatalf("claimed intent lost item = %+v, err=%v, wanted nil", itemA, err)
+	}
+
+	inB, err := ledger.Get(ctx, pendingID)
+	if err != nil {
+		t.Fatalf("get B: %v", err)
+	}
+	if inB.State != payment.TerminalLost {
+		t.Fatalf("pending_at_device intent state = %q, wanted lost", inB.State)
+	}
+	itemB, err := ledger.LostItemOfIntent(ctx, pendingID)
+	if err != nil || itemB == nil {
+		t.Fatalf("pending_at_device lost item = %+v, err=%v, wanted open item", itemB, err)
+	}
+	if itemB.State != "open" || itemB.ProviderRef != "devref-wsw" || itemB.AmountCents != 3400 {
+		t.Fatalf("lost item B = %+v", itemB)
 	}
 }

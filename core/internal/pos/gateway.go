@@ -245,14 +245,14 @@ const (
 // its own committed write; a failing audit write is logged and never hides
 // the outcome. On failure it answers the 502 the route returns instead of
 // the refusal that caused it: the un-returned money outranks the reason.
-func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, amountCents int64, entity uuid.UUID, actor string, cause error) error {
+func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, amountCents int64, entity uuid.UUID, actor string, cause error, key string) error {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
 	defer cancel()
 	outcome, reverseCause := chargeVoided, error(nil)
-	if _, voidErr := s.gateway.Void(rctx, gatewayTxID); voidErr != nil {
+	if _, voidErr := payment.VoidUnderKey(rctx, s.gateway, gatewayTxID, key); voidErr != nil {
 		s.logger.Info("gateway void refused, refunding instead",
 			"gateway_tx_id", gatewayTxID, "entity_id", entity, "error", voidErr)
-		if _, refundErr := s.gateway.Refund(rctx, gatewayTxID, amountCents); refundErr != nil {
+		if _, refundErr := payment.RefundUnderKey(rctx, s.gateway, gatewayTxID, amountCents, key); refundErr != nil {
 			outcome, reverseCause = chargeFailed, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
 		} else {
 			outcome = chargeRefunded

@@ -32,6 +32,40 @@ type ChargeRequest struct {
 	Description string // e.g., "Invoice #1234"
 	InvoiceID   string // Reference back to our invoice
 	CustomerID  string // Reference back to our customer
+	// IdempotencyKey, when set, is the provider's own dedupe key: a retried
+	// charge under it is the same charge at the provider, never a second one
+	// (the terminal intent ledger mints one key per card leg).
+	IdempotencyKey string
+}
+
+// IdempotentGateway is the idempotency key extension of PaymentGateway a
+// gateway implements when its provider accepts keys on refunds and voids
+// too. The terminal ledger sends every leg under a key; a gateway that does
+// not implement it keeps the plain PaymentGateway calls.
+type IdempotentGateway interface {
+	PaymentGateway
+	// RefundWithKey refunds a captured charge under an idempotency key.
+	RefundWithKey(ctx context.Context, gatewayTxID string, amountCents int64, key string) (*GatewayResult, error)
+	// VoidWithKey cancels an authorized charge under an idempotency key.
+	VoidWithKey(ctx context.Context, gatewayTxID string, key string) (*GatewayResult, error)
+}
+
+// RefundUnderKey refunds through the idempotency key extension when the
+// gateway implements it, and through the plain call when it does not.
+func RefundUnderKey(ctx context.Context, gw PaymentGateway, gatewayTxID string, amountCents int64, key string) (*GatewayResult, error) {
+	if ig, ok := gw.(IdempotentGateway); ok && key != "" {
+		return ig.RefundWithKey(ctx, gatewayTxID, amountCents, key)
+	}
+	return gw.Refund(ctx, gatewayTxID, amountCents)
+}
+
+// VoidUnderKey voids through the idempotency key extension when the gateway
+// implements it, and through the plain call when it does not.
+func VoidUnderKey(ctx context.Context, gw PaymentGateway, gatewayTxID string, key string) (*GatewayResult, error) {
+	if ig, ok := gw.(IdempotentGateway); ok && key != "" {
+		return ig.VoidWithKey(ctx, gatewayTxID, key)
+	}
+	return gw.Void(ctx, gatewayTxID)
 }
 
 // GatewayResult is the normalized response from any payment gateway.

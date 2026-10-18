@@ -31,6 +31,20 @@ func LockOutboxTables(t *testing.T) {
 	lockKey(t, outboxLockKey, "outbox tables")
 }
 
+// terminalLockKey is the advisory lock key every test that sweeps or reads
+// the card terminal tables as a whole holds for its body.
+const terminalLockKey int64 = 0x7465726d696e6c // "terminl"
+
+// LockTerminalTables serialises the calling test against every other test, in
+// any package, that sweeps the card terminal intent ledger (a sweep reaches
+// every expired intent of its branch, so two suites sweeping together would
+// close each other's legs) or empties its tables. Call it first, before
+// RequireDB, so the lock is released last.
+func LockTerminalTables(t *testing.T) {
+	t.Helper()
+	lockKey(t, terminalLockKey, "card terminal tables")
+}
+
 // productImageLockKey is the advisory lock key every test that writes the
 // catalog.product_images setting row holds for its body.
 const productImageLockKey int64 = 0x70726f64696d67 // "prodimg"
