@@ -11,15 +11,33 @@
 -- ID checks, print counts, sealed signatures, reason codes, restocking fees
 -- and the exchange links) goes with its columns and tables. A restocking fee
 -- line on a credit memo cannot exist in the old shape, so those lines are
--- deleted first; the memo's own totals and its ledger entry already carry
--- the fee, so no balance changes, only the line that showed it.
+-- deleted first and the memo's subtotal, total_amount, amount and amount_open
+-- are restated to equal the remaining lines.
 
 DROP INDEX IF EXISTS idx_pos_transactions_exchange_return;
 DROP INDEX IF EXISTS idx_pos_returns_exchange_sale;
 ALTER TABLE pos_transactions DROP COLUMN IF EXISTS exchange_return_id;
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS exchange_sale_id;
 
-DELETE FROM credit_memo_lines WHERE line_type = 'CHARGE' AND quantity > 0;
+WITH fee AS (
+    DELETE FROM credit_memo_lines
+    WHERE line_type = 'CHARGE' AND quantity > 0
+    RETURNING credit_memo_id, COALESCE(line_total, 0) AS line_total
+), fee_by_memo AS (
+    SELECT credit_memo_id, SUM(line_total) AS fee_total
+    FROM fee
+    GROUP BY credit_memo_id
+)
+UPDATE credit_memos cm
+SET subtotal = cm.subtotal - fee.fee_total,
+    total_amount = cm.total_amount - fee.fee_total,
+    amount = -(cm.total_amount - fee.fee_total),
+    amount_open = CASE
+        WHEN cm.status IN ('OPEN', 'PARTIAL') THEN cm.amount_open - fee.fee_total
+        ELSE cm.amount_open
+    END
+FROM fee_by_memo fee
+WHERE cm.id = fee.credit_memo_id;
 ALTER TABLE credit_memo_lines DROP CONSTRAINT IF EXISTS credit_memo_lines_shape;
 ALTER TABLE credit_memo_lines ADD CONSTRAINT credit_memo_lines_shape CHECK (
     (line_type = 'TEXT' AND quantity IS NULL AND uom IS NULL AND price_uom IS NULL AND uom_qty IS NULL
