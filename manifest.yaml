@@ -37,3 +37,6 @@ frontends:
   - id: desk
     name: Desk
     path: web/apps/desk
+  - id: work-shell
+    name: Work Shell
+    path: web/apps/work-shell
