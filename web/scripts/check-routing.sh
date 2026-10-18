@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# Proves web/nginx.conf routes the two real built bundles correctly: `/` is the
-# front door, every desk route is the desk through the SPA fallback, and the
-# assets of both load. Runs the given web image (default gable-web:routing-check)
-# or, with BUNDLES=local, nginx:1.27-alpine over the local dist folders.
+# Proves web/nginx.conf routes the four real built bundles correctly: `/` is
+# the front door, /shell/ is the work shell, /field/ is the field shell, every
+# desk route is the desk through the SPA fallback, and the assets load. Runs
+# the given web image (default gable-web:routing-check) or, with BUNDLES=local,
+# nginx:1.27-alpine over the local dist folders.
 #
 #   docker build -f web/Dockerfile -t gable-web:routing-check .
 #   web/scripts/check-routing.sh
@@ -24,8 +25,11 @@ if [ "${BUNDLES:-image}" = "local" ]; then
   docker run -d --name "$NAME" -p "127.0.0.1:$PORT:8080" \
     -v "$HERE/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
     -v "$HERE/nginx-headers.conf:/etc/nginx/gable-headers.conf:ro" \
+    -v "$HERE/nginx-headers-frameable.conf:/etc/nginx/gable-headers-frameable.conf:ro" \
     -v "$HERE/apps/front-door/dist:/usr/share/nginx/html/front-door:ro" \
     -v "$HERE/apps/desk/dist:/usr/share/nginx/html/desk:ro" \
+    -v "$HERE/apps/work-shell/dist:/usr/share/nginx/html/work-shell:ro" \
+    -v "$HERE/apps/field-shell/dist:/usr/share/nginx/html/field-shell:ro" \
     nginx:1.27-alpine >/dev/null
 else
   docker run -d --name "$NAME" -p "127.0.0.1:$PORT:8080" "$IMAGE" >/dev/null
@@ -88,8 +92,14 @@ root_headers="$(headers /)"
 csp="$(grep -i '^content-security-policy' <<<"$root_headers" || true)"
 check "CSP connect-src is same origin only" \
   "$(has "connect-src 'self';" "$csp" && ! has localhost "$root_headers" && echo ok)"
-for p in / /home /quotes/7 "$desk_asset" "$door_asset"; do
-  check "security headers on $p" "$(has '^x-frame-options: DENY' "$(headers "$p")" && echo ok)"
+# The framing split: the door, the shell hosts, the portal (sign in and
+# checkout live there) and the static assets stay unframeable; the desk's own
+# pages are frameable by this origin only, for the work and field shells.
+for p in / /shell/ /field/ /portal /portal/login "$desk_asset" "$door_asset"; do
+  check "security headers deny framing on $p" "$(has '^x-frame-options: DENY' "$(headers "$p")" && echo ok)"
+done
+for p in /home /quotes/7; do
+  check "security headers allow same origin framing on $p" "$(has '^x-frame-options: SAMEORIGIN' "$(headers "$p")" && echo ok)"
 done
 
 exit "$fail"

@@ -210,4 +210,3 @@ The detail behind the [CP rows of the parity matrix](../LBM-PARITY-MATRIX.md#cp-
 - **Agility**: not checked for this row.
 - **The MVP** (Missing): Nothing on any line: keyword searches for scale integration across backend and app on master, staging, community and the lumber line found only unrelated words.
 - **Gable today** (Missing): No yard scale integration. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-

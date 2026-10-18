@@ -13,12 +13,15 @@
         "expected_by_method": {
           "CASH": 8768
         },
+        "movement_totals_by_kind": {},
+        "movements": [],
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
           "closed_at": null,
+          "closed_by": null,
           "counted_by_method": {},
           "expected_by_method": {},
           "gl_entry_id": null,
@@ -28,7 +31,9 @@
           "opening_float_cents": 10000,
           "over_short_cents": null,
           "register_id": "REG-01",
-          "status": "open"
+          "sign_off": null,
+          "status": "open",
+          "variance_threshold_cents": null
         },
         "tax_total_cents": 0,
         "tendered_by_method": {
@@ -207,6 +212,76 @@
     }
   },
   {
+    "name": "pos.till.policy.set",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/pos/till/policy",
+      "body": {
+        "branch_id": "<id-2>",
+        "variance_threshold_cents": 100000000
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "branch_threshold_cents": 100000000,
+        "default_threshold_cents": 500,
+        "source": "branch",
+        "variance_threshold_cents": 100000000
+      }
+    }
+  },
+  {
+    "name": "pos.till.policy.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/policy?branch_id=<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-2>",
+        "branch_threshold_cents": 100000000,
+        "default_threshold_cents": 500,
+        "source": "branch",
+        "variance_threshold_cents": 100000000
+      }
+    }
+  },
+  {
+    "name": "pos.till.policy.bad_body",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/pos/till/policy",
+      "body": {
+        "branch_id": "<id-2>",
+        "variance_threshold_cents": -1
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "variance_threshold_cents",
+              "message": "must not be negative"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
     "name": "pos.till.close",
     "request": {
       "method": "POST",
@@ -226,26 +301,31 @@
         "expected_by_method": {
           "CASH": 8768
         },
+        "movement_totals_by_kind": {},
+        "movements": [],
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
+          "closed_by": null,
           "counted_by_method": {
             "CASH": 20000
           },
           "expected_by_method": {
             "CASH": 8768
           },
-          "gl_entry_id": "<id-12>",
+          "gl_entry_id": "<id-13>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
           "over_short_cents": 11232,
           "register_id": "REG-01",
-          "status": "closed"
+          "sign_off": null,
+          "status": "closed",
+          "variance_threshold_cents": 100000000
         },
         "tax_total_cents": 0,
         "tendered_by_method": {
@@ -274,7 +354,7 @@
           "message": "the till session is not open"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -294,7 +374,7 @@
           "message": "no open till session for this register"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -316,16 +396,585 @@
         "branch_id": "<id-2>",
         "cashier_id": "<id-3>",
         "closed_at": null,
+        "closed_by": null,
         "counted_by_method": {},
         "expected_by_method": {},
         "gl_entry_id": null,
-        "id": "<id-15>",
+        "id": "<id-16>",
         "notes": "",
         "opened_at": "<ts+0d>",
         "opening_float_cents": 10000,
         "over_short_cents": null,
         "register_id": "REG-01",
-        "status": "open"
+        "sign_off": null,
+        "status": "open",
+        "variance_threshold_cents": null
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.drop",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-16>/movements",
+      "body": {
+        "amount_cents": 1000,
+        "kind": "safe_drop"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "actor": "",
+        "amount_cents": 1000,
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "gl_entry_id": "<id-17>",
+        "id": "<id-18>",
+        "kind": "safe_drop",
+        "note": "",
+        "reason_code": null,
+        "register_id": "REG-01",
+        "taken_by": null,
+        "till_session_id": "<id-16>"
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.paid_out",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-16>/movements",
+      "body": {
+        "amount_cents": 250,
+        "kind": "paid_out",
+        "reason_code": "postage"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "actor": "",
+        "amount_cents": 250,
+        "branch_id": "<id-2>",
+        "created_at": "<ts+0d>",
+        "gl_entry_id": "<id-19>",
+        "id": "<id-20>",
+        "kind": "paid_out",
+        "note": "",
+        "reason_code": "postage",
+        "register_id": "REG-01",
+        "taken_by": null,
+        "till_session_id": "<id-16>"
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.bad_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-16>/movements",
+      "body": {
+        "amount_cents": 250,
+        "kind": "paid_out",
+        "reason_code": "lunch"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason_code",
+              "message": "must be one of: supplies, freight, fuel, postage, meals, repairs, other"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.pickup_alone",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-16>/movements",
+      "body": {
+        "amount_cents": 250,
+        "kind": "pickup"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "taken_by",
+              "message": "is required: the person taking the cash"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.closed_session",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/movements",
+      "body": {
+        "amount_cents": 1000,
+        "kind": "safe_drop"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "session_closed",
+              "message": "the till session is not open: its cash has been counted and no movement can be recorded in it"
+            }
+          ],
+          "message": "the till session is not open: its cash has been counted and no movement can be recorded in it"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-5>/movements",
+      "body": {
+        "amount_cents": 1000,
+        "kind": "safe_drop"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "till session not found"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-16>/movements"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "actor": "",
+            "amount_cents": 1000,
+            "branch_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "gl_entry_id": "<id-17>",
+            "id": "<id-18>",
+            "kind": "safe_drop",
+            "note": "",
+            "reason_code": null,
+            "register_id": "REG-01",
+            "taken_by": null,
+            "till_session_id": "<id-16>"
+          },
+          {
+            "actor": "",
+            "amount_cents": 250,
+            "branch_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "kind": "paid_out",
+            "note": "",
+            "reason_code": "postage",
+            "register_id": "REG-01",
+            "taken_by": null,
+            "till_session_id": "<id-16>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.till.movement.list.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-5>/movements"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "till session not found"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.report.reopened",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/<id-16>/report"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "change_cents": 0,
+        "expected_by_method": {
+          "CASH": 8750
+        },
+        "movement_totals_by_kind": {
+          "paid_out": 250,
+          "safe_drop": 1000
+        },
+        "movements": [
+          {
+            "actor": "",
+            "amount_cents": 1000,
+            "branch_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "gl_entry_id": "<id-17>",
+            "id": "<id-18>",
+            "kind": "safe_drop",
+            "note": "",
+            "reason_code": null,
+            "register_id": "REG-01",
+            "taken_by": null,
+            "till_session_id": "<id-16>"
+          },
+          {
+            "actor": "",
+            "amount_cents": 250,
+            "branch_id": "<id-2>",
+            "created_at": "<ts+0d>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "kind": "paid_out",
+            "note": "",
+            "reason_code": "postage",
+            "register_id": "REG-01",
+            "taken_by": null,
+            "till_session_id": "<id-16>"
+          }
+        ],
+        "sale_count": 0,
+        "sales_total_cents": 0,
+        "session": {
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
+          "closed_at": null,
+          "closed_by": null,
+          "counted_by_method": {},
+          "expected_by_method": {},
+          "gl_entry_id": null,
+          "id": "<id-16>",
+          "notes": "",
+          "opened_at": "<ts+0d>",
+          "opening_float_cents": 10000,
+          "over_short_cents": null,
+          "register_id": "REG-01",
+          "sign_off": null,
+          "status": "open",
+          "variance_threshold_cents": null
+        },
+        "tax_total_cents": 0,
+        "tendered_by_method": {}
+      }
+    }
+  },
+  {
+    "name": "pos.till.signoffs.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/till/signoffs"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.till.signoff.not_pending",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/signoff",
+      "body": {
+        "reason": "r1b c sign off"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "the till session is not waiting for sign off"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.till.signoff.no_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/till/<id-1>/signoff",
+      "body": {
+        "reason": " "
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required: why the variance is accepted"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.summary",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/end-of-day?branch_id=<id-2>&date=<day+0>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "pos.eod.summary.bad_date",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/end-of-day?branch_id=<id-2>&date=tomorrow"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "date",
+              "message": "must be a date as YYYY-MM-DD"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.close.till_open",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/close",
+      "body": {
+        "branch_id": "<id-2>",
+        "date": "<day+0>",
+        "deposit_slip_ref": "R1B-C-SLIP"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "till_open",
+              "message": "close the open till of register REG-01"
+            }
+          ],
+          "message": "the branch day cannot close while a till is open or waiting for sign off"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.close.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/close",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
+        },
+        "meta": {
+          "request_id": "<id-30>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.candidates.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/end-of-day/<id-5>/deposit-candidates"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "branch day close not found"
+        },
+        "meta": {
+          "request_id": "<id-31>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.reopen.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/<id-5>/reopen",
+      "body": {
+        "reason": "r1b c reopen"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "branch day close not found"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.reopen.no_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/<id-5>/reopen",
+      "body": {
+        "reason": " "
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required: why the day reopens"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-33>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.eod.match.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/end-of-day/<id-5>/deposit-match",
+      "body": {
+        "bank_transaction_id": "<id-5>"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "branch day close not found"
+        },
+        "meta": {
+          "request_id": "<id-34>"
+        }
       }
     }
   },
@@ -343,26 +992,31 @@
         "expected_by_method": {
           "CASH": 8768
         },
+        "movement_totals_by_kind": {},
+        "movements": [],
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
+          "closed_by": null,
           "counted_by_method": {
             "CASH": 20000
           },
           "expected_by_method": {
             "CASH": 8768
           },
-          "gl_entry_id": "<id-12>",
+          "gl_entry_id": "<id-13>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
           "over_short_cents": 11232,
           "register_id": "REG-01",
-          "status": "closed"
+          "sign_off": null,
+          "status": "closed",
+          "variance_threshold_cents": 100000000
         },
         "tax_total_cents": 0,
         "tendered_by_method": {
@@ -383,33 +1037,38 @@
       "body": {
         "branch_id": "<id-2>",
         "generated_at": "<ts+0d>",
-        "id": "<id-16>",
+        "id": "<id-35>",
         "over_short_cents": 11232,
         "payload": {
           "change_cents": 48432,
           "expected_by_method": {
             "CASH": 8768
           },
+          "movement_totals_by_kind": {},
+          "movements": [],
           "sale_count": 1,
           "sales_total_cents": 1568,
           "session": {
             "branch_id": "<id-2>",
             "cashier_id": "<id-3>",
             "closed_at": "<ts+0d>",
+            "closed_by": null,
             "counted_by_method": {
               "CASH": 20000
             },
             "expected_by_method": {
               "CASH": 8768
             },
-            "gl_entry_id": "<id-12>",
+            "gl_entry_id": "<id-13>",
             "id": "<id-1>",
             "notes": "r1b c close count",
             "opened_at": "<ts+0d>",
             "opening_float_cents": 10000,
             "over_short_cents": 11232,
             "register_id": "REG-01",
-            "status": "closed"
+            "sign_off": null,
+            "status": "closed",
+            "variance_threshold_cents": 100000000
           },
           "tax_total_cents": 0,
           "tendered_by_method": {
@@ -436,7 +1095,7 @@
           "message": "no Z-report for this session"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -454,33 +1113,38 @@
         {
           "branch_id": "<id-2>",
           "generated_at": "<ts+0d>",
-          "id": "<id-16>",
+          "id": "<id-35>",
           "over_short_cents": 11232,
           "payload": {
             "change_cents": 48432,
             "expected_by_method": {
               "CASH": 8768
             },
+            "movement_totals_by_kind": {},
+            "movements": [],
             "sale_count": 1,
             "sales_total_cents": 1568,
             "session": {
               "branch_id": "<id-2>",
               "cashier_id": "<id-3>",
               "closed_at": "<ts+0d>",
+              "closed_by": null,
               "counted_by_method": {
                 "CASH": 20000
               },
               "expected_by_method": {
                 "CASH": 8768
               },
-              "gl_entry_id": "<id-12>",
+              "gl_entry_id": "<id-13>",
               "id": "<id-1>",
               "notes": "r1b c close count",
               "opened_at": "<ts+0d>",
               "opening_float_cents": 10000,
               "over_short_cents": 11232,
               "register_id": "REG-01",
-              "status": "closed"
+              "sign_off": null,
+              "status": "closed",
+              "variance_threshold_cents": 100000000
             },
             "tax_total_cents": 0,
             "tendered_by_method": {

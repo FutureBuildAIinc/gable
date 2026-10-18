@@ -49,9 +49,12 @@ up)
     --add-host=host.docker.internal:host-gateway \
     -v "$HERE/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
     -v "$HERE/nginx-headers.conf:/etc/nginx/gable-headers.conf:ro" \
+    -v "$HERE/nginx-headers-frameable.conf:/etc/nginx/gable-headers-frameable.conf:ro" \
     -v "$E2E_DIR/gable-api.conf:/etc/nginx/gable-api.conf:ro" \
     -v "$HERE/apps/front-door/dist:/usr/share/nginx/html/front-door:ro" \
     -v "$HERE/apps/desk/dist:/usr/share/nginx/html/desk:ro" \
+    -v "$HERE/apps/work-shell/dist:/usr/share/nginx/html/work-shell:ro" \
+    -v "$HERE/apps/field-shell/dist:/usr/share/nginx/html/field-shell:ro" \
     nginx:1.27-alpine >/dev/null
   for _ in $(seq 1 30); do
     curl -fsS "http://127.0.0.1:$WEB_PORT/api/v1/apps" >/dev/null 2>&1 && break

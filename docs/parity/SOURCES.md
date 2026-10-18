@@ -377,4 +377,3 @@ Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by produ
 | A159 | [Agility customer story](https://www.dmsi.com/resources/sprint-lumber/) | case_study |
 | A160 | [DMSi Agility profile (erp-software.org)](https://usa.erp-software.org/software/dmsi-agility/) | review |
 | A161 | [Agility help: Purchase Orders section](https://documentation.dmsi.com/Agility/prod/Purchase_Orders.html) | vendor_docs |
-

@@ -201,9 +201,11 @@ func (s *Service) StartSaleAt(ctx context.Context, item *OfflineSale, register, 
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		sale := &Sale{ID: item.ClientID, RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID}
-		if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
-			sale.TillSessionID = &session.ID
+		session, err := s.openDrawer(ctx, in.RegisterID)
+		if err != nil {
+			return err
 		}
+		sale.TillSessionID = &session.ID
 		if err := s.repo.CreateSale(ctx, sale); err != nil {
 			return err
 		}

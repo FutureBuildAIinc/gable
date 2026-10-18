@@ -1673,6 +1673,28 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		t.Errorf("bound key foreign till close wrote Z reports: %d rows for the session", n)
 	}
 
+	// The foreign session's movements: the list answers what a missing
+	// session answers, and a movement into it is refused (every key is refused
+	// the cashier act), so nothing is written to the foreign drawer.
+	sMoveMiss, _ := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/movements", "", nil)
+	sMoveB, bMoveB := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/movements", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/till/"+f.tillB.String()+"/movements")
+	if sMoveB != sMoveMiss || strings.Contains(string(bMoveB), f.regB) {
+		t.Errorf("bound key foreign movement list: %d %s, want the missing row answer (%d, no B data)", sMoveB, bMoveB, sMoveMiss)
+	}
+	sPost, _ := f.key(t, f.bound, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/movements", `{"kind":"safe_drop","amount_cents":100}`, nil)
+	f.twinLeg("POST", "/api/v1/pos/till/"+f.tillB.String()+"/movements")
+	if sPost < 400 {
+		t.Errorf("bound key movement into the foreign drawer answered %d, want a refusal", sPost)
+	}
+	var moved int
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM till_movements WHERE till_session_id = $1`, f.tillB).Scan(&moved); err != nil {
+		t.Fatal(err)
+	}
+	if moved != 0 {
+		t.Errorf("bound key wrote %d movements into the foreign drawer", moved)
+	}
+
 	// The register list carries the pin's own register and not the foreign one.
 	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/registers", "", nil)
 	f.twinLeg("GET", "/api/v1/pos/registers")

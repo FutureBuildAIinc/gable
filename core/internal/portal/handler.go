@@ -22,6 +22,11 @@ const maxBodySize = 1 << 20
 // Handler provides HTTP handlers for portal endpoints.
 type Handler struct {
 	svc *Service
+	// emailPasswordAllowed, when set, is consulted before a login attempt:
+	// the dealer's sign in method allowlist must hold email_password for the
+	// email and password login to answer at all. Nil keeps the login open
+	// (the seam is optional so existing callers and tests compile unchanged).
+	emailPasswordAllowed func(ctx context.Context) bool
 }
 
 // NewHandler creates a new portal handler.
@@ -132,6 +137,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 	h.registerPhase2Routes(mux, authMw)
 }
 
+// WithEmailPasswordGuard gates the login on the dealer's sign in method
+// allowlist (the module that owns it wires this in serve.go).
+func (h *Handler) WithEmailPasswordGuard(fn func(ctx context.Context) bool) *Handler {
+	h.emailPasswordAllowed = fn
+	return h
+}
+
 // HandleLogin authenticates a contractor and returns JWT + config.
 func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
@@ -143,6 +155,13 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if req.Email == "" || req.Password == "" {
 		httputil.RespondError(w, r, "Email and password are required", http.StatusBadRequest, nil)
+		return
+	}
+
+	// The allowlist gate: a dealer that dropped email and password sign in
+	// refuses the method here, before any credential is consulted.
+	if h.emailPasswordAllowed != nil && !h.emailPasswordAllowed(r.Context()) {
+		httputil.RespondError(w, r, "Sign in with email and password is not allowed for this dealer", http.StatusForbidden, nil)
 		return
 	}
 

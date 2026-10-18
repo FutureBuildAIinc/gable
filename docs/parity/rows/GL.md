@@ -114,4 +114,3 @@ The detail behind the [GL rows of the parity matrix](../LBM-PARITY-MATRIX.md#gl-
 - **Agility**: not checked for this row.
 - **The MVP** (Missing): No embedded banking, sweep/treasury account, or corporate card issuing integration exists on any line.
 - **Gable today** (Missing): No banking service. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-

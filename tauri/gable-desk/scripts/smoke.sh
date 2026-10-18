@@ -12,7 +12,9 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-bin="${1:-$here/target/debug/gable-desk}"
+# The workspace builds into tauri/target (one target directory for every
+# member), or wherever CARGO_TARGET_DIR points.
+bin="${1:-${CARGO_TARGET_DIR:-$here/../target}/debug/gable-desk}"
 [ -x "$bin" ] || { echo "smoke: FAIL: no binary at $bin (run cargo tauri build --debug first)" >&2; exit 1; }
 
 log="$(mktemp)"

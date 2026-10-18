@@ -125,4 +125,3 @@ The detail behind the [DD rows of the parity matrix](../LBM-PARITY-MATRIX.md#dd-
 - **Agility** (found by its research): Shipping Service Interface exports orders to UPS or FedEx software and imports tracking numbers, ship dates and charges; APIs store tracking per shipment. [A133](https://documentation.dmsi.com/Agility/prod/Integrated_Solutions/shippingserviceinterface.htm) [A27](https://restdoc.dmsi.com/)
 - **The MVP** (Missing): No UPS, FedEx, Purolator, or LTL rate shopping, label printing, or tracking number integration exists on any line.
 - **Gable today** (Missing): No parcel carrier integration. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-

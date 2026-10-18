@@ -159,6 +159,7 @@ func resetTransactionalData(db *sql.DB) {
 		"purchase_orders", "purchase_order_lines", "reorder_runs",
 		"gl_journal_entries", "gl_journal_lines",
 		"pos_transactions", "pos_sync_log",
+		"till_movements", "till_day_closes",
 		"projects", "crm_activities", "customer_contacts",
 		"rebate_programs", "rebate_tiers", "rebate_claims",
 		"saved_reports", "edi_trading_partners",

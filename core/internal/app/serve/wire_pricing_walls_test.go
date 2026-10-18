@@ -33,14 +33,7 @@ func newPricingWallFixture(t *testing.T) (*branchWall, func(method, path, role, 
 	db := testutil.RequireDB(t)
 	t.Setenv("AUTH_MODE", "dev")
 	// The branch middleware reads the switch at construction.
-	if _, err := db.Pool.Exec(context.Background(),
-		`INSERT INTO system_settings (key, value) VALUES ('multi_branch_enabled', 'true')
-		 ON CONFLICT (key) DO UPDATE SET value = 'true'`); err != nil {
-		t.Fatalf("enable multi branch: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM system_settings WHERE key = 'multi_branch_enabled'`)
-	})
+	setSetting(t, db, "multi_branch_enabled", "true")
 
 	wall := newBranchWall(db)
 	customerSvc := customer.NewService(customer.NewRepository(db)).WithTxRunner(db)

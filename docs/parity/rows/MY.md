@@ -93,4 +93,3 @@ The detail behind the [MY rows of the parity matrix](../LBM-PARITY-MATRIX.md#my-
 - **Agility** (found by its research): Document storage archives forms and scanned documents with keyword indexing; signed delivery tickets viewable online; WorldView is a named partner. [A136](https://documentation.dmsi.com/Agility/prod/Integrated_Solutions/documentstorage.htm) [A10](https://www.dmsi.com/agility-billing-portal/) [A15](https://www.dmsi.com/partners/)
 - **The MVP** (Partial, master): RFC CRUD and AI drafting over governance_rfcs (governance/handler.go:33-36, service.go:34, service_test.go, migrations/036_community_governance.sql) and GovernanceHub.ts. Vote counts are plain integer columns with no per-user vote record, no multi-dealer registry, and no shared template exchange.
 - **Gable today** (Missing): No scanned document storage linked to transactions. (a search of `core/internal`, `core/migrations` and `web/apps` at `58dde7e8`, unchanged at `695d587c`).
-
