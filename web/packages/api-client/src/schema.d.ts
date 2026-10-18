@@ -5202,6 +5202,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/terminal-intents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one card terminal intent (the desk's waiting state)
+         * @description The card leg's own record at the counter (CP-05): where the leg stands, claimed at the terminal, waiting at the device, answered authorized or declined, or lost to the sweep. The desk's waiting state reads this route while the terminal has the card. The intent's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404).
+         */
+        get: operations["posTerminalIntentGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/terminal-intents/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a card terminal intent, honest about the device
+         * @description The desk's cancel of a waiting card leg. It is honest about the device: a claim the terminal never reached closes lost with no manager item (nothing moved), while a leg at the device is refused (409 terminal_at_device), because the device may still move the money and only the sweep and a manager settle that. An intent already answered or lost is 409 terminal_intent_settled. The cancel never claims money back. A machine key is refused in the route itself, bound or not.
+         */
+        post: operations["posTerminalIntentCancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/terminal-intents/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sweep the card terminal intents past their lease
+         * @description The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The scheduler runs this act on its own; the route is the manager's own trigger. Admin, owner and finance roles only; a machine key is refused in the route itself.
+         */
+        post: operations["posTerminalIntentsSweep"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/terminal-lost-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the open lost terminal answers (the manager's queue)
+         * @description The manager's queue of card legs the sweep turned lost because the device may have moved money: who must resolve it (the register), what amount, the device reference, and the transaction it belongs to. A manager reads the terminal's own record and settles each at the resolve route. Admin, owner and finance roles only. Items whose sale the caller's branch context hides are not the caller's to see.
+         */
+        get: operations["posTerminalLostItemsList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/terminal-lost-items/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve one lost terminal answer
+         * @description The manager's settlement of one lost card leg, the terminal's own record the authority (CP-05). Outcome authorized applies the tender to the sale it belongs to, or refunds it through the gateway when the sale is gone (the same day void first, the refund when the void is refused; a reversal that fails answers 502 charge_not_reversed and the item stays open). Outcome declined closes the item and moves nothing. Both write one audit row naming the person, the item, the outcome and the reference. Admin, owner and finance roles only; a machine key is refused in the route itself, bound or not. The item's branch is held to the caller's grants before either leg, so a caller outside the branch finds a missing row (404). An item already resolved is 409 lost_item_settled.
+         */
+        post: operations["posTerminalLostItemResolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/calculate": {
         parameters: {
             query?: never;
@@ -12753,6 +12853,74 @@ export interface components {
             /** Format: uuid */
             client_id: string;
             reason: string;
+        };
+        PosTerminalIntent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** @description The tender leg inside the transaction this intent holds. */
+            leg_key: string;
+            /** @enum {string} */
+            kind: "sale" | "refund" | "void";
+            /** @enum {string} */
+            state: "claimed" | "pending_at_device" | "authorized" | "declined" | "lost";
+            /** Format: int64 */
+            amount_cents: number;
+            /** @description The device's own reference for the leg, empty until dispatched. */
+            provider_ref: string;
+            /**
+             * @description The landed verdict; empty while none has.
+             * @enum {string}
+             */
+            answer_verdict: "" | "authorized" | "declined";
+        };
+        PosTerminalSweepResult: {
+            /**
+             * Format: int64
+             * @description Claims past their lease that never reached the device, closed lost.
+             */
+            claimed_closed: number;
+            /**
+             * Format: int64
+             * @description Legs at the device past their lease, turned lost with a manager item each.
+             */
+            dispatched_lost: number;
+        };
+        PosTerminalLostItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            intent_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            register_id: string;
+            /** Format: uuid */
+            transaction_id: string;
+            /** @enum {string} */
+            kind: "sale" | "refund" | "void";
+            /** Format: int64 */
+            amount_cents: number;
+            device_id: string;
+            provider_ref: string;
+            /** @enum {string} */
+            state: "open" | "resolved_authorized" | "resolved_declined";
+        };
+        PosTerminalLostItemList: {
+            items: components["schemas"]["PosTerminalLostItem"][];
+            /** @description Null: the queue's open items are one page. */
+            next_cursor: string | null;
+            limit: number;
+        };
+        PosResolveTerminalLostItemRequest: {
+            /**
+             * @description What the terminal's own record said.
+             * @enum {string}
+             */
+            outcome: "authorized" | "declined";
+            /** @description The terminal's own record the manager read. */
+            reference?: string;
+            reason?: string;
         };
         /**
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
@@ -25836,6 +26004,161 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosRefundIntentPaidBack"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTerminalIntentGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The intent as it stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTerminalIntent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTerminalIntentCancel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The intent as it stands after the cancel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTerminalIntent"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTerminalIntentsSweep: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the pass closed and queued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTerminalSweepResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTerminalLostItemsList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open items, oldest first, in the list envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTerminalLostItemList"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTerminalLostItemResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosResolveTerminalLostItemRequest"];
+            };
+        };
+        responses: {
+            /** @description The settled item. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTerminalLostItem"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
