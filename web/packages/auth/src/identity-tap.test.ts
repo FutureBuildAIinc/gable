@@ -27,6 +27,23 @@ describe('identity tap', () => {
     expect(readIdentity(storage)).toEqual({ displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN' });
   });
 
+  it('records and reads back the sign in method when given, and drops an unknown method code', () => {
+    const storage = memoryStorage();
+    recordIdentity(storage, { displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN', method: 'google' });
+    expect(readIdentity(storage)).toEqual({
+      displayName: 'Morgan Hale',
+      role: 'owner',
+      yard: 'KEL-MAIN',
+      method: 'google',
+    });
+
+    storage.setItem(
+      IDENTITY_TAP_KEY,
+      JSON.stringify({ v: 1, displayName: 'Morgan Hale', method: 'not_a_method' }),
+    );
+    expect(readIdentity(storage)).toEqual({ displayName: 'Morgan Hale', role: null, yard: null });
+  });
+
   it('keeps nulls for a missing role or yard', () => {
     const storage = memoryStorage();
     recordIdentity(storage, { displayName: 'Someone', role: null, yard: null });

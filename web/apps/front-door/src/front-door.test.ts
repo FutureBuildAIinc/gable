@@ -368,4 +368,74 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(allStorage).not.toContain('eyJ');
     expect(allStorage).not.toContain('token');
   });
+
+  it('renders Continue as <name> as a real button with only the method used, and starts that method on click when still allowed', async () => {
+    authConfig.devMode = false;
+    localStorage.setItem(
+      'gable.identity-tap.v1',
+      JSON.stringify({ v: 1, displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN', method: 'google' }),
+    );
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(String(url));
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify({
+          auth_mode: 'production',
+          methods: [
+            { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+            { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+        { status: 501 },
+      );
+    }));
+
+    const el = await mount();
+    await settle(el);
+
+    const continueBtn = el.querySelector<HTMLButtonElement>('button[aria-label^="Continue as Morgan Hale"]');
+    expect(continueBtn).not.toBeNull();
+    expect(continueBtn!.getAttribute('type')).toBe('button');
+    expect(continueBtn!.className).toContain('rounded-lg');
+    expect(continueBtn!.className).toContain('hover:border-gable-green');
+    expect(continueBtn!.className).toContain('focus-visible:ring-2');
+    expect(continueBtn!.textContent).toContain('Continue as Morgan Hale');
+    expect(continueBtn!.textContent).toContain('with Google');
+    expect(continueBtn!.textContent).not.toContain('owner');
+    expect(continueBtn!.textContent).not.toContain('OWNER');
+    expect(continueBtn!.textContent).not.toContain('KEL-MAIN');
+
+    continueBtn!.click();
+    await settle(el);
+    expect(calls.some((u) => u.includes('/api/v1/auth/start/google'))).toBe(true);
+  });
+
+  it('focuses the first allowed method when the Continue as method is no longer allowed', async () => {
+    authConfig.devMode = false;
+    localStorage.setItem(
+      'gable.identity-tap.v1',
+      JSON.stringify({ v: 1, displayName: 'Morgan Hale', role: 'owner', yard: 'KEL-MAIN', method: 'google' }),
+    );
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
+      ],
+    });
+
+    const el = await mount();
+    await settle(el);
+
+    const continueBtn = el.querySelector<HTMLButtonElement>('button[aria-label^="Continue as Morgan Hale"]')!;
+    expect(continueBtn).not.toBeNull();
+    continueBtn.click();
+    await settle(el);
+
+    const firstMethodBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Passkey"]')!;
+    expect(document.activeElement).toBe(firstMethodBtn);
+  });
 });

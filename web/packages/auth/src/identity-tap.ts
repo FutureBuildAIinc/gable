@@ -9,15 +9,30 @@
  */
 
 import type { StorageLike } from './custody.ts';
+import type { SignInMethodCode } from './runtime-config.ts';
 
 /** The tap's storage key. */
 export const IDENTITY_TAP_KEY = 'gable.identity-tap.v1';
 
-/** The display block the tap keeps: who, as what, where. */
+const VALID_METHODS: readonly SignInMethodCode[] = [
+  'email_password',
+  'passkey',
+  'magic_link',
+  'google',
+  'microsoft',
+  'oidc',
+];
+
+function isSignInMethodCode(value: unknown): value is SignInMethodCode {
+  return typeof value === 'string' && VALID_METHODS.includes(value as SignInMethodCode);
+}
+
+/** The display block the tap keeps: who, as what, where, and which sign in method they used. */
 export interface TappedIdentity {
   displayName: string;
   role: string | null;
   yard: string | null;
+  method?: SignInMethodCode | null;
 }
 
 interface TapRecord {
@@ -25,6 +40,7 @@ interface TapRecord {
   displayName: string;
   role?: string;
   yard?: string;
+  method?: SignInMethodCode;
 }
 
 /** Remember the last signed in user's display block. Never a token. */
@@ -32,6 +48,9 @@ export function recordIdentity(storage: StorageLike, identity: TappedIdentity): 
   const record: TapRecord = { v: 1, displayName: identity.displayName };
   if (identity.role !== null) record.role = identity.role;
   if (identity.yard !== null) record.yard = identity.yard;
+  if (identity.method !== undefined && identity.method !== null && isSignInMethodCode(identity.method)) {
+    record.method = identity.method;
+  }
   try {
     storage.setItem(IDENTITY_TAP_KEY, JSON.stringify(record));
   } catch {
@@ -61,7 +80,11 @@ export function readIdentity(storage: StorageLike): TappedIdentity | null {
   if (typeof record['displayName'] !== 'string' || record['displayName'] === '') return null;
   const role = typeof record['role'] === 'string' ? record['role'] : null;
   const yard = typeof record['yard'] === 'string' ? record['yard'] : null;
-  return { displayName: record['displayName'] as string, role, yard };
+  const out: TappedIdentity = { displayName: record['displayName'] as string, role, yard };
+  if (isSignInMethodCode(record['method'])) {
+    out.method = record['method'];
+  }
+  return out;
 }
 
 /** Forget the remembered identity (sign out calls this). */

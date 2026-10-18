@@ -37,7 +37,7 @@ import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/d
 import {
   authCustody, authConfig, InvalidTokenError,
   authMethodsConfig, recordIdentity, readIdentity, forgetIdentity,
-  type AuthMethodsRuntimeConfig, type SignInMethodConfig,
+  type AuthMethodsRuntimeConfig, type SignInMethodCode, type SignInMethodConfig, type TappedIdentity,
 } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
@@ -245,11 +245,59 @@ export class GableFrontDoor extends LitElement {
   }
 
   /** Remember the last signed in user's display block for the next visit. */
-  private _tapIdentity(yard: string | null = null) {
+  private _tapIdentity(yard: string | null = null, method: SignInMethodCode | null = null) {
     const name = authCustody.displayName;
     if (name === null) return;
     const role = authCustody.personaRole ?? this._roles[0] ?? null;
-    recordIdentity(localStorage, { displayName: name, role, yard: yard ?? null });
+    recordIdentity(localStorage, { displayName: name, role, yard: yard ?? null, method });
+  }
+
+  private _methodLabelFor(code: SignInMethodCode): string {
+    const configured = this._authCfg?.methods.find((m) => m.method === code);
+    if (configured !== undefined) return configured.label;
+    switch (code) {
+      case 'email_password': return 'Email and password';
+      case 'passkey': return 'Passkey';
+      case 'magic_link': return 'Email a sign in link';
+      case 'google': return 'Google';
+      case 'microsoft': return 'Microsoft';
+      case 'oidc': return 'Single sign on';
+    }
+  }
+
+  private _focusFirstAllowedMethod() {
+    const first = this._authCfg?.methods[0];
+    if (first === undefined) return;
+    if (first.kind === 'form') {
+      this.querySelector<HTMLInputElement>('input[aria-label="Email"]')?.focus();
+      return;
+    }
+    this.querySelector<HTMLButtonElement>(`button[aria-label="Sign in with ${first.label}"]`)?.focus();
+  }
+
+  /**
+   * Clicking Continue as <name> starts the remembered method when it is still
+   * in the dealer's allowlist, or focuses the first allowed method when it is
+   * no longer allowed.
+   */
+  private _continueAs(last: TappedIdentity) {
+    const methods = this._authCfg?.methods ?? [];
+    const allowed = last.method !== undefined && last.method !== null
+      ? methods.find((m) => m.method === last.method)
+      : undefined;
+    if (allowed !== undefined) {
+      if (allowed.kind === 'form') {
+        if (this._email !== '' && this._password !== '') {
+          void this._signInEmailPassword();
+        } else {
+          this.querySelector<HTMLInputElement>('input[aria-label="Email"]')?.focus();
+        }
+        return;
+      }
+      void this._startMethod(allowed);
+      return;
+    }
+    this._focusFirstAllowedMethod();
   }
 
   private _signOut() {
@@ -426,22 +474,30 @@ export class GableFrontDoor extends LitElement {
       `;
     }
     const last = readIdentity(localStorage);
+    const lastMethodLabel = last?.method !== undefined && last.method !== null
+      ? this._methodLabelFor(last.method)
+      : null;
     return html`
       ${this._authCfg.degraded && this._authCfg.notice ? html`
         <p role="alert" class="text-sm text-amber-300">${this._authCfg.notice}</p>
       ` : nothing}
       ${last ? html`
-        <div class="rounded-xl border border-zinc-500 bg-surface-2 px-4 py-3 flex items-center gap-3">
-          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green">
+        <button
+          type="button"
+          @click=${() => this._continueAs(last)}
+          aria-label="Continue as ${last.displayName}${lastMethodLabel ? ` with ${lastMethodLabel}` : ''}"
+          class="w-full rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 flex items-center gap-3 text-left hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+        >
+          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0">
             ${initialsFor(last.displayName)}
           </div>
-          <div class="leading-tight">
-            <div class="text-sm text-white">Continue as ${last.displayName}</div>
-            <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-              ${[last.role, last.yard].filter(Boolean).join(' · ') || 'previous visit'}
-            </div>
+          <div class="min-w-0 leading-tight">
+            <div class="text-sm font-medium text-white truncate">Continue as ${last.displayName}</div>
+            ${lastMethodLabel ? html`
+              <div class="text-xs text-muted-foreground truncate">with ${lastMethodLabel}</div>
+            ` : nothing}
           </div>
-        </div>
+        </button>
       ` : nothing}
       <div class="space-y-2.5">
         ${this._renderMethodList(this._authCfg.methods)}
