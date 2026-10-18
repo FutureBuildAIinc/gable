@@ -527,7 +527,7 @@ export class GableFrontDoor extends LitElement {
           <button
             type="button"
             @click=${() => void this._retryAuthConfig()}
-            class="shrink-0 rounded border border-amber-300/50 bg-amber-300/15 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-300/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 transition-colors"
+            class="shrink-0 rounded border border-amber-300/50 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-300/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 transition-colors"
           >
             Retry
           </button>
@@ -681,7 +681,7 @@ export class GableFrontDoor extends LitElement {
         >
           <span class="inline-flex items-center gap-2.5 max-w-full">
             <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
-            <span class="text-left leading-snug">${m.label}</span>
+            <span class="min-w-0 text-center leading-snug">${m.label}</span>
           </span>
         </button>
         ${this._signInError && this._errorSource === m.method ? html`
