@@ -30,6 +30,7 @@ func TestTheNewCounterRoutesHoldTheBranchWall(t *testing.T) {
 		mustExec(t, db, `DELETE FROM locations WHERE id = $1`, branchB)
 	})
 	f := newFixture(t, db, withReceipts(thermalStandIn(nil)))
+	f.seedTill()
 	// an open sale on branch A (the default branch), made with no claims: the
 	// middleware's dev fallback, permissive with no branch context (the
 	// multi branch switch asks every claimed request for a branch)

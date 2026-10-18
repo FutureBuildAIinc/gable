@@ -63,7 +63,7 @@ func TestTheGatewayRefundIdLandsOnTheClaimWhenTheTerminalAnswers(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
@@ -148,7 +148,7 @@ func TestARecordedRefundResolutionBooksTheStrandedReturn(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	f.openTill(0)
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
@@ -162,7 +162,7 @@ func TestARecordedRefundResolutionBooksTheStrandedReturn(t *testing.T) {
 	}
 	// the transient write failure that stranded the act is gone by the time
 	// finance resolves it
-	f.events.fail = ""
+	f.events.setFail("")
 	r := f.resolveOn(t, intentID, map[string]any{
 		"outcome": "refund", "refund_tx_id": refundTxID, "reason": "terminal log shows the refund",
 	}, "owner")
@@ -204,7 +204,7 @@ func TestARecordedRefundResolutionBooksTheStrandedVoid(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_transaction.voided"
+		f.events.setFail("pos_transaction.voided")
 	})
 	f.openTill(0)
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
@@ -219,7 +219,7 @@ func TestARecordedRefundResolutionBooksTheStrandedVoid(t *testing.T) {
 	}
 	// the transient write failure that stranded the act is gone by the time
 	// finance resolves it
-	f.events.fail = ""
+	f.events.setFail("")
 	r := f.resolveOn(t, intentID, map[string]any{
 		"outcome": "refund", "refund_tx_id": refundTxID, "reason": "terminal log shows the refund",
 	}, "finance")

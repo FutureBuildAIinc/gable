@@ -112,6 +112,10 @@ POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.Handl
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
 POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
+GET	/api/v1/auth/config	internal/signinmethods	h.GetConfig
+GET	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.GetAllowlist)
+PUT	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.PutAllowlist)
+POST	/api/v1/auth/start/{method}	internal/signinmethods	h.Start
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
@@ -305,6 +309,11 @@ POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
 GET	/api/v1/pos/customers	internal/pos	h.FindCustomers
 GET	/api/v1/pos/customers/{id}/standing	internal/pos	h.GetStanding
+GET	/api/v1/pos/end-of-day	internal/pos	h.GetBranchDay
+POST	/api/v1/pos/end-of-day/close	internal/pos	h.CloseBranchDay
+GET	/api/v1/pos/end-of-day/{id}/deposit-candidates	internal/pos	h.ListDepositCandidates
+POST	/api/v1/pos/end-of-day/{id}/deposit-match	internal/pos	h.MatchDeposit
+POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 POST	/api/v1/pos/exchanges	internal/pos	h.CreateExchange
 POST	/api/v1/pos/exchanges/preview	internal/pos	h.PreviewExchange
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
@@ -319,8 +328,14 @@ POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
 GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill
+GET	/api/v1/pos/till/policy	internal/pos	h.GetVariancePolicy
+PUT	/api/v1/pos/till/policy	internal/pos	h.PutVariancePolicy
+GET	/api/v1/pos/till/signoffs	internal/pos	h.ListPendingSignoffs
 POST	/api/v1/pos/till/{id}/close	internal/pos	h.CloseTill
+GET	/api/v1/pos/till/{id}/movements	internal/pos	h.ListMovements
+POST	/api/v1/pos/till/{id}/movements	internal/pos	h.CreateMovement
 GET	/api/v1/pos/till/{id}/report	internal/pos	h.TillReportHandler
+POST	/api/v1/pos/till/{id}/signoff	internal/pos	h.SignOffTill
 GET	/api/v1/pos/till/{id}/zreport	internal/pos	h.GetZReport
 GET	/api/v1/pos/transactions	internal/pos	h.ListTransactions
 POST	/api/v1/pos/transactions	internal/pos	h.StartTransaction

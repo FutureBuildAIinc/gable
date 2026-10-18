@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSession) error {
@@ -27,6 +28,12 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 		RETURNING opened_at`,
 		s.ID, s.RegisterID, s.BranchID, s.CashierID, string(s.Status), int64(s.OpeningFloat)).Scan(&opened)
 	if err != nil {
+		// two openers racing for one register: the second meets the one open
+		// drawer index and answers the same refusal the pre-check does
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "idx_till_sessions_open_register" {
+			return conflict("till_open", fmt.Sprintf("register %s already has an open till session", s.RegisterID))
+		}
 		return fmt.Errorf("failed to open the till session: %w", mapWriteError(err))
 	}
 	s.OpenedAt = httpx.TimestampOf(opened)
@@ -36,11 +43,20 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) {
 	var s TillSession
 	var status string
-	var openedAt, closedAt *time.Time
+	var openedAt, closedAt, signedOffAt *time.Time
+	var signoffBy, signoffReason *string
 	err := row.Scan(&s.ID, &s.RegisterID, &s.BranchID, &s.CashierID, &status, &s.OpeningFloat, &openedAt, &closedAt,
-		&s.ExpectedByMethod, &s.CountedByMethod, &s.OverShort, &s.GLEntryID, &s.Notes)
+		&s.ExpectedByMethod, &s.CountedByMethod, &s.OverShort, &s.GLEntryID, &s.Notes,
+		&s.ClosedBy, &s.VarianceThreshold, &signoffBy, &signoffReason, &signedOffAt)
 	if err != nil {
 		return nil, err
+	}
+	if signoffBy != nil && signedOffAt != nil {
+		reason := ""
+		if signoffReason != nil {
+			reason = *signoffReason
+		}
+		s.SignOff = &TillSignOff{SignedOffBy: *signoffBy, Reason: reason, SignedOffAt: httpx.TimestampOf(*signedOffAt)}
 	}
 	if openedAt != nil {
 		s.OpenedAt = httpx.TimestampOf(*openedAt)
@@ -57,7 +73,16 @@ func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) 
 }
 
 const tillCols = `id, register_id, branch_id, cashier_id, status, ROUND(opening_float * 100)::bigint, opened_at, closed_at,
-	expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes`
+	expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes,
+	closed_by, variance_threshold_cents, signoff_by, signoff_reason, signed_off_at`
+
+// tillInner is the session table with its over or short in cents, the
+// subquery every walled read selects tillCols from.
+const tillInner = `SELECT id, register_id, branch_id, cashier_id, status, opening_float, opened_at, closed_at,
+	expected_by_method, counted_by_method,
+	CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
+	gl_entry_id, notes, closed_by, variance_threshold_cents, signoff_by, signoff_reason, signed_off_at
+	FROM till_sessions`
 
 // LockTillSession locks a session row inside the caller's transaction: the
 // completion and the void take it FOR SHARE (the close's FOR UPDATE then
@@ -94,12 +119,7 @@ func (r *PostgresRepository) TillSessionBranch(ctx context.Context, id uuid.UUID
 }
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
-	s, err := r.scanTillSession(r.ex(ctx).QueryRow(ctx, `SELECT `+tillCols+` FROM (
-		SELECT id, register_id, branch_id, cashier_id, status, opening_float, opened_at, closed_at,
-			expected_by_method, counted_by_method,
-			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
-			gl_entry_id, notes
-		FROM till_sessions) t WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
+	s, err := r.scanTillSession(r.ex(ctx).QueryRow(ctx, `SELECT `+tillCols+` FROM (`+tillInner+`) t WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("till session not found")
 	}
@@ -110,12 +130,7 @@ func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (
 }
 
 func (r *PostgresRepository) GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error) {
-	s, err := r.scanTillSession(r.ex(ctx).QueryRow(ctx, `SELECT `+tillCols+` FROM (
-		SELECT id, register_id, branch_id, cashier_id, status, opening_float, opened_at, closed_at,
-			expected_by_method, counted_by_method,
-			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
-			gl_entry_id, notes
-		FROM till_sessions) t WHERE t.register_id = $1 AND t.status = 'OPEN'
+	s, err := r.scanTillSession(r.ex(ctx).QueryRow(ctx, `SELECT `+tillCols+` FROM (`+tillInner+`) t WHERE t.register_id = $1 AND t.status = 'OPEN'
 			AND `+middleware.Wall("t", 2, 3), registerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -135,16 +150,22 @@ func (r *PostgresRepository) CloseTillSession(ctx context.Context, s *TillSessio
 	if err != nil {
 		return err
 	}
-	var over any
+	var over, threshold any
 	if s.OverShort != nil {
 		over = int64(*s.OverShort)
 	}
+	if s.VarianceThreshold != nil {
+		threshold = int64(*s.VarianceThreshold)
+	}
+	// the count ends the session CLOSED, or PENDING_SIGNOFF when its variance
+	// passed the threshold (s.Status says which)
 	tag, err := r.ex(ctx).Exec(ctx, `
-		UPDATE till_sessions SET status = 'CLOSED', closed_at = NOW(),
+		UPDATE till_sessions SET status = $7, closed_at = NOW(),
 			expected_by_method = $2::jsonb, counted_by_method = $3::jsonb,
-			over_short = ($4::bigint::numeric / 100), gl_entry_id = $5, notes = $6
+			over_short = ($4::bigint::numeric / 100), gl_entry_id = $5, notes = $6,
+			closed_by = $8, variance_threshold_cents = $9
 		WHERE id = $1 AND status = 'OPEN'`,
-		s.ID, string(expected), string(counted), over, s.GLEntryID, s.Notes)
+		s.ID, string(expected), string(counted), over, s.GLEntryID, s.Notes, string(s.Status), s.ClosedBy, threshold)
 	if err != nil {
 		return fmt.Errorf("failed to close the till session: %w", err)
 	}
@@ -234,6 +255,13 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 		return nil, fmt.Errorf("failed to aggregate the session's card return refunds: %w", err)
 	}
 	agg.CardRefundsCents += cardReturnRefunds
+	// The session's movements, by kind: paid in, paid out, drops and pickups
+	// move the cash the drawer should hold (CP-08).
+	totals, err := r.TillMovementTotals(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	agg.MovementTotals = totals
 	return agg, nil
 }
 
@@ -303,4 +331,125 @@ func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string
 		out = append(out, z)
 	}
 	return out, rows.Err()
+}
+
+// VarianceThreshold is the threshold a close over or short is held to at a
+// branch, in cents: the branch's own row, else the database wide default
+// (system_settings till.variance_threshold_cents). set is false when neither
+// exists: no threshold is in force, and no close waits for sign off.
+func (r *PostgresRepository) VarianceThreshold(ctx context.Context, branch *uuid.UUID) (cents int64, set bool, err error) {
+	var v *int64
+	err = r.ex(ctx).QueryRow(ctx, `SELECT COALESCE(
+		(SELECT p.threshold_cents FROM till_variance_policy p WHERE p.branch_id = $1),
+		(SELECT CASE WHEN s.value ~ '^[0-9]{1,15}$' THEN s.value::bigint END FROM system_settings s
+			WHERE s.key = 'till.variance_threshold_cents'))`, branch).Scan(&v)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to read the variance threshold: %w", err)
+	}
+	if v == nil {
+		return 0, false, nil
+	}
+	return *v, true, nil
+}
+
+// SignOffTillSession releases a session waiting for sign off: it ends CLOSED
+// with the ledger entry of its variance and who signed off, why and when.
+func (r *PostgresRepository) SignOffTillSession(ctx context.Context, s *TillSession) error {
+	var signed time.Time
+	err := r.ex(ctx).QueryRow(ctx, `
+		UPDATE till_sessions SET status = 'CLOSED', gl_entry_id = $2, signoff_by = $3, signoff_reason = $4, signed_off_at = NOW()
+		WHERE id = $1 AND status = 'PENDING_SIGNOFF'
+		RETURNING signed_off_at`,
+		s.ID, s.GLEntryID, s.SignOff.SignedOffBy, s.SignOff.Reason).Scan(&signed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.InvalidStateTransition("the till session is not waiting for sign off")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to sign off the till session: %w", err)
+	}
+	s.SignOff.SignedOffAt = httpx.TimestampOf(signed)
+	return nil
+}
+
+// ListPendingSignoffs pages the sessions waiting for a manager, oldest close
+// first (closed_at, id), inside the caller's wall.
+func (r *PostgresRepository) ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT `+tillCols+` FROM (`+tillInner+`) t
+		WHERE t.status = 'PENDING_SIGNOFF' AND `+middleware.Wall("t", 1, 2)+`
+		  AND ($3::uuid IS NULL OR t.branch_id = $3)
+		  AND ($4::timestamptz IS NULL OR (t.closed_at, t.id) > ($4::timestamptz, $5::uuid))
+		ORDER BY t.closed_at, t.id LIMIT $6`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), branch, after, afterID, limit+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to list the sessions waiting for sign off: %w", err)
+	}
+	defer rows.Close()
+	out := []TillSession{}
+	for rows.Next() {
+		s, err := r.scanTillSession(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, *s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	return out, more, nil
+}
+
+// VariancePolicy is a branch's threshold answer: its own override, the
+// database wide default, and which of them is in force.
+type VariancePolicy struct {
+	BranchID uuid.UUID `json:"branch_id"`
+	// ThresholdCents is the figure in force (null when no threshold exists);
+	// BranchThresholdCents the branch's own override (null when it has none);
+	// DefaultThresholdCents the database wide default (null when unset).
+	ThresholdCents        *httpx.Cents `json:"variance_threshold_cents"`
+	BranchThresholdCents  *httpx.Cents `json:"branch_threshold_cents"`
+	DefaultThresholdCents *httpx.Cents `json:"default_threshold_cents"`
+	Source                string       `json:"source"`
+}
+
+// GetVariancePolicy reads the branch's threshold with its two sources.
+func (r *PostgresRepository) GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error) {
+	p := &VariancePolicy{BranchID: branch}
+	err := r.ex(ctx).QueryRow(ctx, `SELECT
+		(SELECT threshold_cents FROM till_variance_policy WHERE branch_id = $1),
+		(SELECT CASE WHEN value ~ '^[0-9]{1,15}$' THEN value::bigint END FROM system_settings WHERE key = 'till.variance_threshold_cents')`,
+		branch).Scan(&p.BranchThresholdCents, &p.DefaultThresholdCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the variance policy: %w", err)
+	}
+	switch {
+	case p.BranchThresholdCents != nil:
+		p.ThresholdCents, p.Source = p.BranchThresholdCents, "branch"
+	case p.DefaultThresholdCents != nil:
+		p.ThresholdCents, p.Source = p.DefaultThresholdCents, "default"
+	default:
+		p.Source = "none"
+	}
+	return p, nil
+}
+
+// SetVariancePolicy writes (or, with a nil threshold, clears) the branch's
+// own override.
+func (r *PostgresRepository) SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error {
+	if cents == nil {
+		if _, err := r.ex(ctx).Exec(ctx, `DELETE FROM till_variance_policy WHERE branch_id = $1`, branch); err != nil {
+			return fmt.Errorf("failed to clear the variance policy: %w", err)
+		}
+		return nil
+	}
+	if _, err := r.ex(ctx).Exec(ctx, `INSERT INTO till_variance_policy (branch_id, threshold_cents, updated_by, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (branch_id) DO UPDATE SET threshold_cents = EXCLUDED.threshold_cents,
+			updated_by = EXCLUDED.updated_by, updated_at = NOW()`, branch, *cents, actor); err != nil {
+		return fmt.Errorf("failed to write the variance policy: %w", mapWriteError(err))
+	}
+	return nil
 }

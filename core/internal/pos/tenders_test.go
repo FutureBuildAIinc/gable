@@ -189,7 +189,7 @@ func TestStoreCreditPaysASaleThroughTheARCore(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	f.accountReturnOf() // 599 of store credit
-	f.openTill(0)
+	f.ensureTill()
 	sale, total := f.cartOf("2", &f.customerID) // 1198
 	r := f.completeSale(sale, tender("store_credit", 599), tender("cash", total-599))
 	if r.status != http.StatusOK {
@@ -234,7 +234,7 @@ func TestStoreCreditLimitsAndTheVoidReturnsIt(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	f.accountReturnOf() // 599
-	f.openTill(0)
+	f.ensureTill()
 
 	sale, total := f.cartOf("2", &f.customerID)
 	blockerOf(t, f.completeSale(sale, tender("store_credit", 600), tender("cash", total-600)), "store_credit_short")

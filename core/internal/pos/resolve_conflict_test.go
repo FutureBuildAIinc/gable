@@ -52,7 +52,7 @@ func TestANoRefundOverARecordedRefundIdIsRefused(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	f.openTill(0)
 	_, _, intentID, refundTxID := strandedReturnWithID(t, f)
@@ -86,7 +86,7 @@ func TestARefundIdThatDiffersFromTheRecordedOneIsRefused(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	f.openTill(0)
 	_, _, intentID, refundTxID := strandedReturnWithID(t, f)
@@ -107,7 +107,7 @@ func TestARefundIdThatDiffersFromTheRecordedOneIsRefused(t *testing.T) {
 		t.Errorf("the claim was settled under the wrong id: %d PENDING rows, want 1", got)
 	}
 	// the claim's own recorded id settles it
-	f.events.fail = ""
+	f.events.setFail("")
 	rr := f.resolveOn(t, intentID, map[string]any{
 		"outcome": "refund", "refund_tx_id": refundTxID, "reason": "the terminal's own id",
 	}, "finance")

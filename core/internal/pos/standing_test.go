@@ -79,6 +79,7 @@ func (f *fixture) override(saleID, kind, reason string, capCents int64, role, su
 // startSaleBy opens a cart as the cashier subject given.
 func (f *fixture) startSaleBy(sub string, customer *uuid.UUID) string {
 	f.t.Helper()
+	f.ensureTill()
 	body := map[string]any{"register_id": f.register, "cashier_id": sub}
 	if customer != nil {
 		body["customer_id"] = customer.String()

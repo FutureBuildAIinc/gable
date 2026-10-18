@@ -185,6 +185,7 @@ func TestQuantityChangeCarriesTheBranchWall(t *testing.T) {
 		mustExecB(`DELETE FROM locations WHERE id = $1`, branchB)
 	})
 	f := newFixture(t, db)
+	f.seedTill()
 	// the owner's own branch, as the till wall test reaches it: no claims
 	var own []string
 	started := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": f.register}, own...)

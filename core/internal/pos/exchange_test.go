@@ -405,7 +405,7 @@ func TestTheCountersNewActsNeverTouchThePoolInsideTheirTransaction(t *testing.T)
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 1), withReceipts(thermalStandIn(nil)))
 	f.accountReturnOf() // 599 of store credit
-	f.openTill(0)
+	f.ensureTill()
 	sale, total := f.cartOf("2", &f.customerID)
 	if r := f.completeSale(sale, tender("store_credit", 599), tender("cash", total-599)); r.status != http.StatusOK {
 		t.Fatalf("store credit sale at pool size 1 = %d: %s", r.status, r.raw)

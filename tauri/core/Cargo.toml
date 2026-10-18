@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+[package]
+name = "gable-shell-core"
+version.workspace = true
+description = "Shared Rust core for the Gable shells: the OS keychain custody of the core tokens, the token command's origin fence, and the profile manifest."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Secret values (the access and refresh tokens) are wiped when their holding
+# value drops, so a freed string leaves no plaintext behind in reclaimed
+# memory.
+zeroize = "1"
+# Origin parsing for the token command's fence; the same url crate the shell
+# graph already carries through Tauri.
+url = "2"
+
+# The profile manifest's tests pin the model against each profile's own
+# tauri.conf.json.
+[dev-dependencies]
+serde_json = "1"
+
+# The OS keychain through the keyring crate, one backend per desktop target:
+# the freedesktop Secret Service's pure Rust path on desktop Linux (zbus, no
+# libsecret and no libdbus headers), the macOS Keychain, and the Windows
+# Credential Manager. No target carries another's backend, and the build
+# never needs a C keychain header.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["async-secret-service", "tokio", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
