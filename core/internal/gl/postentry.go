@@ -87,6 +87,8 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 		return nil, ErrNoBranch
 	}
 	var debit, credit int64
+	debitByBranch := make(map[uuid.UUID]int64)
+	creditByBranch := make(map[uuid.UUID]int64)
 	legs := make([]Leg, 0, len(in.Legs))
 	codes := make([]string, 0, len(in.Legs))
 	for _, l := range in.Legs {
@@ -96,13 +98,29 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 		if l.Debit == 0 && l.Credit == 0 {
 			continue
 		}
+		b := in.BranchID
+		if l.BranchID != nil && *l.BranchID != uuid.Nil {
+			b = *l.BranchID
+		}
 		debit += l.Debit
 		credit += l.Credit
+		debitByBranch[b] += l.Debit
+		creditByBranch[b] += l.Credit
 		legs = append(legs, l)
 		codes = append(codes, l.AccountCode)
 	}
 	if debit != credit {
 		return nil, fmt.Errorf("%w: debits %d, credits %d", ErrUnbalanced, debit, credit)
+	}
+	for b, d := range debitByBranch {
+		if c := creditByBranch[b]; d != c {
+			return nil, fmt.Errorf("%w: branch %s debits %d, credits %d", ErrUnbalanced, b, d, c)
+		}
+	}
+	for b, c := range creditByBranch {
+		if d := debitByBranch[b]; d != c {
+			return nil, fmt.Errorf("%w: branch %s debits %d, credits %d", ErrUnbalanced, b, d, c)
+		}
 	}
 	if len(legs) == 0 {
 		return nil, nil

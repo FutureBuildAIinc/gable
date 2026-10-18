@@ -134,14 +134,32 @@ func (s *Service) CreateJournalEntry(ctx context.Context, entry *JournalEntry) e
 		return fmt.Errorf("journal entry must have at least 2 lines")
 	}
 
-	// Validate balance: total debits == total credits
+	// Validate balance: total debits == total credits overall and per branch
 	var totalDebit, totalCredit int64
+	debitByBranch := make(map[uuid.UUID]int64)
+	creditByBranch := make(map[uuid.UUID]int64)
 	for _, line := range entry.Lines {
+		b := entry.BranchID
+		if line.BranchID != uuid.Nil {
+			b = line.BranchID
+		}
 		totalDebit += line.Debit
 		totalCredit += line.Credit
+		debitByBranch[b] += line.Debit
+		creditByBranch[b] += line.Credit
 	}
 	if totalDebit != totalCredit {
-		return fmt.Errorf("journal entry is not balanced: debits (%d) != credits (%d)", totalDebit, totalCredit)
+		return fmt.Errorf("%w: journal entry is not balanced: debits (%d) != credits (%d)", ErrUnbalanced, totalDebit, totalCredit)
+	}
+	for b, d := range debitByBranch {
+		if c := creditByBranch[b]; d != c {
+			return fmt.Errorf("%w: journal entry is not balanced on branch %s: debits (%d) != credits (%d)", ErrUnbalanced, b, d, c)
+		}
+	}
+	for b, c := range creditByBranch {
+		if d := debitByBranch[b]; d != c {
+			return fmt.Errorf("%w: journal entry is not balanced on branch %s: debits (%d) != credits (%d)", ErrUnbalanced, b, d, c)
+		}
 	}
 	if totalDebit == 0 {
 		return fmt.Errorf("journal entry cannot have zero amounts")

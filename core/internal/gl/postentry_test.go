@@ -259,3 +259,63 @@ func TestPostEntryRefusesNoBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// RULE: a posting or journal entry whose lines override BranchID must balance
+// debits and credits within each branch, not only across the whole entry.
+func TestPostEntryAndCreateJournalEntryEnforcePerBranchBalance(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	branchA := testBranch(t, db)
+	branchB := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, $2)`, branchB, "M6-PB-"+branchB.String()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE memo IN ('cross-branch unbalanced', 'createje cross-branch unbalanced'))`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE memo IN ('cross-branch unbalanced', 'createje cross-branch unbalanced')`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, branchB)
+	})
+
+	// 1. PostEntry refuses when overall debits == credits (1000 == 1000) but branchA is +1000 DR and branchB is +1000 CR.
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		_, err := svc.PostEntry(ctx, gl.PostingInput{
+			EntryDate: time.Now(), Memo: "cross-branch unbalanced", Source: gl.SourceManual,
+			BranchID: branchA, Currency: "USD",
+			Legs: []gl.Leg{
+				{AccountCode: gl.AccountCodeAR, Debit: 1000, BranchID: &branchA},
+				{AccountCode: gl.AccountCodeRevenue, Credit: 1000, BranchID: &branchB},
+			},
+		})
+		if !errors.Is(err, gl.ErrUnbalanced) {
+			t.Errorf("PostEntry with per-branch imbalance = %v, want ErrUnbalanced", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. CreateJournalEntry refuses with ErrUnbalanced when per-branch lines do not balance.
+	var arID, revID uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeAR).Scan(&arID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeRevenue).Scan(&revID); err != nil {
+		t.Fatal(err)
+	}
+	je := &gl.JournalEntry{
+		EntryDate: time.Now(),
+		Memo:      "createje cross-branch unbalanced",
+		Source:    gl.SourceManual,
+		BranchID:  branchA,
+		Lines: []gl.JournalLine{
+			{AccountID: arID, Debit: 1000, BranchID: branchA},
+			{AccountID: revID, Credit: 1000, BranchID: branchB},
+		},
+	}
+	if err := svc.CreateJournalEntry(ctx, je); !errors.Is(err, gl.ErrUnbalanced) {
+		t.Errorf("CreateJournalEntry with per-branch imbalance = %v, want ErrUnbalanced", err)
+	}
+}
+
