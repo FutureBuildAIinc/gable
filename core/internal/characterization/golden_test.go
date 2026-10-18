@@ -74,6 +74,8 @@ var (
 	reTS   = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})`)
 	rePgTS = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?(\+\d{2})?`)
 	reDate = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+	// reLongDate is a date as the printed documents write it ("Jan 2, 2006").
+	reLongDate = regexp.MustCompile(`\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}\b`)
 	// reWholeDate is a value that is a calendar date and nothing else.
 	reWholeDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	reKey       = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
@@ -202,6 +204,15 @@ func (n *normaliser) string(s string) string {
 	})
 	s = reTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
 	s = rePgTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
+	// A printed document says its day in words; it is a day offset like any
+	// other date, so the recorded text does not move with the calendar.
+	s = reLongDate.ReplaceAllStringFunc(s, func(m string) string {
+		d, err := time.Parse("Jan 2, 2006", m)
+		if err != nil {
+			return m
+		}
+		return n.dayOffset(d.Format(dayLayout))
+	})
 	s = reDate.ReplaceAllStringFunc(s, n.dayOffset)
 	s = reWordDateMonthFirst.ReplaceAllStringFunc(s, n.wordMonthFirstOffset)
 	s = reWordDateDayFirst.ReplaceAllStringFunc(s, n.wordDayFirstOffset)

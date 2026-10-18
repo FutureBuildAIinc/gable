@@ -3035,7 +3035,7 @@ export interface paths {
         };
         /**
          * List the chart of accounts
-         * @description Every account ordered by code, with the posted balance (debit minus credit, cents) computed per account. Role guard admin or owner. The body is null when the chart is empty.
+         * @description One cursor page of the chart, ordered by code, with the posted balance (debit minus credit, cents) computed per account. Role guard admin or owner.
          */
         get: operations["glAccountList"];
         put?: never;
@@ -3060,7 +3060,7 @@ export interface paths {
         get?: never;
         /**
          * Replace a GL account
-         * @description Role guard admin or owner. Full replace of the editable columns; the account is always written active (is_active cannot be set false here). The row is not checked for existence: an unknown id still answers 200, echoing the request with a zero created_at (0001-01-01T00:00:00Z) and a zero balance. A non UUID id or an undecodable body is a 400; a database refusal is a 500.
+         * @description Role guard admin or owner. Full replace of the editable columns; the account is always written active (is_active cannot be set false here). If-Match (or the body revision) must carry the revision the caller read: absent is 428, stale is 409, and the row's revision moves on with the write. An unknown id is a 404.
          */
         put: operations["glAccountUpdate"];
         post?: never;
@@ -3079,13 +3079,13 @@ export interface paths {
         };
         /**
          * List journal entries
-         * @description Every entry, newest entry_date first then highest entry_number. No filters or paging. Headers only: lines are omitted. Role guard admin or owner. The body is null when there are no entries.
+         * @description One cursor page of the entries, highest entry_number first, at the caller's branch reach. branch_id narrows the page to one branch; a caller held to one branch is refused the consolidated read (no branch_id) with 403. Headers only: lines are omitted.
          */
         get: operations["glJournalEntryList"];
         put?: never;
         /**
          * Create a draft manual journal entry
-         * @description Role guard admin or owner. The request carries float dollars; each amount is multiplied by 100 and rounded to int64 cents. Source is always MANUAL and status DRAFT. entry_date is optional (today when absent) and must be YYYY-MM-DD. Refused with 400: undecodable body, malformed entry_date, a negative debit or credit, a non UUID account_id, fewer than 2 lines, debits not equal to credits, all zero amounts, or a database refusal such as an unknown account.
+         * @description Role guard admin or owner. The request carries int64 cents (debit_cents, credit_cents) and names its branch, which the branch wall holds to the caller's reach. Source is always MANUAL and status DRAFT. entry_date is optional (today when absent) and must be YYYY-MM-DD. The entry, its audit row and its outbox event ride one transaction. Refused with 400: undecodable body, malformed entry_date, a negative amount, a non UUID account_id or branch_id, fewer than 2 lines, debits not equal to credits, all zero amounts, or a database refusal such as an unknown account.
          */
         post: operations["glJournalEntryCreate"];
         delete?: never;
@@ -3103,7 +3103,7 @@ export interface paths {
         };
         /**
          * Get one journal entry with lines
-         * @description Role guard admin or owner. Lines carry account_code and account_name. Any repository failure, not only a missing row, answers 404. reverses_entry_id is never present on this read.
+         * @description Role guard admin or owner, walled by the entry's branch: a caller held to one branch finds another branch's entry a 404. Lines carry account_code and account_name. Any repository failure, not only a missing row, answers 404.
          */
         get: operations["glJournalEntryGet"];
         put?: never;
@@ -3125,7 +3125,7 @@ export interface paths {
         put?: never;
         /**
          * Post a draft journal entry
-         * @description Role guard admin or owner. No body. Only a DRAFT entry whose date does not fall in a CLOSED fiscal period can post. Every refusal, including an unknown id, is a 400.
+         * @description Role guard admin or owner. No body. Only a DRAFT entry whose date does not fall in a CLOSED fiscal period can post. An unknown id, or an entry of a branch outside the caller's reach, is a 404; every other refusal is a 400. The post, its audit row and its outbox event ride one transaction.
          */
         post: operations["glJournalEntryPost"];
         delete?: never;
@@ -3145,7 +3145,7 @@ export interface paths {
         put?: never;
         /**
          * Reverse a posted journal entry
-         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. The reversal posts in the original entry's own currency (the entry priced its legs into that currency, so a reversal in the currency.default setting's code would leave the control account holding both halves of one undo in different currencies). Every refusal, including an unknown id, is a 400.
+         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id, in the original entry's own branch and currency, each line keeping its own branch. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. An unknown id, or an entry of a branch outside the caller's reach, is a 404; every other refusal is a 400. The reversal, its audit row and its outbox event ride one transaction.
          */
         post: operations["glJournalEntryReverse"];
         delete?: never;
@@ -3165,7 +3165,7 @@ export interface paths {
         put?: never;
         /**
          * Void a posted journal entry
-         * @description Role guard admin or owner. No body. Only a POSTED entry can be voided; every refusal, including an unknown id, is a 400.
+         * @description Role guard admin or owner. No body. Only a POSTED entry can be voided. An unknown id, or an entry of a branch outside the caller's reach, is a 404; every other refusal is a 400. The void, its audit row and its outbox event ride one transaction.
          */
         post: operations["glJournalEntryVoid"];
         delete?: never;
@@ -3183,7 +3183,7 @@ export interface paths {
         };
         /**
          * Trial balance
-         * @description Role guard admin or owner. Posted activity up to and including as_of (default today), for active accounts with any activity, ordered by code. A malformed as_of is a 400. The body is null when no account has activity.
+         * @description Role guard admin or owner. Posted activity up to and including as_of (default the branch's business day in its own time zone), for active accounts with any activity, ordered by code. branch_id cuts the report to one branch; absent reads consolidated, which needs every branch reach (403 otherwise). A malformed as_of is a 400. The body is null when no account has activity.
          */
         get: operations["glTrialBalance"];
         put?: never;
@@ -3203,7 +3203,7 @@ export interface paths {
         };
         /**
          * Profit and loss statement
-         * @description Role guard admin or owner. start defaults to the first of the current month and end to today; both are YYYY-MM-DD and inclusive. A malformed date or an end before the start is a 400. The three sections are never null.
+         * @description Role guard admin or owner. start defaults to the first of the current month and end to today; both are YYYY-MM-DD and inclusive. compare_start and compare_end carry the previous period beside the current one. branch_id cuts the statement to one branch; absent reads consolidated, the sum of the branches, which needs every branch reach (403 otherwise). A malformed date or an end before the start is a 400. The three sections are never null.
          */
         get: operations["glProfitAndLoss"];
         put?: never;
@@ -3223,9 +3223,49 @@ export interface paths {
         };
         /**
          * Balance sheet
-         * @description Role guard admin or owner. as_of defaults to today; a malformed value is a 400. retained_earnings is already included in total_equity. The three sections are never null.
+         * @description Role guard admin or owner. as_of defaults to the branch's business day in its own time zone; a malformed value is a 400. retained_earnings is already included in total_equity. branch_id cuts the sheet to one branch; absent reads consolidated, which needs every branch reach (403 otherwise). The three sections are never null.
          */
         get: operations["glBalanceSheet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gl/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GL detail drill down
+         * @description Role guard admin or owner. The posted lines of one account over a date window, oldest first: the drill down from a statement row. branch_id cuts the detail to one branch; absent reads every branch, which needs every branch reach (403 otherwise). account_id, from and to are required; a malformed value is a 400.
+         */
+        get: operations["glDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gl/tie-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subledger tie out
+         * @description Role guard admin or owner. The AR control account (1020) against the customer subledger and the AP control account (2010) against the open vendor bills, each difference answered in cents, in one currency. The subledgers hold only their current balances, so the tie out is for the branch's business day: an earlier as_of is a 400. branch_id ties one branch (the customer subledger carries no branch of its own, so its branch figure is that branch's customers, by primary branch); absent ties consolidated, which needs every branch reach (403 otherwise).
+         */
+        get: operations["glTieOut"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3243,7 +3283,7 @@ export interface paths {
         };
         /**
          * List fiscal periods
-         * @description Role guard admin or owner. All periods ordered by start date; the body is null when there are none.
+         * @description Role guard admin or owner. One cursor page of the periods ordered by start date, each with the revision its If-Match takes.
          */
         get: operations["glFiscalPeriodList"];
         put?: never;
@@ -3265,7 +3305,7 @@ export interface paths {
         put?: never;
         /**
          * Close an open fiscal period
-         * @description Role guard admin or owner. No body. A period that does not exist or is not OPEN is a 400.
+         * @description Role guard admin or owner. No body. If-Match must carry the revision the caller read: absent is 428, stale is 409. The close, its audit row and its outbox event ride one transaction. A period that does not exist is a 404; one already closed is a 409 invalid_state_transition. The close spans every branch, so a caller held to some branches is refused (403).
          */
         post: operations["glFiscalPeriodClose"];
         delete?: never;
@@ -3285,9 +3325,29 @@ export interface paths {
         put?: never;
         /**
          * Reopen a closed fiscal period
-         * @description Role guard admin or owner. No body. A period that does not exist or is not CLOSED is a 400.
+         * @description Role guard admin or owner. The body reason is required: a period is reopened with a reason, recorded on the row with the actor and the time. If-Match must carry the revision the caller read (absent 428, stale 409). The reopen, its audit row and its outbox event ride one transaction. A period that does not exist is a 404; one not closed is a 409 invalid_state_transition. The reopen spans every branch, so a caller held to some branches is refused (403).
          */
         post: operations["glFiscalPeriodReopen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gl/years/{year}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close the year
+         * @description Role guard admin or owner. Zeroes the year's revenue and expense accounts into Retained Earnings (3020), one balanced CLOSING entry per branch that holds activity, dated the year's last day; each entry, its audit row and its outbox event ride one transaction. A year whose last day falls in a closed period is refused 409 period_closed (reopen it with a reason first). The close spans every branch, so a caller held to some branches is refused (403). The income statement leaves the closing entries out, so a closed year still reads what it earned.
+         */
+        post: operations["glYearClose"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12361,7 +12421,7 @@ export interface components {
             /** Format: uuid */
             id: string;
         };
-        /** @description One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines). */
+        /** @description One chart of accounts row (gl.GLAccount). balance is int64 cents (debit minus credit of posted lines); revision is the If-Match revision of the row. */
         GlAccount: {
             /** Format: uuid */
             id: string;
@@ -12381,13 +12441,20 @@ export interface components {
              * @description Cents.
              */
             balance: number;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        GlAccountList: components["schemas"]["GlAccount"][] | null;
-        /** @description The create and update body for an account. Unknown keys are ignored. */
+        /** @description One cursor page of the chart of accounts. */
+        GlAccountPage: {
+            items: components["schemas"]["GlAccount"][];
+            next_cursor?: string | null;
+            limit: number;
+        };
+        /** @description The create and update body for an account. The optional revision is the update's precondition beside If-Match. Unknown keys are ignored. */
         GlAccountRequest: {
             code: string;
             name: string;
@@ -12399,8 +12466,10 @@ export interface components {
             /** @enum {string} */
             normal_balance?: "DEBIT" | "CREDIT";
             description?: string;
+            /** Format: int64 */
+            revision?: number;
         };
-        /** @description A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents. */
+        /** @description A journal entry header (gl.JournalEntry), with lines on the single read and the create echo. total_debit and total_credit are int64 cents; branch_id is the branch the entry belongs to. */
         GlJournalEntry: {
             /** Format: uuid */
             id: string;
@@ -12412,6 +12481,8 @@ export interface components {
             source: string;
             /** Format: uuid */
             source_ref_id?: string;
+            /** Format: uuid */
+            branch_id: string;
             /** @enum {string} */
             status: "DRAFT" | "POSTED" | "VOID";
             posted_by: string;
@@ -12433,8 +12504,13 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        GlJournalEntryList: components["schemas"]["GlJournalEntry"][] | null;
-        /** @description One debit or credit line (gl.JournalLine). debit and credit are int64 cents. */
+        /** @description One cursor page of the journal entry headers. */
+        GlJournalEntryPage: {
+            items: components["schemas"]["GlJournalEntry"][];
+            next_cursor?: string | null;
+            limit: number;
+        };
+        /** @description One debit or credit line (gl.JournalLine). debit and credit are int64 cents; branch_id is the line's branch, normally its entry's. */
         GlJournalLine: {
             /** Format: uuid */
             id: string;
@@ -12445,6 +12521,8 @@ export interface components {
             account_code?: string;
             account_name?: string;
             description: string;
+            /** Format: uuid */
+            branch_id?: string;
             /**
              * Format: int64
              * @description Cents.
@@ -12456,24 +12534,36 @@ export interface components {
              */
             credit: number;
         };
-        /** @description The create body. entry_date is YYYY-MM-DD and defaults to today. debit and credit are float dollars today, rounded to cents on the way in. */
+        /** @description The create body. entry_date is YYYY-MM-DD and defaults to today. debit_cents and credit_cents are int64 cents. branch_id names the branch the entry belongs to, held to the caller's reach. */
         GlJournalEntryRequest: {
             /** Format: date */
             entry_date?: string;
             memo?: string;
+            /** Format: uuid */
+            branch_id: string;
             lines?: components["schemas"]["GlJournalLineRequest"][];
         };
         GlJournalLineRequest: {
             /** Format: uuid */
             account_id?: string;
             description?: string;
-            /** @description Float dollars today; must be >= 0. */
-            debit?: number;
-            /** @description Float dollars today; must be >= 0. */
-            credit?: number;
+            /**
+             * Format: int64
+             * @description Cents; must be >= 0.
+             */
+            debit_cents?: number;
+            /**
+             * Format: int64
+             * @description Cents; must be >= 0.
+             */
+            credit_cents?: number;
         };
         GlReverseRequest: {
             reason?: string;
+        };
+        /** @description The reopen body (a period is reopened with a reason). */
+        GlReopenRequest: {
+            reason: string;
         };
         GlReverseResult: {
             /** Format: uuid */
@@ -12482,9 +12572,9 @@ export interface components {
         /** @description The one key acknowledgement the status routes write. */
         GlStatusResult: {
             /** @enum {string} */
-            status: "posted" | "voided" | "closed" | "reopened";
+            status: "posted" | "voided";
         };
-        /** @description An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open. */
+        /** @description An accounting period (gl.FiscalPeriod). closed_at and closed_by are omitted while the period is open; reopen_reason, reopened_by and reopened_at appear once it has been reopened. revision is the If-Match revision. */
         GlFiscalPeriod: {
             /** Format: uuid */
             id: string;
@@ -12498,11 +12588,22 @@ export interface components {
             /** Format: date-time */
             closed_at?: string;
             closed_by?: string;
+            reopen_reason?: string;
+            reopened_by?: string;
+            /** Format: date-time */
+            reopened_at?: string;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
         };
-        GlFiscalPeriodList: components["schemas"]["GlFiscalPeriod"][] | null;
-        /** @description One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents. */
+        /** @description One cursor page of the fiscal periods. */
+        GlFiscalPeriodPage: {
+            items: components["schemas"]["GlFiscalPeriod"][];
+            next_cursor?: string | null;
+            limit: number;
+        };
+        /** @description One trial balance row (gl.TrialBalanceRow), per account, currency and branch. debit and credit are int64 cents. */
         GlTrialBalanceRow: {
             /** @description The ISO 4217 code of the entries summed in this row. */
             currency: string;
@@ -12511,6 +12612,8 @@ export interface components {
             account_code: string;
             account_name: string;
             account_type: string;
+            /** Format: uuid */
+            branch_id: string;
             /**
              * Format: int64
              * @description Cents.
@@ -12523,6 +12626,56 @@ export interface components {
             credit: number;
         };
         GlTrialBalance: components["schemas"]["GlTrialBalanceRow"][] | null;
+        /** @description One posted ledger line behind a statement row (gl.GLDetailRow). debit_cents and credit_cents are int64 cents. */
+        GlDetailRow: {
+            /** Format: uuid */
+            entry_id: string;
+            entry_number: number;
+            /** Format: date-time */
+            entry_date: string;
+            memo: string;
+            source: string;
+            /** Format: uuid */
+            line_id: string;
+            /** Format: uuid */
+            account_id: string;
+            account_code: string;
+            account_name: string;
+            description: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: int64 */
+            debit_cents: number;
+            /** Format: int64 */
+            credit_cents: number;
+        };
+        GlDetailList: components["schemas"]["GlDetailRow"][];
+        /** @description One control account against its subledger, cents. */
+        GlTieOutLeg: {
+            /** Format: int64 */
+            control_cents: number;
+            /** Format: int64 */
+            subledger_cents: number;
+            /** Format: int64 */
+            difference_cents: number;
+        };
+        /** @description The subledger tie out (gl.TieOutReport), AR 1020 against the customers and AP 2010 against the open bills. */
+        GlTieOutReport: {
+            /** @description YYYY-MM-DD. */
+            as_of: string;
+            currency: string;
+            /** Format: uuid */
+            branch_id?: string;
+            ar: components["schemas"]["GlTieOutLeg"];
+            ap: components["schemas"]["GlTieOutLeg"];
+        };
+        /** @description The year end close's answer (gl.YearEndResult). */
+        GlYearEndResult: {
+            year: number;
+            currency: string;
+            /** @description One closing entry id per branch that held activity; empty when the year held none. */
+            entries: string[];
+        };
         /** @description One account's signed balance on a statement (gl.AccountLineItem). amount is int64 cents. */
         GlAccountLineItem: {
             account_id: string;
@@ -12534,13 +12687,31 @@ export interface components {
              */
             amount: number;
         };
-        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency. */
+        /** @description The previous period's totals beside the current ones (gl.ProfitAndLossComparison), cents. */
+        GlProfitAndLossComparison: {
+            start_date: string;
+            end_date: string;
+            /** Format: int64 */
+            total_revenue: number;
+            /** Format: int64 */
+            total_cogs: number;
+            /** Format: int64 */
+            gross_profit: number;
+            /** Format: int64 */
+            total_expenses: number;
+            /** Format: int64 */
+            net_income: number;
+        };
+        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency, one branch's or the consolidated sum. */
         GlProfitAndLossReport: {
             currency: string;
+            /** Format: uuid */
+            branch_id?: string;
             /** @description YYYY-MM-DD. */
             start_date: string;
             /** @description YYYY-MM-DD. */
             end_date: string;
+            comparison?: components["schemas"]["GlProfitAndLossComparison"];
             revenue: components["schemas"]["GlAccountLineItem"][];
             cogs: components["schemas"]["GlAccountLineItem"][];
             expenses: components["schemas"]["GlAccountLineItem"][];
@@ -12558,9 +12729,11 @@ export interface components {
             /** Format: int64 */
             net_income: number;
         };
-        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency. */
+        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency, one branch's or the consolidated sum. */
         GlBalanceSheetReport: {
             currency: string;
+            /** Format: uuid */
+            branch_id?: string;
             /** @description YYYY-MM-DD. */
             as_of_date: string;
             assets: components["schemas"]["GlAccountLineItem"][];
@@ -26355,22 +26528,28 @@ export interface operations {
     };
     glAccountList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
+                limit?: components["parameters"]["Limit"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The chart of accounts. */
+            /** @description A page of the chart of accounts. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlAccountList"];
+                    "application/json": components["schemas"]["GlAccountPage"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -26392,7 +26571,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created account (balance is 0). */
+            /** @description The created account (balance is 0, revision is 1). */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -26413,6 +26592,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26427,7 +26608,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The account as written, not re-read. */
+            /** @description The account as written, with its new revision. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -26439,30 +26620,40 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
     glJournalEntryList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
+                limit?: components["parameters"]["Limit"];
+                /** @description One branch's entries. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
+                branch_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The journal entry headers. */
+            /** @description A page of the journal entry headers. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlJournalEntryList"];
+                    "application/json": components["schemas"]["GlJournalEntryPage"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -26524,7 +26715,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     glJournalEntryPost: {
@@ -26553,6 +26744,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -26588,6 +26780,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -26619,6 +26812,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -26627,10 +26821,12 @@ export interface operations {
     glTrialBalance: {
         parameters: {
             query?: {
-                /** @description Cut-off date, YYYY-MM-DD. Defaults to today. */
+                /** @description The branch's business day or later, YYYY-MM-DD. Defaults to the branch's business day. */
                 as_of?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone. */
                 currency?: string;
+                /** @description One branch's rows. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -26660,8 +26856,14 @@ export interface operations {
                 start?: string;
                 /** @description Last day, YYYY-MM-DD. Defaults to today. */
                 end?: string;
+                /** @description First day of the comparison period, YYYY-MM-DD. */
+                compare_start?: string;
+                /** @description Last day of the comparison period, YYYY-MM-DD. */
+                compare_end?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency. */
                 currency?: string;
+                /** @description One branch's statement. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -26687,10 +26889,12 @@ export interface operations {
     glBalanceSheet: {
         parameters: {
             query?: {
-                /** @description Statement date, YYYY-MM-DD. Defaults to today. */
+                /** @description Statement date, YYYY-MM-DD. Defaults to the branch's business day. */
                 as_of?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency. */
                 currency?: string;
+                /** @description One branch's sheet. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
+                branch_id?: string;
             };
             header?: never;
             path?: never;
@@ -26713,24 +26917,96 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    glFiscalPeriodList: {
+    glDetail: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The account whose posted lines are listed. */
+                account_id: string;
+                /** @description First day, YYYY-MM-DD. */
+                from: string;
+                /** @description Last day, YYYY-MM-DD. */
+                to: string;
+                /** @description ISO 4217 code, three capital letters; defaults to the dealer's default currency. */
+                currency?: string;
+                /** @description One branch's lines. Absent reads the X-Branch-Id branch when the header is sent, else every branch, which needs every branch reach. */
+                branch_id?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The fiscal periods. */
+            /** @description The posted detail lines; never null. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlFiscalPeriodList"];
+                    "application/json": components["schemas"]["GlDetailList"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    glTieOut: {
+        parameters: {
+            query?: {
+                /** @description Cut-off date, YYYY-MM-DD. Defaults to the branch's business day. */
+                as_of?: string;
+                /** @description ISO 4217 code, three capital letters; defaults to the dealer's default currency. */
+                currency?: string;
+                /** @description One branch's tie out. Absent ties the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
+                branch_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tie out, differences in cents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlTieOutReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    glFiscalPeriodList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the fiscal periods. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlFiscalPeriodPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
@@ -26740,6 +27016,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26750,27 +27028,31 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Closed. The body is a one key object with status "closed". */
+            /** @description The closed period, revision moved on. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlStatusResult"];
+                    "application/json": components["schemas"]["GlFiscalPeriod"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
         };
     };
     glFiscalPeriodReopen: {
         parameters: {
             query?: never;
             header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -26779,23 +27061,64 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GlReopenRequest"];
+            };
+        };
         responses: {
-            /** @description Reopened. The body is a one key object with status "reopened". */
+            /** @description The reopened period with its reason, revision moved on. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlStatusResult"];
+                    "application/json": components["schemas"]["GlFiscalPeriod"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+        };
+    };
+    glYearClose: {
+        parameters: {
+            query?: {
+                /** @description ISO 4217 code, three capital letters; defaults to the dealer's default currency. */
+                currency?: string;
+            };
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The branches' closing entry ids. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlYearEndResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
         };
     };
     governanceListRFCs: {

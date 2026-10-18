@@ -186,7 +186,7 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 			}
 			entry, err := s.ledger.PostEntry(ctx, gl.PostingInput{
 				EntryDate: day, Memo: fmt.Sprintf("Till %s: session %s", strings.ReplaceAll(string(m.Kind), "_", " "), sessionID),
-				Source: gl.SourceAdjustment, SourceRefID: &m.ID, PostedBy: actorOrSystem(actor), Legs: movementLegs(m),
+				Source: gl.SourceAdjustment, SourceRefID: &m.ID, BranchID: m.BranchID, PostedBy: actorOrSystem(actor), Legs: movementLegs(m),
 			})
 			if err != nil {
 				return ledgerRefusal(err, "failed to post the movement")

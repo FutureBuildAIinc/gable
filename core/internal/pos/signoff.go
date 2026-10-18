@@ -88,7 +88,10 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 			overShort = int64(*session.OverShort)
 		}
 		if s.ledger != nil && overShort != 0 {
-			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
+			if session.BranchID == nil {
+				return fmt.Errorf("the till session names no branch: its over/short cannot post")
+			}
+			glID, err := s.ledger.PostTillOverShort(ctx, *session.BranchID, sessionID, overShort)
 			if err != nil {
 				return ledgerRefusal(err, "failed to post the drawer variance")
 			}

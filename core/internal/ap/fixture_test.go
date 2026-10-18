@@ -316,10 +316,19 @@ func (f *fixture) glReverse(entry string) resp {
 	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
 }
 
-// glVoidEntry runs the GL void route on an entry.
+// glVoidEntry marks an entry VOID to exercise AP's legacy voided-chain guards
+// now that the GL void route refuses non-MANUAL and already-reversed entries.
 func (f *fixture) glVoidEntry(entry string) resp {
 	f.t.Helper()
-	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	if r.status == http.StatusBadRequest {
+		if _, err := f.db.Pool.Exec(context.Background(),
+			`UPDATE gl_journal_entries SET status = 'VOID', updated_at = NOW() WHERE id = $1 AND status = 'POSTED'`, entry); err != nil {
+			f.t.Fatal(err)
+		}
+		r.status = http.StatusOK
+	}
+	return r
 }
 
 // glEntryOf is the bill's linked entry id.

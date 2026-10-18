@@ -108,7 +108,7 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	fx := &Effects{}
 	payID := id
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.ReceivedOn, Memo: "Payment " + number, Source: gl.SourcePayment,
-		SourceRefID: &payID, Currency: in.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
+		SourceRefID: &payID, BranchID: in.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
 			{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
 			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents},
 		}})
@@ -270,11 +270,22 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	for _, p := range plans {
 		inv, l := p.inv, p.line
 		appID := uuid.New()
+		payBranch := pay.BranchID
+		invBranch := inv.BranchID
+		legs := []gl.Leg{
+			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents},
+			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents},
+		}
+		if payBranch != invBranch {
+			legs = []gl.Leg{
+				{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents, BranchID: &payBranch},
+				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Credit: l.AmountCents, BranchID: &payBranch},
+				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Debit: l.AmountCents, BranchID: &invBranch},
+				{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
+			}
+		}
 		entry, err := s.post(ctx, gl.PostingInput{EntryDate: on, Memo: fmt.Sprintf("Payment %s applied to %s", pay.Number, inv.Number),
-			Source: gl.SourcePayment, SourceRefID: &appID, Currency: pay.Currency, PostedBy: actor, Legs: []gl.Leg{
-				{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents},
-				{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents},
-			}})
+			Source: gl.SourcePayment, SourceRefID: &appID, BranchID: inv.BranchID, Currency: pay.Currency, PostedBy: actor, Legs: legs})
 		if err != nil {
 			return err
 		}
@@ -292,7 +303,7 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 		if l.DiscountCents > 0 {
 			dID := uuid.New()
 			dEntry, err := s.post(ctx, gl.PostingInput{EntryDate: on, Memo: fmt.Sprintf("Early pay discount on %s", inv.Number),
-				Source: gl.SourcePayment, SourceRefID: &dID, Currency: pay.Currency, PostedBy: actor, Legs: []gl.Leg{
+				Source: gl.SourcePayment, SourceRefID: &dID, BranchID: inv.BranchID, Currency: pay.Currency, PostedBy: actor, Legs: []gl.Leg{
 					{AccountCode: gl.AccountCodeSalesDiscounts, Description: "Sales Discounts", Debit: l.DiscountCents},
 					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.DiscountCents},
 				}})
@@ -330,8 +341,10 @@ type ApplyCreditMemoIn struct {
 	Actor  string
 }
 
-// ApplyCreditMemo uses a memo's open credit on invoices: no ledger entry (both
-// sides are in 1020) and no subledger row.
+// ApplyCreditMemo uses a memo's open credit on invoices: no ledger entry when
+// both sides share a branch (both sit in 1020 on that branch), or a balanced
+// per-branch entry moving 1020 when the memo and invoice belong to different
+// branches, and no subledger row.
 func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*Effects, error) {
 	if err := s.requireTx(ctx); err != nil {
 		return nil, err
@@ -406,8 +419,28 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	for _, l := range in.Lines {
 		inv := byID[l.InvoiceID]
 		appID := uuid.New()
+		var entry *uuid.UUID
+		if m.BranchID != inv.BranchID {
+			memoBranch := m.BranchID
+			invBranch := inv.BranchID
+			var err error
+			entry, err = s.post(ctx, gl.PostingInput{
+				EntryDate: in.On, Memo: fmt.Sprintf("Credit memo %s applied to %s", m.Number, inv.Number),
+				Source: gl.SourceCreditMemo, SourceRefID: &appID, BranchID: inv.BranchID, Currency: m.Currency, PostedBy: in.Actor,
+				Legs: []gl.Leg{
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: l.AmountCents, BranchID: &memoBranch},
+					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Credit: l.AmountCents, BranchID: &memoBranch},
+					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Debit: l.AmountCents, BranchID: &invBranch},
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			fx.entry(entry)
+		}
 		if err := s.insertApplication(ctx, &appRow{ID: appID, CustomerID: m.CustomerID, InvoiceID: inv.ID, ActID: act, Currency: m.Currency,
-			Kind: KindCreditMemo, CreditMemoID: &memoID, Amount: l.AmountCents}, in.On, in.Actor, nil, nil); err != nil {
+			Kind: KindCreditMemo, CreditMemoID: &memoID, Amount: l.AmountCents}, in.On, in.Actor, nil, entry); err != nil {
 			return nil, err
 		}
 		fx.ApplicationIDs = append(fx.ApplicationIDs, appID)
@@ -464,7 +497,7 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 	}
 	appID := uuid.New()
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Write off " + inv.Number, Source: gl.SourceWriteOff,
-		SourceRefID: &appID, Currency: inv.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
+		SourceRefID: &appID, BranchID: inv.BranchID, Currency: inv.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
 			{AccountCode: gl.AccountCodeBadDebt, Description: "Bad Debt Expense", Debit: in.AmountCents},
 			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: in.AmountCents},
 		}})
@@ -627,11 +660,22 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 					contra, source = gl.AccountCodeBadDebt, gl.SourceWriteOff
 				}
 				id := a.ID
+				legs := []gl.Leg{
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount},
+					{AccountCode: contra, Description: "Reversal", Credit: a.Amount},
+				}
+				if a.Kind == KindPayment && r.payment != nil && r.payment.BranchID != uuid.Nil && inv.BranchID != uuid.Nil && r.payment.BranchID != inv.BranchID {
+					payBranch := r.payment.BranchID
+					invBranch := inv.BranchID
+					legs = []gl.Leg{
+						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount, BranchID: &invBranch},
+						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Credit: a.Amount, BranchID: &invBranch},
+						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Debit: a.Amount, BranchID: &payBranch},
+						{AccountCode: contra, Description: "Reversal", Credit: a.Amount, BranchID: &payBranch},
+					}
+				}
 				rev, err = s.post(ctx, gl.PostingInput{EntryDate: on, Memo: "Reversal of an application to " + inv.Number, Source: source,
-					SourceRefID: &id, Currency: a.Currency, PostedBy: actor, Legs: []gl.Leg{
-						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount},
-						{AccountCode: contra, Description: "Reversal", Credit: a.Amount},
-					}})
+					SourceRefID: &id, BranchID: inv.BranchID, Currency: a.Currency, PostedBy: actor, Legs: legs})
 			}
 			if err != nil {
 				return err
@@ -640,6 +684,14 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 			if err := s.subledger(ctx, fx, a.CustomerID, a.Currency, TransactionTypeReversal, a.Amount, a.ID, sourceApplication,
 				"Reversal of an application to "+inv.Number); err != nil {
 				return err
+			}
+		case KindCreditMemo:
+			if a.GLEntryID != nil {
+				rev, err = s.reverseEntry(ctx, gl.ReversalInput{EntryID: *a.GLEntryID, EntryDate: on, Currency: a.Currency, Reason: reason, PostedBy: actor})
+				if err != nil {
+					return err
+				}
+				fx.entry(rev)
 			}
 		}
 		if _, err := s.ex(ctx).Exec(ctx, `
@@ -782,7 +834,7 @@ func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, 
 	remaining := pay.Unapplied + r.paymentAdd
 	payID := pay.ID
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Void of payment " + pay.Number, Source: gl.SourcePayment,
-		SourceRefID: &payID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
+		SourceRefID: &payID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
 			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: remaining},
 			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: remaining},
 		}})
@@ -838,7 +890,7 @@ func (s *Service) RefundPayment(ctx context.Context, in RefundPaymentIn) (uuid.U
 	fx := &Effects{}
 	refundID := uuid.New()
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Refund of payment " + pay.Number, Source: gl.SourcePayment,
-		SourceRefID: &refundID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
+		SourceRefID: &refundID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
 			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: in.AmountCents},
 			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
 		}})
@@ -898,7 +950,7 @@ func (s *Service) RefundCreditMemo(ctx context.Context, in RefundCreditMemoIn) (
 	}
 	refundID := uuid.New()
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Refund of credit memo " + m.Number, Source: gl.SourceCreditMemo,
-		SourceRefID: &refundID, Currency: m.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
+		SourceRefID: &refundID, BranchID: m.BranchID, Currency: m.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
 			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.AmountCents},
 			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
 		}})

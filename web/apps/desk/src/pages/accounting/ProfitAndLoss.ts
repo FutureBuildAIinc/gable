@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import '../../components/ui/gable-date-field.ts';
+import './branch-scope.ts';
+import './gl-detail.ts';
+import { branchContext } from '../../services/BranchContext';
+import { loadFailure } from './load-failure';
 import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
-import { formatStatementCents, statementAmountClasses } from './statement-format';
+import { formatStatementCents, statementAmountClasses, previousPeriod } from './statement-format';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchProfitAndLoss } from '../../services/GLService';
 import type { ProfitAndLossReport, AccountLineItem } from '../../types/gl';
@@ -24,6 +28,10 @@ export class ProfitAndLoss extends LitElement {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     })();
     @state() private endDate = todayDay();
+    /** The branch id the books are cut to, empty for the consolidated view. */
+    @state() private scope = branchContext.currentId ?? '';
+    @state() private compare = false;
+    @state() private drill: { id: string; label: string } | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -33,10 +41,13 @@ export class ProfitAndLoss extends LitElement {
     private async _load() {
         this.loading = true;
         try {
-            this.report = await fetchProfitAndLoss(this.startDate, this.endDate);
+            const prev = this.compare ? previousPeriod(this.startDate, this.endDate) : null;
+            this.report = await fetchProfitAndLoss(
+                this.startDate, this.endDate, this.scope || undefined, prev?.start, prev?.end,
+            );
         } catch (err) {
             console.error(err);
-            ToastService.show('Failed to load Profit & Loss report', 'error');
+            ToastService.show(loadFailure(err, 'Profit & Loss report'), 'error');
         } finally {
             this.loading = false;
         }
@@ -47,24 +58,33 @@ export class ProfitAndLoss extends LitElement {
         window.print();
     }
 
+    private get _columns() {
+        return this.report?.comparison ? 4 : 3;
+    }
+
     private _renderAccountLines(items: AccountLineItem[]) {
         if (!items || items.length === 0) {
             return html`
                 <tr class="border-b border-white/5">
-                    <td colspan="3" class="px-4 py-2 text-zinc-500 italic pl-8">No accounts</td>
+                    <td colspan=${this._columns} class="px-4 py-2 text-zinc-500 italic pl-8">No accounts</td>
                 </tr>
             `;
         }
         return items.map(item => html`
-            <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+            <tr
+                class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                title="Show the ledger lines"
+                @click=${() => { this.drill = { id: item.account_id, label: `${item.account_code} ${item.account_name}` }; }}
+            >
                 <td class="px-4 py-2.5 font-mono text-emerald-400 pl-8">${item.account_code}</td>
                 <td class="px-4 py-2.5 text-white">${item.account_name}</td>
                 <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${formatStatementCents(item.amount)}</td>
+                ${this.report?.comparison ? html`<td></td>` : nothing}
             </tr>
         `);
     }
 
-    private _renderSubtotalRow(label: string, amount: number, highlight = false) {
+    private _renderSubtotalRow(label: string, amount: number, highlight = false, previous?: number) {
         return html`
             <tr class="border-b border-white/10 ${highlight ? 'bg-white/[0.03]' : ''}">
                 <td colspan="2" class="px-4 py-2.5 text-right font-semibold text-sm ${highlight ? 'text-white' : 'text-zinc-400'}">
@@ -73,6 +93,11 @@ export class ProfitAndLoss extends LitElement {
                 <td class="px-4 py-2.5 text-right font-mono font-semibold ${highlight ? 'text-lg' : 'text-sm'} ${statementAmountClasses(amount)} border-t border-white/10">
                     ${formatStatementCents(amount)}
                 </td>
+                ${previous !== undefined ? html`
+                    <td class="px-4 py-2.5 text-right font-mono font-semibold ${highlight ? 'text-lg' : 'text-sm'} ${statementAmountClasses(previous)} border-t border-white/10">
+                        ${formatStatementCents(previous)}
+                    </td>
+                ` : nothing}
             </tr>
         `;
     }
@@ -92,6 +117,10 @@ export class ProfitAndLoss extends LitElement {
                         </p>
                     </div>
                     <div class="flex items-center gap-3">
+                        <gable-branch-scope
+                            .value=${this.scope}
+                            @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this.drill = null; this._load(); }}
+                        ></gable-branch-scope>
                         <label class="text-sm text-zinc-400">From:</label>
                         <gable-date-field
                             label="From"
@@ -104,6 +133,13 @@ export class ProfitAndLoss extends LitElement {
                             .value=${this.endDate}
                             @change=${(e: Event) => { this.endDate = (e.target as GableDateField).value; }}
                         ></gable-date-field>
+                        <button
+                            @click=${() => { this.compare = !this.compare; this._load(); }}
+                            aria-pressed=${this.compare ? 'true' : 'false'}
+                            class="px-4 py-2 border rounded-lg text-sm font-medium transition-colors ${this.compare ? 'bg-gable-green/10 text-gable-green border-gable-green/30' : 'text-zinc-400 border-white/10 hover:text-white hover:bg-white/5'}"
+                        >
+                            Compare to previous period
+                        </button>
                         <button
                             @click=${() => this._load()}
                             class="px-4 py-2 bg-gable-green/10 text-gable-green border border-gable-green/30 rounded-lg text-sm font-medium hover:bg-gable-green/20 transition-colors"
@@ -168,38 +204,44 @@ export class ProfitAndLoss extends LitElement {
                                         <th class="text-left px-4 py-3 font-medium w-24">Code</th>
                                         <th class="text-left px-4 py-3 font-medium">Account</th>
                                         <th class="text-right px-4 py-3 font-medium w-48">Amount</th>
+                                        ${report.comparison ? html`
+                                            <th class="text-right px-4 py-3 font-medium w-48">
+                                                Previous period
+                                                <span class="block text-xs font-normal text-zinc-500">${report.comparison.start_date} to ${report.comparison.end_date}</span>
+                                            </th>
+                                        ` : nothing}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <!-- Revenue Section -->
                                     <tr class="bg-white/[0.02]">
-                                        <td colspan="3" class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-emerald-400">
+                                        <td colspan=${this._columns} class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-emerald-400">
                                             Revenue
                                         </td>
                                     </tr>
                                     ${this._renderAccountLines(report.revenue)}
-                                    ${this._renderSubtotalRow('Total Revenue', report.total_revenue)}
+                                    ${this._renderSubtotalRow('Total Revenue', report.total_revenue, false, report.comparison?.total_revenue)}
 
                                     <!-- COGS Section -->
                                     <tr class="bg-white/[0.02]">
-                                        <td colspan="3" class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-amber-400">
+                                        <td colspan=${this._columns} class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-amber-400">
                                             Cost of Goods Sold
                                         </td>
                                     </tr>
                                     ${this._renderAccountLines(report.cogs)}
-                                    ${this._renderSubtotalRow('Total COGS', report.total_cogs)}
+                                    ${this._renderSubtotalRow('Total COGS', report.total_cogs, false, report.comparison?.total_cogs)}
 
                                     <!-- Gross Profit Line -->
-                                    ${this._renderSubtotalRow('Gross Profit', report.gross_profit, true)}
+                                    ${this._renderSubtotalRow('Gross Profit', report.gross_profit, true, report.comparison?.gross_profit)}
 
                                     <!-- Operating Expenses Section -->
                                     <tr class="bg-white/[0.02]">
-                                        <td colspan="3" class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-red-400">
+                                        <td colspan=${this._columns} class="px-4 py-2 font-bold text-xs uppercase tracking-wider text-red-400">
                                             Operating Expenses
                                         </td>
                                     </tr>
                                     ${this._renderAccountLines(report.expenses)}
-                                    ${this._renderSubtotalRow('Total Operating Expenses', report.total_expenses)}
+                                    ${this._renderSubtotalRow('Total Operating Expenses', report.total_expenses, false, report.comparison?.total_expenses)}
 
                                     <!-- Net Income Line -->
                                     <tr class="font-bold ${report.net_income >= 0 ? 'bg-emerald-500/5' : 'bg-red-500/5'}">
@@ -209,11 +251,28 @@ export class ProfitAndLoss extends LitElement {
                                         <td class="px-4 py-3 text-right font-mono text-lg ${statementAmountClasses(report.net_income)}">
                                             ${formatStatementCents(report.net_income)}
                                         </td>
+                                        ${report.comparison ? html`
+                                            <td class="px-4 py-3 text-right font-mono text-lg ${statementAmountClasses(report.comparison.net_income)}">
+                                                ${formatStatementCents(report.comparison.net_income)}
+                                            </td>
+                                        ` : nothing}
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
+
+                    ${this.drill ? html`
+                        <gable-gl-detail
+                            account-id=${this.drill.id}
+                            account-label=${this.drill.label}
+                            from=${report.start_date}
+                            to=${report.end_date}
+                            branch-id=${this.scope}
+                            currency=${report.currency ?? ''}
+                            @gl-detail-close=${() => { this.drill = null; }}
+                        ></gable-gl-detail>
+                    ` : nothing}
                 `}
             </div>
         `;

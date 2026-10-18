@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,20 +27,28 @@ type Repository interface {
 	CreateJournalEntry(ctx context.Context, entry *JournalEntry) error
 	GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error)
 	ListJournalEntries(ctx context.Context) ([]JournalEntry, error)
+	ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error)
+	ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error)
+	ListJournalEntriesPage(ctx context.Context, limit, beforeNumber int, f branchFilter) ([]JournalEntry, error)
 	UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error
 
-	// Trial Balance
-	GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error)
+	// Trial Balance and statements (branch.go)
+	GetTrialBalanceFor(ctx context.Context, asOfDate time.Time, currency string, f branchFilter) ([]TrialBalanceRow, error)
+	GetAccountActivityFor(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string, f branchFilter) ([]AccountActivity, error)
+	GetGLDetail(ctx context.Context, accountID uuid.UUID, from, to time.Time, f branchFilter) ([]GLDetailRow, error)
+	YearActivityByBranch(ctx context.Context, year int, currency string) (map[uuid.UUID][]AccountActivity, error)
+	BranchBusinessDay(ctx context.Context, branch *uuid.UUID) (time.Time, error)
+	ControlBalance(ctx context.Context, code string, asOf time.Time, currency string, f branchFilter) (int64, error)
+	ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error)
+	APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error)
 	DefaultCurrency(ctx context.Context) (string, error)
-
-	// Financial Statements
-	GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]AccountActivity, error)
 
 	// Fiscal Periods
 	ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error)
+	GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error)
 	GetFiscalPeriodForDate(ctx context.Context, date time.Time) (*FiscalPeriod, error)
 	CloseFiscalPeriod(ctx context.Context, id uuid.UUID, closedBy string) error
-	ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error
+	ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reason, reopenedBy string) error
 	IsReversed(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
@@ -98,30 +107,31 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''), a.parent_id,
 		       a.normal_balance, a.is_active, COALESCE(a.description, ''),
 		       COALESCE(
-		           (SELECT SUM(l.debit) - SUM(l.credit)
+		           (SELECT ROUND((SUM(l.debit) - SUM(l.credit)) * 100)
 		            FROM gl_journal_lines l
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-		            WHERE l.account_id = a.id AND e.status = 'POSTED'), 0
-		       ) AS balance,
-		       a.created_at, a.updated_at
+		            WHERE l.account_id = a.id AND e.status = 'POSTED'
+		              AND e.currency = COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
+		              AND ` + middleware.Wall("l", 2, 3) + `), 0
+		       )::bigint AS balance,
+		       a.created_at, a.updated_at, a.revision
 		FROM gl_accounts a
 		WHERE a.id = $1
 	`
 	var a GLAccount
-	var balanceFloat float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
+	f := filterFor(ctx, nil)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, f.Branch, f.Grants).Scan(
 		&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 		&a.NormalBalance, &a.IsActive, &a.Description,
-		&balanceFloat,
-		&a.CreatedAt, &a.UpdatedAt,
+		&a.Balance,
+		&a.CreatedAt, &a.UpdatedAt, &a.Revision,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("account not found")
+			return nil, ErrAccountNotFound
 		}
 		return nil, fmt.Errorf("failed to get account: %w", err)
 	}
-	a.Balance = money.DollarsToCents(balanceFloat)
 	return &a, nil
 }
 
@@ -150,20 +160,28 @@ func (r *PostgresRepository) CreateAccount(ctx context.Context, acct *GLAccount)
 
 func (r *PostgresRepository) UpdateAccount(ctx context.Context, acct *GLAccount) error {
 	acct.UpdatedAt = time.Now()
+	// Revision guarded (ADR 0001): the update lands only on the revision the
+	// caller read, and the row's revision moves on; a lost race answers
+	// ErrStaleRevision rather than overwriting the winner.
 	query := `
 		UPDATE gl_accounts
 		SET code = $1, name = $2, type = $3, subtype = $4, parent_id = $5,
-		    normal_balance = $6, is_active = $7, description = $8, updated_at = $9
-		WHERE id = $10
+		    normal_balance = $6, is_active = $7, description = $8, updated_at = $9,
+		    revision = revision + 1
+		WHERE id = $10 AND revision = $11
 	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		acct.Code, acct.Name, acct.Type, acct.Subtype, acct.ParentID,
 		acct.NormalBalance, acct.IsActive, acct.Description, acct.UpdatedAt,
-		acct.ID,
+		acct.ID, acct.Revision,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update account: %w", err)
 	}
+	if tag.RowsAffected() == 0 {
+		return ErrStaleRevision
+	}
+	acct.Revision++
 	return nil
 }
 
@@ -186,21 +204,21 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 		ex := r.db.GetExecutor(ctx)
 
 		queryHeader := `
-			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-				COALESCE(NULLIF($11::text, ''), (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'))
+			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+				COALESCE(NULLIF($12::text, ''), (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'))
 			RETURNING entry_number
 		`
 		if err := ex.QueryRow(ctx, queryHeader,
-			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
+			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID, entry.BranchID,
 			entry.Status, entry.PostedBy, entry.ReversesEntryID, entry.CreatedAt, entry.UpdatedAt, entry.Currency,
 		).Scan(&entry.EntryNumber); err != nil {
 			return fmt.Errorf("failed to insert journal entry: %w", err)
 		}
 
 		queryLine := `
-			INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 		`
 		for i := range entry.Lines {
 			line := &entry.Lines[i]
@@ -208,12 +226,16 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 				line.ID = uuid.New()
 			}
 			line.EntryID = entry.ID
+			lineBranch := line.BranchID
+			if lineBranch == uuid.Nil {
+				lineBranch = entry.BranchID
+			}
 
 			debitFloat := float64(line.Debit) / 100.0
 			creditFloat := float64(line.Credit) / 100.0
 
 			if _, err := ex.Exec(ctx, queryLine,
-				line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat,
+				line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat, lineBranch,
 			); err != nil {
 				return fmt.Errorf("failed to insert journal line: %w", err)
 			}
@@ -225,25 +247,25 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 
 func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error) {
 	queryHeader := `
-		SELECT id, entry_number, entry_date, memo, source, source_ref_id, status, COALESCE(posted_by, ''), created_at, updated_at, currency
+		SELECT id, entry_number, entry_date, memo, source, source_ref_id, branch_id, status, COALESCE(posted_by, ''), reverses_entry_id, created_at, updated_at, currency
 		FROM gl_journal_entries
 		WHERE id = $1
 	`
 	var e JournalEntry
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source,
-		&e.SourceRefID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
+		&e.SourceRefID, &e.BranchID, &e.Status, &e.PostedBy, &e.ReversesEntryID, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("journal entry not found")
+			return nil, ErrEntryNotFound
 		}
 		return nil, fmt.Errorf("failed to get journal entry: %w", err)
 	}
 
 	queryLines := `
 		SELECT l.id, l.journal_entry_id, l.account_id, COALESCE(a.code, ''), COALESCE(a.name, ''),
-		       COALESCE(l.description, ''), l.debit, l.credit
+		       COALESCE(l.description, ''), l.branch_id, l.debit, l.credit
 		FROM gl_journal_lines l
 		LEFT JOIN gl_accounts a ON a.id = l.account_id
 		WHERE l.journal_entry_id = $1
@@ -259,7 +281,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 	for rows.Next() {
 		var l JournalLine
 		var debitFloat, creditFloat float64
-		if err := rows.Scan(&l.ID, &l.EntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.Description, &debitFloat, &creditFloat); err != nil {
+		if err := rows.Scan(&l.ID, &l.EntryID, &l.AccountID, &l.AccountCode, &l.AccountName, &l.Description, &l.BranchID, &debitFloat, &creditFloat); err != nil {
 			return nil, fmt.Errorf("failed to scan journal line: %w", err)
 		}
 		l.Debit = money.DollarsToCents(debitFloat)
@@ -276,7 +298,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 
 func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalEntry, error) {
 	query := `
-		SELECT e.id, e.entry_number, e.entry_date, e.memo, e.source, e.source_ref_id,
+		SELECT e.id, e.entry_number, e.entry_date, e.memo, e.source, e.source_ref_id, e.branch_id,
 		       e.status, COALESCE(e.posted_by, ''),
 		       COALESCE((SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_debit,
 		       COALESCE((SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id), 0) AS total_credit,
@@ -295,7 +317,7 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 		var e JournalEntry
 		var totalDebitFloat, totalCreditFloat float64
 		if err := rows.Scan(
-			&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source, &e.SourceRefID,
+			&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source, &e.SourceRefID, &e.BranchID,
 			&e.Status, &e.PostedBy,
 			&totalDebitFloat, &totalCreditFloat,
 			&e.CreatedAt, &e.UpdatedAt,
@@ -310,10 +332,17 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 }
 
 func (r *PostgresRepository) UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error {
-	query := `UPDATE gl_journal_entries SET status = $1, posted_by = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, postedBy, id)
+	fromStatus := StatusDraft
+	if status == StatusVoid {
+		fromStatus = StatusPosted
+	}
+	query := `UPDATE gl_journal_entries SET status = $1, posted_by = COALESCE(NULLIF($2, ''), posted_by), updated_at = NOW() WHERE id = $3 AND status = $4`
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, postedBy, id, fromStatus)
 	if err != nil {
 		return fmt.Errorf("failed to update journal entry status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("journal entry %s is not in %s status", id, fromStatus)
 	}
 	return nil
 }
@@ -329,42 +358,6 @@ func (r *PostgresRepository) DefaultCurrency(ctx context.Context) (string, error
 		return "", fmt.Errorf("failed to read the default currency: %w", err)
 	}
 	return code, nil
-}
-
-// GetTrialBalance sums the posted lines per account AND per currency, never
-// across two currencies (ADR 0005 4.2): currency "" returns every currency's
-// rows (each row names its currency), a code returns that currency alone.
-func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
-	query := `
-		SELECT a.id, a.code, a.name, a.type, e.currency,
-		       COALESCE(SUM(l.debit), 0) AS total_debit,
-		       COALESCE(SUM(l.credit), 0) AS total_credit
-		FROM gl_accounts a
-		JOIN gl_journal_lines l ON l.account_id = a.id
-		JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED' AND e.entry_date <= $1
-		WHERE a.is_active = TRUE AND ($2 = '' OR e.currency = $2)
-		GROUP BY a.id, a.code, a.name, a.type, e.currency
-		HAVING COALESCE(SUM(l.debit), 0) > 0 OR COALESCE(SUM(l.credit), 0) > 0
-		ORDER BY e.currency, a.code
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get trial balance: %w", err)
-	}
-	defer rows.Close()
-
-	var result []TrialBalanceRow
-	for rows.Next() {
-		var row TrialBalanceRow
-		var debitFloat, creditFloat float64
-		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &row.Currency, &debitFloat, &creditFloat); err != nil {
-			return nil, fmt.Errorf("failed to scan trial balance row: %w", err)
-		}
-		row.Debit = money.DollarsToCents(debitFloat)
-		row.Credit = money.DollarsToCents(creditFloat)
-		result = append(result, row)
-	}
-	return result, nil
 }
 
 // --- Financial Statements ---
@@ -385,50 +378,12 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 // lands once per contra/unnatural-balance account and breaks
 // assets = liabilities + equity outright. Keeping the arithmetic in numeric
 // removes the failure mode rather than rounding it more carefully.
-func (r *PostgresRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]AccountActivity, error) {
-	// Deliberately not filtered on a.is_active: an account that is deactivated
-	// while still carrying a balance does not stop being part of the entity's
-	// financial position, and excluding it would silently unbalance the sheet.
-	query := `
-		SELECT a.id, a.code, a.name, a.type, COALESCE(a.subtype, ''),
-		       COALESCE(ROUND(SUM(l.debit) * 100), 0)::bigint  AS debit_cents,
-		       COALESCE(ROUND(SUM(l.credit) * 100), 0)::bigint AS credit_cents
-		FROM gl_accounts a
-		JOIN gl_journal_lines l ON l.account_id = a.id
-		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-		WHERE e.status = 'POSTED'
-		  AND e.entry_date <= $1
-		  AND ($2::date IS NULL OR e.entry_date >= $2::date)
-		  AND a.type = ANY($3)
-		  AND e.currency = $4
-		GROUP BY a.id, a.code, a.name, a.type, a.subtype
-		ORDER BY a.code
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes, currency)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get account activity: %w", err)
-	}
-	defer rows.Close()
-
-	var result []AccountActivity
-	for rows.Next() {
-		var row AccountActivity
-		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &row.AccountSubtype, &row.Debit, &row.Credit); err != nil {
-			return nil, fmt.Errorf("failed to scan account activity row: %w", err)
-		}
-		result = append(result, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read account activity: %w", err)
-	}
-	return result, nil
-}
-
 // --- Fiscal Periods ---
 
 func (r *PostgresRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error) {
 	query := `
-		SELECT id, name, start_date, end_date, status, closed_at, COALESCE(closed_by, ''), created_at
+		SELECT id, name, start_date, end_date, status, closed_at, COALESCE(closed_by, ''), created_at,
+		       revision, COALESCE(reopen_reason, ''), COALESCE(reopened_by, ''), reopened_at
 		FROM gl_fiscal_periods
 		ORDER BY start_date
 	`
@@ -441,12 +396,65 @@ func (r *PostgresRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPer
 	var periods []FiscalPeriod
 	for rows.Next() {
 		var p FiscalPeriod
-		if err := rows.Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt,
+			&p.Revision, &p.ReopenReason, &p.ReopenedBy, &p.ReopenedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan fiscal period: %w", err)
 		}
 		periods = append(periods, p)
 	}
-	return periods, nil
+	return periods, rows.Err()
+}
+
+// ListFiscalPeriodsPage answers one page of the fiscal periods, earliest
+// start first, keyed on the start date; a zero afterStart is the first page.
+func (r *PostgresRepository) ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error) {
+	query := `
+		SELECT id, name, start_date, end_date, status, closed_at, COALESCE(closed_by, ''), created_at,
+		       revision, COALESCE(reopen_reason, ''), COALESCE(reopened_by, ''), reopened_at
+		FROM gl_fiscal_periods
+		WHERE ($1::date IS NULL OR start_date > $1::date)
+		ORDER BY start_date
+		LIMIT $2
+	`
+	var after *time.Time
+	if !afterStart.IsZero() {
+		after = &afterStart
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list fiscal periods: %w", err)
+	}
+	defer rows.Close()
+
+	periods := []FiscalPeriod{}
+	for rows.Next() {
+		var p FiscalPeriod
+		if err := rows.Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt,
+			&p.Revision, &p.ReopenReason, &p.ReopenedBy, &p.ReopenedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan fiscal period: %w", err)
+		}
+		periods = append(periods, p)
+	}
+	return periods, rows.Err()
+}
+
+func (r *PostgresRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error) {
+	query := `
+		SELECT id, name, start_date, end_date, status, closed_at, COALESCE(closed_by, ''), created_at,
+		       revision, COALESCE(reopen_reason, ''), COALESCE(reopened_by, ''), reopened_at
+		FROM gl_fiscal_periods
+		WHERE id = $1
+	`
+	var p FiscalPeriod
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt,
+		&p.Revision, &p.ReopenReason, &p.ReopenedBy, &p.ReopenedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrPeriodNotFound
+		}
+		return nil, fmt.Errorf("failed to get fiscal period: %w", err)
+	}
+	return &p, nil
 }
 
 func (r *PostgresRepository) GetFiscalPeriodForDate(ctx context.Context, date time.Time) (*FiscalPeriod, error) {
@@ -468,27 +476,28 @@ func (r *PostgresRepository) GetFiscalPeriodForDate(ctx context.Context, date ti
 }
 
 func (r *PostgresRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, closedBy string) error {
-	query := `UPDATE gl_fiscal_periods SET status = 'CLOSED', closed_at = NOW(), closed_by = $1 WHERE id = $2 AND status = 'OPEN'`
+	query := `UPDATE gl_fiscal_periods SET status = 'CLOSED', closed_at = NOW(), closed_by = $1, revision = revision + 1 WHERE id = $2 AND status = 'OPEN'`
 	result, err := r.db.GetExecutor(ctx).Exec(ctx, query, closedBy, id)
 	if err != nil {
 		return fmt.Errorf("failed to close fiscal period: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("fiscal period not found or already closed")
+		return ErrPeriodState
 	}
 	return nil
 }
 
-// ReopenFiscalPeriod flips a CLOSED period back to OPEN (correction path).
-func (r *PostgresRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error {
+// ReopenFiscalPeriod flips a CLOSED period back to OPEN, recording the
+// reason it was reopened (correction path).
+func (r *PostgresRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reason, reopenedBy string) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
-		`UPDATE gl_fiscal_periods SET status='OPEN', closed_at=NULL, closed_by=$1 WHERE id=$2 AND status='CLOSED'`,
-		reopenedBy, id)
+		`UPDATE gl_fiscal_periods SET status='OPEN', closed_at=NULL, closed_by=NULL, reopen_reason=$1, reopened_by=$2, reopened_at=NOW(), revision=revision+1 WHERE id=$3 AND status='CLOSED'`,
+		reason, reopenedBy, id)
 	if err != nil {
 		return fmt.Errorf("failed to reopen fiscal period: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("fiscal period not found or not closed")
+		return ErrPeriodState
 	}
 	return nil
 }

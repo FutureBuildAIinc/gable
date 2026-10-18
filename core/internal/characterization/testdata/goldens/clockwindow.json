@@ -353,60 +353,167 @@
           "account_id": "<id-12>",
           "account_name": "Cash",
           "account_type": "ASSET",
+          "branch_id": "<id-13>",
           "credit": 5000,
           "currency": "USD",
-          "debit": 31359485
+          "debit": 17055158
+        },
+        {
+          "account_code": "1010",
+          "account_id": "<id-12>",
+          "account_name": "Cash",
+          "account_type": "ASSET",
+          "branch_id": "<id-14>",
+          "credit": 0,
+          "currency": "USD",
+          "debit": 5908199
+        },
+        {
+          "account_code": "1010",
+          "account_id": "<id-12>",
+          "account_name": "Cash",
+          "account_type": "ASSET",
+          "branch_id": "<id-15>",
+          "credit": 0,
+          "currency": "USD",
+          "debit": 8396128
         },
         {
           "account_code": "1020",
-          "account_id": "<id-13>",
+          "account_id": "<id-16>",
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
-          "credit": 31386204,
+          "branch_id": "<id-13>",
+          "credit": 17040877,
           "currency": "USD",
-          "debit": 40371714
+          "debit": 21129134
+        },
+        {
+          "account_code": "1020",
+          "account_id": "<id-16>",
+          "account_name": "Accounts Receivable",
+          "account_type": "ASSET",
+          "branch_id": "<id-14>",
+          "credit": 5949199,
+          "currency": "USD",
+          "debit": 7119104
+        },
+        {
+          "account_code": "1020",
+          "account_id": "<id-16>",
+          "account_name": "Accounts Receivable",
+          "account_type": "ASSET",
+          "branch_id": "<id-15>",
+          "credit": 8396128,
+          "currency": "USD",
+          "debit": 12123476
         },
         {
           "account_code": "1030",
-          "account_id": "<id-14>",
+          "account_id": "<id-17>",
           "account_name": "Inventory",
           "account_type": "ASSET",
+          "branch_id": "<id-13>",
           "credit": 2100,
           "currency": "USD",
           "debit": 0
         },
         {
           "account_code": "2020",
-          "account_id": "<id-15>",
+          "account_id": "<id-18>",
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
-          "credit": 4325193,
+          "branch_id": "<id-13>",
+          "credit": 2263490,
+          "currency": "USD",
+          "debit": 0
+        },
+        {
+          "account_code": "2020",
+          "account_id": "<id-18>",
+          "account_name": "Sales Tax Payable",
+          "account_type": "LIABILITY",
+          "branch_id": "<id-14>",
+          "credit": 762760,
+          "currency": "USD",
+          "debit": 0
+        },
+        {
+          "account_code": "2020",
+          "account_id": "<id-18>",
+          "account_name": "Sales Tax Payable",
+          "account_type": "LIABILITY",
+          "branch_id": "<id-15>",
+          "credit": 1298943,
           "currency": "USD",
           "debit": 0
         },
         {
           "account_code": "2200",
-          "account_id": "<id-16>",
+          "account_id": "<id-19>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
-          "credit": 31352629,
+          "branch_id": "<id-13>",
+          "credit": 17048302,
           "currency": "USD",
-          "debit": 31350129
+          "debit": 17045802
+        },
+        {
+          "account_code": "2200",
+          "account_id": "<id-19>",
+          "account_name": "Customer Deposits",
+          "account_type": "LIABILITY",
+          "branch_id": "<id-14>",
+          "credit": 5908199,
+          "currency": "USD",
+          "debit": 5908199
+        },
+        {
+          "account_code": "2200",
+          "account_id": "<id-19>",
+          "account_name": "Customer Deposits",
+          "account_type": "LIABILITY",
+          "branch_id": "<id-15>",
+          "credit": 8396128,
+          "currency": "USD",
+          "debit": 8396128
         },
         {
           "account_code": "4010",
-          "account_id": "<id-17>",
+          "account_id": "<id-20>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 36053377,
+          "branch_id": "<id-13>",
+          "credit": 18872500,
           "currency": "USD",
-          "debit": 41075
+          "debit": 75
+        },
+        {
+          "account_code": "4010",
+          "account_id": "<id-20>",
+          "account_name": "Sales Revenue",
+          "account_type": "REVENUE",
+          "branch_id": "<id-14>",
+          "credit": 6356344,
+          "currency": "USD",
+          "debit": 41000
+        },
+        {
+          "account_code": "4010",
+          "account_id": "<id-20>",
+          "account_name": "Sales Revenue",
+          "account_type": "REVENUE",
+          "branch_id": "<id-15>",
+          "credit": 10824533,
+          "currency": "USD",
+          "debit": 0
         },
         {
           "account_code": "5010",
-          "account_id": "<id-18>",
+          "account_id": "<id-21>",
           "account_name": "Cost of Goods Sold",
           "account_type": "EXPENSE",
+          "branch_id": "<id-13>",
           "credit": 0,
           "currency": "USD",
           "debit": 2100
@@ -427,7 +534,7 @@
         "cogs": [
           {
             "account_code": "5010",
-            "account_id": "<id-18>",
+            "account_id": "<id-21>",
             "account_name": "Cost of Goods Sold",
             "amount": 2100
           }
@@ -440,7 +547,7 @@
         "revenue": [
           {
             "account_code": "4010",
-            "account_id": "<id-17>",
+            "account_id": "<id-20>",
             "account_name": "Sales Revenue",
             "amount": 8252179
           }
@@ -472,13 +579,13 @@
           },
           {
             "account_code": "1020",
-            "account_id": "<id-13>",
+            "account_id": "<id-16>",
             "account_name": "Accounts Receivable",
             "amount": 8985510
           },
           {
             "account_code": "1030",
-            "account_id": "<id-14>",
+            "account_id": "<id-17>",
             "account_name": "Inventory",
             "amount": -2100
           }
@@ -488,13 +595,13 @@
         "liabilities": [
           {
             "account_code": "2020",
-            "account_id": "<id-15>",
+            "account_id": "<id-18>",
             "account_name": "Sales Tax Payable",
             "amount": 4325193
           },
           {
             "account_code": "2200",
-            "account_id": "<id-16>",
+            "account_id": "<id-19>",
             "account_name": "Customer Deposits",
             "amount": 2500
           }

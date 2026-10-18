@@ -592,31 +592,31 @@ func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *LegacyInvoice) e
 
 // PostCashSaleToGL posts a POS cash sale to the GL (DR Cash / CR Sales
 // Revenue), best effort AFTER the sale commits (C2-5 moves it inside).
-func (s *Service) PostCashSaleToGL(ctx context.Context, posTxID string, amountCents int64) error {
+func (s *Service) PostCashSaleToGL(ctx context.Context, branchID uuid.UUID, posTxID string, amountCents int64) error {
 	if s.gl == nil {
 		return nil
 	}
-	return s.gl.SyncCashSale(ctx, posTxID, amountCents)
+	return s.gl.SyncCashSale(ctx, branchID, posTxID, amountCents)
 }
 
 // PostCashReturnToGL posts a POS cash refund to the GL (DR Sales Revenue / CR
 // Cash), the mirror of PostCashSaleToGL; best effort, after the return
 // commits. It returns the entry ID (uuid.Nil when no GL is wired).
-func (s *Service) PostCashReturnToGL(ctx context.Context, returnID string, amountCents int64) (uuid.UUID, error) {
+func (s *Service) PostCashReturnToGL(ctx context.Context, branchID uuid.UUID, returnID string, amountCents int64) (uuid.UUID, error) {
 	if s.gl == nil {
 		return uuid.Nil, nil
 	}
-	return s.gl.SyncCashReturn(ctx, returnID, amountCents)
+	return s.gl.SyncCashReturn(ctx, branchID, returnID, amountCents)
 }
 
 // PostAccountReturnToLedger books a POS return refunded as store credit: the
 // GL leg (DR Sales Revenue / CR Accounts Receivable) plus a balance-reducing
 // subledger row through the AR core. Best-effort at the POS layer (C2-5 turns
 // it into a credit memo). Returns the GL entry ID (uuid.Nil when no GL is wired).
-func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, returnID uuid.UUID, amountCents int64) (uuid.UUID, error) {
+func (s *Service) PostAccountReturnToLedger(ctx context.Context, branchID uuid.UUID, customerID, returnID uuid.UUID, amountCents int64) (uuid.UUID, error) {
 	var glEntryID uuid.UUID
 	if s.gl != nil {
-		id, err := s.gl.SyncAccountReturn(ctx, returnID.String(), amountCents)
+		id, err := s.gl.SyncAccountReturn(ctx, branchID, returnID.String(), amountCents)
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("failed to post account return to GL: %w", err)
 		}

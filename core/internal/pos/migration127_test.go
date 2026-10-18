@@ -102,11 +102,14 @@ func TestMigration127_DownRefusesWhileADrawerWaitsAndReversesCleanly(t *testing.
 
 	// an account a journal line uses stays through the down
 	if _, err := c.Exec(ctx, `
-		INSERT INTO gl_journal_entries (id, entry_date, memo, source, status, posted_by)
-		VALUES ('00000000-0000-0000-0000-0000000000e1', CURRENT_DATE, 'mig127', 'MANUAL', 'POSTED', 'test');
-		INSERT INTO gl_journal_lines (journal_entry_id, account_id, debit, credit)
-		VALUES ('00000000-0000-0000-0000-0000000000e1', (SELECT id FROM gl_accounts WHERE code = '1015'), 1, 0),
-		       ('00000000-0000-0000-0000-0000000000e1', (SELECT id FROM gl_accounts WHERE code = '1010'), 0, 1);`); err != nil {
+		INSERT INTO gl_journal_entries (id, entry_date, memo, source, branch_id, status, posted_by)
+		VALUES ('00000000-0000-0000-0000-0000000000e1', CURRENT_DATE, 'mig127', 'MANUAL',
+		        (SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1), 'POSTED', 'test');
+		INSERT INTO gl_journal_lines (journal_entry_id, account_id, branch_id, debit, credit)
+		VALUES ('00000000-0000-0000-0000-0000000000e1', (SELECT id FROM gl_accounts WHERE code = '1015'),
+		        (SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1), 1, 0),
+		       ('00000000-0000-0000-0000-0000000000e1', (SELECT id FROM gl_accounts WHERE code = '1010'),
+		        (SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1), 0, 1);`); err != nil {
 		t.Fatalf("seed the journal line: %v", err)
 	}
 	if _, err := c.Exec(ctx, downSQL); err != nil {

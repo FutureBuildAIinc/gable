@@ -6,10 +6,14 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
 import '../../components/ui/gable-date-field.ts';
+import './branch-scope.ts';
+import './gl-detail.ts';
+import { branchContext } from '../../services/BranchContext';
 import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchTrialBalance } from '../../services/GLService';
+import { loadFailure } from './load-failure';
 import type { TrialBalanceRow } from '../../types/gl';
 import { BarChart3 } from 'lucide';
 
@@ -29,6 +33,25 @@ const TYPE_COLORS: Record<string, string> = {
     EXPENSE: 'text-amber-400',
 };
 
+/**
+ * The trial balance answers one row per account and branch; the page shows one
+ * row per account, the sum of the branches it was asked for.
+ */
+function sumByAccount(rows: TrialBalanceRow[]): TrialBalanceRow[] {
+    const byAccount = new Map<string, TrialBalanceRow>();
+    for (const r of rows) {
+        const key = `${r.account_id}|${r.currency ?? ''}`;
+        const seen = byAccount.get(key);
+        if (seen) {
+            seen.debit += r.debit;
+            seen.credit += r.credit;
+        } else {
+            byAccount.set(key, { ...r });
+        }
+    }
+    return [...byAccount.values()];
+}
+
 @customElement('gable-trial-balance')
 export class TrialBalance extends LitElement {
     createRenderRoot() { return this; }
@@ -36,6 +59,9 @@ export class TrialBalance extends LitElement {
     @state() private rows: TrialBalanceRow[] = [];
     @state() private loading = true;
     @state() private asOfDate = todayDay();
+    /** The branch id the books are cut to, empty for the consolidated view. */
+    @state() private scope = branchContext.currentId ?? '';
+    @state() private drill: { id: string; label: string; currency: string } | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -45,22 +71,28 @@ export class TrialBalance extends LitElement {
     private async _load() {
         this.loading = true;
         try {
-            const data = await fetchTrialBalance(this.asOfDate);
-            this.rows = data || [];
+            const data = await fetchTrialBalance(this.asOfDate, this.scope || undefined);
+            this.rows = sumByAccount(data || []);
         } catch (err) {
             console.error(err);
-            ToastService.show('Failed to load trial balance', 'error');
+            ToastService.show(loadFailure(err, 'trial balance'), 'error');
         } finally {
             this.loading = false;
         }
     }
 
+    private get _visibleRows(): TrialBalanceRow[] {
+        const cur = this.rows[0]?.currency ?? '';
+        if (!cur) return this.rows;
+        return this.rows.filter(r => (r.currency ?? '') === cur);
+    }
+
     private get _totalDebit() {
-        return this.rows.reduce((sum, r) => sum + r.debit, 0);
+        return this._visibleRows.reduce((sum, r) => sum + r.debit, 0);
     }
 
     private get _totalCredit() {
-        return this.rows.reduce((sum, r) => sum + r.credit, 0);
+        return this._visibleRows.reduce((sum, r) => sum + r.credit, 0);
     }
 
     private get _isBalanced() {
@@ -69,7 +101,7 @@ export class TrialBalance extends LitElement {
 
     render() {
         const groupedRows = TYPE_ORDER.reduce((acc, type) => {
-            acc[type] = this.rows.filter(r => r.account_type === type);
+            acc[type] = this._visibleRows.filter(r => r.account_type === type);
             return acc;
         }, {} as Record<string, TrialBalanceRow[]>);
 
@@ -85,6 +117,10 @@ export class TrialBalance extends LitElement {
                         </p>
                     </div>
                     <div class="flex items-center gap-3">
+                        <gable-branch-scope
+                            .value=${this.scope}
+                            @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this.drill = null; this._load(); }}
+                        ></gable-branch-scope>
                         <label class="text-sm text-zinc-400">As of:</label>
                         <gable-date-field
                             label="As of"
@@ -159,7 +195,11 @@ export class TrialBalance extends LitElement {
                                                 </td>
                                             </tr>
                                             ${typeRows.map(row => html`
-                                                <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                                                <tr
+                                                    class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                                                    title="Show the ledger lines"
+                                                    @click=${() => { this.drill = { id: row.account_id, label: `${row.account_code} ${row.account_name}`, currency: row.currency ?? '' }; }}
+                                                >
                                                     <td class="px-4 py-2.5 font-mono text-emerald-400 pl-8">${row.account_code}</td>
                                                     <td class="px-4 py-2.5 text-white">${row.account_name}</td>
                                                     <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${row.debit > 0 ? formatCents(row.debit) : '--'}</td>
@@ -196,6 +236,18 @@ export class TrialBalance extends LitElement {
                         </div>
                     </div>
                 `}
+
+                ${this.drill ? html`
+                    <gable-gl-detail
+                        account-id=${this.drill.id}
+                        account-label=${this.drill.label}
+                        from="1900-01-01"
+                        to=${this.asOfDate}
+                        branch-id=${this.scope}
+                        currency=${this.drill.currency}
+                        @gl-detail-close=${() => { this.drill = null; }}
+                    ></gable-gl-detail>
+                ` : nothing}
             </div>
         `;
     }

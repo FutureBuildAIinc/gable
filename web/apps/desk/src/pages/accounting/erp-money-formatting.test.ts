@@ -47,13 +47,18 @@ function serve(routes: Record<string, unknown>) {
   )
 }
 
+/** A cursor page, the shape every GL list answers. */
+function page<T>(items: T[]) {
+  return { items, next_cursor: null, limit: 50 }
+}
+
 /** Money-looking substrings in the rendered page, in document order. */
 function amounts(el: LitElement): string[] {
   return text(el).match(/\$[\d,]+\.\d{2}(?: DR)?/g) ?? []
 }
 
 function tbRow(code: string, name: string, debit: number, credit: number): TrialBalanceRow {
-  return { account_id: `a-${code}`, account_code: code, account_name: name, account_type: 'ASSET', debit, credit }
+  return { account_id: `a-${code}`, account_code: code, account_name: name, account_type: 'ASSET', branch_id: 'b-1', debit, credit }
 }
 
 beforeEach(() => {
@@ -141,6 +146,7 @@ describe('journal entries', () => {
       entry_date: '2026-08-11',
       memo: 'Invoice INV-77 posted to AR',
       source: 'INVOICE',
+      branch_id: 'b-1',
       status: 'POSTED',
       posted_by: 'system',
       total_debit: total,
@@ -151,7 +157,7 @@ describe('journal entries', () => {
   }
 
   it('converts the entry total from cents to dollars', async () => {
-    serve({ '/gl/journal-entries': [entry(738_807)], '/gl/accounts': [] })
+    serve({ '/gl/journal-entries': page([entry(738_807)]), '/gl/accounts': page([]) })
     const el = await mountAsync<LitElement>('gable-journal-entries')
 
     expect(text(el)).toContain('$7,388.07')
@@ -161,7 +167,7 @@ describe('journal entries', () => {
   it('renders a zero-value entry as $0.00', async () => {
     // Unlike TrialBalance, this copy has no dash case — same money, two
     // renderings, one page apart.
-    serve({ '/gl/journal-entries': [entry(0)], '/gl/accounts': [] })
+    serve({ '/gl/journal-entries': page([entry(0)]), '/gl/accounts': page([]) })
     const el = await mountAsync<LitElement>('gable-journal-entries')
 
     expect(text(el)).toContain('$0.00')
@@ -188,13 +194,13 @@ describe('journal entries', () => {
   }
 
   it('takes the draft entry in dollars, matching what it posts', async () => {
-    // The read side of this page is cents (`total_debit` above) but the write
-    // side is dollars: `gl/handler.go:218` declares `Debit float64` and
-    // `:253` does `int64(math.Round(lr.Debit * 100))`. The running total is
-    // therefore correctly *not* divided by 100 — it is already dollars. Pinning
-    // this so nobody "fixes" the asymmetry by adding a /100 that would post a
+    // The read side of this page is cents (`total_debit` above) and so is the
+    // wire (`debit_cents`, `credit_cents`), but the operator types dollars.
+    // The running total is therefore correctly *not* divided by 100 -- it is
+    // already dollars -- and the request converts it to cents once. Pinning
+    // this so nobody "fixes" the asymmetry by adding a /100 that would show a
     // journal entry 100x too small.
-    serve({ '/gl/journal-entries': [], '/gl/accounts': [] })
+    serve({ '/gl/journal-entries': page([]), '/gl/accounts': page([]) })
     const el = await mountAsync<LitElement>('gable-journal-entries')
     await draft(el, '73.88', '73.88')
 
@@ -204,7 +210,7 @@ describe('journal entries', () => {
   })
 
   it('refuses to post an unbalanced entry', async () => {
-    serve({ '/gl/journal-entries': [], '/gl/accounts': [] })
+    serve({ '/gl/journal-entries': page([]), '/gl/accounts': page([]) })
     const el = await mountAsync<LitElement>('gable-journal-entries')
     await draft(el, '73.88', '73.87')
 
@@ -218,7 +224,7 @@ describe('journal entries', () => {
   it('refuses to post an entry that balances at zero', async () => {
     // 0 = 0 is arithmetically balanced and financially meaningless; the
     // backend rejects it too (gl/service.go:120).
-    serve({ '/gl/journal-entries': [], '/gl/accounts': [] })
+    serve({ '/gl/journal-entries': page([]), '/gl/accounts': page([]) })
     const el = await mountAsync<LitElement>('gable-journal-entries')
     await draft(el, '0', '0')
 

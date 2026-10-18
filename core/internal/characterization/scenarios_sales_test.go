@@ -192,10 +192,10 @@ func glGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/gl/journal-entries",
 				body: map[string]any{
-					"memo": "golden characterisation entry", "entry_date": "{today}",
+					"memo": "golden characterisation entry", "entry_date": "{today}", "branch_id": "{branch}",
 					"lines": []map[string]any{
-						{"account_id": "{glAccount}", "description": "golden debit", "debit": 100.0, "credit": 0},
-						{"account_id": "{glAccount2}", "description": "golden credit", "debit": 0, "credit": 100.0},
+						{"account_id": "{glAccount}", "description": "golden debit", "debit_cents": 10000, "credit_cents": 0},
+						{"account_id": "{glAccount2}", "description": "golden credit", "debit_cents": 0, "credit_cents": 10000},
 					},
 				},
 				extract: map[string]string{"myJournalEntry": "/id"},
@@ -204,9 +204,9 @@ func glGroups() []groupDef {
 			// Unbalanced entry: the service's own 400.
 			{name: "gl.journal_entry.unbalanced", method: "POST", path: "/api/v1/gl/journal-entries",
 				body: map[string]any{
-					"memo": "unbalanced", "entry_date": "{today}",
+					"memo": "unbalanced", "entry_date": "{today}", "branch_id": "{branch}",
 					"lines": []map[string]any{
-						{"account_id": "{glAccount}", "description": "debit only", "debit": 50.0, "credit": 0},
+						{"account_id": "{glAccount}", "description": "debit only", "debit_cents": 5000, "credit_cents": 0},
 					},
 				}},
 		},

@@ -17,6 +17,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -25,13 +26,14 @@ func TestPostEntry(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	branch := testBranch(t, db)
 	ref := uuid.New()
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, ref)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, ref)
 	})
 	in := func(legs ...gl.Leg) gl.PostingInput {
-		return gl.PostingInput{EntryDate: time.Now(), Memo: "postentry test", Source: gl.SourceInvoice, SourceRefID: &ref, Currency: "CAD", Legs: legs}
+		return gl.PostingInput{EntryDate: time.Now(), Memo: "postentry test", Source: gl.SourceInvoice, SourceRefID: &ref, BranchID: branch, Currency: "CAD", Legs: legs}
 	}
 	balanced := in(
 		gl.Leg{AccountCode: gl.AccountCodeAR, Debit: 1100},
@@ -119,6 +121,7 @@ func TestPostReversal(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	branch := testBranch(t, db)
 	ref := uuid.New()
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1 OR reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1))`, ref)
@@ -128,7 +131,7 @@ func TestPostReversal(t *testing.T) {
 	var orig uuid.UUID
 	day := time.Date(2031, 3, 4, 0, 0, 0, 0, time.UTC)
 	err := db.RunInTx(ctx, func(ctx context.Context) error {
-		e, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "orig", Source: gl.SourceInvoice, SourceRefID: &ref, Currency: "CAD",
+		e, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "orig", Source: gl.SourceInvoice, SourceRefID: &ref, BranchID: branch, Currency: "CAD",
 			Legs: []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1000}, {AccountCode: gl.AccountCodeSalesTax, Credit: 100}}})
 		if err != nil {
 			return err
@@ -184,6 +187,7 @@ func TestPostEntryMapsOnlyTheReversalIndexViolation(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	branch := testBranch(t, db)
 	ref := uuid.New()
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, ref)
@@ -197,7 +201,7 @@ func TestPostEntryMapsOnlyTheReversalIndexViolation(t *testing.T) {
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DROP INDEX IF EXISTS `+index) })
 	entry := func(memo string, reverses *uuid.UUID) gl.PostingInput {
 		return gl.PostingInput{EntryDate: time.Now(), Memo: memo, Source: gl.SourceInvoice, SourceRefID: &ref,
-			Currency: "USD", ReversesEntryID: reverses,
+			BranchID: branch, Currency: "USD", ReversesEntryID: reverses,
 			Legs: []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1100}}}
 	}
 	err := db.RunInTx(ctx, func(ctx context.Context) error {
@@ -222,3 +226,96 @@ func TestPostEntryMapsOnlyTheReversalIndexViolation(t *testing.T) {
 		t.Errorf("a violation of %s mapped to ErrAlreadyReversed: only ux_gl_entry_single_reversal may map there, and this loss is not a reversal race", index)
 	}
 }
+
+// testBranch answers the default branch the migrations seed, the branch the
+// database backed tests post under.
+func testBranch(t *testing.T, db *database.DB) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// RULE (migration 125): a posting that names no branch is refused
+// (ErrNoBranch) rather than silently posted on the default branch.
+func TestPostEntryRefusesNoBranch(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	legs := []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1100}}
+	if _, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "no branch", Source: gl.SourceManual, Currency: "CAD", Legs: legs}); !errors.Is(err, gl.ErrNoTransaction) {
+		t.Fatalf("PostEntry with no transaction = %v, want ErrNoTransaction (checked before the branch)", err)
+	}
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		if _, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "no branch", Source: gl.SourceManual, Currency: "CAD", Legs: legs}); !errors.Is(err, gl.ErrNoBranch) {
+			t.Errorf("PostEntry with no branch = %v, want ErrNoBranch", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// RULE: a posting or journal entry whose lines override BranchID must balance
+// debits and credits within each branch, not only across the whole entry.
+func TestPostEntryAndCreateJournalEntryEnforcePerBranchBalance(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	branchA := testBranch(t, db)
+	branchB := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, $2)`, branchB, "M6-PB-"+branchB.String()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE memo IN ('cross-branch unbalanced', 'createje cross-branch unbalanced'))`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE memo IN ('cross-branch unbalanced', 'createje cross-branch unbalanced')`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, branchB)
+	})
+
+	// 1. PostEntry refuses when overall debits == credits (1000 == 1000) but branchA is +1000 DR and branchB is +1000 CR.
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		_, err := svc.PostEntry(ctx, gl.PostingInput{
+			EntryDate: time.Now(), Memo: "cross-branch unbalanced", Source: gl.SourceManual,
+			BranchID: branchA, Currency: "USD",
+			Legs: []gl.Leg{
+				{AccountCode: gl.AccountCodeAR, Debit: 1000, BranchID: &branchA},
+				{AccountCode: gl.AccountCodeRevenue, Credit: 1000, BranchID: &branchB},
+			},
+		})
+		if !errors.Is(err, gl.ErrUnbalanced) {
+			t.Errorf("PostEntry with per-branch imbalance = %v, want ErrUnbalanced", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. CreateJournalEntry refuses with ErrUnbalanced when per-branch lines do not balance.
+	var arID, revID uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeAR).Scan(&arID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeRevenue).Scan(&revID); err != nil {
+		t.Fatal(err)
+	}
+	je := &gl.JournalEntry{
+		EntryDate: time.Now(),
+		Memo:      "createje cross-branch unbalanced",
+		Source:    gl.SourceManual,
+		BranchID:  branchA,
+		Lines: []gl.JournalLine{
+			{AccountID: arID, Debit: 1000, BranchID: branchA},
+			{AccountID: revID, Credit: 1000, BranchID: branchB},
+		},
+	}
+	if err := svc.CreateJournalEntry(ctx, je); !errors.Is(err, gl.ErrUnbalanced) {
+		t.Errorf("CreateJournalEntry with per-branch imbalance = %v, want ErrUnbalanced", err)
+	}
+}
+

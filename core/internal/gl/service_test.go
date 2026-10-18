@@ -62,6 +62,53 @@ func (m *MockRepository) UpdateAccount(ctx context.Context, acct *GLAccount) err
 	return nil
 }
 
+func (m *MockRepository) GetTrialBalanceFor(ctx context.Context, asOfDate time.Time, currency string, f branchFilter) ([]TrialBalanceRow, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) GetAccountActivityFor(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string, f branchFilter) ([]AccountActivity, error) {
+	return m.GetAccountActivity(ctx, start, end, accountTypes, currency)
+}
+
+func (m *MockRepository) GetGLDetail(ctx context.Context, accountID uuid.UUID, from, to time.Time, f branchFilter) ([]GLDetailRow, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) YearActivityByBranch(ctx context.Context, year int, currency string) (map[uuid.UUID][]AccountActivity, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) BranchBusinessDay(ctx context.Context, branch *uuid.UUID) (time.Time, error) {
+	return time.Now(), nil
+}
+
+func (m *MockRepository) ControlBalance(ctx context.Context, code string, asOf time.Time, currency string, f branchFilter) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) ARSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) APSubledgerCents(ctx context.Context, f branchFilter, currency string) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) GetFiscalPeriod(ctx context.Context, id uuid.UUID) (*FiscalPeriod, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) ListFiscalPeriodsPage(ctx context.Context, limit int, afterStart time.Time) ([]FiscalPeriod, error) {
+	return m.ListFiscalPeriods(ctx)
+}
+func (m *MockRepository) ListAccountsPage(ctx context.Context, limit int, afterCode string) ([]GLAccount, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) ListJournalEntriesPage(ctx context.Context, limit, beforeNumber int, f branchFilter) ([]JournalEntry, error) {
+	return nil, nil
+}
+
 func (m *MockRepository) CreateJournalEntry(ctx context.Context, entry *JournalEntry) error {
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
@@ -143,7 +190,7 @@ func (m *MockRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, cl
 	return nil
 }
 
-func (m *MockRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error {
+func (m *MockRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reason, reopenedBy string) error {
 	for i := range m.periods {
 		if m.periods[i].ID == id {
 			m.periods[i].Status = PeriodOpen
@@ -191,6 +238,7 @@ func TestCreateJournalEntry_Balanced(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Test sale",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},      // $100.00 DR
 			{AccountID: revenueID, Debit: 0, Credit: 10000}, // $100.00 CR
@@ -217,6 +265,7 @@ func TestCreateJournalEntry_Unbalanced(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Unbalanced entry",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},     // $100.00 DR
 			{AccountID: revenueID, Debit: 0, Credit: 5000}, // $50.00 CR — UNBALANCED!
@@ -236,6 +285,7 @@ func TestCreateJournalEntry_TooFewLines(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Now(),
 		Memo:      "Single line entry",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 10000, Credit: 0},
 		},
@@ -255,6 +305,7 @@ func TestPostJournalEntry_Success(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), // In open period
 		Memo:      "Postable entry",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},
@@ -284,6 +335,7 @@ func TestPostJournalEntry_ClosedPeriod(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2025, 12, 15, 0, 0, 0, 0, time.UTC), // In CLOSED period
 		Memo:      "Should fail",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},
@@ -304,7 +356,7 @@ func TestSyncInvoice_CreatesEntry(t *testing.T) {
 	svc, repo := newTestService()
 
 	invoiceID := uuid.New().String()
-	err := svc.SyncInvoice(context.Background(), invoiceID, 25000) // $250.00
+	err := svc.SyncInvoice(context.Background(), testBranchID, invoiceID, 25000) // $250.00
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -344,6 +396,7 @@ func TestVoidJournalEntry(t *testing.T) {
 	entry := &JournalEntry{
 		EntryDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		Memo:      "To be voided",
+		BranchID:  testBranchID,
 		Lines: []JournalLine{
 			{AccountID: arID, Debit: 5000, Credit: 0},
 			{AccountID: revenueID, Debit: 0, Credit: 5000},

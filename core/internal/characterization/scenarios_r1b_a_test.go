@@ -662,12 +662,14 @@ func r1bAAPGroups() []groupDef {
 
 func r1bAGLGroups() []groupDef {
 	periodIdx := r1bACurrentPeriodIndex()
+	ifMatch := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	entryBody := func(memo string, amount float64) map[string]any {
+		cents := int64(amount * 100)
 		return map[string]any{
-			"memo": memo, "entry_date": "{today}",
+			"memo": memo, "entry_date": "{today}", "branch_id": "{branch}",
 			"lines": []map[string]any{
-				{"account_id": "{glAccount}", "description": memo + " debit", "debit": amount, "credit": 0},
-				{"account_id": "{glAccount2}", "description": memo + " credit", "debit": 0, "credit": amount},
+				{"account_id": "{glAccount}", "description": memo + " debit", "debit_cents": cents, "credit_cents": 0},
+				{"account_id": "{glAccount2}", "description": memo + " credit", "debit_cents": 0, "credit_cents": cents},
 			},
 		}
 	}
@@ -691,19 +693,24 @@ func r1bAGLGroups() []groupDef {
 			{name: "gl.account.create.missing_name", method: "POST", path: "/api/v1/gl/accounts",
 				body: map[string]any{"code": "1992", "type": "ASSET"}},
 			{name: "gl.account.create.bad_body", method: "POST", path: "/api/v1/gl/accounts", body: "not-an-object"},
+			{name: "gl.account.update.no_if_match", method: "PUT", path: "/api/v1/gl/accounts/{a_glaccount}",
+				body: map[string]any{"code": "1990", "name": "Golden Clearing Renamed", "type": "ASSET", "normal_balance": "DEBIT"}},
 			{
-				name:   "gl.account.update",
-				method: "PUT",
-				path:   "/api/v1/gl/accounts/{a_glaccount}",
+				name:    "gl.account.update",
+				method:  "PUT",
+				path:    "/api/v1/gl/accounts/{a_glaccount}",
+				headers: ifMatch("1"),
 				body: map[string]any{
 					"code": "1990", "name": "Golden Clearing Renamed", "type": "ASSET", "subtype": "Other",
 					"normal_balance": "DEBIT", "description": "renamed",
 				},
 			},
+			{name: "gl.account.update.stale", method: "PUT", path: "/api/v1/gl/accounts/{a_glaccount}", headers: ifMatch("1"),
+				body: map[string]any{"code": "1990", "name": "Golden Clearing Stale", "type": "ASSET", "normal_balance": "DEBIT"}},
 			{name: "gl.account.update.bad_id", method: "PUT", path: "/api/v1/gl/accounts/not-a-uuid",
 				body: map[string]any{"code": "1", "name": "x", "type": "ASSET"}},
 			{name: "gl.account.update.bad_body", method: "PUT", path: "/api/v1/gl/accounts/{a_glaccount}", body: "not-an-object"},
-			{name: "gl.account.update.not_found", method: "PUT", path: "/api/v1/gl/accounts/" + r1bAMissingID,
+			{name: "gl.account.update.not_found", method: "PUT", path: "/api/v1/gl/accounts/" + r1bAMissingID, headers: ifMatch("1"),
 				body: map[string]any{"code": "1993", "name": "Ghost", "type": "ASSET", "normal_balance": "DEBIT"}},
 
 			// Journal entries: one reversed, one voided, each created and posted here.
@@ -741,20 +748,28 @@ func r1bAGLGroups() []groupDef {
 				name:    "gl.fiscal_periods.list",
 				method:  "GET",
 				path:    "/api/v1/gl/fiscal-periods",
-				extract: map[string]string{"a_period": fmt.Sprintf("/%d/id", periodIdx)},
+				extract: map[string]string{"a_period": fmt.Sprintf("/items/%d/id", periodIdx)},
 				// The migration seeds twelve monthly periods of the current
 				// calendar year: the name carries the year and the dates move
 				// with the calendar, so they mask; ids, status and order pin.
 				maskFields: map[string]any{"name": "<period>", "start_date": "<period-start>", "end_date": "<period-end>"},
 			},
-			{name: "gl.fiscal_period.close", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close"},
-			{name: "gl.fiscal_period.close.again", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close"},
-			{name: "gl.fiscal_period.close.not_found", method: "POST", path: "/api/v1/gl/fiscal-periods/" + r1bAMissingID + "/close"},
-			{name: "gl.fiscal_period.close.bad_id", method: "POST", path: "/api/v1/gl/fiscal-periods/not-a-uuid/close"},
-			{name: "gl.fiscal_period.reopen", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen"},
-			{name: "gl.fiscal_period.reopen.not_closed", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen"},
-			{name: "gl.fiscal_period.reopen.not_found", method: "POST", path: "/api/v1/gl/fiscal-periods/" + r1bAMissingID + "/reopen"},
-			{name: "gl.fiscal_period.reopen.bad_id", method: "POST", path: "/api/v1/gl/fiscal-periods/not-a-uuid/reopen"},
+			{name: "gl.fiscal_period.close.no_if_match", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close"},
+			{name: "gl.fiscal_period.close", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close", headers: ifMatch("1")},
+			{name: "gl.fiscal_period.close.stale", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close", headers: ifMatch("1")},
+			{name: "gl.fiscal_period.close.again", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/close", headers: ifMatch("2")},
+			{name: "gl.fiscal_period.close.not_found", method: "POST", path: "/api/v1/gl/fiscal-periods/" + r1bAMissingID + "/close", headers: ifMatch("1")},
+			{name: "gl.fiscal_period.close.bad_id", method: "POST", path: "/api/v1/gl/fiscal-periods/not-a-uuid/close", headers: ifMatch("1")},
+			{name: "gl.fiscal_period.reopen.no_reason", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("2"),
+				body: map[string]any{}},
+			{name: "gl.fiscal_period.reopen", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("2"),
+				body: map[string]any{"reason": "golden correction"}},
+			{name: "gl.fiscal_period.reopen.not_closed", method: "POST", path: "/api/v1/gl/fiscal-periods/{a_period}/reopen", headers: ifMatch("3"),
+				body: map[string]any{"reason": "golden correction"}},
+			{name: "gl.fiscal_period.reopen.not_found", method: "POST", path: "/api/v1/gl/fiscal-periods/" + r1bAMissingID + "/reopen", headers: ifMatch("1"),
+				body: map[string]any{"reason": "golden correction"}},
+			{name: "gl.fiscal_period.reopen.bad_id", method: "POST", path: "/api/v1/gl/fiscal-periods/not-a-uuid/reopen", headers: ifMatch("1"),
+				body: map[string]any{"reason": "golden correction"}},
 		},
 	}}
 }

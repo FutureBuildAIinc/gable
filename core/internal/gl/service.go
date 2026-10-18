@@ -13,6 +13,10 @@ import (
 
 	"github.com/gablelbm/gable/internal/domain"
 	integration "github.com/gablelbm/gable/internal/integrations/gl"
+	"github.com/gablelbm/gable/pkg/actor"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +25,13 @@ type Service struct {
 	repo    Repository
 	adapter integration.GLAdapter
 	logger  *slog.Logger
+
+	// db, audit and events ride the period and year end mutations: every act
+	// opens one transaction and carries its audit row and outbox event in it
+	// (ADR 0003). Any may be nil; the act then runs without that side.
+	db     *database.DB
+	audit  *audit.Logger
+	events *outbox.Writer
 }
 
 // NewService creates a new GL Service. The adapter is optional (nil if no external GL sync).
@@ -92,31 +103,80 @@ func (s *Service) CreateAccount(ctx context.Context, acct *GLAccount) error {
 	}
 	if acct.NormalBalance == "" {
 		acct.NormalBalance = defaultNormalBalance(acct.Type)
+	} else if acct.NormalBalance != NormalDebit && acct.NormalBalance != NormalCredit {
+		return fmt.Errorf("invalid normal balance: %s", acct.NormalBalance)
 	}
 	acct.IsActive = true
-	return s.repo.CreateAccount(ctx, acct)
+	return s.runTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.CreateAccount(ctx, acct); err != nil {
+			return err
+		}
+		return s.record(ctx, "gl.account_created", "gl_account", acct.ID, nil,
+			map[string]any{"code": acct.Code, "name": acct.Name, "type": acct.Type})
+	})
 }
 
 func (s *Service) UpdateAccount(ctx context.Context, acct *GLAccount) error {
-	return s.repo.UpdateAccount(ctx, acct)
+	if acct.Code == "" {
+		return fmt.Errorf("account code is required")
+	}
+	if acct.Name == "" {
+		return fmt.Errorf("account name is required")
+	}
+	if !isValidAccountType(acct.Type) {
+		return fmt.Errorf("invalid account type: %s", acct.Type)
+	}
+	if acct.NormalBalance == "" {
+		acct.NormalBalance = defaultNormalBalance(acct.Type)
+	} else if acct.NormalBalance != NormalDebit && acct.NormalBalance != NormalCredit {
+		return fmt.Errorf("invalid normal balance: %s", acct.NormalBalance)
+	}
+	return s.runTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.UpdateAccount(ctx, acct); err != nil {
+			return err
+		}
+		return s.record(ctx, "gl.account_updated", "gl_account", acct.ID, nil,
+			map[string]any{"code": acct.Code, "name": acct.Name, "revision": acct.Revision})
+	})
 }
 
 // --- Journal Entry Operations ---
 
 // CreateJournalEntry creates a new journal entry, validating that it balances.
 func (s *Service) CreateJournalEntry(ctx context.Context, entry *JournalEntry) error {
+	if entry.BranchID == uuid.Nil {
+		return ErrNoBranch
+	}
 	if len(entry.Lines) < 2 {
 		return fmt.Errorf("journal entry must have at least 2 lines")
 	}
 
-	// Validate balance: total debits == total credits
+	// Validate balance: total debits == total credits overall and per branch
 	var totalDebit, totalCredit int64
+	debitByBranch := make(map[uuid.UUID]int64)
+	creditByBranch := make(map[uuid.UUID]int64)
 	for _, line := range entry.Lines {
+		b := entry.BranchID
+		if line.BranchID != uuid.Nil {
+			b = line.BranchID
+		}
 		totalDebit += line.Debit
 		totalCredit += line.Credit
+		debitByBranch[b] += line.Debit
+		creditByBranch[b] += line.Credit
 	}
 	if totalDebit != totalCredit {
-		return fmt.Errorf("journal entry is not balanced: debits (%d) != credits (%d)", totalDebit, totalCredit)
+		return fmt.Errorf("%w: journal entry is not balanced: debits (%d) != credits (%d)", ErrUnbalanced, totalDebit, totalCredit)
+	}
+	for b, d := range debitByBranch {
+		if c := creditByBranch[b]; d != c {
+			return fmt.Errorf("%w: journal entry is not balanced on branch %s: debits (%d) != credits (%d)", ErrUnbalanced, b, d, c)
+		}
+	}
+	for b, c := range creditByBranch {
+		if d := debitByBranch[b]; d != c {
+			return fmt.Errorf("%w: journal entry is not balanced on branch %s: debits (%d) != credits (%d)", ErrUnbalanced, b, d, c)
+		}
 	}
 	if totalDebit == 0 {
 		return fmt.Errorf("journal entry cannot have zero amounts")
@@ -129,7 +189,11 @@ func (s *Service) CreateJournalEntry(ctx context.Context, entry *JournalEntry) e
 		entry.Source = SourceManual
 	}
 	if entry.EntryDate.IsZero() {
-		entry.EntryDate = time.Now()
+		if day, err := s.repo.BranchBusinessDay(ctx, &entry.BranchID); err == nil && !day.IsZero() {
+			entry.EntryDate = day
+		} else {
+			entry.EntryDate = time.Now()
+		}
 	}
 
 	entry.TotalDebit = totalDebit
@@ -148,24 +212,37 @@ func (s *Service) ListJournalEntries(ctx context.Context) ([]JournalEntry, error
 
 // PostJournalEntry transitions a DRAFT entry to POSTED after validating the fiscal period is open.
 func (s *Service) PostJournalEntry(ctx context.Context, id uuid.UUID) error {
-	entry, err := s.repo.GetJournalEntry(ctx, id)
-	if err != nil {
-		return err
-	}
-	if entry.Status != StatusDraft {
-		return fmt.Errorf("can only post entries in DRAFT status (current: %s)", entry.Status)
-	}
+	return s.runTx(ctx, func(ctx context.Context) error {
+		entry, err := s.repo.GetJournalEntry(ctx, id)
+		if err != nil {
+			return err
+		}
+		if entry.Status != StatusDraft {
+			return fmt.Errorf("can only post entries in DRAFT status (current: %s)", entry.Status)
+		}
 
-	// Check fiscal period
-	period, err := s.repo.GetFiscalPeriodForDate(ctx, entry.EntryDate)
-	if err != nil {
-		return fmt.Errorf("failed to check fiscal period: %w", err)
-	}
-	if period != nil && period.Status == PeriodClosed {
-		return fmt.Errorf("cannot post to closed fiscal period: %s", period.Name)
-	}
+		// Check fiscal period
+		period, err := s.repo.GetFiscalPeriodForDate(ctx, entry.EntryDate)
+		if err != nil {
+			return fmt.Errorf("failed to check fiscal period: %w", err)
+		}
+		if period != nil && period.Status == PeriodClosed {
+			return fmt.Errorf("cannot post to closed fiscal period: %s", period.Name)
+		}
 
-	return s.repo.UpdateJournalEntryStatus(ctx, id, StatusPosted, "system")
+		postedBy := actor.FromContext(ctx).ID
+		if postedBy == "" {
+			postedBy = entry.PostedBy
+		}
+		if postedBy == "" {
+			postedBy = "system"
+		}
+		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusPosted, postedBy); err != nil {
+			return err
+		}
+		return s.record(ctx, "gl.journal_entry_posted", "gl_journal_entry", id, &entry.BranchID,
+			map[string]any{"branch_id": entry.BranchID})
+	})
 }
 
 // VoidJournalEntry marks a POSTED entry as VOID.
@@ -174,14 +251,38 @@ func (s *Service) PostJournalEntry(ctx context.Context, id uuid.UUID) error {
 // fact and should be corrected with ReverseJournalEntry (which leaves an
 // audit trail) rather than silently voided. Retained for compatibility.
 func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
-	entry, err := s.repo.GetJournalEntry(ctx, id)
-	if err != nil {
-		return err
-	}
-	if entry.Status != StatusPosted {
-		return fmt.Errorf("can only void entries in POSTED status (current: %s)", entry.Status)
-	}
-	return s.repo.UpdateJournalEntryStatus(ctx, id, StatusVoid, "")
+	return s.runTx(ctx, func(ctx context.Context) error {
+		entry, err := s.repo.GetJournalEntry(ctx, id)
+		if err != nil {
+			return err
+		}
+		if entry.Status != StatusPosted {
+			return fmt.Errorf("can only void entries in POSTED status (current: %s)", entry.Status)
+		}
+		if entry.Source != SourceManual {
+			return fmt.Errorf("can only void MANUAL journal entries (source: %s)", entry.Source)
+		}
+		if entry.ReversesEntryID != nil {
+			return fmt.Errorf("cannot void a reversal journal entry")
+		}
+		if reversed, err := s.repo.IsReversed(ctx, id); err != nil {
+			return err
+		} else if reversed {
+			return fmt.Errorf("cannot void a journal entry that has already been reversed")
+		}
+		period, err := s.repo.GetFiscalPeriodForDate(ctx, entry.EntryDate)
+		if err != nil {
+			return fmt.Errorf("failed to check fiscal period: %w", err)
+		}
+		if period != nil && period.Status == PeriodClosed {
+			return fmt.Errorf("%w: cannot void entry in closed fiscal period: %s", ErrPeriodClosed, period.Name)
+		}
+		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusVoid, entry.PostedBy); err != nil {
+			return err
+		}
+		return s.record(ctx, "gl.journal_entry_voided", "gl_journal_entry", id, &entry.BranchID,
+			map[string]any{"branch_id": entry.BranchID})
+	})
 }
 
 // ReverseJournalEntry books a net-zero reversing entry for a posted entry:
@@ -194,6 +295,17 @@ func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 // account holding both halves of one undo in different currencies (review r6
 // P2-1).
 func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason string) (uuid.UUID, error) {
+	var reversal uuid.UUID
+	err := s.runTx(ctx, func(ctx context.Context) error {
+		var err error
+		reversal, err = s.reverseJournalEntry(ctx, id, reason)
+		return err
+	})
+	return reversal, err
+}
+
+// reverseJournalEntry is ReverseJournalEntry inside its transaction.
+func (s *Service) reverseJournalEntry(ctx context.Context, id uuid.UUID, reason string) (uuid.UUID, error) {
 	orig, err := s.repo.GetJournalEntry(ctx, id)
 	if err != nil {
 		return uuid.Nil, err
@@ -210,23 +322,48 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 		return uuid.Nil, fmt.Errorf("journal entry %s has no lines to reverse", id)
 	}
 
+	entryDate, err := s.repo.BranchBusinessDay(ctx, &orig.BranchID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to read branch business day: %w", err)
+	}
+	if entryDate.IsZero() {
+		entryDate = time.Now()
+	}
+	period, err := s.repo.GetFiscalPeriodForDate(ctx, entryDate)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to check fiscal period: %w", err)
+	}
+	if period != nil && period.Status == PeriodClosed {
+		return uuid.Nil, fmt.Errorf("%w: cannot post reversal to closed fiscal period: %s", ErrPeriodClosed, period.Name)
+	}
+
+	postedBy := actor.FromContext(ctx).ID
+	if postedBy == "" {
+		postedBy = orig.PostedBy
+	}
+	if postedBy == "" {
+		postedBy = "system"
+	}
+
 	memo := fmt.Sprintf("Reversal of #%d", orig.EntryNumber)
 	if reason != "" {
 		memo += ": " + reason
 	}
 	rev := &JournalEntry{
-		EntryDate:       time.Now(),
+		EntryDate:       entryDate,
 		Memo:            memo,
 		Source:          SourceReversal,
 		SourceRefID:     &orig.ID,
+		BranchID:        orig.BranchID,
 		Status:          StatusPosted,
-		PostedBy:        "system",
+		PostedBy:        postedBy,
 		ReversesEntryID: &orig.ID,
 		Currency:        orig.Currency,
 	}
 	for _, l := range orig.Lines {
 		rev.Lines = append(rev.Lines, JournalLine{
 			AccountID:   l.AccountID,
+			BranchID:    l.BranchID,
 			Description: "Reversal: " + l.Description,
 			Debit:       l.Credit, // swap
 			Credit:      l.Debit,
@@ -235,26 +372,14 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 	if err := s.CreateJournalEntry(ctx, rev); err != nil {
 		return uuid.Nil, fmt.Errorf("failed to post reversal: %w", err)
 	}
+	if err := s.record(ctx, "gl.journal_entry_reversed", "gl_journal_entry", rev.ID, &orig.BranchID,
+		map[string]any{"reverses": orig.ID, "branch_id": orig.BranchID, "reason": reason}); err != nil {
+		return uuid.Nil, err
+	}
 	return rev.ID, nil
 }
 
-// ReopenFiscalPeriod flips a CLOSED period back to OPEN (correction path;
-// should be a controller-privileged action at the handler layer).
-func (s *Service) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID) error {
-	return s.repo.ReopenFiscalPeriod(ctx, id, "system")
-}
-
 // --- Trial Balance ---
-
-// GetTrialBalance sums per account and per currency, never across two currencies
-// (ADR 0005 4.2). currency "" answers every currency's rows, each naming its
-// currency; a code answers that currency alone.
-func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
-	if asOfDate.IsZero() {
-		asOfDate = time.Now()
-	}
-	return s.repo.GetTrialBalance(ctx, asOfDate, currency)
-}
 
 // reportCurrency settles the currency of an income statement or a balance
 // sheet: the one named, else the dealer default. A statement is always in one
@@ -273,7 +398,7 @@ const statementDateLayout = "2006-01-02"
 
 // GetProfitAndLoss assembles an income statement covering [startDate, endDate]
 // inclusive. Both dates are YYYY-MM-DD.
-func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string) (*ProfitAndLossReport, error) {
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string, branch *uuid.UUID) (*ProfitAndLossReport, error) {
 	start, err := time.Parse(statementDateLayout, startDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid start date %q: %w", startDate, err)
@@ -289,7 +414,7 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, curr
 	if currency, err = s.reportCurrency(ctx, currency); err != nil {
 		return nil, err
 	}
-	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency)
+	rows, err := s.repo.GetAccountActivityFor(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +425,7 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, curr
 
 // GetBalanceSheet assembles a statement of financial position as of asOfDate
 // (YYYY-MM-DD).
-func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string) (*BalanceSheetReport, error) {
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string, branch *uuid.UUID) (*BalanceSheetReport, error) {
 	asOf, err := time.Parse(statementDateLayout, asOfDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid as_of date %q: %w", asOfDate, err)
@@ -312,13 +437,13 @@ func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string
 	if currency, err = s.reportCurrency(ctx, currency); err != nil {
 		return nil, err
 	}
-	position, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency)
+	position, err := s.repo.GetAccountActivityFor(ctx, nil, asOf,
+		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
-	earnings, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeRevenue, AccountTypeExpense}, currency)
+	earnings, err := s.repo.GetAccountActivityFor(ctx, nil, asOf,
+		[]string{AccountTypeRevenue, AccountTypeExpense}, currency, filterFor(ctx, branch))
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +576,7 @@ func (s *Service) CloseFiscalPeriod(ctx context.Context, id uuid.UUID) error {
 
 // SyncInvoice creates a journal entry: DR Accounts Receivable / CR Sales Revenue.
 // This replaces the old stub that only forwarded to external GL.
-func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int64) error {
+func (s *Service) SyncInvoice(ctx context.Context, branchID uuid.UUID, invoiceID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(invoiceID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeAR, AccountCodeRevenue)
@@ -463,9 +588,9 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Invoice %s", invoiceID),
 		Source:      SourceInvoice,
-		SourceRefID: &sourceRefID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &sourceRefID, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue", Debit: 0, Credit: amount},
@@ -501,7 +626,7 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 }
 
 // SyncPayment creates a journal entry: DR Cash / CR Accounts Receivable.
-func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int64) error {
+func (s *Service) SyncPayment(ctx context.Context, branchID uuid.UUID, paymentID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(paymentID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeAR)
@@ -513,9 +638,9 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int6
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Payment %s", paymentID),
 		Source:      SourcePayment,
-		SourceRefID: &sourceRefID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &sourceRefID, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: 0, Credit: amount},
@@ -533,7 +658,7 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int6
 // Unlike an on-account sale there is no AR leg — the sale is paid at the till.
 // Tagged with the PAYMENT source (cash received) to satisfy the source CHECK
 // constraint. The amount is the full sale total in cents.
-func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64) error {
+func (s *Service) SyncCashSale(ctx context.Context, branchID uuid.UUID, posTxID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(posTxID)
 
 	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeRevenue)
@@ -545,9 +670,9 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Sale %s", posTxID),
 		Source:      SourcePayment,
-		SourceRefID: &sourceRefID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &sourceRefID, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue", Debit: 0, Credit: amount},
@@ -565,7 +690,7 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 // revenue and pays cash back out of the drawer. amount is the refunded total
 // in cents (positive). Tagged RETURN so refunds are filterable in the ledger.
 // Returns the journal entry ID so the return row can link back to its entry.
-func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncCashReturn(ctx context.Context, branchID uuid.UUID, refID string, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("cash return amount must be positive, got %d", amount)
 	}
@@ -580,9 +705,9 @@ func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Return %s", refID),
 		Source:      SourceReturn,
-		SourceRefID: &sourceRefID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &sourceRefID, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue (return)", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeCash], Description: "Cash refund", Debit: 0, Credit: amount},
@@ -600,7 +725,7 @@ func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64
 // of an on-account sale. No cash leaves the drawer; the customer simply owes
 // less. The balance-due subledger effect is posted separately by the caller.
 // Returns the journal entry ID so the return row can link back to its entry.
-func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncAccountReturn(ctx context.Context, branchID uuid.UUID, refID string, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("account return amount must be positive, got %d", amount)
 	}
@@ -615,9 +740,9 @@ func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount in
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("POS Return (account credit) %s", refID),
 		Source:      SourceReturn,
-		SourceRefID: &sourceRefID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &sourceRefID, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue (return)", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable (credit)", Debit: 0, Credit: amount},
@@ -634,7 +759,7 @@ func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount in
 // DR Cash / CR Customer Deposits. The deposit is a liability we hold until it
 // is applied against the customer's AR (see ApplyCustomerDeposit). Returns the
 // journal entry ID so the deposit row can link back to its ledger entry.
-func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+func (s *Service) SyncCustomerDeposit(ctx context.Context, branchID uuid.UUID, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("deposit amount must be positive, got %d", amount)
 	}
@@ -648,9 +773,9 @@ func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, 
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Customer deposit %s", depositID),
 		Source:      SourceDeposit,
-		SourceRefID: &ref,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &ref, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeCustomerDeposit], Description: "Customer deposit received", Debit: 0, Credit: amount},
@@ -667,7 +792,7 @@ func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, 
 // and reduces the receivable (the balance-due subledger effect is posted
 // separately by the deposit service via account.PostTransaction). Returns the
 // journal entry ID so each application can link back to its ledger entry.
-func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+func (s *Service) ApplyCustomerDeposit(ctx context.Context, branchID uuid.UUID, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
 	if amount <= 0 {
 		return uuid.Nil, fmt.Errorf("applied amount must be positive, got %d", amount)
 	}
@@ -681,9 +806,9 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Customer deposit %s applied to AR", depositID),
 		Source:      SourceDeposit,
-		SourceRefID: &ref,
-		Status:      StatusPosted,
-		PostedBy:    "system",
+		SourceRefID: &ref, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: "system",
 		Lines: []JournalLine{
 			{AccountID: ids[AccountCodeCustomerDeposit], Description: "Customer deposit applied", Debit: amount, Credit: 0},
 			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: 0, Credit: amount},
@@ -703,7 +828,7 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 //     overage is a credit against the expense)
 //
 // A zero variance posts nothing and returns uuid.Nil.
-func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
+func (s *Service) PostTillOverShort(ctx context.Context, branchID uuid.UUID, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
 	if overShortCents == 0 {
 		return uuid.Nil, nil
 	}
@@ -730,15 +855,27 @@ func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, ov
 		}
 	}
 
+	entryDate, err := s.repo.BranchBusinessDay(ctx, &branchID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to read branch business day: %w", err)
+	}
+	if entryDate.IsZero() {
+		entryDate = time.Now()
+	}
+	postedBy := actor.FromContext(ctx).ID
+	if postedBy == "" {
+		postedBy = "system"
+	}
+
 	ref := sessionID
 	entry := &JournalEntry{
-		EntryDate:   time.Now(),
+		EntryDate:   entryDate,
 		Memo:        fmt.Sprintf("Till over/short — session %s", sessionID),
 		Source:      SourceAdjustment,
-		SourceRefID: &ref,
-		Status:      StatusPosted,
-		PostedBy:    "system",
-		Lines:       lines,
+		SourceRefID: &ref, BranchID: branchID,
+		Status:   StatusPosted,
+		PostedBy: postedBy,
+		Lines:    lines,
 	}
 	if err := s.CreateJournalEntry(ctx, entry); err != nil {
 		return uuid.Nil, fmt.Errorf("failed to post till over/short to GL: %w", err)

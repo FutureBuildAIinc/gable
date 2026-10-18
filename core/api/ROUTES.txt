@@ -309,6 +309,7 @@ GET	/api/v1/gl/accounts	internal/gl	h.HandleListAccounts
 POST	/api/v1/gl/accounts	internal/gl	h.HandleCreateAccount
 PUT	/api/v1/gl/accounts/{id}	internal/gl	h.HandleUpdateAccount
 GET	/api/v1/gl/balance-sheet	internal/gl	h.HandleBalanceSheet
+GET	/api/v1/gl/detail	internal/gl	h.HandleGLDetail
 GET	/api/v1/gl/fiscal-periods	internal/gl	h.HandleListFiscalPeriods
 POST	/api/v1/gl/fiscal-periods/{id}/close	internal/gl	h.HandleCloseFiscalPeriod
 POST	/api/v1/gl/fiscal-periods/{id}/reopen	internal/gl	h.HandleReopenFiscalPeriod
@@ -319,7 +320,9 @@ POST	/api/v1/gl/journal-entries/{id}/post	internal/gl	h.HandlePostJournalEntry
 POST	/api/v1/gl/journal-entries/{id}/reverse	internal/gl	h.HandleReverseJournalEntry
 POST	/api/v1/gl/journal-entries/{id}/void	internal/gl	h.HandleVoidJournalEntry
 GET	/api/v1/gl/profit-and-loss	internal/gl	h.HandleProfitAndLoss
+GET	/api/v1/gl/tie-out	internal/gl	h.HandleTieOut
 GET	/api/v1/gl/trial-balance	internal/gl	h.HandleTrialBalance
+POST	/api/v1/gl/years/{year}/close	internal/gl	h.HandleCloseYear
 GET	/api/v1/governance/rfcs	internal/governance	h.HandleListRFCs
 POST	/api/v1/governance/rfcs	internal/governance	h.HandleCreateRFC
 GET	/api/v1/governance/rfcs/{id}	internal/governance	h.HandleGetRFC

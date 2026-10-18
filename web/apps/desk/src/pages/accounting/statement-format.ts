@@ -29,3 +29,24 @@ export function statementAmountClasses(cents: number): string {
     if (cents > 0) return 'text-emerald-400';
     return 'text-zinc-400';
 }
+
+const DAY_MS = 86_400_000;
+
+function utcDay(day: string): number {
+    const [y, m, d] = day.split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+}
+
+function dayString(ms: number): string {
+    return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * The window of the same length that ends the day before `start`, the period
+ * an income statement is compared with. Both bounds are YYYY-MM-DD, inclusive.
+ */
+export function previousPeriod(start: string, end: string): { start: string; end: string } {
+    const days = Math.round((utcDay(end) - utcDay(start)) / DAY_MS) + 1;
+    const prevEnd = utcDay(start) - DAY_MS;
+    return { start: dayString(prevEnd - (days - 1) * DAY_MS), end: dayString(prevEnd) };
+}

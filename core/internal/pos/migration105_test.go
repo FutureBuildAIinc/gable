@@ -474,6 +474,14 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	// its lines and the invoice; the database stops at 105 for the legacy rows only
 	mig105Apply(t, conn, "../../migrations/114_pos_sale_account_refs.sql")
 	mig105Apply(t, conn, "../../migrations/123_sales_line_units.sql")
+	// the ledger columns the service stamps on every posting (migration 125
+	// also reads tables this stage of the schema has not built yet, and there
+	// is nothing to backfill here)
+	if _, err := conn.Exec(context.Background(), `
+		ALTER TABLE gl_journal_entries ADD COLUMN branch_id UUID REFERENCES locations(id);
+		ALTER TABLE gl_journal_lines ADD COLUMN branch_id UUID REFERENCES locations(id);`); err != nil {
+		t.Fatalf("add the ledger branch columns: %v", err)
+	}
 	// and the counter's account sale columns of migration 126
 	mig105Apply(t, conn, "../../migrations/126_counter_buyers_returns_and_receipts.sql")
 	// and the till columns and tables 127 added (the session reads name them)
