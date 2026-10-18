@@ -76,6 +76,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -96,6 +97,7 @@ var publicAPIPaths = []string{
 	"/api/portal/v1/login",
 	"/api/portal/v1/config",
 	"/api/portal/v1/",
+	"/api/public/v1/",
 	"/api/integration/",
 	"/api/v1/a2a/",
 	"/api/v1/auth/config",
@@ -1025,6 +1027,14 @@ func Run() {
 		WithAudit(auditLog)
 	project.NewHandler(projectSvc).RegisterRoutes(mux, portalChain)
 
+	// Customer quotes: the contractor's quote to their own customer, the
+	// capability link and the dealer's shared project pipeline (wire_customer_quotes.go).
+	wireCustomerQuotes(mux, customerQuoteDeps{
+		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
+		Email: emailSvc, Docs: docSvc, PublicURL: cfg.PublicURL, Trusted: cfg.TrustedProxies,
+		Quotes: quoteSvc, Audit: auditLog, Wall: wall,
+	}, portalChain)
+
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
 	// reads back. Route list and the admin/owner guard: wire_staff.go.
@@ -1355,7 +1365,7 @@ func RequestLogger(logger *slog.Logger, trusted clientip.Trusted, next http.Hand
 		next.ServeHTTP(sw, r)
 		logger.Info("request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", httputil.SafePath(r.URL.Path),
 			"status", sw.status,
 			"bytes", sw.bytesWritten,
 			"duration_ms", time.Since(start).Milliseconds(),

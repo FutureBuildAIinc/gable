@@ -41,7 +41,7 @@ func RespondError(w http.ResponseWriter, r *http.Request, msg string, code int, 
 		"error", err,
 		"status", code,
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", SafePath(r.URL.Path),
 		"request_id", reqID,
 	)
 

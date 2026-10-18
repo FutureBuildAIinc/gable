@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // Recovery returns middleware that recovers from panics, logs the stack trace,
@@ -22,7 +24,7 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 						"error", fmt.Sprintf("%v", err),
 						"stack", string(stack),
 						"method", r.Method,
-						"path", r.URL.Path,
+						"path", httputil.SafePath(r.URL.Path),
 						"request_id", GetRequestID(r.Context()),
 					)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
