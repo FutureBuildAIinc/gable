@@ -290,29 +290,35 @@ func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID 
 }
 
 // ReleaseScheduleHold gives a held hold back and clears the window from its
-// order and any open delivery stop.
+// order and any open delivery stop inside one transaction.
 func (r *PostgresRepository) ReleaseScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) error {
-	ex := r.db.GetExecutor(ctx)
-	var orderID *uuid.UUID
-	err := ex.QueryRow(ctx, `
-		UPDATE portal_schedule_holds SET status = 'released', updated_at = NOW()
-		WHERE id = $1 AND customer_id = $2 AND status = 'held'
-		RETURNING order_id
-	`, holdID, customerID).Scan(&orderID)
-	if err != nil {
-		return ErrHoldNotFound
-	}
-	if orderID != nil {
-		_, _ = ex.Exec(ctx, `
-			UPDATE orders SET scheduled_delivery_date = NULL, updated_at = NOW()
-			WHERE id = $1 AND customer_id = $2
-		`, *orderID, customerID)
-		_, _ = ex.Exec(ctx, `
-			UPDATE deliveries SET scheduled_start = NULL, scheduled_end = NULL, updated_at = NOW()
-			WHERE order_id = $1 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
-		`, *orderID)
-	}
-	return nil
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		ex := r.db.GetExecutor(txCtx)
+		var orderID *uuid.UUID
+		err := ex.QueryRow(txCtx, `
+			UPDATE portal_schedule_holds SET status = 'released', updated_at = NOW()
+			WHERE id = $1 AND customer_id = $2 AND status = 'held'
+			RETURNING order_id
+		`, holdID, customerID).Scan(&orderID)
+		if err != nil {
+			return ErrHoldNotFound
+		}
+		if orderID != nil {
+			if _, err := ex.Exec(txCtx, `
+				UPDATE orders SET scheduled_delivery_date = NULL, updated_at = NOW()
+				WHERE id = $1 AND customer_id = $2
+			`, *orderID, customerID); err != nil {
+				return fmt.Errorf("failed to clear order schedule date: %w", err)
+			}
+			if _, err := ex.Exec(txCtx, `
+				UPDATE deliveries SET scheduled_start = NULL, scheduled_end = NULL, updated_at = NOW()
+				WHERE order_id = $1 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
+			`, *orderID); err != nil {
+				return fmt.Errorf("failed to clear delivery schedule window: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // GetScheduleHold reads one hold with its window facts, scoped to the customer.

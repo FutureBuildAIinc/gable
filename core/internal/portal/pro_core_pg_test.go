@@ -473,15 +473,78 @@ func TestSchedule_ListHoldChangeRelease(t *testing.T) {
 		t.Errorf("dispatch stop scheduled_start=%v scheduled_end=%v, want the chosen window bounds", schedStart, schedEnd)
 	}
 
-	// Release it.
-	rec, _ = call(mux, "DELETE", "/api/portal/v1/schedule/holds/"+holdID, "", nil)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("release answered %d", rec.Code)
+	// If the delivery un-stamping update fails during ReleaseScheduleHold,
+	// the error is returned and the hold remains 'held' (atomic transaction).
+	constraintName := "chk_test_p1_2_release_" + strings.ReplaceAll(f.aConfirmed.String()[:8], "-", "")
+	if _, err := f.db.Pool.Exec(context.Background(), fmt.Sprintf(
+		`ALTER TABLE deliveries ADD CONSTRAINT %s CHECK (order_id <> '%s' OR scheduled_start IS NOT NULL) NOT VALID`,
+		constraintName, f.aConfirmed,
+	)); err != nil {
+		t.Fatalf("add test constraint: %v", err)
 	}
-	// A released hold cannot be released again.
 	rec, _ = call(mux, "DELETE", "/api/portal/v1/schedule/holds/"+holdID, "", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("second release answered %d, want 404", rec.Code)
+	_, _ = f.db.Pool.Exec(context.Background(), fmt.Sprintf(`ALTER TABLE deliveries DROP CONSTRAINT IF EXISTS %s`, constraintName))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("release with failing delivery update answered %d, want 500", rec.Code)
+	}
+	var holdStatus string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT status FROM portal_schedule_holds WHERE id = $1`, holdID).Scan(&holdStatus); err != nil {
+		t.Fatalf("query hold status after failed release: %v", err)
+	}
+	if holdStatus != "held" {
+		t.Errorf("hold status after failed release = %q, want held (rolled back)", holdStatus)
+	}
+
+	// Release it across three concurrent contenders on a pool of four connections:
+	// exactly one wins with 204 and the other two answer 404.
+	db4 := testutil.RequireDBMaxConns(t, 4)
+	repo4 := NewRepository(db4)
+	const relContenders = 3
+	relCodes := make(chan int, relContenders)
+	relStart := make(chan struct{})
+	var relWG sync.WaitGroup
+	for i := 0; i < relContenders; i++ {
+		relWG.Add(1)
+		go func() {
+			defer relWG.Done()
+			m := muxFor(repo4, f.aCustomer, f.users[RoleProjectManager], RoleProjectManager)
+			<-relStart
+			r, _ := call(m, "DELETE", "/api/portal/v1/schedule/holds/"+holdID, "", nil)
+			relCodes <- r.Code
+		}()
+	}
+	close(relStart)
+	relWG.Wait()
+	close(relCodes)
+	noContent, notFound := 0, 0
+	for c := range relCodes {
+		switch c {
+		case http.StatusNoContent:
+			noContent++
+		case http.StatusNotFound:
+			notFound++
+		default:
+			t.Errorf("concurrent release answered %d, want 204 or 404", c)
+		}
+	}
+	if noContent != 1 || notFound != relContenders-1 {
+		t.Errorf("concurrent release settled %d x 204 and %d x 404, want 1 and %d", noContent, notFound, relContenders-1)
+	}
+	var ordSchedDate *time.Time
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT scheduled_delivery_date FROM orders WHERE id = $1`, f.aConfirmed).Scan(&ordSchedDate); err != nil {
+		t.Fatalf("query order scheduled_delivery_date after release: %v", err)
+	}
+	if ordSchedDate != nil {
+		t.Errorf("order scheduled_delivery_date after release = %v, want nil", ordSchedDate)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT scheduled_start, scheduled_end FROM deliveries WHERE order_id = $1`, f.aConfirmed).Scan(&schedStart, &schedEnd); err != nil {
+		t.Fatalf("query stop scheduled bounds after release: %v", err)
+	}
+	if schedStart != nil || schedEnd != nil {
+		t.Errorf("dispatch stop after release scheduled_start=%v scheduled_end=%v, want nil", schedStart, schedEnd)
 	}
 }
 
@@ -670,14 +733,80 @@ func TestSiteDeliveryInstructions(t *testing.T) {
 		t.Errorf("order DTO site_delivery_instructions = %v, want Leave at the gate, code 1234", ordBody["site_delivery_instructions"])
 	}
 
-	// The dealer's own read is scoped the same way: the row carries it.
+	// The dealer's own read is scoped the same way: both the order and its open
+	// delivery stop carry the instructions.
 	var got *string
 	if err := f.db.Pool.QueryRow(context.Background(),
 		`SELECT site_delivery_instructions FROM orders WHERE id = $1`, f.aConfirmed).Scan(&got); err != nil {
-		t.Fatalf("read back: %v", err)
+		t.Fatalf("read back order: %v", err)
 	}
 	if got == nil || *got != "Leave at the gate, code 1234" {
-		t.Errorf("stored instructions = %v", got)
+		t.Errorf("stored order instructions = %v", got)
+	}
+	var stopInstr *string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT delivery_instructions FROM deliveries WHERE order_id = $1`, f.aConfirmed).Scan(&stopInstr); err != nil {
+		t.Fatalf("read back stop: %v", err)
+	}
+	if stopInstr == nil || *stopInstr != "Leave at the gate, code 1234" {
+		t.Errorf("stored delivery stop instructions = %v, want Leave at the gate, code 1234", stopInstr)
+	}
+
+	// If the delivery mirror update fails, the error is returned and the order
+	// row rolls back so order and delivery never diverge.
+	constraintName := "chk_test_p1_2_instr_" + strings.ReplaceAll(f.aConfirmed.String()[:8], "-", "")
+	if _, err := f.db.Pool.Exec(context.Background(), fmt.Sprintf(
+		`ALTER TABLE deliveries ADD CONSTRAINT %s CHECK (order_id <> '%s' OR delivery_instructions <> 'REJECT_MIRROR') NOT VALID`,
+		constraintName, f.aConfirmed,
+	)); err != nil {
+		t.Fatalf("add test constraint: %v", err)
+	}
+	rec, _ = call(mux, "PUT", "/api/portal/v1/orders/"+f.aConfirmed.String()+"/delivery-instructions",
+		`{"instructions":"REJECT_MIRROR"}`, nil)
+	_, _ = f.db.Pool.Exec(context.Background(), fmt.Sprintf(`ALTER TABLE deliveries DROP CONSTRAINT IF EXISTS %s`, constraintName))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("instructions with failing delivery mirror answered %d, want 500", rec.Code)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT site_delivery_instructions FROM orders WHERE id = $1`, f.aConfirmed).Scan(&got); err != nil {
+		t.Fatalf("read back order after failed mirror: %v", err)
+	}
+	if got == nil || *got != "Leave at the gate, code 1234" {
+		t.Errorf("order instructions after failed mirror = %v, want Leave at the gate, code 1234 (rolled back)", got)
+	}
+
+	// Three concurrent writers on a pool of four connections all complete cleanly
+	// and leave the order and its open delivery stop with the same winning value.
+	db4 := testutil.RequireDBMaxConns(t, 4)
+	repo4 := NewRepository(db4)
+	const instrContenders = 3
+	instrStart := make(chan struct{})
+	var instrWG sync.WaitGroup
+	for i := 0; i < instrContenders; i++ {
+		instrWG.Add(1)
+		go func(i int) {
+			defer instrWG.Done()
+			m := muxFor(repo4, f.aCustomer, f.users[RoleSiteSuper], RoleSiteSuper)
+			<-instrStart
+			r, _ := call(m, "PUT", "/api/portal/v1/orders/"+f.aConfirmed.String()+"/delivery-instructions",
+				fmt.Sprintf(`{"instructions":"Gate note %d"}`, i), nil)
+			if r.Code != http.StatusOK {
+				t.Errorf("concurrent instructions writer %d answered %d", i, r.Code)
+			}
+		}(i)
+	}
+	close(instrStart)
+	instrWG.Wait()
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT site_delivery_instructions FROM orders WHERE id = $1`, f.aConfirmed).Scan(&got); err != nil {
+		t.Fatalf("read back order after concurrent writes: %v", err)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT delivery_instructions FROM deliveries WHERE order_id = $1`, f.aConfirmed).Scan(&stopInstr); err != nil {
+		t.Fatalf("read back stop after concurrent writes: %v", err)
+	}
+	if got == nil || stopInstr == nil || *got != *stopInstr {
+		t.Errorf("order (%v) and stop (%v) diverged after concurrent writes", got, stopInstr)
 	}
 
 	// A fulfilled order's instructions are read only.

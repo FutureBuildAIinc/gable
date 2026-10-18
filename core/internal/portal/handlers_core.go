@@ -245,7 +245,7 @@ func (h *Handler) HandleReleaseScheduleHold(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := h.svc.ReleaseScheduleHold(r.Context(), customerID, holdID); err != nil {
-		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusNotFound))
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
