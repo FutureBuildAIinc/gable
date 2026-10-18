@@ -283,9 +283,8 @@ func parseLocalDay(s string) (time.Time, error) {
 // hh:mm spellings for display.
 func windowBoundsInZone(w windowRow, day time.Time) (start, end time.Time, startLocal, endLocal string, err error) {
 	loc := loadYardLocation(w.yardTZ)
-	localDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-	start = localDay.Add(time.Duration(w.startMinutes) * time.Minute)
-	end = localDay.Add(time.Duration(w.endMinutes) * time.Minute)
+	start = time.Date(day.Year(), day.Month(), day.Day(), w.startMinutes/60, w.startMinutes%60, 0, 0, loc)
+	end = time.Date(day.Year(), day.Month(), day.Day(), w.endMinutes/60, w.endMinutes%60, 0, 0, loc)
 	return start.UTC(), end.UTC(), start.In(loc).Format("15:04"), end.In(loc).Format("15:04"), nil
 }
 
