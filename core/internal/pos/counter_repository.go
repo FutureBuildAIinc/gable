@@ -195,6 +195,35 @@ func (r *PostgresRepository) LockOpenCreditMemos(ctx context.Context, customerID
 	return out, rows.Err()
 }
 
+// LockCreditMemo locks one open or partly used credit memo by id (used by an
+// exchange for the memo its own return just posted in the same transaction,
+// without locking other open memos out of section 11's order).
+func (r *PostgresRepository) LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error) {
+	var m openMemo
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT m.id, COALESCE(m.number, ''), m.memo_date, -ROUND(m.amount_open * 100)::bigint
+		FROM credit_memos m
+		WHERE m.id = $1 AND m.status IN ('OPEN', 'PARTIAL') AND m.amount_open < 0
+		FOR UPDATE`, memoID).Scan(&m.ID, &m.Number, &m.MemoDate, &m.OpenCents)
+	if err != nil {
+		return openMemo{}, fmt.Errorf("failed to lock the credit memo: %w", err)
+	}
+	return m, nil
+}
+
+// LockCustomer locks the customer row FOR UPDATE (ADR 0005 section 11, step 7)
+// before a gapless document counter (step 8) or a foreign-key child insert.
+func (r *PostgresRepository) LockCustomer(ctx context.Context, customerID uuid.UUID) error {
+	var id uuid.UUID
+	if err := r.ex(ctx).QueryRow(ctx, `SELECT id FROM customers WHERE id = $1 FOR UPDATE`, customerID).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("customer not found")
+		}
+		return fmt.Errorf("failed to lock the customer: %w", err)
+	}
+	return nil
+}
+
 // InsertSignature seals one signature to a sale; a sale already signed
 // answers 409 signature_exists (the row never changes once written).
 func (r *PostgresRepository) InsertSignature(ctx context.Context, sig *storedSignature) error {

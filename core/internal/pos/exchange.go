@@ -129,6 +129,13 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 				return err
 			}
 		}
+		// Section 11 step 1a: the customer's credit serialization, unconditionally
+		// taken right after the sale row and before any stock or AR row.
+		if saleCustomer != nil {
+			if err := s.repo.LockCustomerCredit(ctx, *saleCustomer); err != nil {
+				return err
+			}
+		}
 		// The replacement sale, its lines priced as the counter prices them.
 		sale, err := s.StartSale(ctx, &StartSale{RegisterID: in.RegisterID, CashierID: cashierID, CustomerID: saleCustomer}, actor)
 		if err != nil {
@@ -145,13 +152,6 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		}
 		if len(lines) == 0 {
 			return invalid("sale_lines", "name at least one replacement line")
-		}
-		// Section 11 step 1a: the customer's credit serialization, before any
-		// AR row, when the difference may go on the account.
-		if saleCustomer != nil && sumTenders(in.Tenders).account > 0 {
-			if err := s.repo.LockCustomerCredit(ctx, *saleCustomer); err != nil {
-				return err
-			}
 		}
 		// Step 6: the inventory rows of every product the act touches, in
 		// product order, before any AR row (step 7): the restock of the

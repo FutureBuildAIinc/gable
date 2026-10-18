@@ -478,12 +478,16 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return conflict("walk_in_store_credit",
 					"store credit belongs to a named account: the walk-in customer holds none")
 			}
-			if storeMemos, err = s.repo.LockOpenCreditMemos(ctx, customerID, sale.Currency); err != nil {
-				return err
-			}
 			if ex != nil {
-				// the exchange spends the memo its own return made, no other
-				storeMemos = onlyMemo(storeMemos, ex.memoID)
+				// the exchange spends the memo its own return made (already
+				// locked in this transaction), no other
+				m, err := s.repo.LockCreditMemo(ctx, ex.memoID)
+				if err != nil {
+					return err
+				}
+				storeMemos = []openMemo{m}
+			} else if storeMemos, err = s.repo.LockOpenCreditMemos(ctx, customerID, sale.Currency); err != nil {
+				return err
 			}
 			var held int64
 			for _, m := range storeMemos {
@@ -977,14 +981,4 @@ type exchangeLeg struct {
 	// preview runs the act to state its figures and rolls it back: a short
 	// tender is not refused.
 	preview bool
-}
-
-// onlyMemo keeps the one memo of the list.
-func onlyMemo(memos []openMemo, id uuid.UUID) []openMemo {
-	for _, m := range memos {
-		if m.ID == id {
-			return []openMemo{m}
-		}
-	}
-	return nil
 }

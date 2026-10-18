@@ -194,6 +194,8 @@ type Repository interface {
 	// spent by a single statement).
 	OpenCreditMemoCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	LockOpenCreditMemos(ctx context.Context, customerID uuid.UUID, currency string) ([]openMemo, error)
+	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
+	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)

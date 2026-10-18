@@ -1058,6 +1058,33 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return err
 			}
 		}
+		// The restocking fee, as its own line of the memo (a charge that lowers
+		// the credit) booked to the RESTOCK charge code's income account.
+		var feeAccount string
+		var feeCodeID uuid.UUID
+		if st.feeCents > 0 {
+			codes, err := s.repo.LookupChargeCodes(ctx, []string{"RESTOCK"})
+			if err != nil {
+				return err
+			}
+			code, ok := codes["RESTOCK"]
+			if !ok {
+				return conflict("restock_charge_missing",
+					"a restocking fee is configured but the RESTOCK charge code is missing: add it before returning goods that carry a fee")
+			}
+			feeAccount = code.RevenueAccountCode
+			feeCodeID = code.ID
+		}
+		// Section 11 steps 7 and 8: lock the customer row FOR UPDATE before the
+		// gapless CM counter row and before the credit_memos foreign-key insert
+		// ("No code takes the customer row after a gapless number.").
+		if err := s.repo.LockCustomer(ctx, *customerID); err != nil {
+			return err
+		}
+		memoNumber, err := httpx.NextGaplessNumber(ctx, s.db.GetExecutor(ctx), "credit_memo", "CM", httpx.DefaultDocNumberWidth)
+		if err != nil {
+			return err
+		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, amount,
 				subtotal, tax_amount, total_amount, amount_open, memo_date, created_at, updated_at, revision)
@@ -1085,35 +1112,16 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
 		}
-		// The restocking fee, as its own line of the memo (a charge that lowers
-		// the credit) booked to the RESTOCK charge code's income account.
-		var feeAccount string
 		if st.feeCents > 0 {
-			codes, err := s.repo.LookupChargeCodes(ctx, []string{"RESTOCK"})
-			if err != nil {
-				return err
-			}
-			code, ok := codes["RESTOCK"]
-			if !ok {
-				return conflict("restock_charge_missing",
-					"a restocking fee is configured but the RESTOCK charge code is missing: add it before returning goods that carry a fee")
-			}
-			feeAccount = code.RevenueAccountCode
 			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, charge_code_id, description, quantity,
 					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code,
 					restock, created_at)
 				VALUES ($1, $2, 'CHARGE', $3, 'Restocking fee', 1, 'EA', 'EA', 1, 1, $4::numeric / 100, 'MANUAL',
 					$4::numeric / 100, FALSE, $5, FALSE, NOW())`,
-				memoID, len(lines), code.ID, st.feeCents, feeAccount); err != nil {
+				memoID, len(lines), feeCodeID, st.feeCents, feeAccount); err != nil {
 				return fmt.Errorf("failed to create the restocking fee line: %w", mapWriteError(err))
 			}
-		}
-		// The gapless CM number, minted late: after every other row lock,
-		// before the posting (ADR 0005 section 4.1).
-		memoNumber, err := httpx.NextGaplessNumber(ctx, s.db.GetExecutor(ctx), "credit_memo", "CM", httpx.DefaultDocNumberWidth)
-		if err != nil {
-			return err
 		}
 		// Revenue, per the line's own account (8.3): product lines to 4010, a
 		// returned charge to its code's account.

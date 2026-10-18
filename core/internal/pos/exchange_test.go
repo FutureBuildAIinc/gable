@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
@@ -426,3 +427,258 @@ func TestTheCountersNewActsNeverTouchThePoolInsideTheirTransaction(t *testing.T)
 		t.Fatalf("exchange at pool size 1 = %d: %s", r.status, r.raw)
 	}
 }
+
+// RULE (ADR 0005 section 11): return and exchange acquire the customer credit
+// advisory lock (step 1a) before stock locks (step 6), and the customer row
+// lock (step 7) before the gapless document counter lock (step 8). Racing an
+// exchange on sale A against a concurrent return and a concurrent
+// store-credit/on-account sale on sale B for the same customer and overlapping
+// products at pool size 4 produces zero deadlocks and conserves balance_due,
+// qty_on_hand, and gapless CM-*/IN-* numbers.
+func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newFixture(t, db)
+	f.openTill(0)
+	ctx := t.Context()
+
+	sale1, total1 := f.cartOf("2", &f.customerID)
+	if r := f.completeSale(sale1, tender("cash", total1)); r.status != http.StatusOK {
+		t.Fatalf("sale1 = %d: %s", r.status, r.raw)
+	}
+	line1 := f.getSale(t, sale1)["lines"].([]any)[0].(map[string]any)["id"].(string)
+
+	waitForWaiter := func(waitQuery string, args ...any) {
+		t.Helper()
+		for range 400 {
+			var waiting int64
+			if err := db.Pool.QueryRow(ctx, waitQuery, args...).Scan(&waiting); err == nil && waiting > 0 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for contender to block on expected lock")
+	}
+
+	// 1. Return locks customers (step 7) BEFORE document_counters (step 8).
+	txCust, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txCust: %v", err)
+	}
+	defer func() { _ = txCust.Rollback(ctx) }()
+	var lockedID uuid.UUID
+	if err := txCust.QueryRow(ctx, `SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, f.customerID).Scan(&lockedID); err != nil {
+		t.Fatalf("lock customer: %v", err)
+	}
+
+	retDone := make(chan resp, 1)
+	go func() {
+		retDone <- f.returnLines(t, sale1, "", lineOf(line1, "1", "defective"))
+	}()
+
+	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('tuple', 'transactionid')`)
+
+	// While the return is blocked waiting on the customer row (step 7),
+	// document_counters for credit_memo (step 8) must NOT be locked yet.
+	txProbe, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txProbe: %v", err)
+	}
+	var lastCM int64
+	err = txProbe.QueryRow(ctx, `SELECT next_value FROM document_counters WHERE series = 'credit_memo' FOR UPDATE NOWAIT`).Scan(&lastCM)
+	_ = txProbe.Rollback(ctx)
+	if err != nil {
+		_ = txCust.Rollback(ctx)
+		<-retDone
+		t.Fatalf("return locked document_counters (step 8) before customers (step 7): %v", err)
+	}
+	if err := txCust.Commit(ctx); err != nil {
+		t.Fatalf("commit txCust: %v", err)
+	}
+	if r := <-retDone; r.status != http.StatusCreated {
+		t.Fatalf("return after customer unlock = %d: %s", r.status, r.raw)
+	}
+
+	// 2. Exchange unconditionally acquires customer credit advisory lock (step 1a)
+	// before locking inventory (step 6), even when no account tender is sent.
+	txAdv, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txAdv: %v", err)
+	}
+	defer func() { _ = txAdv.Rollback(ctx) }()
+	if _, err := txAdv.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, f.customerID.String()); err != nil {
+		t.Fatalf("lock advisory: %v", err)
+	}
+
+	exDone := make(chan resp, 1)
+	go func() {
+		exDone <- f.exchange("", map[string]any{
+			"original_sale_id": sale1, "customer_id": f.customerID.String(),
+			"returned_lines": []map[string]any{lineOf(line1, "1", "wrong_item")},
+			"sale_lines":     f.replaceWith("1"),
+		})
+	}()
+
+	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'advisory'`)
+
+	txInvProbe, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txInvProbe: %v", err)
+	}
+	var invRowID uuid.UUID
+	err = txInvProbe.QueryRow(ctx, `SELECT id FROM inventory WHERE product_id = $1 FOR UPDATE NOWAIT`, f.productID).Scan(&invRowID)
+	_ = txInvProbe.Rollback(ctx)
+	if err != nil {
+		_ = txAdv.Rollback(ctx)
+		<-exDone
+		t.Fatalf("exchange locked inventory (step 6) before customer credit advisory lock (step 1a): %v", err)
+	}
+	if err := txAdv.Commit(ctx); err != nil {
+		t.Fatalf("commit txAdv: %v", err)
+	}
+	if r := <-exDone; r.status != http.StatusCreated {
+		t.Fatalf("exchange after advisory unlock = %d: %s", r.status, r.raw)
+	}
+
+	// 2b. Exchange also locks customers (step 7) BEFORE document_counters (step 8).
+	sale2, total2 := f.cartOf("1", &f.customerID)
+	if r := f.completeSale(sale2, tender("cash", total2)); r.status != http.StatusOK {
+		t.Fatalf("sale2 = %d: %s", r.status, r.raw)
+	}
+	line2 := f.getSale(t, sale2)["lines"].([]any)[0].(map[string]any)["id"].(string)
+
+	txCustEx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txCustEx: %v", err)
+	}
+	defer func() { _ = txCustEx.Rollback(ctx) }()
+	if err := txCustEx.QueryRow(ctx, `SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, f.customerID).Scan(&lockedID); err != nil {
+		t.Fatalf("lock customer for exchange: %v", err)
+	}
+
+	exCustDone := make(chan resp, 1)
+	go func() {
+		exCustDone <- f.exchange("", map[string]any{
+			"original_sale_id": sale2, "customer_id": f.customerID.String(),
+			"returned_lines": []map[string]any{lineOf(line2, "1", "wrong_item")},
+			"sale_lines":     f.replaceWith("1"),
+		})
+	}()
+
+	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('tuple', 'transactionid')`)
+
+	txProbeEx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txProbeEx: %v", err)
+	}
+	err = txProbeEx.QueryRow(ctx, `SELECT next_value FROM document_counters WHERE series = 'credit_memo' FOR UPDATE NOWAIT`).Scan(&lastCM)
+	_ = txProbeEx.Rollback(ctx)
+	if err != nil {
+		_ = txCustEx.Rollback(ctx)
+		<-exCustDone
+		t.Fatalf("exchange locked document_counters (step 8) before customers (step 7): %v", err)
+	}
+	if err := txCustEx.Commit(ctx); err != nil {
+		t.Fatalf("commit txCustEx: %v", err)
+	}
+	if r := <-exCustDone; r.status != http.StatusCreated {
+		t.Fatalf("exchange after customer unlock = %d: %s", r.status, r.raw)
+	}
+
+	// 3. Three-contender cross-table concurrency at pool size 4:
+	// Contender A: exchange on saleA (customer, overlapping product, cash/account)
+	// Contender B: return on saleC (same customer, overlapping product, account credit)
+	// Contender C: store-credit + on-account sale completion on saleB (same customer, overlapping product)
+	f.accountReturnOf() // leaves 599 of open store credit on f.customerID
+	saleA, totalA := f.cartOf("2", &f.customerID)
+	if r := f.completeSale(saleA, tender("cash", totalA)); r.status != http.StatusOK {
+		t.Fatalf("saleA = %d: %s", r.status, r.raw)
+	}
+	lineA := f.getSale(t, saleA)["lines"].([]any)[0].(map[string]any)["id"].(string)
+
+	saleC, totalC := f.cartOf("1", &f.customerID)
+	if r := f.completeSale(saleC, tender("cash", totalC)); r.status != http.StatusOK {
+		t.Fatalf("saleC = %d: %s", r.status, r.raw)
+	}
+	lineC := f.getSale(t, saleC)["lines"].([]any)[0].(map[string]any)["id"].(string)
+
+	saleB, totalB := f.cartOf("2", &f.customerID)
+	if r := f.attach(saleB, map[string]any{"customer_id": f.customerID.String(), "customer_po": "PO-CONC-1"}); r.status != http.StatusOK {
+		t.Fatalf("attach saleB = %d: %s", r.status, r.raw)
+	}
+
+	balBefore := f.scalar(`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE id = $1`, f.customerID).(int64)
+	qtyBefore := f.scalar(`SELECT ROUND(SUM(quantity) * 10000)::bigint FROM inventory WHERE product_id = $1`, f.productID).(int64)
+	cmBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64)
+	inBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var resEx, resRet, resSale resp
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		resEx = f.exchange("", map[string]any{
+			"original_sale_id": saleA, "customer_id": f.customerID.String(),
+			"returned_lines": []map[string]any{lineOf(lineA, "1", "wrong_item")},
+			"sale_lines":     f.replaceWith("2"),
+			"tenders":        []map[string]any{tender("cash", 599)},
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		resRet = f.do("POST", "/api/v1/pos/returns", map[string]any{
+			"register_id": f.register, "original_sale_id": saleC, "customer_id": f.customerID.String(),
+			"refund_method": "account", "reason": "unused",
+			"lines": []map[string]any{lineOf(lineC, "1", "overbought")},
+		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		resSale = f.completeSale(saleB, tender("store_credit", 599), tender("account", totalB-599))
+	}()
+	close(start)
+	wg.Wait()
+
+	if resEx.status != http.StatusCreated {
+		t.Fatalf("concurrent exchange = %d: %s", resEx.status, resEx.raw)
+	}
+	if resRet.status != http.StatusCreated {
+		t.Fatalf("concurrent return = %d: %s", resRet.status, resRet.raw)
+	}
+	if resSale.status != http.StatusOK {
+		t.Fatalf("concurrent store-credit/account sale = %d: %s", resSale.status, resSale.raw)
+	}
+
+	// Balance conservation:
+	// - Exchange returned 599 (applied to replacement 1198) + 599 cash paid -> net 0 on balance_due
+	// - Return to account -> -599 on balance_due
+	// - SaleB (1198) paid 599 by existing store_credit + 599 on account -> +1198 invoice, 0 subledger for credit memo app -> net +1198 on balance_due
+	wantBal := balBefore - 599 + totalB
+	gotBal := f.scalar(`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE id = $1`, f.customerID).(int64)
+	if gotBal != wantBal {
+		t.Errorf("balance_due = %d, want %d", gotBal, wantBal)
+	}
+	// Stock conservation:
+	// - Exchange: +1 returned, -2 replacement = -1
+	// - Return: +1 returned = +1
+	// - SaleB: -2 issued = -2
+	// Net = -2 units (-20000 scale-4)
+	wantQty := qtyBefore - 20000
+	gotQty := f.scalar(`SELECT ROUND(SUM(quantity) * 10000)::bigint FROM inventory WHERE product_id = $1`, f.productID).(int64)
+	if gotQty != wantQty {
+		t.Errorf("qty_on_hand = %d, want %d", gotQty, wantQty)
+	}
+	// Gapless counters: 2 credit memos (exchange + return) and 2 invoices (exchange + saleB).
+	if gotCM := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64); gotCM != cmBefore+2 {
+		t.Errorf("credit_memo counter = %d, want %d", gotCM, cmBefore+2)
+	}
+	if gotIN := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64); gotIN != inBefore+2 {
+		t.Errorf("invoice counter = %d, want %d", gotIN, inBefore+2)
+	}
+	f.assertARInvariants(t)
+}
+
