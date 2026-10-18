@@ -124,17 +124,14 @@ GET	/api/v1/ar/finance-charges/runs	internal/account	wrap(guard, h.HandleListFin
 POST	/api/v1/ar/finance-charges/runs	internal/account	wrap(finance, h.HandleRunFinanceCharges)
 GET	/api/v1/ar/finance-charges/runs/{id}	internal/account	wrap(guard, h.HandleGetFinanceChargeRun)
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
-<<<<<<< HEAD
 GET	/api/v1/ar/statements/runs	internal/account	wrap(guard, h.HandleListStatementRuns)
 POST	/api/v1/ar/statements/runs	internal/account	wrap(finance, h.HandleCreateStatementRun)
 GET	/api/v1/ar/statements/runs/{id}	internal/account	wrap(guard, h.HandleGetStatementRun)
 GET	/api/v1/ar/worklist	internal/account	wrap(guard, h.HandleWorklist)
-=======
 GET	/api/v1/auth/config	internal/signinmethods	h.GetConfig
 GET	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.GetAllowlist)
 PUT	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.PutAllowlist)
 POST	/api/v1/auth/start/{method}	internal/signinmethods	h.Start
->>>>>>> origin/refactor/v1
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
