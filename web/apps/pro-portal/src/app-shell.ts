@@ -13,7 +13,9 @@ import { OFFLINE_READ_NOTE, browserOffline } from './lib/offline.ts'
 import { NAVIGATE_EVENT, navigate, orderIdFromPath, quoteIdFromPath, replacePath, tabFromPath } from './lib/router.ts'
 import type { PortalConfig, PortalMe } from './types.ts'
 import './screens/today.ts'
+import './screens/order.ts'
 import './screens/schedule.ts'
+import './screens/pay.ts'
 import './screens/quotes.ts'
 
 const TAB_ICONS = {
@@ -214,16 +216,14 @@ export class GableProShell extends LitElement {
     switch (this.active) {
       case 'today':
         return html`<gable-pro-today .me=${me} .offline=${this.offline}></gable-pro-today>`
+      case 'order':
+        return html`<gable-pro-order .me=${me} .offline=${this.offline}></gable-pro-order>`
       case 'schedule':
         return html`<gable-pro-schedule .me=${me} .offline=${this.offline} .orderId=${orderIdFromPath(window.location.pathname)}></gable-pro-schedule>`
+      case 'pay':
+        return html`<gable-pro-pay .me=${me} .offline=${this.offline}></gable-pro-pay>`
       case 'quotes':
         return html`<gable-pro-quotes .me=${me} .offline=${this.offline} .quoteId=${quoteIdFromPath(window.location.pathname)}></gable-pro-quotes>`
-      default:
-        return html`<section data-testid=${`${this.active}-screen`}>
-          <p class="pro-page-kicker">Gable Pro</p>
-          <h1 class="pro-page-title">${this.active === 'order' ? 'Order' : this.active === 'pay' ? 'Pay' : 'Quotes'}</h1>
-          <div class="pro-empty mt-5"><p class="pro-card-title">This surface is ready for its next read.</p></div>
-        </section>`
     }
   }
 

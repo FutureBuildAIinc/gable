@@ -78,3 +78,54 @@ export async function readCached<T>(key: string, path: string, options: CachedRe
 export function assertWritesOnline(): void {
   if (browserOffline()) throw new OfflineUnavailableError()
 }
+
+export interface PortalRequestOptions {
+  idempotencyKey?: string
+  headers?: Record<string, string>
+}
+
+export async function portalRequest<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+  options: PortalRequestOptions = {},
+): Promise<T> {
+  const headers: Record<string, string> = { ...options.headers }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey
+
+  const response = await authFetch(`${API_URL}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await response.text()
+  let parsed: unknown = undefined
+  if (text !== '') {
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = text
+    }
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, parsed, response.headers.get('X-Request-ID'))
+  }
+  return parsed as T
+}
+
+export async function portalDownload(path: string, filename: string): Promise<void> {
+  const response = await authFetch(`${API_URL}${path}`)
+  if (!response.ok) {
+    const text = await response.text()
+    throw new ApiError(response.status, text, response.headers.get('X-Request-ID'))
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+

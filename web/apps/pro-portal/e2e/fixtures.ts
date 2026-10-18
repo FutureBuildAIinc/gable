@@ -128,8 +128,342 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
         ? route.fulfill({ status: 200, contentType: 'text/csv', body: 'reference,title\nCQ-1001,Deck' })
         : json(route, { customers: [], projects: [], quotes: [customerQuote] })
     }
-    if (path === '/api/portal/v1/catalog') return json(route, catalogFixtures)
-    if (path === '/api/portal/v1/projects') return json(route, { items: [], next_cursor: null, limit: 50 })
+    if (path === '/api/portal/v1/catalog/categories') {
+      return json(route, [
+        { id: '10000000-0000-4000-8000-000000000001', name: 'Dimensional Lumber', slug: 'dimensional-lumber', path: 'lumber.dimensional', depth: 1, sort_order: 1, product_count: 3, children: [] },
+      ])
+    }
+    if (path.startsWith('/api/portal/v1/catalog/')) {
+      const first = catalogFixtures[0]!
+      return json(route, {
+        ...first,
+        weight_lbs: 11.4,
+        upc: '012345678905',
+        vendor: 'Cascade Forest',
+        volume_breaks: [
+          { min_quantity: 100, unit_price: 8.5, price_source: 'TIER_100', details: 'Full unit bunk', saves_per_unit: 0.7 },
+        ],
+      })
+    }
+    if (path === '/api/portal/v1/catalog') {
+      return json(
+        route,
+        catalogFixtures.map((prod) => ({
+          ...prod,
+          availability: [
+            { yard_id: ids.yardA, yard_code: 'MAIN', yard_name: 'Main Yard', on_hand: 320, available: 280, in_stock: true, lead_time_days: 1 },
+            { yard_id: ids.yardB, yard_code: 'NORTH', yard_name: 'North Yard', on_hand: 140, available: 120, in_stock: true, lead_time_days: 2 },
+          ],
+        })),
+      )
+    }
+    if (path === '/api/portal/v1/cart/items' || path === '/api/portal/v1/cart') {
+      const first = catalogFixtures[0]!
+      return json(
+        route,
+        {
+          id: '20000000-0000-4000-8000-000000000002',
+          item_count: 24,
+          subtotal: 220.8,
+          items: [
+            {
+              id: '30000000-0000-4000-8000-000000000003',
+              product_id: first.id,
+              product_sku: first.sku,
+              product_name: first.name,
+              image_url: '',
+              quantity: 24,
+              unit_price: first.customer_price,
+              line_total: 220.8,
+              available: first.available,
+            },
+          ],
+        },
+        request.method() === 'POST' ? 201 : 200,
+      )
+    }
+    if (path === '/api/portal/v1/checkout') {
+      return json(route, { order_id: testIds.order, message: 'Order placed.' }, 201)
+    }
+    if (path === `/api/portal/v1/orders/${testIds.order}/reorder-preview`) {
+      return json(route, {
+        source_order_id: testIds.order,
+        project_id: null,
+        original_total_cents: 23424,
+        current_total_cents: 24720,
+        total_diff_cents: 1296,
+        lines: [
+          {
+            line_id: '40000000-0000-4000-8000-000000000004',
+            product_id: testIds.product,
+            sku: 'LUM-248',
+            description: '2x4x8 SPF Premium',
+            quantity: 48,
+            uom: 'EA',
+            original_unit_price_cents: 488,
+            current_unit_price_cents: 515,
+            price_diff_cents: 27,
+            original_line_total_cents: 23424,
+            current_line_total_cents: 24720,
+            line_diff_cents: 1296,
+            price_source: 'CONTRACT',
+            available_qty: 480,
+            in_stock: true,
+          },
+        ],
+      })
+    }
+    if (path === '/api/portal/v1/orders/reorder') {
+      return json(route, { order_id: testIds.order, new_order_id: testIds.order, message: 'Reorder placed.' }, 201)
+    }
+    if (path === '/api/portal/v1/procurement/projects') {
+      return json(route, [
+        {
+          id: '50000000-0000-4000-8000-000000000005',
+          name: 'Standard Cedar Deck Package',
+          status: 'DRAFT',
+          created_at: iso(),
+          updated_at: iso(),
+          lines: [
+            {
+              id: '51000000-0000-4000-8000-000000000005',
+              project_id: '50000000-0000-4000-8000-000000000005',
+              product_id: catalogFixtures[0]?.id ?? null,
+              product_sku: catalogFixtures[0]?.sku ?? 'LUM-248',
+              product_name: catalogFixtures[0]?.name ?? '2x10x16 #2 Fir',
+              description: catalogFixtures[0]?.name ?? '2x10x16 #2 Fir',
+              qty_entered: 36,
+              uom: 'EA',
+              notes: '',
+              unit_price_cents: 920,
+              line_total_cents: 33120,
+              available_qty: 200,
+              in_stock: true,
+              created_at: iso(),
+            },
+          ],
+        },
+      ])
+    }
+    if (path === '/api/portal/v1/quotes/intake') {
+      return json(route, {
+        source: 'TEXT',
+        synthetic: false,
+        items: [
+          {
+            raw_text: '24 pcs 2x10x16 #2 Fir',
+            parsed_qty: 24,
+            parsed_unit: 'EA',
+            parsed_description: '2x10x16 #2 Fir',
+            matched_product_id: catalogFixtures[0]?.id ?? null,
+            matched_product_name: catalogFixtures[0]?.name ?? '2x10x16 #2 Fir',
+            matched_sku: catalogFixtures[0]?.sku ?? 'LUM-21016',
+            confidence: 'HIGH',
+          },
+        ],
+      })
+    }
+    if (path === '/api/portal/v1/quotes') {
+      return json(route, [
+        {
+          id: testIds.quote,
+          status: 'PRICED',
+          erp_state: 'SENT',
+          project_id: null,
+          project_name: 'Glenview Lofts',
+          notes: 'Second floor framing',
+          priced: true,
+          total_amount: 1420.5,
+          freight_amount: 75,
+          delivery_type: 'DELIVERY',
+          expires_at: iso(),
+          sent_at: iso(),
+          accepted_at: null,
+          rejected_at: null,
+          created_at: iso(),
+          updated_at: iso(),
+          lines: [
+            {
+              id: '61000000-0000-4000-8000-000000000006',
+              product_id: testIds.product,
+              product_sku: 'LUM-248',
+              description: '2x4x8 SPF Premium',
+              customer_note: '',
+              quantity: 200,
+              uom: 'EA',
+              price_uom: 'EA',
+              unit_price: 4.88,
+              line_total: 976,
+              is_special_order: false,
+            },
+          ],
+        },
+      ])
+    }
+    if (path === '/api/portal/v1/billing/summary') {
+      return json(route, {
+        balance_tiles: {
+          currency: 'USD',
+          current_balance_cents: 412575,
+          credit_limit_cents: 2500000,
+          available_credit_cents: 2087425,
+          past_due_cents: 125050,
+          unapplied_cash_cents: 15000,
+          net_balance_cents: 397575,
+          open_invoice_count: 2,
+          overdue_invoice_count: 1,
+        },
+        aging: {
+          as_of: '2026-06-15',
+          currency: 'USD',
+          current_cents: 287525,
+          days_1_30_cents: 125050,
+          days_31_60_cents: 0,
+          days_61_90_cents: 0,
+          days_over_90_cents: 0,
+          unapplied_cents: 15000,
+          total_open_cents: 412575,
+          net_cents: 397575,
+        },
+        job_summaries: [
+          {
+            project_id: '70000000-0000-4000-8000-000000000007',
+            project_name: 'Glenview Lofts',
+            status: 'ACTIVE',
+            budget_cents: 1500000,
+            quoted_cents: 920000,
+            ordered_cents: 742118,
+            invoiced_cents: 412575,
+            paid_cents: 200000,
+            open_balance_cents: 212575,
+            quote_variance_cents: -177882,
+            order_count: 3,
+            invoice_count: 2,
+            delivery_count: 3,
+            delivered_count: 2,
+          },
+        ],
+      })
+    }
+    if (path === '/api/portal/v1/invoices') {
+      return json(route, [
+        {
+          id: testIds.invoice,
+          number: 'IN-1001',
+          is_overdue: true,
+          order_id: testIds.order,
+          status: 'UNPAID',
+          total_amount: 1250.5,
+          subtotal: 1150,
+          tax_amount: 100.5,
+          payment_terms: 'Net 30',
+          due_date: iso(),
+          paid_at: null,
+          created_at: iso(),
+          updated_at: iso(),
+          lines: [
+            { product_id: testIds.product, product_sku: 'LUM-248', product_name: '2x4x8 SPF Premium', quantity: 48, price_each: 4.88 },
+          ],
+        },
+        {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc',
+          number: 'IN-1002',
+          is_overdue: false,
+          order_id: testIds.order,
+          status: 'PARTIAL',
+          total_amount: 2875.25,
+          subtotal: 2650,
+          tax_amount: 225.25,
+          payment_terms: 'Net 30',
+          due_date: iso(),
+          paid_at: null,
+          created_at: iso(),
+          updated_at: iso(),
+          lines: [
+            { product_id: testIds.product, product_sku: 'PLY-34', product_name: '3/4 CDX Plywood', quantity: 50, price_each: 53 },
+          ],
+        },
+      ])
+    }
+    if (path === '/api/portal/v1/statements') return json(route, [])
+    if (path === '/api/portal/v1/statement') {
+      return json(route, {
+        customer_id: ids.customer,
+        customer_name: 'Summit Frame Works',
+        from: '2026-05-15',
+        to: '2026-06-15',
+        currency: 'USD',
+        opening_balance_cents: 200000,
+        closing_balance_cents: 412575,
+        unapplied_cents: 15000,
+        net_balance_cents: 397575,
+        aging: {
+          as_of: '2026-06-15',
+          currency: 'USD',
+          current_cents: 287525,
+          days_1_30_cents: 125050,
+          days_31_60_cents: 0,
+          days_61_90_cents: 0,
+          days_over_90_cents: 0,
+          unapplied_cents: 15000,
+          total_open_cents: 412575,
+          net_cents: 397575,
+        },
+        lines: [
+          {
+            id: '80000000-0000-4000-8000-000000000008',
+            date: '2026-06-01',
+            type: 'INVOICE',
+            description: 'Invoice IN-1001',
+            amount_cents: 125050,
+            balance_after_cents: 325050,
+            reference_id: testIds.invoice,
+          },
+        ],
+        open_invoices: [
+          { kind: 'INVOICE', id: testIds.invoice, number: 'IN-1001', date: '2026-06-01', due_date: '2026-06-10', total_cents: 125050, open_cents: 125050 },
+          { kind: 'INVOICE', id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc', number: 'IN-1002', date: '2026-06-08', due_date: '2026-07-08', total_cents: 287525, open_cents: 287525 },
+        ],
+      })
+    }
+    if (path === '/api/portal/v1/payment-methods') {
+      return json(route, [
+        {
+          id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+          customer_id: ids.customer,
+          gateway: 'HOSTED_VAULT',
+          method_type: 'CARD',
+          brand: 'Visa',
+          last4: '4242',
+          exp_month: 12,
+          exp_year: 2028,
+          is_default: true,
+          status: 'ACTIVE',
+          created_at: iso(),
+        },
+      ])
+    }
+    if (path === '/api/portal/v1/payments') {
+      const payment = {
+        id: '90000000-0000-4000-8000-000000000009',
+        number: 'PAY-000042',
+        customer_id: ids.customer,
+        currency: 'USD',
+        method: 'CARD',
+        status: 'APPLIED',
+        amount_cents: 412575,
+        unapplied_cents: 0,
+        card_brand: 'Visa',
+        card_last4: '4242',
+        received_on: '2026-06-15',
+        created_at: iso(),
+        allocations: [
+          { id: '91000000-0000-4000-8000-000000000001', invoice_id: testIds.invoice, invoice_number: 'IN-1001', amount_cents: 125050, applied_on: '2026-06-15', created_at: iso() },
+        ],
+      }
+      return json(route, request.method() === 'POST' ? payment : [payment], request.method() === 'POST' ? 201 : 200)
+    }
+    if (path === '/api/portal/v1/projects') return json(route, { items: [{ id: '70000000-0000-4000-8000-000000000007', name: 'Glenview Lofts' }], next_cursor: null, limit: 50 })
     if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/preview`) return json(route, publicQuoteFixture)
     if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/send`) {
       customerQuote.status = 'sent'
