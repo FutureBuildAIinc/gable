@@ -40,6 +40,8 @@ export interface SignInMethodConfig {
 /** The runtime config the door renders from. */
 export interface AuthMethodsRuntimeConfig {
   readonly authMode: 'dev' | 'production';
+  readonly dealerName: string | null;
+  readonly dealerMarkUrl: string | null;
   readonly methods: readonly SignInMethodConfig[];
   /** True when the server's answer was not had and the config failed closed. */
   readonly degraded: boolean;
@@ -64,6 +66,8 @@ const DEGRADED_NOTICE =
 export function degradedAuthMethodsConfig(): AuthMethodsRuntimeConfig {
   return {
     authMode: 'production',
+    dealerName: null,
+    dealerMarkUrl: null,
     methods: [
       {
         method: 'email_password',
@@ -84,13 +88,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function stringOrNull(value: unknown): string | null {
-  return typeof value === 'string' && value !== '' ? value : null;
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
 /** Read the parsed JSON field by field; never cast. */
 export function parseAuthMethodsConfig(raw: unknown): AuthMethodsRuntimeConfig {
   if (!isRecord(raw)) return degradedAuthMethodsConfig();
   const authMode = raw['auth_mode'] === 'dev' ? 'dev' : 'production';
+  const dealerName = stringOrNull(raw['dealer_name']);
+  const dealerMarkUrl = stringOrNull(raw['dealer_mark_url']);
   const list = raw['methods'];
   if (!Array.isArray(list)) return degradedAuthMethodsConfig();
   const methods: SignInMethodConfig[] = [];
@@ -110,7 +116,7 @@ export function parseAuthMethodsConfig(raw: unknown): AuthMethodsRuntimeConfig {
     });
   }
   if (methods.length === 0) return degradedAuthMethodsConfig();
-  return { authMode, methods, degraded: false, notice: null };
+  return { authMode, dealerName, dealerMarkUrl, methods, degraded: false, notice: null };
 }
 
 /** The page life cache: the first call's promise is every call's answer. */

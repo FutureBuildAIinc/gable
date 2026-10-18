@@ -342,12 +342,30 @@ export class GableFrontDoor extends LitElement {
     const headerRoleWords = personaRole !== null
       ? ROLE_WORDS[personaRole as keyof typeof ROLE_WORDS] ?? personaRole
       : null;
+    const dealerName = !authConfig.devMode ? (this._authCfg?.dealerName ?? null) : null;
+    const dealerMarkUrl = !authConfig.devMode ? (this._authCfg?.dealerMarkUrl ?? null) : null;
     return html`
-      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
-        <div class="flex items-center gap-3 justify-self-start">
-          <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
-          <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
-        </div>
+      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
+        ${dealerName !== null ? html`
+          <div class="flex items-center gap-2.5 min-w-0 shrink-0 justify-self-start">
+            ${dealerMarkUrl !== null
+              ? html`<img
+                  src=${dealerMarkUrl}
+                  alt=""
+                  class="h-8 w-8 rounded-lg object-contain bg-white/5 border border-white/5 shrink-0"
+                />`
+              : html`<span
+                  aria-hidden="true"
+                  class="h-8 w-8 rounded-lg bg-gable-green/10 border border-gable-green/30 flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0"
+                >${initialsFor(dealerName)}</span>`}
+            <span class="text-sm font-semibold text-white max-w-[200px] sm:max-w-[240px] truncate">${dealerName}</span>
+          </div>
+        ` : html`
+          <div class="flex items-center gap-3 justify-self-start">
+            <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
+            <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
+          </div>
+        `}
         <div class="text-center text-sm font-medium tracking-wide text-zinc-400 truncate">
           ${this._headerWord}
         </div>
@@ -418,12 +436,16 @@ export class GableFrontDoor extends LitElement {
 
   private _renderSignIn() {
     // The heading and the card width differ between dev (the wide card and
-    // the tenant's name) and a production build (the base wrapper on
-    // refactor/v1, the plain product name). Every dealer's real door carries
-    // their own tenant name, so the production door must not render "Gable
-    // Building Supply".
+    // the demo tenant's name) and a production build, which leads with the
+    // dealer's own name from /api/v1/auth/config when one is configured and
+    // falls back to Gable's own lockup when none is set.
     const dev = authConfig.devMode;
-    const headingText = dev ? 'Sign in to Gable Building Supply' : 'Sign in to Gable';
+    const dealerName = !dev ? (this._authCfg?.dealerName ?? null) : null;
+    const headingText = dev
+      ? 'Sign in to Gable Building Supply'
+      : dealerName !== null
+        ? `Sign in to ${dealerName}`
+        : 'Sign in to Gable';
     const outerClasses = dev
       ? 'flex items-start justify-center py-12'
       : 'flex items-center justify-center py-16';

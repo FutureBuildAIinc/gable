@@ -438,4 +438,42 @@ describe('front door runtime sign in methods (S8)', () => {
     const firstMethodBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Passkey"]')!;
     expect(document.activeElement).toBe(firstMethodBtn);
   });
+
+  it('white labels the header and card title with the dealer mark or monogram and name when configured, and falls back to Gable when empty', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: null,
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Northridge Lumber');
+    const header = el.querySelector('header')!;
+    expect(header.textContent).toContain('NL');
+    expect(header.textContent).toContain('Northridge Lumber');
+    expect(header.querySelector('gable-brand-logo')).toBeNull();
+    expect(el.querySelector('footer')?.textContent).toContain('Powered by Gable');
+
+    // With a dealer_mark_url, the header renders the img mark instead of the monogram.
+    document.body.innerHTML = '';
+    resetAuthMethodsCache();
+    stubConfig({
+      auth_mode: 'production',
+      dealer_name: 'Northridge Lumber',
+      dealer_mark_url: '/api/v1/dealer-profile/logo',
+      methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const elWithLogo = await mount();
+    await settle(elWithLogo);
+    const logoImg = elWithLogo.querySelector<HTMLImageElement>('header img');
+    expect(logoImg).not.toBeNull();
+    expect(logoImg?.getAttribute('src')).toBe('/api/v1/dealer-profile/logo');
+  });
 });

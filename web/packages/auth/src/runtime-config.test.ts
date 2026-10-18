@@ -48,8 +48,28 @@ describe('parseAuthMethodsConfig', () => {
     expect(cfg.methods[0].label).toBe('Dealer SSO');
   });
 
+  it('reads dealer_name and dealer_mark_url when set, and nulls them when blank or absent', () => {
+    const withDealer = parseAuthMethodsConfig({
+      ...TWO_METHODS,
+      dealer_name: '  Kelowna Building Supply  ',
+      dealer_mark_url: '/api/v1/dealer-profile/logo',
+    });
+    expect(withDealer.dealerName).toBe('Kelowna Building Supply');
+    expect(withDealer.dealerMarkUrl).toBe('/api/v1/dealer-profile/logo');
+
+    const withoutDealer = parseAuthMethodsConfig({
+      ...TWO_METHODS,
+      dealer_name: '   ',
+      dealer_mark_url: null,
+    });
+    expect(withoutDealer.dealerName).toBeNull();
+    expect(withoutDealer.dealerMarkUrl).toBeNull();
+  });
+
   it('fails closed on a non object, a missing list, an empty list or unknown methods', () => {
     const degraded = degradedAuthMethodsConfig();
+    expect(degraded.dealerName).toBeNull();
+    expect(degraded.dealerMarkUrl).toBeNull();
     for (const bad of [null, 3, {}, { auth_mode: 'production', methods: [] }, { auth_mode: 'production', methods: [{ method: 'sms', kind: 'form' }] }]) {
       expect(parseAuthMethodsConfig(bad)).toEqual(degraded);
     }
