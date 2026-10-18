@@ -13,6 +13,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/domain"
 	integration "github.com/gablelbm/gable/internal/integrations/gl"
+	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -102,6 +103,8 @@ func (s *Service) CreateAccount(ctx context.Context, acct *GLAccount) error {
 	}
 	if acct.NormalBalance == "" {
 		acct.NormalBalance = defaultNormalBalance(acct.Type)
+	} else if acct.NormalBalance != NormalDebit && acct.NormalBalance != NormalCredit {
+		return fmt.Errorf("invalid normal balance: %s", acct.NormalBalance)
 	}
 	acct.IsActive = true
 	return s.runTx(ctx, func(ctx context.Context) error {
@@ -114,6 +117,20 @@ func (s *Service) CreateAccount(ctx context.Context, acct *GLAccount) error {
 }
 
 func (s *Service) UpdateAccount(ctx context.Context, acct *GLAccount) error {
+	if acct.Code == "" {
+		return fmt.Errorf("account code is required")
+	}
+	if acct.Name == "" {
+		return fmt.Errorf("account name is required")
+	}
+	if !isValidAccountType(acct.Type) {
+		return fmt.Errorf("invalid account type: %s", acct.Type)
+	}
+	if acct.NormalBalance == "" {
+		acct.NormalBalance = defaultNormalBalance(acct.Type)
+	} else if acct.NormalBalance != NormalDebit && acct.NormalBalance != NormalCredit {
+		return fmt.Errorf("invalid normal balance: %s", acct.NormalBalance)
+	}
 	return s.runTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.UpdateAccount(ctx, acct); err != nil {
 			return err
@@ -172,7 +189,11 @@ func (s *Service) CreateJournalEntry(ctx context.Context, entry *JournalEntry) e
 		entry.Source = SourceManual
 	}
 	if entry.EntryDate.IsZero() {
-		entry.EntryDate = time.Now()
+		if day, err := s.repo.BranchBusinessDay(ctx, &entry.BranchID); err == nil && !day.IsZero() {
+			entry.EntryDate = day
+		} else {
+			entry.EntryDate = time.Now()
+		}
 	}
 
 	entry.TotalDebit = totalDebit
@@ -209,7 +230,14 @@ func (s *Service) PostJournalEntry(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("cannot post to closed fiscal period: %s", period.Name)
 		}
 
-		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusPosted, "system"); err != nil {
+		postedBy := actor.FromContext(ctx).ID
+		if postedBy == "" {
+			postedBy = entry.PostedBy
+		}
+		if postedBy == "" {
+			postedBy = "system"
+		}
+		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusPosted, postedBy); err != nil {
 			return err
 		}
 		return s.record(ctx, "gl.journal_entry_posted", "gl_journal_entry", id, &entry.BranchID,
@@ -231,7 +259,25 @@ func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 		if entry.Status != StatusPosted {
 			return fmt.Errorf("can only void entries in POSTED status (current: %s)", entry.Status)
 		}
-		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusVoid, ""); err != nil {
+		if entry.Source != SourceManual {
+			return fmt.Errorf("can only void MANUAL journal entries (source: %s)", entry.Source)
+		}
+		if entry.ReversesEntryID != nil {
+			return fmt.Errorf("cannot void a reversal journal entry")
+		}
+		if reversed, err := s.repo.IsReversed(ctx, id); err != nil {
+			return err
+		} else if reversed {
+			return fmt.Errorf("cannot void a journal entry that has already been reversed")
+		}
+		period, err := s.repo.GetFiscalPeriodForDate(ctx, entry.EntryDate)
+		if err != nil {
+			return fmt.Errorf("failed to check fiscal period: %w", err)
+		}
+		if period != nil && period.Status == PeriodClosed {
+			return fmt.Errorf("%w: cannot void entry in closed fiscal period: %s", ErrPeriodClosed, period.Name)
+		}
+		if err := s.repo.UpdateJournalEntryStatus(ctx, id, StatusVoid, entry.PostedBy); err != nil {
 			return err
 		}
 		return s.record(ctx, "gl.journal_entry_voided", "gl_journal_entry", id, &entry.BranchID,
@@ -276,18 +322,41 @@ func (s *Service) reverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 		return uuid.Nil, fmt.Errorf("journal entry %s has no lines to reverse", id)
 	}
 
+	entryDate, err := s.repo.BranchBusinessDay(ctx, &orig.BranchID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to read branch business day: %w", err)
+	}
+	if entryDate.IsZero() {
+		entryDate = time.Now()
+	}
+	period, err := s.repo.GetFiscalPeriodForDate(ctx, entryDate)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to check fiscal period: %w", err)
+	}
+	if period != nil && period.Status == PeriodClosed {
+		return uuid.Nil, fmt.Errorf("%w: cannot post reversal to closed fiscal period: %s", ErrPeriodClosed, period.Name)
+	}
+
+	postedBy := actor.FromContext(ctx).ID
+	if postedBy == "" {
+		postedBy = orig.PostedBy
+	}
+	if postedBy == "" {
+		postedBy = "system"
+	}
+
 	memo := fmt.Sprintf("Reversal of #%d", orig.EntryNumber)
 	if reason != "" {
 		memo += ": " + reason
 	}
 	rev := &JournalEntry{
-		EntryDate:       time.Now(),
+		EntryDate:       entryDate,
 		Memo:            memo,
 		Source:          SourceReversal,
 		SourceRefID:     &orig.ID,
 		BranchID:        orig.BranchID,
 		Status:          StatusPosted,
-		PostedBy:        "system",
+		PostedBy:        postedBy,
 		ReversesEntryID: &orig.ID,
 		Currency:        orig.Currency,
 	}
@@ -786,14 +855,26 @@ func (s *Service) PostTillOverShort(ctx context.Context, branchID uuid.UUID, ses
 		}
 	}
 
+	entryDate, err := s.repo.BranchBusinessDay(ctx, &branchID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to read branch business day: %w", err)
+	}
+	if entryDate.IsZero() {
+		entryDate = time.Now()
+	}
+	postedBy := actor.FromContext(ctx).ID
+	if postedBy == "" {
+		postedBy = "system"
+	}
+
 	ref := sessionID
 	entry := &JournalEntry{
-		EntryDate:   time.Now(),
+		EntryDate:   entryDate,
 		Memo:        fmt.Sprintf("Till over/short — session %s", sessionID),
 		Source:      SourceAdjustment,
 		SourceRefID: &ref, BranchID: branchID,
 		Status:   StatusPosted,
-		PostedBy: "system",
+		PostedBy: postedBy,
 		Lines:    lines,
 	}
 	if err := s.CreateJournalEntry(ctx, entry); err != nil {

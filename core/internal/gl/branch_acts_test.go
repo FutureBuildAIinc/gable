@@ -10,6 +10,7 @@ package gl_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,6 +26,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -591,6 +593,256 @@ func TestCrossBranchSubledgerTieOutAndSettlements(t *testing.T) {
 		if tie.AP.ControlCents != 0 || tie.AP.SubledgerCents != 0 || tie.AP.DifferenceCents != 0 {
 			t.Errorf("branch %s AP tie-out after multi-branch PayVendor = %+v, want 0/0/0", b, tie.AP)
 		}
+	}
+}
+
+// TestPeriodAndAccountGuardsOnJournalAndAccountActs verifies period-close,
+// reversal, source, and actor guards on VoidJournalEntry, PostJournalEntry,
+// and ReverseJournalEntry, plus everyBranch and input/balance guards on
+// HandleCreateAccount and HandleUpdateAccount.
+func TestPeriodAndAccountGuardsOnJournalAndAccountActs(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := wiredService(db)
+	branch := secondBranch(t, db, "M6-GRD")
+	h := gl.NewHandler(svc).WithBranchGuard(middleware.NewBranchGuard(db))
+
+	var ar, rev uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeAR).Scan(&ar); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = $1`, gl.AccountCodeRevenue).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE branch_id = $1 OR journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, branch)
+		_, _ = db.Pool.Exec(ctx, `UPDATE gl_journal_entries SET reverses_entry_id = NULL WHERE branch_id = $1`, branch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE branch_id = $1`, branch)
+	})
+
+	// 1. PostJournalEntry preserves actor and VoidJournalEntry refuses non-MANUAL,
+	// already-reversed, and closed-period entries.
+	closedPeriodID := newPeriod(t, db, "m6 grd closed "+uuid.NewString()[:8], "2039-01-01", "2039-01-31")
+	openEntry := &gl.JournalEntry{
+		EntryDate: time.Date(2039, 1, 15, 0, 0, 0, 0, time.UTC),
+		Memo:      "m6 grd manual",
+		Source:    gl.SourceManual,
+		BranchID:  branch,
+		PostedBy:  "creator-actor",
+		Status:    gl.StatusDraft,
+		Lines: []gl.JournalLine{
+			{AccountID: ar, Debit: 1000},
+			{AccountID: rev, Credit: 1000},
+		},
+	}
+	if err := svc.CreateManualJournalEntry(ctx, openEntry); err != nil {
+		t.Fatal(err)
+	}
+	postCtx := actor.WithKeyID(ctx, "poster-actor")
+	if err := svc.PostJournalEntry(postCtx, openEntry.ID); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := svc.GetJournalEntry(ctx, openEntry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.PostedBy != "poster-actor" {
+		t.Errorf("PostJournalEntry posted_by = %q, want %q", loaded.PostedBy, "poster-actor")
+	}
+
+	if _, err := svc.CloseFiscalPeriodFor(ctx, closedPeriodID, 1, "auditor"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VoidJournalEntry(ctx, openEntry.ID); err == nil {
+		t.Errorf("VoidJournalEntry in CLOSED period = nil, want error")
+	}
+
+	// Non-MANUAL entry cannot be voided via VoidJournalEntry.
+	var invEntry *gl.JournalEntry
+	if err := db.RunInTx(ctx, func(ctx context.Context) error {
+		var err error
+		invEntry, err = svc.PostEntry(ctx, gl.PostingInput{
+			EntryDate: time.Date(2039, 2, 10, 0, 0, 0, 0, time.UTC),
+			Memo:      "m6 grd inv",
+			Source:    gl.SourceInvoice,
+			BranchID:  branch,
+			PostedBy:  "t",
+			Legs: []gl.Leg{
+				{AccountCode: gl.AccountCodeAR, Debit: 2000},
+				{AccountCode: gl.AccountCodeRevenue, Credit: 2000},
+			},
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VoidJournalEntry(ctx, invEntry.ID); err == nil {
+		t.Errorf("VoidJournalEntry on non-MANUAL entry = nil, want error")
+	}
+
+	// Already-reversed entry (and the reversal entry itself) cannot be voided.
+	revTarget := &gl.JournalEntry{
+		EntryDate: time.Date(2039, 2, 12, 0, 0, 0, 0, time.UTC),
+		Memo:      "m6 grd rev target",
+		Source:    gl.SourceManual,
+		BranchID:  branch,
+		PostedBy:  "creator-actor",
+		Status:    gl.StatusPosted,
+		Lines: []gl.JournalLine{
+			{AccountID: ar, Debit: 3000},
+			{AccountID: rev, Credit: 3000},
+		},
+	}
+	if err := svc.CreateManualJournalEntry(ctx, revTarget); err != nil {
+		t.Fatal(err)
+	}
+	revCtx := actor.WithKeyID(ctx, "reverser-actor")
+	revID, err := svc.ReverseJournalEntry(revCtx, revTarget.ID, "mistake")
+	if err != nil {
+		t.Fatalf("ReverseJournalEntry: %v", err)
+	}
+	revLoaded, err := svc.GetJournalEntry(ctx, revID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revLoaded.PostedBy != "reverser-actor" {
+		t.Errorf("ReverseJournalEntry posted_by = %q, want %q", revLoaded.PostedBy, "reverser-actor")
+	}
+	if err := svc.VoidJournalEntry(ctx, revTarget.ID); err == nil {
+		t.Errorf("VoidJournalEntry on already-reversed entry = nil, want error")
+	}
+	if err := svc.VoidJournalEntry(ctx, revID); err == nil {
+		t.Errorf("VoidJournalEntry on reversal entry = nil, want error")
+	}
+
+	// 2. ReverseJournalEntry refused when branch business day falls in a CLOSED period.
+	today, err := svc.BusinessDay(ctx, &branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var todayPeriodID uuid.UUID
+	var todayPeriodRev int64
+	err = db.Pool.QueryRow(ctx, `SELECT id, revision FROM gl_fiscal_periods WHERE $1::date BETWEEN start_date AND end_date LIMIT 1`, today.Format("2006-01-02")).Scan(&todayPeriodID, &todayPeriodRev)
+	if err != nil {
+		todayStr := today.Format("2006-01-02")
+		todayPeriodID = newPeriod(t, db, "m6 grd today "+uuid.NewString()[:8], todayStr, todayStr)
+		todayPeriodRev = 1
+	}
+	closedToday, err := svc.CloseFiscalPeriodFor(ctx, todayPeriodID, todayPeriodRev, "auditor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `UPDATE gl_fiscal_periods SET status = 'OPEN', closed_at = NULL, closed_by = NULL WHERE id = $1`, todayPeriodID)
+	})
+	unreversedEntry := &gl.JournalEntry{
+		EntryDate: time.Date(2039, 2, 14, 0, 0, 0, 0, time.UTC),
+		Memo:      "m6 grd unreversed",
+		Source:    gl.SourceManual,
+		BranchID:  branch,
+		PostedBy:  "creator-actor",
+		Status:    gl.StatusPosted,
+		Lines: []gl.JournalLine{
+			{AccountID: ar, Debit: 4000},
+			{AccountID: rev, Credit: 4000},
+		},
+	}
+	if err := svc.CreateManualJournalEntry(ctx, unreversedEntry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReverseJournalEntry(ctx, unreversedEntry.ID, "closed today"); err == nil {
+		t.Errorf("ReverseJournalEntry when business day period is CLOSED = nil, want error")
+	}
+	if _, err := svc.ReopenFiscalPeriodFor(ctx, todayPeriodID, closedToday.Revision, "reopen today", "auditor"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Voiding unreversedEntry in an open period succeeds and preserves PostedBy.
+	if err := svc.VoidJournalEntry(ctx, unreversedEntry.ID); err != nil {
+		t.Fatalf("VoidJournalEntry in open period: %v", err)
+	}
+	voidedLoaded, err := svc.GetJournalEntry(ctx, unreversedEntry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voidedLoaded.PostedBy != "creator-actor" {
+		t.Errorf("VoidJournalEntry posted_by = %q, want %q", voidedLoaded.PostedBy, "creator-actor")
+	}
+
+	// 3. HandleCreateAccount and HandleUpdateAccount enforce everyBranch and validate/preserve fields.
+	serve := func(bc *branchctx.Context, method, target, body, ifMatch string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, target, strings.NewReader(body))
+		if ifMatch != "" {
+			r.Header.Set("If-Match", ifMatch)
+		}
+		r = r.WithContext(branchctx.With(context.Background(), bc))
+		w := httptest.NewRecorder()
+		mux := http.NewServeMux()
+		h.RegisterRoutes(mux)
+		mux.ServeHTTP(w, r)
+		return w
+	}
+
+	sub := "m6-grd-" + uuid.NewString()[:8]
+	oneBranchCaller := &branchctx.Context{UserSub: sub, BranchID: &branch}
+	if w := serve(oneBranchCaller, "POST", "/api/v1/gl/accounts", `{"code":"9881","name":"Branch Acct","type":"ASSET"}`, ""); w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/v1/gl/accounts as branch-confined caller = %d, want 403: %s", w.Code, w.Body)
+	}
+
+	adminCaller := &branchctx.Context{UserSub: sub, IsAdmin: true}
+	acctCode := "9" + strings.ReplaceAll(uuid.NewString()[:5], "-", "0")
+	wCreate := serve(adminCaller, "POST", "/api/v1/gl/accounts",
+		fmt.Sprintf(`{"code":%q,"name":"Grd Acct","type":"ASSET"}`, acctCode), "")
+	if wCreate.Code != http.StatusCreated {
+		t.Fatalf("POST /api/v1/gl/accounts as admin = %d, want 201: %s", wCreate.Code, wCreate.Body)
+	}
+	var created gl.GLAccount
+	if err := json.Unmarshal(wCreate.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id = $1 OR entity_id IN (SELECT id FROM gl_accounts WHERE code = '9881')`, created.ID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = $1 OR entity_id IN (SELECT id FROM gl_accounts WHERE code = '9881')`, created.ID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_accounts WHERE id = $1 OR code = '9881'`, created.ID)
+	})
+
+	if w := serve(oneBranchCaller, "PUT", "/api/v1/gl/accounts/"+created.ID.String(),
+		fmt.Sprintf(`{"code":%q,"name":"Renamed","type":"ASSET"}`, acctCode), `"1"`); w.Code != http.StatusForbidden {
+		t.Errorf("PUT /api/v1/gl/accounts/{id} as branch-confined caller = %d, want 403: %s", w.Code, w.Body)
+	}
+
+	// Post activity to created account so it has a non-zero balance.
+	post(t, db, svc, branch, time.Date(2039, 2, 16, 0, 0, 0, 0, time.UTC), "m6 grd acct bal",
+		gl.Leg{AccountCode: acctCode, Debit: 5500}, gl.Leg{AccountCode: gl.AccountCodeRevenue, Credit: 5500})
+
+	// Update omitting normal_balance defaults it and preserves balance and created_at.
+	wUpdate := serve(adminCaller, "PUT", "/api/v1/gl/accounts/"+created.ID.String(),
+		fmt.Sprintf(`{"code":%q,"name":"Grd Acct Updated","type":"ASSET"}`, acctCode), `"1"`)
+	if wUpdate.Code != http.StatusOK {
+		t.Fatalf("PUT /api/v1/gl/accounts/{id} omitting normal_balance = %d, want 200: %s", wUpdate.Code, wUpdate.Body)
+	}
+	var updated gl.GLAccount
+	if err := json.Unmarshal(wUpdate.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.NormalBalance != gl.NormalDebit {
+		t.Errorf("PUT account normal_balance = %q, want %q", updated.NormalBalance, gl.NormalDebit)
+	}
+	if updated.Balance != 5500 {
+		t.Errorf("PUT account balance = %d, want 5500", updated.Balance)
+	}
+	if updated.CreatedAt.IsZero() {
+		t.Errorf("PUT account created_at is zero, want non-zero")
+	}
+
+	// Invalid type on PUT returns 400, not 500.
+	wBad := serve(adminCaller, "PUT", "/api/v1/gl/accounts/"+created.ID.String(),
+		fmt.Sprintf(`{"code":%q,"name":"Grd Acct","type":"BOGUS"}`, acctCode), `"2"`)
+	if wBad.Code != http.StatusBadRequest {
+		t.Errorf("PUT /api/v1/gl/accounts/{id} with invalid type = %d, want 400: %s", wBad.Code, wBad.Body)
 	}
 }
 

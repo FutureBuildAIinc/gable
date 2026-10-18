@@ -248,14 +248,14 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 
 func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error) {
 	queryHeader := `
-		SELECT id, entry_number, entry_date, memo, source, source_ref_id, branch_id, status, COALESCE(posted_by, ''), created_at, updated_at, currency
+		SELECT id, entry_number, entry_date, memo, source, source_ref_id, branch_id, status, COALESCE(posted_by, ''), reverses_entry_id, created_at, updated_at, currency
 		FROM gl_journal_entries
 		WHERE id = $1
 	`
 	var e JournalEntry
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source,
-		&e.SourceRefID, &e.BranchID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
+		&e.SourceRefID, &e.BranchID, &e.Status, &e.PostedBy, &e.ReversesEntryID, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -333,10 +333,17 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 }
 
 func (r *PostgresRepository) UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error {
-	query := `UPDATE gl_journal_entries SET status = $1, posted_by = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, postedBy, id)
+	fromStatus := StatusDraft
+	if status == StatusVoid {
+		fromStatus = StatusPosted
+	}
+	query := `UPDATE gl_journal_entries SET status = $1, posted_by = COALESCE(NULLIF($2, ''), posted_by), updated_at = NOW() WHERE id = $3 AND status = $4`
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, postedBy, id, fromStatus)
 	if err != nil {
 		return fmt.Errorf("failed to update journal entry status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("journal entry %s is not in %s status", id, fromStatus)
 	}
 	return nil
 }

@@ -253,6 +253,9 @@ type createAccountRequest struct {
 }
 
 func (h *Handler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
+	if !h.everyBranch(w, r, "creating a GL account") {
+		return
+	}
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
@@ -280,6 +283,9 @@ func (h *Handler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
+	if !h.everyBranch(w, r, "updating a GL account") {
+		return
+	}
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -311,8 +317,10 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		ParentID:      req.ParentID,
 		NormalBalance: req.NormalBalance,
 		Description:   req.Description,
-		IsActive:      true,
+		IsActive:      current.IsActive,
+		Balance:       current.Balance,
 		Revision:      current.Revision,
+		CreatedAt:     current.CreatedAt,
 	}
 
 	if err := h.svc.UpdateAccount(r.Context(), acct); err != nil {
@@ -320,7 +328,7 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, httpx.StaleRevision("the account was changed after this revision was read; reload and retry"))
 			return
 		}
-		httputil.RespondError(w, r, "failed to update GL account", http.StatusInternalServerError, err)
+		httputil.RespondError(w, r, "failed to update GL account", http.StatusBadRequest, err)
 		return
 	}
 
