@@ -625,6 +625,59 @@ func TestSchedule_CutoffRefusal(t *testing.T) {
 	}
 }
 
+// The current calendar date for listing open windows and placing a hold is
+// taken in the yard's own time zone, never in UTC: a yard in a zone behind UTC
+// (testutil.AlwaysBehindUTC) can list and hold a late evening slot on its own
+// current local day even after UTC midnight has advanced to the next date.
+func TestSchedule_CurrentDateInYardTimezone(t *testing.T) {
+	f := setupPro(t)
+	ctx := context.Background()
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE locations SET timezone = $1 WHERE id = $2`, testutil.AlwaysBehindUTC, f.aYard); err != nil {
+		t.Fatalf("set yard timezone: %v", err)
+	}
+	nowInYard := time.Now().In(time.FixedZone("-25", -25*3600))
+	yardToday := nowInYard.Format("2006-01-02")
+	yardWeekday := int(nowInYard.Weekday())
+	winToday := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `
+		INSERT INTO yard_schedule_windows (id, yard_id, kind, weekday, start_time, end_time, capacity, cutoff_minutes)
+		VALUES ($1, $2, 'delivery', $3, '23:58', '23:59', 2, 0)
+	`, winToday, f.aYard, yardWeekday); err != nil {
+		t.Fatalf("insert today window: %v", err)
+	}
+
+	repo := NewRepository(f.db)
+	mux := muxFor(repo, f.aCustomer, f.users[RoleOwner], RoleOwner)
+
+	// Default range on GET /schedule/windows (no from or to) starts on the
+	// yard's own current date.
+	rec, _ := call(mux, "GET", "/api/portal/v1/schedule/windows?yard_id="+f.aYard.String(), "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list windows answered %d: %s", rec.Code, rec.Body.String())
+	}
+	var views []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &views)
+	foundToday := false
+	for _, v := range views {
+		if v["window_id"] == winToday.String() && v["date"] == yardToday {
+			foundToday = true
+			break
+		}
+	}
+	if !foundToday {
+		t.Errorf("default windows list omitted yard local today (%s) for window %s", yardToday, winToday)
+	}
+
+	// Holding that slot on the yard's local today succeeds (201), not 400
+	// "the date is in the past".
+	rec, _ = call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, winToday, yardToday), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("hold on yard local today (%s) answered %d: %s", yardToday, rec.Code, rec.Body.String())
+	}
+}
+
 // Checkout with a schedule hold creates the order and attaches the hold in one
 // transaction (a failure leaves neither), and ChangeScheduleHold neither
 // releases the existing hold before the new one is secured nor re-applies the

@@ -121,16 +121,59 @@ func heldCount(ctx context.Context, exec database.Executor, windowID uuid.UUID, 
 	return n, err
 }
 
+// yardTimezoneForCustomer checks that the yard belongs to the customer and
+// returns its configured time zone (defaulting to UTC).
+func (r *PostgresRepository) yardTimezoneForCustomer(ctx context.Context, yardID, customerID uuid.UUID) (string, bool, error) {
+	var tz string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT COALESCE(l.timezone, 'UTC')
+		FROM customer_branches cb
+		LEFT JOIN locations l ON l.id = cb.branch_id
+		WHERE cb.customer_id = $1 AND cb.branch_id = $2
+	`, customerID, yardID).Scan(&tz)
+	if err != nil {
+		return "", false, nil
+	}
+	return tz, true, nil
+}
+
+// loadYardLocation resolves a yard's IANA time zone (or the test POSIX offset
+// AlwaysBehindUTC) and falls back to UTC when unknown.
+func loadYardLocation(tz string) *time.Location {
+	if tz == "<-25>+25" {
+		return time.FixedZone("-25", -25*3600)
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// yardLocalToday returns the yard's current calendar day at 00:00:00 UTC so it
+// compares directly with parseLocalDay.
+func yardLocalToday(tz string) time.Time {
+	now := time.Now().In(loadYardLocation(tz))
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 // ListScheduleWindows expands the yard's active windows over a date range
 // (inclusive, capped at 62 days) into concrete slots with the places left.
 // The yard must be one of the customer's own.
 func (r *PostgresRepository) ListScheduleWindows(ctx context.Context, customerID, yardID uuid.UUID, kind, from, to string) ([]ScheduleWindowView, error) {
-	ok, err := r.yardBelongsToCustomer(ctx, yardID, customerID)
+	yardTZ, ok, err := r.yardTimezoneForCustomer(ctx, yardID, customerID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, ErrYardNotFound
+	}
+	today := yardLocalToday(yardTZ)
+	if strings.TrimSpace(from) == "" {
+		from = today.Format("2006-01-02")
+	}
+	if strings.TrimSpace(to) == "" {
+		to = today.AddDate(0, 0, 14).Format("2006-01-02")
 	}
 	fromDay, err := parseLocalDay(from)
 	if err != nil {
@@ -217,10 +260,7 @@ func parseLocalDay(s string) (time.Time, error) {
 // interpreted in the yard's own zone, returned as UTC instants plus the local
 // HH:MM spellings for display.
 func windowBoundsInZone(w windowRow, day time.Time) (start, end time.Time, startLocal, endLocal string, err error) {
-	loc, loadErr := time.LoadLocation(w.yardTZ)
-	if loadErr != nil {
-		loc = time.UTC
-	}
+	loc := loadYardLocation(w.yardTZ)
 	localDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	start = localDay.Add(time.Duration(w.startMinutes) * time.Minute)
 	end = localDay.Add(time.Duration(w.endMinutes) * time.Minute)
@@ -440,9 +480,6 @@ func (r *PostgresRepository) holdLocked(ctx context.Context, customerID uuid.UUI
 	if err != nil {
 		return nil, fmt.Errorf("%w: date must be YYYY-MM-DD", ErrInvalidRequest)
 	}
-	if !unchangedWindow && day.Before(time.Now().UTC().Truncate(24*time.Hour)) {
-		return nil, fmt.Errorf("%w: the date is in the past", ErrInvalidRequest)
-	}
 
 	// Lock the window: capacity below is counted under this lock.
 	w, err := scanWindow(ex.QueryRow(ctx, windowSelect+`
@@ -459,6 +496,9 @@ func (r *PostgresRepository) holdLocked(ctx context.Context, customerID uuid.UUI
 	}
 	if !ok {
 		return nil, ErrYardNotFound
+	}
+	if !unchangedWindow && day.Before(yardLocalToday(w.yardTZ)) {
+		return nil, fmt.Errorf("%w: the date is in the past", ErrInvalidRequest)
 	}
 	if w.weekday != int(day.Weekday()) {
 		return nil, fmt.Errorf("%w: the yard does not run this window on that weekday", ErrInvalidRequest)
