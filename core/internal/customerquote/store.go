@@ -670,9 +670,11 @@ type CodeRow struct {
 }
 
 // InsertCode stores a freshly minted code's hash.
-func (s *Store) InsertCode(ctx context.Context, quoteID uuid.UUID, linkID, channel, destination, salt, hash string, expires time.Time) error {
-	_, err := s.exec(ctx).Exec(ctx, `INSERT INTO pro_portal_verification_codes (quote_id, token_id, channel, destination, salt, code_hash, max_attempts, expires_at)
-		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8)`, quoteID, linkID, channel, destination, salt, hash, CodeMaxAttempts, expires)
+func (s *Store) InsertCode(ctx context.Context, quoteID uuid.UUID, linkID, channel, destination, salt, hash string, now, expires time.Time) error {
+	_, err := s.exec(ctx).Exec(ctx, `INSERT INTO pro_portal_verification_codes (quote_id, token_id, channel, destination, salt, code_hash, max_attempts, created_at, expires_at)
+		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7,
+			GREATEST($8::timestamptz, COALESCE((SELECT max(created_at) + interval '1 microsecond' FROM pro_portal_verification_codes WHERE token_id = $2::uuid), $8::timestamptz)),
+			$9)`, quoteID, linkID, channel, destination, salt, hash, CodeMaxAttempts, now, expires)
 	if err != nil {
 		return fmt.Errorf("store verification code: %w", err)
 	}
@@ -701,6 +703,13 @@ func (s *Store) CountCodesSince(ctx context.Context, linkID string, since time.T
 	var n int
 	err := s.exec(ctx).QueryRow(ctx, `SELECT count(*) FROM pro_portal_verification_codes WHERE token_id = $1::uuid AND created_at >= $2`, linkID, since).Scan(&n)
 	return n, err
+}
+
+// LinkCodeUsage counts the total codes issued and total wrong attempts across
+// the lifetime of a link.
+func (s *Store) LinkCodeUsage(ctx context.Context, linkID string) (codes, attempts int, err error) {
+	err = s.exec(ctx).QueryRow(ctx, `SELECT count(*), COALESCE(sum(attempts), 0) FROM pro_portal_verification_codes WHERE token_id = $1::uuid`, linkID).Scan(&codes, &attempts)
+	return codes, attempts, err
 }
 
 // BumpCodeAttempts counts one try against a code.

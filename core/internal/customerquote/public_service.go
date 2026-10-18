@@ -194,14 +194,18 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if err != nil {
 			return err
 		}
-		if !link.Live(s.now()) || q.Effective(s.now()) != StatusSent {
+		now := s.now()
+		if !link.Live(now) || q.Effective(now) != StatusSent {
 			return ErrInvalidState
 		}
 		if !q.RequireCode {
 			return httpx.BadRequest("this quote does not use a verification code")
 		}
+		if s.mail == nil {
+			return ErrCodesUnavailable
+		}
 		ch := s.mail.Channels()
-		if s.mail == nil || !ch.Any() {
+		if !ch.Any() {
 			return ErrCodesUnavailable
 		}
 		if !ch.Has(channel) && (channel == "email" || channel == "sms") {
@@ -218,7 +222,14 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if dest == "" {
 			return httpx.BadRequest("the contractor has no address for that channel", httpx.FieldError{Field: "channel", Message: "has no destination on this quote"})
 		}
-		n, err := s.store.CountCodesSince(ctx, link.ID, s.now().Add(-codeRequestWindow))
+		totalCodes, totalAttempts, err := s.store.LinkCodeUsage(ctx, link.ID)
+		if err != nil {
+			return err
+		}
+		if totalCodes >= CodeMaxLifetimeCodes || totalAttempts >= CodeMaxLifetimeAttempts {
+			return ErrCodeBudgetExhausted
+		}
+		n, err := s.store.CountCodesSince(ctx, link.ID, now.Add(-codeRequestWindow))
 		if err != nil {
 			return err
 		}
@@ -233,7 +244,7 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if err != nil {
 			return err
 		}
-		return s.store.InsertCode(ctx, q.ID, link.ID, channel, dest, salt, HashCode(salt, q.ID.String(), code), s.now().Add(CodeTTL))
+		return s.store.InsertCode(ctx, q.ID, link.ID, channel, dest, salt, HashCode(salt, q.ID.String(), code), now, now.Add(CodeTTL))
 	})
 	if err != nil {
 		return err
@@ -382,6 +393,13 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 			if in.Code == "" {
 				return ErrCodeRequired
 			}
+			totalCodes, totalAttempts, err := s.store.LinkCodeUsage(ctx, link.ID)
+			if err != nil {
+				return err
+			}
+			if totalAttempts >= CodeMaxLifetimeAttempts {
+				return ErrCodeBudgetExhausted
+			}
 			row, err := s.store.LatestCodeForUpdate(ctx, link.ID)
 			if err != nil {
 				return err
@@ -396,6 +414,10 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 					if err := s.store.BumpCodeAttempts(ctx, row.ID); err != nil {
 						return err
 					}
+				}
+				if cerr == ErrCodeLocked && totalCodes >= CodeMaxLifetimeCodes {
+					wrong = ErrCodeBudgetExhausted
+					return nil
 				}
 				wrong = cerr
 				return nil

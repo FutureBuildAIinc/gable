@@ -27,6 +27,10 @@ const (
 	CodeTTL = 10 * time.Minute
 	// CodeMaxAttempts is the wrong guesses a code survives.
 	CodeMaxAttempts = 5
+	// CodeMaxLifetimeCodes is the total codes one link may issue across its life.
+	CodeMaxLifetimeCodes = 10
+	// CodeMaxLifetimeAttempts is the total wrong guesses one link survives across all codes.
+	CodeMaxLifetimeAttempts = 15
 )
 
 var codeShape = regexp.MustCompile(`^[0-9]{6}$`)
@@ -60,10 +64,11 @@ func HashCode(salt, quoteID, code string) string {
 
 // The reasons a code is refused.
 var (
-	ErrCodeWrong    = errors.New("the code is not right")
-	ErrCodeExpired  = errors.New("the code has expired")
-	ErrCodeConsumed = errors.New("the code has already been used")
-	ErrCodeLocked   = errors.New("too many wrong codes")
+	ErrCodeWrong           = errors.New("the code is not right")
+	ErrCodeExpired         = errors.New("the code has expired")
+	ErrCodeConsumed        = errors.New("the code has already been used")
+	ErrCodeLocked          = errors.New("too many wrong codes")
+	ErrCodeBudgetExhausted = errors.New("the verification code budget for this link is exhausted: ask the contractor to send a fresh link")
 )
 
 // CodeRecord is a stored code row.

@@ -420,6 +420,78 @@ func TestCode_RequestsAreLimitedAndGoOnlyToTheContactOnFile(t *testing.T) {
 	}
 }
 
+func TestCode_LifetimeBudgetRefusesAcrossWindows(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	in := w.basicInput()
+	req := true
+	in.RequireCode = &req
+	q, token := w.createSent(in)
+	var choices []customerquote.Choice
+	for _, l := range q.Lines {
+		choices = append(choices, customerquote.Choice{LineID: l.ID, State: customerquote.SelectionApproved})
+	}
+	if _, err := w.svc.Choose(ctx, token, anon, choices); err != nil {
+		t.Fatal(err)
+	}
+	accept := func(tok, code string) error {
+		_, err := w.svc.Accept(ctx, tok, anon, customerquote.AcceptInput{FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), Code: code})
+		return err
+	}
+
+	// Across windows, 3 codes x 5 wrong guesses = 15 lifetime wrong attempts exhaust the link.
+	for c := 0; c < 3; c++ {
+		if err := w.svc.RequestCode(ctx, token, anon, "email"); err != nil {
+			t.Fatalf("code %d: %v", c+1, err)
+		}
+		wrong := "000000"
+		if w.mail.lastCode() == wrong {
+			wrong = "111111"
+		}
+		for a := 0; a < customerquote.CodeMaxAttempts; a++ {
+			if err := accept(token, wrong); !errors.Is(err, customerquote.ErrCodeWrong) {
+				t.Fatalf("code %d guess %d: %v", c+1, a+1, err)
+			}
+		}
+		w.advance(11 * time.Minute)
+	}
+	if err := w.svc.RequestCode(ctx, token, anon, "email"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("request after 15 wrong guesses across windows: %v, want ErrCodeBudgetExhausted", err)
+	}
+	if err := accept(token, "000000"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("guess after 15 wrong guesses: %v, want ErrCodeBudgetExhausted", err)
+	}
+
+	// Rotating the link issues a fresh token with its own budget.
+	rot, err := w.svc.Rotate(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshToken := strings.TrimPrefix(rot.Path, "/q/")
+	// Request 10 codes across four windows: the 10th succeeds, the 11th is refused.
+	for win := 0; win < 4; win++ {
+		wantCodes := 3
+		if win == 3 {
+			wantCodes = 1
+		}
+		for i := 0; i < wantCodes; i++ {
+			if err := w.svc.RequestCode(ctx, freshToken, anon, "email"); err != nil {
+				t.Fatalf("window %d code %d: %v", win+1, i+1, err)
+			}
+		}
+		if win < 3 {
+			w.advance(11 * time.Minute)
+		}
+	}
+	if err := w.svc.RequestCode(ctx, freshToken, anon, "email"); !errors.Is(err, customerquote.ErrCodeBudgetExhausted) {
+		t.Fatalf("11th code request on link: %v, want ErrCodeBudgetExhausted", err)
+	}
+	// The 10th code itself can still be verified while its attempts remain.
+	if err := accept(freshToken, w.mail.lastCode()); err != nil {
+		t.Fatalf("accepting with the 10th code: %v", err)
+	}
+}
+
 func TestConfirm_PlacesTheOrderForTheApprovedMaterialAndRecordsIt(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
