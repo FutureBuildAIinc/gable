@@ -107,6 +107,7 @@ export interface ProfitAndLossComparison {
 
 /** Income statement for the window [start_date, end_date]. */
 export interface ProfitAndLossReport {
+    currency?: string;
     branch_id?: string;
     comparison?: ProfitAndLossComparison;
     start_date: string;
@@ -130,6 +131,7 @@ export interface ProfitAndLossReport {
  * accounts and then print `total_equity` — do not add the two together.
  */
 export interface BalanceSheetReport {
+    currency?: string;
     branch_id?: string;
     as_of_date: string;
     assets: AccountLineItem[];
