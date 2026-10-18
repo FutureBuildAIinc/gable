@@ -539,8 +539,18 @@ paths:
         cash). Refused with 409 and a blocker: insufficient_tender,
         change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in
         customer), card_terminal, card_declined, tax_quote_stale,
-        tax_rate_not_configured, credit_limit, insufficient_stock; 503 when
-        the tax provider fails before any row is written. The completion
+        tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms
+        (an account tender on an account whose terms are due on receipt),
+        buyer_required, buyer_not_authorized, buyer_cap (the account's buyer
+        roster), check_over_limit (a check over the customer's check limit,
+        or the database wide one, unless a manager approved it for this
+        sale), store_credit_short, walk_in_store_credit, one_account_leg,
+        one_store_credit_leg, insufficient_stock; 503 when
+        the tax provider fails before any row is written. An ACCOUNT tender
+        is held to the same verdict the standing read states, and a manager
+        override the sale holds is spent here, once. A store_credit tender
+        applies the customer's open credit memos to the sale's invoice
+        through the AR core, oldest first. The completion
         carries the sale's revision (If-Match or the body's revision; 428
         without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context
         or wall hides, answers 404, the same for both, and nothing is written;
