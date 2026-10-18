@@ -23,6 +23,7 @@ tags:
   - name: ap
   - name: apps
   - name: ar
+  - name: auth
   - name: bankrecon
   - name: charge-codes
   - name: configurator
@@ -15273,6 +15274,104 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/auth/config:
+    get:
+      operationId: authConfigGet
+      tags: [auth]
+      summary: The runtime auth config
+      description: >-
+        Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+      security: []
+      responses:
+        "200":
+          description: The auth mode, the dealer brand and the allowed methods, in the dealer's order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthConfig"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/auth/start/{method}:
+    post:
+      operationId: authStart
+      tags: [auth]
+      summary: Start a sign in by one method
+      description: >-
+        Public. The route a non form method starts from. A method outside the six is a 404; a method the dealer's allowlist does not hold is a 403; the form method has no start route (a 400); and a method that is allowed but not built on this server yet answers a plain 501 not_implemented, never a crash.
+      security: []
+      parameters:
+        - name: method
+          in: path
+          required: true
+          description: One of the six method codes.
+          schema:
+            type: string
+            enum: [email_password, passkey, magic_link, google, microsoft, oidc]
+      responses:
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "501":
+          description: >-
+            The method is in the dealer's allowlist but not implemented on this server; the standard error envelope with code not_implemented and the plain message that says so.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+  /api/v1/auth/methods:
+    get:
+      operationId: authMethodsGet
+      tags: [auth]
+      summary: Read the dealer's sign in method allowlist
+      description: >-
+        The admin read of the allowlist: the same method views the public config carries, plus the last write time. Role gated admin and owner, the dealer's admin roles alone.
+      security:
+        - BearerJWT: []
+      responses:
+        "200":
+          description: The allowlist and its last write time.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigninMethodsAllowlist"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: authMethodsPut
+      tags: [auth]
+      summary: Replace the dealer's sign in method allowlist
+      description: >-
+        Replaces the whole allowlist. The order of the request's methods is the order the door renders them. The list must hold at least one method, every code one of the six, no code twice, and the oidc fields (issuer URL, client id, display label) belong to the oidc method alone and are required on it; the table never stores a client secret. The write is audited with the before and after in one transaction. Role gated admin and owner.
+      security:
+        - BearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SigninMethodsPutRequest"
+      responses:
+        "200":
+          description: The saved allowlist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigninMethodsAllowlist"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/tax/exemptions:
     post:
       operationId: taxExemptionCreate
@@ -27682,6 +27781,87 @@ components:
         updated_at:
           type: string
           format: date-time
+    AuthConfigMethod:
+      type: object
+      required: [method, kind, label, start_url, issuer_url, client_id]
+      description: >-
+        One allowed sign in method. The nullable fields are always present, null when the method does not use them.
+      properties:
+        method:
+          type: string
+          enum: [email_password, passkey, magic_link, google, microsoft, oidc]
+        kind:
+          type: string
+          enum: [form, passkey, link, redirect]
+          description: How the door renders the method.
+        label:
+          type: string
+          description: The door's label; an oidc row carries its own.
+        start_url:
+          type: [string, "null"]
+          description: >-
+            Where the method starts: the portal login for the form method, the start route for every other.
+        issuer_url:
+          type: [string, "null"]
+          description: The oidc issuer URL, null for every other method.
+        client_id:
+          type: [string, "null"]
+          description: The oidc client id, null for every other method.
+    AuthConfig:
+      type: object
+      required: [auth_mode, dealer_name, dealer_mark_url, methods]
+      properties:
+        auth_mode:
+          type: string
+          enum: [dev, production]
+          description: The auth mode the server runs in.
+        dealer_name:
+          type: string
+          description: >-
+            The dealer's public display name (trading name when set on the dealer profile, else legal name; empty when neither is set).
+        dealer_mark_url:
+          type: [string, "null"]
+          description: >-
+            The path of the dealer's logo when one is uploaded on the dealer profile, else null.
+        methods:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthConfigMethod"
+          description: The allowed methods, in the dealer's stored order.
+    SigninMethodsAllowlist:
+      type: object
+      required: [methods, updated_at]
+      properties:
+        methods:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthConfigMethod"
+        updated_at:
+          type: string
+          format: date-time
+    SigninMethodsPutRequest:
+      type: object
+      required: [methods]
+      properties:
+        methods:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [method]
+            properties:
+              method:
+                type: string
+                enum: [email_password, passkey, magic_link, google, microsoft, oidc]
+              oidc_issuer_url:
+                type: string
+                description: The https issuer URL; required on the oidc method, refused on any other.
+              oidc_client_id:
+                type: string
+                description: The client id; required on the oidc method, refused on any other.
+              oidc_label:
+                type: string
+                description: The display label; optional on the oidc method, refused on any other.
     TaxExemption:
       type: object
       required: [id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date, is_active, created_at]

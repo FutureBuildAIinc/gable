@@ -6837,6 +6837,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The runtime auth config
+         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+         */
+        get: operations["authConfigGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/start/{method}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a sign in by one method
+         * @description Public. The route a non form method starts from. A method outside the six is a 404; a method the dealer's allowlist does not hold is a 403; the form method has no start route (a 400); and a method that is allowed but not built on this server yet answers a plain 501 not_implemented, never a crash.
+         */
+        post: operations["authStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer's sign in method allowlist
+         * @description The admin read of the allowlist: the same method views the public config carries, plus the last write time. Role gated admin and owner, the dealer's admin roles alone.
+         */
+        get: operations["authMethodsGet"];
+        /**
+         * Replace the dealer's sign in method allowlist
+         * @description Replaces the whole allowlist. The order of the request's methods is the order the door renders them. The list must hold at least one method, every code one of the six, no code twice, and the oidc fields (issuer URL, client id, display label) belong to the oidc method alone and are required on it; the table never stores a client secret. The write is audited with the before and after in one transaction. Role gated admin and owner.
+         */
+        put: operations["authMethodsPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tax/exemptions": {
         parameters: {
             query?: never;
@@ -14440,6 +14504,54 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description One allowed sign in method. The nullable fields are always present, null when the method does not use them. */
+        AuthConfigMethod: {
+            /** @enum {string} */
+            method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+            /**
+             * @description How the door renders the method.
+             * @enum {string}
+             */
+            kind: "form" | "passkey" | "link" | "redirect";
+            /** @description The door's label; an oidc row carries its own. */
+            label: string;
+            /** @description Where the method starts: the portal login for the form method, the start route for every other. */
+            start_url: string | null;
+            /** @description The oidc issuer URL, null for every other method. */
+            issuer_url: string | null;
+            /** @description The oidc client id, null for every other method. */
+            client_id: string | null;
+        };
+        AuthConfig: {
+            /**
+             * @description The auth mode the server runs in.
+             * @enum {string}
+             */
+            auth_mode: "dev" | "production";
+            /** @description The dealer's public display name (trading name when set on the dealer profile, else legal name; empty when neither is set). */
+            dealer_name: string;
+            /** @description The path of the dealer's logo when one is uploaded on the dealer profile, else null. */
+            dealer_mark_url: string | null;
+            /** @description The allowed methods, in the dealer's stored order. */
+            methods: components["schemas"]["AuthConfigMethod"][];
+        };
+        SigninMethodsAllowlist: {
+            methods: components["schemas"]["AuthConfigMethod"][];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SigninMethodsPutRequest: {
+            methods: {
+                /** @enum {string} */
+                method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+                /** @description The https issuer URL; required on the oidc method, refused on any other. */
+                oidc_issuer_url?: string;
+                /** @description The client id; required on the oidc method, refused on any other. */
+                oidc_client_id?: string;
+                /** @description The display label; optional on the oidc method, refused on any other. */
+                oidc_label?: string;
+            }[];
         };
         TaxExemption: {
             /** Format: uuid */
@@ -29122,6 +29234,104 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    authConfigGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The auth mode, the dealer brand and the allowed methods, in the dealer's order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthConfig"];
+                };
+            };
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    authStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description One of the six method codes. */
+                method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            400: components["responses"]["WireBadRequest"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            /** @description The method is in the dealer's allowlist but not implemented on this server; the standard error envelope with code not_implemented and the plain message that says so. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+        };
+    };
+    authMethodsGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The allowlist and its last write time. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigninMethodsAllowlist"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    authMethodsPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SigninMethodsPutRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved allowlist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigninMethodsAllowlist"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     taxExemptionCreate: {
