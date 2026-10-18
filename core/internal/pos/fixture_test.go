@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,18 +71,31 @@ func withoutTill() func(*fixture) { return func(f *fixture) { f.noAutoTill = tru
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
 
 // recordingWriter wraps the outbox writer, remembering what was written and
-// optionally failing one type (the transaction proofs).
+// optionally failing one type (the transaction proofs). Contenders write
+// through it from several goroutines, so its state is behind a mutex; a test
+// sets the failing type with setFail.
 type recordingWriter struct {
 	inner pos.EventRecorder
+	mu    sync.Mutex
 	fail  string
 	seen  []string
 }
 
+// setFail names the event type that fails, "" for none.
+func (w *recordingWriter) setFail(eventType string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.fail = eventType
+}
+
 func (w *recordingWriter) Write(ctx context.Context, ev outbox.Event) error {
+	w.mu.Lock()
 	if ev.Type == w.fail {
+		w.mu.Unlock()
 		return fmt.Errorf("outbox insert failed")
 	}
 	w.seen = append(w.seen, ev.Type)
+	w.mu.Unlock()
 	return w.inner.Write(ctx, ev)
 }
 

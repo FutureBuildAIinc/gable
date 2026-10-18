@@ -275,7 +275,7 @@ func TestAMovementIsOneTransaction(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	sessionID := f.openTill(5000)
-	f.events.fail = "till.movement_recorded"
+	f.events.setFail("till.movement_recorded")
 	r := f.movement(sessionID, map[string]any{"kind": "safe_drop", "amount_cents": 1000}, mustUUID(t))
 	if r.status == http.StatusCreated {
 		t.Fatal("the movement committed with a failing event write")

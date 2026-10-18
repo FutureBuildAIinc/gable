@@ -336,7 +336,7 @@ func TestASignOffIsOneTransaction(t *testing.T) {
 	f.setThreshold(100)
 	sessionID := f.openTill(10000)
 	f.closeAs(sessionID, 9000, mustUUID(t))
-	f.events.fail = "till.closed"
+	f.events.setFail("till.closed")
 	r := f.signOff(sessionID, "will roll back", "finance", mustUUID(t))
 	if r.status == http.StatusOK {
 		t.Fatal("the sign off committed with a failing event write")
@@ -350,7 +350,7 @@ func TestASignOffIsOneTransaction(t *testing.T) {
 	if got := countOf(t, f.db, `SELECT count(*) FROM till_z_reports WHERE till_session_id = $1`, sessionID); got != 0 {
 		t.Errorf("a Z report survived the rollback")
 	}
-	f.events.fail = ""
+	f.events.setFail("")
 	if r := f.signOff(sessionID, "retry", "finance", mustUUID(t)); r.status != http.StatusOK {
 		t.Errorf("the retry = %d: %s", r.status, r.raw)
 	}
