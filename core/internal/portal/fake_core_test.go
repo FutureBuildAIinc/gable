@@ -39,8 +39,11 @@ func (f *fakePortalRepo) TodayDeliveries(_ context.Context, _ uuid.UUID, _ bool,
 func (f *fakePortalRepo) TodayDeliveriesCount(_ context.Context, _ uuid.UUID, _ bool) (int, error) {
 	return len(f.todayDeliveries), nil
 }
-func (f *fakePortalRepo) NextDeliveries(_ context.Context, _ uuid.UUID, _ bool, _ int) ([]TodayDeliveryRow, error) {
+func (f *fakePortalRepo) NextDeliveries(_ context.Context, _ uuid.UUID, _ bool, _ *time.Time, _ int) ([]TodayDeliveryRow, error) {
 	return nil, nil
+}
+func (f *fakePortalRepo) NextDeliveriesCount(_ context.Context, _ uuid.UUID, _ bool) (int, error) {
+	return 0, nil
 }
 func (f *fakePortalRepo) TodayInvoices(_ context.Context, _ uuid.UUID, _ *time.Time, _ int) ([]TodayInvoiceRow, error) {
 	return f.todayInvoices, nil

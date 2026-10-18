@@ -130,25 +130,18 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 		keep(d.UpdatedAt)
 	}
 
-	next, err := s.repo.NextDeliveries(ctx, customerID, true, todayFirstRows)
+	next, err := s.repo.NextDeliveries(ctx, customerID, true, since, todayFirstRows)
 	if err != nil {
 		return nil, err
 	}
 	if next == nil {
 		next = []TodayDeliveryRow{}
 	}
-	if since != nil {
-		filtered := make([]TodayDeliveryRow, 0, len(next))
-		for _, d := range next {
-			if d.UpdatedAt.After(*since) {
-				filtered = append(filtered, d)
-			}
-		}
-		dto.NextDeliveries.First = filtered
-	} else {
-		dto.NextDeliveries.First = next
+	dto.NextDeliveries.First = next
+	dto.NextDeliveries.Count, err = s.repo.NextDeliveriesCount(ctx, customerID, true)
+	if err != nil {
+		return nil, err
 	}
-	dto.NextDeliveries.Count = len(next)
 	for _, d := range dto.NextDeliveries.First {
 		keep(d.UpdatedAt)
 	}
@@ -268,13 +261,17 @@ func (r *PostgresRepository) TodayDeliveries(ctx context.Context, customerID uui
 }
 
 // NextDeliveries lists the upcoming stops after today, soonest first.
-func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, limit int) ([]TodayDeliveryRow, error) {
+func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error) {
 	q := todayDeliverySelect
 	if !pickup {
 		q += ` AND o.delivery_type <> 'PICKUP'`
 	}
 	q += ` AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE + interval '1 day'`
 	args := []any{customerID}
+	if since != nil {
+		q += ` AND d.updated_at > $2`
+		args = append(args, *since)
+	}
 	q += ` ORDER BY COALESCE(d.scheduled_start, rt.scheduled_date) ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
@@ -282,6 +279,22 @@ func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid
 	}
 	defer rows.Close()
 	return scanTodayDelivery(rows)
+}
+
+// NextDeliveriesCount counts upcoming stops after today for the section headline.
+func (r *PostgresRepository) NextDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error) {
+	q := `
+		SELECT COUNT(*) FROM deliveries d
+		JOIN orders o ON o.id = d.order_id
+		LEFT JOIN delivery_routes rt ON rt.id = d.route_id
+		WHERE o.customer_id = $1
+		  AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE + interval '1 day'`
+	if !pickup {
+		q += ` AND o.delivery_type <> 'PICKUP'`
+	}
+	var n int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, q, customerID).Scan(&n)
+	return n, err
 }
 
 // TodayDeliveriesCount counts today's stops for the section headline.

@@ -404,6 +404,50 @@ func TestToday_Board(t *testing.T) {
 	if rec.Header().Get("ETag") == etag {
 		t.Errorf("today with since cursor returned same ETag %s as unfiltered board", etag)
 	}
+
+	// NextDeliveries: when there are 6 upcoming deliveries and only the 6th
+	// was updated after since, count reports all 6 while since filters in SQL
+	// before LIMIT 5 so first contains that 6th delivery.
+	ctx := context.Background()
+	cutoffSince := time.Now().UTC()
+	var sixthDelivID uuid.UUID
+	for i := 1; i <= 6; i++ {
+		rtID := uuid.New()
+		dID := uuid.New()
+		upd := cutoffSince.Add(-10 * time.Minute)
+		if i == 6 {
+			upd = cutoffSince.Add(10 * time.Second)
+			sixthDelivID = dID
+		}
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO delivery_routes (id, status, scheduled_date) VALUES ($1, 'SCHEDULED', CURRENT_DATE + ($2 || ' days')::interval)`,
+			rtID, fmt.Sprintf("%d", i+1)); err != nil {
+			t.Fatalf("insert next route %d: %v", i, err)
+		}
+		t.Cleanup(func() {
+			_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, rtID)
+		})
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO deliveries (id, order_id, route_id, status, stop_sequence, created_at, updated_at) VALUES ($1, $2, $3, 'PENDING', $4, $5, $5)`,
+			dID, f.aConfirmed, rtID, i, upd); err != nil {
+			t.Fatalf("insert next delivery %d: %v", i, err)
+		}
+	}
+	rec, body = call(mux, "GET", "/api/portal/v1/today?since="+cutoffSince.Format(time.RFC3339Nano), "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("today with next deliveries since answered %d", rec.Code)
+	}
+	nextSec, _ := body["next_deliveries"].(map[string]any)
+	if nextSec["count"] != float64(6) {
+		t.Errorf("next_deliveries.count = %v, want 6 (not capped at 5)", nextSec["count"])
+	}
+	nextFirst, _ := nextSec["first"].([]any)
+	if len(nextFirst) != 1 {
+		t.Fatalf("next_deliveries.first with since has %d rows, want 1 (the 6th delivery updated after since)", len(nextFirst))
+	}
+	if gotID, _ := nextFirst[0].(map[string]any)["delivery_id"].(string); gotID != sixthDelivID.String() {
+		t.Errorf("next_deliveries.first[0].delivery_id = %s, want %s", gotID, sixthDelivID)
+	}
 }
 
 // --- Part 4: scheduling ---------------------------------------------------------
