@@ -404,7 +404,7 @@ var publicKeys = []string{
 	"reference", "title", "status", "contractor", "name", "has_logo", "customer_name", "job_site_address", "valid_until", "note",
 	"payment_terms", "hide_line_prices", "groups", "id", "label", "lines", "group_id", "description", "quantity", "uom", "price_cents",
 	"selection", "extras", "kind", "totals", "subtotal_cents", "tax_cents", "total_cents", "deposit_cents", "tax_mode", "tax_rate_bps",
-	"tax_note", "requires_code", "can_decide", "notice", "approval", "decision", "signed_by", "at", "fulfilment",
+	"tax_note", "requires_code", "can_decide", "selections_version", "notice", "approval", "decision", "signed_by", "at", "fulfilment",
 }
 
 var dealerKeys = []string{
@@ -498,7 +498,7 @@ func TestWire_TheLoopEndToEnd(t *testing.T) {
 	}
 
 	// Acceptance is refused without the code; the code is requested and entered.
-	sign := map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}}
+	sign := map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}
 	r = s.do("POST", s.pub(token)+"/accept", nil, sign)
 	if r.status != 400 || !bytes.Contains(r.body, []byte("code_required")) {
 		t.Fatalf("accept without a code: %d %s", r.status, r.body)
@@ -635,7 +635,7 @@ func TestWire_PriceWall2_NothingOfTheContractorsCostOrMarkupReachesTheCustomer(t
 		}
 		check("selections", s.do("PUT", base+"/selections", nil, map[string]any{"choices": lines}))
 		check("accept", s.do("POST", base+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
-			"signature": map[string]any{"kind": "drawn", "png_base64": base64.StdEncoding.EncodeToString(tinyPNG)}}))
+			"signature": map[string]any{"kind": "drawn", "png_base64": base64.StdEncoding.EncodeToString(tinyPNG)}, "selections_version": 2}))
 		check("view after accept", s.do("GET", base, nil, nil))
 
 		// The customer PDF is built from the same allowlist: its text carries none of it either.
@@ -685,7 +685,7 @@ func TestWire_PriceWall1_NothingOfTheContractorsMarkupReachesTheDealer(t *testin
 	}
 	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
 	if r := s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
-		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}}); r.status != 200 {
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}); r.status != 200 {
 		t.Fatalf("accept: %d %s", r.status, r.body)
 	}
 	conf := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
@@ -1141,7 +1141,7 @@ func TestWire_TheDesksEmailReachesNoContractorCustomerOrPdfResponse(t *testing.T
 		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
 	}
 	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
-	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2})
 	s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
 	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", asDesk, nil); r.status != 200 {
 		t.Fatalf("dealer accept: %d %s", r.status, r.body)
@@ -1221,7 +1221,7 @@ func TestWire_TheDealersPipelineIsHeldToTheCallersBranches(t *testing.T) {
 		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
 	}
 	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
-	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2})
 	if r := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil); r.status != 200 {
 		t.Fatalf("confirm: %d %s", r.status, r.body)
 	}

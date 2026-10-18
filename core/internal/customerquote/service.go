@@ -628,7 +628,7 @@ func (s *Service) Send(ctx context.Context, a Actor, id uuid.UUID, ifMatch strin
 		if _, err := s.store.InsertLink(ctx, q.ID, hash, linkExp); err != nil {
 			return err
 		}
-		moved, err := s.store.Transition(ctx, q.ID, StatusDraft, StatusSent, "sent_at = $4", now)
+		moved, err := s.store.Transition(ctx, q.ID, StatusDraft, StatusSent, "sent_at = $4, selections_version = 1", now)
 		if err != nil {
 			return err
 		}

@@ -1920,7 +1920,7 @@ components:
             $ref: "#/components/schemas/CustomerQuoteView"
     CustomerQuotePublicView:
       type: object
-      required: [reference, title, status, contractor, customer_name, job_site_address, valid_until, note, payment_terms, hide_line_prices, groups, lines, extras, totals, requires_code, can_decide]
+      required: [reference, title, status, contractor, customer_name, job_site_address, valid_until, note, payment_terms, hide_line_prices, groups, lines, extras, totals, requires_code, can_decide, selections_version]
       description: >-
         The strict allowlist of price wall 2. There is no field for the
         dealer's cost, a markup, basis points (the customer site tax rate
@@ -2037,6 +2037,10 @@ components:
           type: boolean
         can_decide:
           type: boolean
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
         notice:
           type: string
           description: >-
@@ -2078,7 +2082,7 @@ components:
                 enum: [pending, approved, declined]
     CustomerQuoteAcceptRequest:
       type: object
-      required: [full_name, signature]
+      required: [full_name, signature, selections_version]
       properties:
         full_name:
           type: string
@@ -2103,6 +2107,10 @@ components:
         code:
           type: string
           pattern: "^[0-9]{6}$"
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
     CustomerQuoteDeclineRequest:
       type: object
       required: [full_name]
@@ -2111,6 +2119,10 @@ components:
           type: string
         reason:
           type: string
+        selections_version:
+          type: integer
+          format: int64
+          minimum: 1
     CustomerQuoteDealerProject:
       type: object
       required: [id, reference, contractor, project, job_site_address, customer, site_contact, status, selections, materials, material_cents, order, dealer_accepted_at, updated_at]

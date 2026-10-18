@@ -18,6 +18,7 @@ const (
 	CodeCodeExpired         = "code_expired"
 	CodeCodeLocked          = "code_locked"
 	CodeCodeBudgetExhausted = "code_budget_exhausted"
+	CodeSelectionsChanged   = "selections_changed"
 	CodeIncomplete          = "selections_incomplete"
 	CodeCodesUnavailable    = "codes_unavailable"
 )
@@ -34,6 +35,10 @@ func wireErr(err error) error {
 		return httpx.Forbidden("your role may not quote customers")
 	case errors.Is(err, ErrInvalidState):
 		return httpx.InvalidStateTransition("the quote is not in a state that allows this")
+	case errors.Is(err, ErrSelectionsChanged):
+		return &httpx.Error{Status: http.StatusConflict, Code: CodeSelectionsChanged,
+			Message: "the selections changed since you viewed the quote: review the updated total and sign again",
+			Details: []httpx.FieldError{{Field: "selections_version", Code: CodeSelectionsChanged, Message: "review the updated total and sign again"}}}
 	case errors.Is(err, ErrLinkUnavailable):
 		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired"}
 	case errors.Is(err, ErrRateLimited):

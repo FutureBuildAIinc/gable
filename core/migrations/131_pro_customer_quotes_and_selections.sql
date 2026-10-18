@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS pro_customer_quotes (
     require_code          BOOLEAN     NOT NULL DEFAULT FALSE,
     valid_until           TIMESTAMPTZ NOT NULL,
     revision              BIGINT      NOT NULL DEFAULT 1,
+    selections_version    INTEGER     NOT NULL DEFAULT 1 CHECK (selections_version >= 1),
     sent_at               TIMESTAMPTZ NULL,
     approved_at           TIMESTAMPTZ NULL,
     declined_at           TIMESTAMPTZ NULL,

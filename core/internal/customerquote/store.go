@@ -231,7 +231,7 @@ func (s *Store) ReplaceDraft(ctx context.Context, q *Quote) error {
 			end_customer_name = $6, end_customer_email = $7, end_customer_phone = $8, site_contact_name = $9, site_contact_phone = $10,
 			markup_kind = $11, markup_bps = $12, hide_line_prices = $13, tax_mode = $14, tax_rate_bps = $15,
 			payment_terms = $16, deposit_bps = $17, customer_note = $18, require_code = $19, valid_until = $20,
-			revision = revision + 1, updated_at = NOW()
+			revision = revision + 1, selections_version = 1, updated_at = NOW()
 		WHERE id = $1 AND status = 'draft'`,
 		q.ID, q.Title, q.ProjectID, q.SourceQuoteID, q.JobSiteAddress,
 		q.EndCustomer.Name, q.EndCustomer.Email, q.EndCustomer.Phone, q.SiteContact.Name, q.SiteContact.Phone,
@@ -255,7 +255,7 @@ func (s *Store) ReplaceDraft(ctx context.Context, q *Quote) error {
 const quoteCols = `id, customer_id, reference, title, project_id, source_quote_id, job_site_address,
 	end_customer_name, end_customer_email, end_customer_phone, site_contact_name, site_contact_phone, status,
 	markup_kind, markup_bps, hide_line_prices, tax_mode, tax_rate_bps, payment_terms, deposit_bps, customer_note,
-	require_code, valid_until, revision, sent_at, approved_at, declined_at, confirmed_at, dealer_accepted_at, order_id,
+	require_code, valid_until, revision, selections_version, sent_at, approved_at, declined_at, confirmed_at, dealer_accepted_at, order_id,
 	created_at, updated_at`
 
 func scanQuote(row pgx.Row) (*Quote, error) {
@@ -264,7 +264,7 @@ func scanQuote(row pgx.Row) (*Quote, error) {
 	err := row.Scan(&q.ID, &q.CustomerID, &q.Reference, &q.Title, &q.ProjectID, &q.SourceQuoteID, &q.JobSiteAddress,
 		&q.EndCustomer.Name, &q.EndCustomer.Email, &q.EndCustomer.Phone, &q.SiteContact.Name, &q.SiteContact.Phone, &status,
 		&mk, &q.Markup.BPS, &q.HideLinePrices, &tm, &q.Tax.RateBPS, &q.PaymentTerms, &q.DepositBPS, &q.CustomerNote,
-		&q.RequireCode, &q.ValidUntil, &q.Revision, &q.SentAt, &q.ApprovedAt, &q.DeclinedAt, &q.ConfirmedAt, &q.DealerAcceptedAt, &q.OrderID,
+		&q.RequireCode, &q.ValidUntil, &q.Revision, &q.SelectionsVersion, &q.SentAt, &q.ApprovedAt, &q.DeclinedAt, &q.ConfirmedAt, &q.DealerAcceptedAt, &q.OrderID,
 		&q.CreatedAt, &q.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -566,6 +566,9 @@ func (s *Store) SetSelections(ctx context.Context, quoteID uuid.UUID, states map
 		if tag.RowsAffected() != 1 {
 			return ErrNotFound
 		}
+	}
+	if _, err := s.exec(ctx).Exec(ctx, `UPDATE pro_customer_quotes SET selections_version = selections_version + 1, updated_at = NOW() WHERE id = $1`, quoteID); err != nil {
+		return fmt.Errorf("bump selections version: %w", err)
 	}
 	return nil
 }

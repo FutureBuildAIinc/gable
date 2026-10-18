@@ -19,25 +19,26 @@ import (
 
 // PublicView is what the customer sees at their link.
 type PublicView struct {
-	Reference      string           `json:"reference"`
-	Title          string           `json:"title"`
-	Status         string           `json:"status"`
-	Contractor     PublicContractor `json:"contractor"`
-	CustomerName   string           `json:"customer_name"`
-	JobSiteAddress string           `json:"job_site_address"`
-	ValidUntil     httpx.Timestamp  `json:"valid_until"`
-	Note           string           `json:"note"`
-	PaymentTerms   string           `json:"payment_terms"`
-	HidePrices     bool             `json:"hide_line_prices"`
-	Groups         []PublicGroup    `json:"groups"`
-	Lines          []PublicLine     `json:"lines"`
-	Extras         []PublicExtra    `json:"extras"`
-	Totals         PublicTotals     `json:"totals"`
-	RequiresCode   bool             `json:"requires_code"`
-	CanDecide      bool             `json:"can_decide"`
-	Notice         string           `json:"notice,omitempty"`
-	Approval       *PublicApproval  `json:"approval,omitempty"`
-	Fulfilment     *string          `json:"fulfilment,omitempty"`
+	Reference         string           `json:"reference"`
+	Title             string           `json:"title"`
+	Status            string           `json:"status"`
+	SelectionsVersion int64            `json:"selections_version"`
+	Contractor        PublicContractor `json:"contractor"`
+	CustomerName      string           `json:"customer_name"`
+	JobSiteAddress    string           `json:"job_site_address"`
+	ValidUntil        httpx.Timestamp  `json:"valid_until"`
+	Note              string           `json:"note"`
+	PaymentTerms      string           `json:"payment_terms"`
+	HidePrices        bool             `json:"hide_line_prices"`
+	Groups            []PublicGroup    `json:"groups"`
+	Lines             []PublicLine     `json:"lines"`
+	Extras            []PublicExtra    `json:"extras"`
+	Totals            PublicTotals     `json:"totals"`
+	RequiresCode      bool             `json:"requires_code"`
+	CanDecide         bool             `json:"can_decide"`
+	Notice            string           `json:"notice,omitempty"`
+	Approval          *PublicApproval  `json:"approval,omitempty"`
+	Fulfilment        *string          `json:"fulfilment,omitempty"`
 }
 
 // PublicContractor is the contractor's mark.
@@ -167,22 +168,27 @@ func BuildPublicView(q *Quote, in PublicInputs) (*PublicView, error) {
 	if err != nil {
 		return nil, err
 	}
+	ver := q.SelectionsVersion
+	if ver < 1 {
+		ver = 1
+	}
 	v := &PublicView{
-		Reference:      q.Reference,
-		Title:          q.Title,
-		Status:         publicStatus(q, in.Now),
-		Contractor:     PublicContractor{Name: in.ContractorName, HasLogo: in.HasLogo},
-		CustomerName:   q.EndCustomer.Name,
-		JobSiteAddress: q.JobSiteAddress,
-		ValidUntil:     httpx.TimestampOf(q.ValidUntil),
-		Note:           q.CustomerNote,
-		PaymentTerms:   q.PaymentTerms,
-		HidePrices:     q.HideLinePrices,
-		Groups:         []PublicGroup{},
-		Lines:          []PublicLine{},
-		Extras:         []PublicExtra{},
-		RequiresCode:   q.RequireCode,
-		CanDecide:      q.Effective(in.Now) == StatusSent,
+		Reference:         q.Reference,
+		Title:             q.Title,
+		Status:            publicStatus(q, in.Now),
+		SelectionsVersion: ver,
+		Contractor:        PublicContractor{Name: in.ContractorName, HasLogo: in.HasLogo},
+		CustomerName:      q.EndCustomer.Name,
+		JobSiteAddress:    q.JobSiteAddress,
+		ValidUntil:        httpx.TimestampOf(q.ValidUntil),
+		Note:              q.CustomerNote,
+		PaymentTerms:      q.PaymentTerms,
+		HidePrices:        q.HideLinePrices,
+		Groups:            []PublicGroup{},
+		Lines:             []PublicLine{},
+		Extras:            []PublicExtra{},
+		RequiresCode:      q.RequireCode,
+		CanDecide:         q.Effective(in.Now) == StatusSent,
 		Totals: PublicTotals{
 			SubtotalCents: t.SubtotalCents, TaxCents: t.TaxCents, TotalCents: t.TotalCents,
 			DepositCents: t.DepositCents, TaxMode: q.Tax.Mode, TaxNote: taxNote(q.Tax),

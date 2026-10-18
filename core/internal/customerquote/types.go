@@ -42,17 +42,18 @@ const (
 // The sentinel errors the service answers with; the handlers map them to the
 // wire (see httpErr).
 var (
-	ErrNotFound        = errors.New("customer quote not found")
-	ErrForbidden       = errors.New("the portal role may not do this")
-	ErrInvalidState    = errors.New("the quote is not in a state that allows this")
-	ErrStaleRevision   = errors.New("the quote changed after it was read")
-	ErrLinkUnknown     = errors.New("unknown link")
-	ErrLinkUnavailable = errors.New("the link is expired or revoked")
-	ErrRateLimited     = errors.New("too many requests")
-	ErrCodeRequired    = errors.New("a verification code is required")
-	ErrDeliveryFailed  = errors.New("the code could not be delivered")
-	ErrIncomplete      = errors.New("every selection must be decided")
-	ErrNothingChosen   = errors.New("nothing is approved")
+	ErrNotFound          = errors.New("customer quote not found")
+	ErrForbidden         = errors.New("the portal role may not do this")
+	ErrInvalidState      = errors.New("the quote is not in a state that allows this")
+	ErrStaleRevision     = errors.New("the quote changed after it was read")
+	ErrSelectionsChanged = errors.New("the selections changed since you viewed the quote: review the updated total and sign again")
+	ErrLinkUnknown       = errors.New("unknown link")
+	ErrLinkUnavailable   = errors.New("the link is expired or revoked")
+	ErrRateLimited       = errors.New("too many requests")
+	ErrCodeRequired      = errors.New("a verification code is required")
+	ErrDeliveryFailed    = errors.New("the code could not be delivered")
+	ErrIncomplete        = errors.New("every selection must be decided")
+	ErrNothingChosen     = errors.New("nothing is approved")
 	// ErrCodesUnavailable refuses a verification code the server cannot send.
 	ErrCodesUnavailable = errors.New(CodesUnavailableMessage)
 )
@@ -140,33 +141,34 @@ type Overhead struct {
 
 // Quote is the whole contractor's quote, internal and contractor facing.
 type Quote struct {
-	ID               uuid.UUID
-	CustomerID       uuid.UUID
-	Reference        string
-	Title            string
-	ProjectID        *uuid.UUID
-	SourceQuoteID    *uuid.UUID
-	JobSiteAddress   string
-	EndCustomer      Contact
-	SiteContact      Contact
-	Status           Status
-	Markup           Markup
-	HideLinePrices   bool
-	Tax              Tax
-	PaymentTerms     string
-	DepositBPS       int64
-	CustomerNote     string
-	RequireCode      bool
-	ValidUntil       time.Time
-	Revision         int64
-	SentAt           *time.Time
-	ApprovedAt       *time.Time
-	DeclinedAt       *time.Time
-	ConfirmedAt      *time.Time
-	DealerAcceptedAt *time.Time
-	OrderID          *uuid.UUID
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                uuid.UUID
+	CustomerID        uuid.UUID
+	Reference         string
+	Title             string
+	ProjectID         *uuid.UUID
+	SourceQuoteID     *uuid.UUID
+	JobSiteAddress    string
+	EndCustomer       Contact
+	SiteContact       Contact
+	Status            Status
+	Markup            Markup
+	HideLinePrices    bool
+	Tax               Tax
+	PaymentTerms      string
+	DepositBPS        int64
+	CustomerNote      string
+	RequireCode       bool
+	ValidUntil        time.Time
+	Revision          int64
+	SelectionsVersion int64
+	SentAt            *time.Time
+	ApprovedAt        *time.Time
+	DeclinedAt        *time.Time
+	ConfirmedAt       *time.Time
+	DealerAcceptedAt  *time.Time
+	OrderID           *uuid.UUID
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 
 	Groups        []OptionGroup
 	Lines         []Line

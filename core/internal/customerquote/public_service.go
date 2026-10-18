@@ -273,11 +273,12 @@ type Signature struct {
 
 // AcceptInput is the body of a sign off.
 type AcceptInput struct {
-	FullName  string    `json:"full_name"`
-	Email     string    `json:"email"`
-	Phone     string    `json:"phone"`
-	Signature Signature `json:"signature"`
-	Code      string    `json:"code"`
+	FullName          string    `json:"full_name"`
+	Email             string    `json:"email"`
+	Phone             string    `json:"phone"`
+	Signature         Signature `json:"signature"`
+	Code              string    `json:"code"`
+	SelectionsVersion int64     `json:"selections_version"`
 }
 
 var pngMagic = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
@@ -388,6 +389,9 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 		if err := decided(cur); err != nil {
 			return err
 		}
+		if in.SelectionsVersion != cur.SelectionsVersion {
+			return ErrSelectionsChanged
+		}
 		verified := false
 		if cur.RequireCode {
 			if in.Code == "" {
@@ -462,8 +466,9 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 
 // DeclineInput is the body of a decline.
 type DeclineInput struct {
-	FullName string `json:"full_name"`
-	Reason   string `json:"reason"`
+	FullName          string `json:"full_name"`
+	Reason            string `json:"reason"`
+	SelectionsVersion int64  `json:"selections_version"`
 }
 
 // Decline records that the customer declines the quote.
@@ -489,6 +494,9 @@ func (s *Service) Decline(ctx context.Context, token string, c Caller, in Declin
 		now := s.now()
 		if !link.Live(now) || cur.Effective(now) != StatusSent {
 			return ErrInvalidState
+		}
+		if in.SelectionsVersion > 0 && in.SelectionsVersion != cur.SelectionsVersion {
+			return ErrSelectionsChanged
 		}
 		body, sum, total, err := BuildSnapshot(cur, "declined")
 		if err != nil {
