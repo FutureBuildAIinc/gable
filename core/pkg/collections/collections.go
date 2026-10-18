@@ -94,3 +94,23 @@ func NetByDay(from, to string, branch, grants int) string {
 		FROM received rc FULL JOIN refunded rf ON rf.day = rc.day
 		ORDER BY 1`
 }
+
+// NetCentsForBranchAt is a scalar subquery: the net collections in cents of
+// one branch on the business date day, for a read that names its branch (the
+// branch day summary) rather than reading the caller's reach. The branch is
+// the parameter position branch. The definition is ReceivedBetween's and
+// RefundedBetween's: payments by their received_on and own yard, never a
+// voided one; refunds by their refunded_on, at the yard of the payment or the
+// credit memo they refund. The caller holds the branch to its wall first.
+func NetCentsForBranchAt(day string, branch int) string {
+	return fmt.Sprintf(`(
+		(SELECT COALESCE(SUM(ROUND(p.amount * 100)::bigint), 0) FROM payments p
+			WHERE p.status = 'POSTED' AND p.received_on = (%[1]s)::date AND p.branch_id = $%[2]d)
+		- (SELECT COALESCE(SUM(ROUND(r.amount * 100)::bigint), 0) FROM payment_refunds r
+			LEFT JOIN payments rp ON rp.id = r.payment_id
+			LEFT JOIN credit_memos rm ON rm.id = r.credit_memo_id
+			WHERE r.status = 'COMPLETE' AND r.refunded_on = (%[1]s)::date
+			  AND (rp.id IS NULL OR rp.status = 'POSTED')
+			  AND (rp.branch_id = $%[2]d OR rm.branch_id = $%[2]d))
+	)`, day, branch)
+}

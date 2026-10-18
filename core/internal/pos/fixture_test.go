@@ -19,10 +19,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -59,23 +61,44 @@ type fixture struct {
 	// terminal, when an opt sets it, is the simulated card terminal the
 	// counter's card legs ride (CP-05), with its intent ledger.
 	terminal *payment.SimulatedTerminal
+	// noAutoTill, when an opt sets it, stops startSale from opening the
+	// register's drawer: the API refuses a sale at a register with no open
+	// till (CP-08), so the helper opens one with no float, as a cashier would,
+	// unless the test is proving that refusal.
+	noAutoTill bool
 }
+
+// withoutTill is the opt of a test that proves the open till rule itself.
+func withoutTill() func(*fixture) { return func(f *fixture) { f.noAutoTill = true } }
 
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
 
 // recordingWriter wraps the outbox writer, remembering what was written and
-// optionally failing one type (the transaction proofs).
+// optionally failing one type (the transaction proofs). Contenders write
+// through it from several goroutines, so its state is behind a mutex; a test
+// sets the failing type with setFail.
 type recordingWriter struct {
 	inner pos.EventRecorder
+	mu    sync.Mutex
 	fail  string
 	seen  []string
 }
 
+// setFail names the event type that fails, "" for none.
+func (w *recordingWriter) setFail(eventType string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.fail = eventType
+}
+
 func (w *recordingWriter) Write(ctx context.Context, ev outbox.Event) error {
+	w.mu.Lock()
 	if ev.Type == w.fail {
+		w.mu.Unlock()
 		return fmt.Errorf("outbox insert failed")
 	}
 	w.seen = append(w.seen, ev.Type)
+	w.mu.Unlock()
 	return w.inner.Write(ctx, ev)
 }
 
@@ -116,7 +139,8 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	f.events = &recordingWriter{inner: outbox.NewWriter(db, "")}
 	f.service = pos.NewService(db, pos.NewRepository(db), logger).
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
-		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db)
+		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db).
+		WithBankLines(bankrecon.NewDepositLines(db))
 	// the counter guards the AR core's applications as serve wires it (C2-5):
 	// an invoice whose sale's void has standing claims takes no application,
 	// and a payment whose unapplied cash is a declined void tender's credit
@@ -214,6 +238,10 @@ func (f *fixture) cleanup() {
 		OR e.source_ref_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_movements)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_day_closes)
+		OR e.reverses_entry_id IN (SELECT gl_entry_id FROM till_day_closes WHERE gl_entry_id IS NOT NULL)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_sessions)
 		OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN
 			((SELECT id::text FROM invoices WHERE id IN `+invs+`)
 			UNION (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
@@ -232,10 +260,13 @@ func (f *fixture) cleanup() {
 		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
 		OR entity_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
-		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id = $1`, f.customerID)
+		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes) OR entity_id = $1`, f.customerID)
 	exec(`DELETE FROM audit_log WHERE entity_id::text IN (SELECT id::text FROM invoices WHERE id IN `+invs+`)
 		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
-		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)`, f.customerID)
+		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
+		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes)`, f.customerID)
 	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM customer_transactions WHERE customer_id IN ($1, `+walkIn+`)`, f.customerID)
@@ -252,12 +283,19 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.customerID)
 	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
 	exec(`DELETE FROM invoices WHERE id IN `+invs, f.customerID)
+	// the entries the drawer's own acts posted (movements, variances) are named
+	// by their rows: release them before the entries go
+	exec(`DELETE FROM till_movements`)
+	exec(`DELETE FROM till_day_closes`)
+	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
+	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE gl_entry_id IS NOT NULL`)
 	if len(entryIDs) > 0 {
 		exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id = ANY($1::uuid[])`, entryIDs)
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)
 	}
 
 	exec(`DELETE FROM pos_sync_log`)
+	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
 	exec(`DELETE FROM till_sessions`)
 	exec(`DELETE FROM inventory WHERE location_id = $1`, f.yardID)
@@ -390,6 +428,7 @@ func errorOf(t *testing.T, r resp) (code string, blockers []string, fields []str
 // startSale opens a cart on the fixture's register.
 func (f *fixture) startSale(customer *uuid.UUID) string {
 	f.t.Helper()
+	f.ensureTill()
 	body := map[string]any{"register_id": f.register}
 	if customer != nil {
 		body["customer_id"] = customer.String()
@@ -462,10 +501,53 @@ func (f *fixture) cashFor(qty string) map[string]any {
 	return tender("cash", total)
 }
 
+// ensureTill opens the register's drawer with no float when none is open, the
+// way a cashier opens the day before the first sale.
+func (f *fixture) ensureTill() { f.t.Helper(); f.ensureTillOn(f.register) }
+
+// ensureTillOn is ensureTill for another register of the fixture.
+func (f *fixture) ensureTillOn(register string) {
+	f.t.Helper()
+	if f.noAutoTill {
+		return
+	}
+	var open int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM till_sessions WHERE register_id = $1 AND status = 'OPEN'`, register).Scan(&open); err != nil {
+		f.t.Fatal(err)
+	}
+	if open == 0 {
+		f.openTillOn(register, 0)
+	}
+}
+
+// allowAnyVariance lifts the fixture branch's variance threshold out of reach,
+// for the tests whose subject is not the sign off and whose count is off by
+// design: the close then posts its variance as it did before the threshold.
+func (f *fixture) allowAnyVariance() {
+	f.t.Helper()
+	mustExec(f.t, f.db, `INSERT INTO till_variance_policy (branch_id, threshold_cents) VALUES ($1, 100000000)
+		ON CONFLICT (branch_id) DO UPDATE SET threshold_cents = EXCLUDED.threshold_cents`, f.branchID)
+}
+
+// seedTill opens the register's drawer straight in the table, for the tests
+// that run with the branch wall on and no header to open it through the route.
+func (f *fixture) seedTill() {
+	f.t.Helper()
+	mustExec(f.t, f.db, `INSERT INTO till_sessions (register_id, branch_id, cashier_id, status, opening_float)
+		VALUES ($1, $2, $3, 'OPEN', 0)`, f.register, f.branchID, uuid.New())
+}
+
 // openTill opens the fixture register's drawer with a float.
 func (f *fixture) openTill(floatCents int64) string {
 	f.t.Helper()
-	r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": floatCents},
+	return f.openTillOn(f.register, floatCents)
+}
+
+// openTillOn opens a register's drawer with a float.
+func (f *fixture) openTillOn(register string, floatCents int64) string {
+	f.t.Helper()
+	r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": register, "opening_float_cents": floatCents},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 	if r.status != http.StatusCreated {
 		f.t.Fatalf("open till = %d: %s", r.status, r.raw)

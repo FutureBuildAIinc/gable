@@ -137,6 +137,22 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/zreport", guard(h.GetZReport))
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
+	// The variance sign off (CP-08): the queue, the release and the policy are
+	// the managers' (finance and owner, as the resolve route).
+	mux.HandleFunc("GET /api/v1/pos/till/signoffs", resolveMount(h.ListPendingSignoffs))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", resolveMount(h.SignOffTill))
+	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
+	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
+
+	// The end of day by branch (CP-09) is the managers' (finance and owner): the
+	// summary, the close and the deposit match.
+	mux.HandleFunc("GET /api/v1/pos/end-of-day", resolveMount(h.GetBranchDay))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/close", resolveMount(h.CloseBranchDay))
+	mux.HandleFunc("GET /api/v1/pos/end-of-day/{id}/deposit-candidates", resolveMount(h.ListDepositCandidates))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/deposit-match", resolveMount(h.MatchDeposit))
+	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/reopen", resolveMount(h.ReopenBranchDay))
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))

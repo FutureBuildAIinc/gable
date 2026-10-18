@@ -3,6 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { framedByShell } from '@gable/design-system';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { icon } from '../../lib/icons.ts';
@@ -37,6 +38,9 @@ export class GableYardLayout extends LitElement {
 
     return html`
       <div class="min-h-screen bg-deep-space text-white font-sans md:max-w-md md:mx-auto md:border-x md:border-white/10 relative shadow-2xl flex flex-col">
+        ${framedByShell()
+          ? nothing
+          : html`
         <header class="h-16 flex items-center justify-between px-4 border-b border-white/10 bg-slate-steel/80 backdrop-blur-md sticky top-0 z-50">
           <div class="font-bold text-lg tracking-wider font-mono">
             GABLE<span class="text-amber-400">YARD</span>
@@ -45,6 +49,7 @@ export class GableYardLayout extends LitElement {
             Y1
           </div>
         </header>
+        `}
 
         <main class="flex-1 pb-20 overflow-y-auto">
           ${this.pageContent}

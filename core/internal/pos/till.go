@@ -23,13 +23,15 @@ import (
 // completed sales' card tenders less the void refunds a resolution booked
 // (r12 P3-2), the same net the CASH figure carries for returns; the other
 // methods are the pass-through of what the session's sales collected (ADR
-// 0005 section 14.2 C2-5). Pure function for testability.
-func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds int64) map[string]int64 {
+// 0005 section 14.2 C2-5). The session's movements move the CASH figure: paid
+// in raises it, paid out, drops and pickups lower it (movementNet, CP-08).
+// Pure function for testability.
+func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds, movementNet int64) map[string]int64 {
 	expected := make(map[string]int64, len(tendered)+1)
 	for m, v := range tendered {
 		expected[m] = v
 	}
-	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds
+	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds + movementNet
 	// The CARD figure is written only where the session collected on cards:
 	// a cash only session's report carries no card figure, as before (a
 	// booked card refund always implies the tender that was collected).
@@ -59,6 +61,21 @@ func (s *Service) OpenTill(ctx context.Context, registerID string, cashierID uui
 		branch, err := s.repo.GetRegisterBranch(ctx, registerID)
 		if err != nil {
 			return err
+		}
+		// The branch's day lock, the one the day close takes, so a drawer never
+		// opens between that close's check and its write; and a branch whose
+		// business date is closed takes no new drawer (CP-09).
+		if branch != nil {
+			if err := s.repo.LockBranchDay(ctx, *branch); err != nil {
+				return err
+			}
+			closed, err := s.repo.BranchDayClosed(ctx, *branch)
+			if err != nil {
+				return err
+			}
+			if closed {
+				return conflict("day_closed", "the branch's business date is closed: no drawer opens until the next day")
+			}
 		}
 		session := &TillSession{RegisterID: registerID, BranchID: branch, CashierID: cashierID,
 			Status: TillOpen, OpeningFloat: openingFloat,
@@ -108,6 +125,10 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 	if err != nil {
 		return nil, err
 	}
+	movements, err := s.repo.ListTillMovements(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	return &TillReport{
 		Session:          *session,
 		SaleCount:        agg.SaleCount,
@@ -115,7 +136,10 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TaxTotalCents:    httpx.Cents(agg.TaxTotalCents),
 		ChangeCents:      httpx.Cents(agg.ChangeCents),
 		TenderedByMethod: agg.TenderedByMethod,
-		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents),
+		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents,
+			movementNetCash(agg.MovementTotals)),
+		Movements:            movements,
+		MovementTotalsByKind: agg.MovementTotals,
 	}, nil
 }
 
@@ -185,9 +209,26 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 			}
 		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
+		// A count whose over or short passes the branch's variance threshold
+		// is held for a manager (CP-08): the drawer is counted and out of
+		// use, its variance is not on the ledger yet, and the sign off posts
+		// it. Inside the threshold the close posts as ever.
+		threshold, thresholdSet, err := s.repo.VarianceThreshold(ctx, report.Session.BranchID)
+		if err != nil {
+			return err
+		}
+		hold := thresholdSet && abs64(overShort) > threshold
 		now := time.Now()
 		session := report.Session
 		session.Status = TillClosed
+		if hold {
+			session.Status = TillPendingSignoff
+		}
+		session.ClosedBy = actorPtr(actor)
+		if thresholdSet {
+			t := httpx.Cents(threshold)
+			session.VarianceThreshold = &t
+		}
 		session.ClosedAt = httpx.PtrTimestamp(&now)
 		session.ExpectedByMethod = report.ExpectedByMethod
 		session.CountedByMethod = countedByMethod
@@ -196,10 +237,10 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		session.Notes = notes
 		// The over/short entry, inside the close's transaction, linked back
 		// onto the session.
-		if s.ledger != nil && overShort != 0 {
+		if s.ledger != nil && overShort != 0 && !hold {
 			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
 			if err != nil {
-				return fmt.Errorf("failed to post the drawer variance: %w", err)
+				return ledgerRefusal(err, "failed to post the drawer variance")
 			}
 			if glID != uuid.Nil {
 				session.GLEntryID = &glID
@@ -209,6 +250,14 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 			return err
 		}
 		report.Session = session
+		if hold {
+			// the Z snapshot waits for the sign off, which freezes it
+			if err := s.recordHeldClose(ctx, report, overShort, threshold, actor); err != nil {
+				return err
+			}
+			out = report
+			return nil
+		}
 		// The frozen Z snapshot, in the same transaction.
 		if err := s.generateZReport(ctx, report); err != nil {
 			return err
@@ -244,6 +293,13 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 }
 
 func aggSales(r *TillReport) int64 { return int64(r.SalesTotalCents) }
+
+func abs64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 // GetZReport returns the frozen Z snapshot for a session.
 func (s *Service) GetZReport(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {

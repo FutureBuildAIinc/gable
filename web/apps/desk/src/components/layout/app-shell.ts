@@ -15,6 +15,7 @@ import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '@gable/design-system';
+import { framedByShell } from '@gable/design-system';
 import { authCustody } from '@gable/auth';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
@@ -326,7 +327,9 @@ export class GableAppShell extends LitElement {
           Skip to main content
         </a>
 
-        <!-- Header -->
+        <!-- Header: hidden when the work shell frames the desk (one header
+             band, the shell's); standalone the desk's own band stands. -->
+        ${framedByShell() ? nothing : html`
         <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 flex items-center gap-4 sticky top-0 z-40 shadow-sm">
           <a href="/home" aria-label="Go to Home" class="flex items-center gap-3 shrink-0">
             <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
@@ -354,11 +357,12 @@ export class GableAppShell extends LitElement {
             ${this._renderUser()}
           </div>
         </header>
+        `}
 
         <!-- Workspace tab strip -->
         <nav
           aria-label="Open modules"
-          class="sticky top-16 z-30 flex items-end gap-1 px-3 md:px-5 pt-1.5 bg-slate-steel/60 backdrop-blur-xl border-b border-white/5 overflow-x-auto gable-scrollbar-x"
+          class="sticky ${framedByShell() ? 'top-0' : 'top-16'} z-30 flex items-end gap-1 px-3 md:px-5 pt-1.5 bg-slate-steel/60 backdrop-blur-xl border-b border-white/5 overflow-x-auto gable-scrollbar-x"
         >
           ${workspace.tabs.map((t) => this._tab(t))}
           <button

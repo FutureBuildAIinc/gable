@@ -16,6 +16,11 @@ import type {
     RefundMethod,
     TillSession,
     TillReport,
+    TillMovement,
+    MovementRequest,
+    BranchDay,
+    DepositCandidate,
+    DayClose,
     CounterCustomer,
     CounterRegister,
     TerminalIntent,
@@ -376,6 +381,104 @@ export const posService = {
                 body: JSON.stringify({ outcome, reference, reason }),
             }),
             'Failed to resolve the lost card answer',
+        );
+        return response.json();
+    },
+
+    // --- Till movements, variance sign off and the branch day (CP-08, CP-09) ---
+
+    /** A safe drop, pickup, paid in or paid out against the open drawer. */
+    async recordMovement(sessionID: string, input: MovementRequest): Promise<TillMovement> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/movements`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to record the movement',
+        );
+        return response.json();
+    },
+
+    /** The counted drawers waiting for a manager (finance and owner only). */
+    async pendingSignoffs(): Promise<TillSession[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/till/signoffs`),
+            'Failed to load the drawers waiting for sign off',
+        );
+        const page = (await response.json()) as { items?: TillSession[] };
+        return Array.isArray(page.items) ? page.items : [];
+    },
+
+    async signOffTill(sessionID: string, reason: string): Promise<TillReport> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/signoff`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason }),
+            }),
+            'Failed to sign off the till',
+        );
+        return response.json();
+    },
+
+    /** The branch's end of day summary; no date is the branch's today. */
+    async branchDay(branchID: string, date?: string): Promise<BranchDay> {
+        const params = new URLSearchParams({ branch_id: branchID });
+        if (date) params.set('date', date);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day?${params.toString()}`),
+            'Failed to load the branch day',
+        );
+        return response.json();
+    },
+
+    async closeBranchDay(branchID: string, date: string, depositSlipRef: string, bankAccountID?: string): Promise<BranchDay> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/close`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    branch_id: branchID,
+                    date,
+                    deposit_slip_ref: depositSlipRef,
+                    ...(bankAccountID ? { bank_account_id: bankAccountID } : {}),
+                }),
+            }),
+            'Failed to close the branch day',
+        );
+        return response.json();
+    },
+
+    async reopenBranchDay(closeID: string, reason: string): Promise<BranchDay> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/${closeID}/reopen`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason }),
+            }),
+            'Failed to reopen the branch day',
+        );
+        return response.json();
+    },
+
+    async depositCandidates(closeID: string): Promise<DepositCandidate[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/${closeID}/deposit-candidates`),
+            'Failed to load the bank statement lines',
+        );
+        const page = (await response.json()) as { items?: DepositCandidate[] };
+        return Array.isArray(page.items) ? page.items : [];
+    },
+
+    async matchDeposit(closeID: string, bankTransactionID: string): Promise<DayClose> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/${closeID}/deposit-match`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ bank_transaction_id: bankTransactionID }),
+            }),
+            'Failed to match the deposit',
         );
         return response.json();
     },

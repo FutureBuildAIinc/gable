@@ -25,12 +25,16 @@ paths:
       summary: Start a sale
       description: >-
         Opens a cart on a register for the resolved cashier, attached to the
-        register's open till session when there is one, at revision 1 with its
+        register's open till session, at revision 1 with its
         POS- number (the gapped series; a rolled back create abandons the
         number). register_id defaults REG-01; the customer names the account
         the invoice posts to, and its absence means the walk-in customer the
         counter books to. The cashier is the JWT's subject; a machine key is
-        refused 403 ("a cashier must be a user").
+        refused 403 ("a cashier must be a user"). A register with no open till
+        session refuses the sale: 409 with the blocker till_not_open, nothing
+        written (a register of another branch is refused by the branch wall
+        first). The same refusal stops the offline sync, which rebuilds each
+        sale through this path.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -510,7 +514,10 @@ paths:
       tags: [pos]
       summary: Tender and complete the sale
       description: >-
-        The money moment, one transaction: stock out through the inventory
+        A sale started before the open till rule, with no drawer on it,
+        completes only into the register's open session, which it joins
+        (409 till_not_open when there is none). The money moment, one
+        transaction: stock out through the inventory
         write path, the invoice (origin POS, pickup) posted through the AR
         core with its tax and COGS legs, each cash, check or card tender a
         payment applied to it and stored net (the tendered amount less change,
@@ -726,7 +733,9 @@ paths:
         branch wall's 403. A sale whose tax provider call fails is never
         rejected (the one exception to the provider rule, ADR 0005 section
         3): it stays pending in the sync log and the sync retries it;
-        errors lists what could not complete and pending what waits.
+        errors lists what could not complete and pending what waits. A sale
+        replayed at a register with no open till session is an error entry
+        (till_not_open): the counter takes no sale outside a drawer.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -787,8 +796,9 @@ paths:
         Opens a till session for the resolved cashier on a register with its
         opening float in cents; register_id defaults REG-01. A register with
         an open session is refused (409, a session is already open). The
-        cashier is the JWT's subject; a machine key is refused 403. Writes
-        till.opened.
+        cashier is the JWT's subject; a machine key is refused 403. A branch
+        whose business date is closed takes no new drawer (409 day_closed).
+        Writes till.opened.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -967,6 +977,477 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/{id}/movements:
+    post:
+      operationId: posTillMovementCreate
+      tags: [pos]
+      summary: Record a drop, pickup, paid in or paid out
+      description: >-
+        Records cash moving in or out of an open drawer: safe_drop and pickup
+        take cash out to undeposited funds (1015), paid_out takes it out for an
+        expense (5020), paid_in brings it in (4030, 5020 or 4090 by the reason).
+        The row carries the register's branch, the actor and, for a pickup, the
+        second person taking the cash (taken_by), who is never the acting cashier
+        nor the session's cashier (409 pickup_needs_second_person). paid_in and
+        paid_out name a reason_code from the closed lowercase list (supplies,
+        freight, fuel, postage, meals, repairs for paid out; fee_received,
+        vendor_refund for paid in; other for both, with a note); a drop or pickup
+        names none. The movement changes the drawer's expected cash (drops,
+        pickups and paid out lower it, paid in raises it). The balanced entry, the
+        audit row and till.movement_recorded are written in the act's
+        transaction; the session is held FOR SHARE against the close's FOR UPDATE.
+        A session that is not open, including one waiting for sign off, answers
+        409 session_closed; one the caller's branch context hides, 404; a caller
+        with no branch in context and no grant for the session's branch, 403.
+        The actor is the JWT's subject; a machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTillMovementRequest"
+      responses:
+        "201":
+          description: The recorded movement.
+          headers:
+            Location:
+              description: The session's movement list.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillMovement"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      operationId: posTillMovementList
+      tags: [pos]
+      summary: The session's movements
+      description: >-
+        The session's movements, oldest first, a cursor page. A session the
+        caller's branch context hides answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of movements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillMovementPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/signoffs:
+    get:
+      operationId: posTillSignoffList
+      tags: [pos]
+      summary: The counted drawers waiting for a manager
+      description: >-
+        The sessions in pending_signoff inside the caller's reach, oldest close
+        first, a cursor page; branch_id narrows to one branch the caller may
+        target (403 for any other). Finance and owner only.
+      parameters:
+        - name: branch_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of sessions waiting for sign off.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillSessionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/{id}/signoff:
+    post:
+      operationId: posTillSignoff
+      tags: [pos]
+      summary: Sign off a counted drawer's variance
+      description: >-
+        Releases a session in pending_signoff: the over or short posts to 5030,
+        the session ends closed with who signed off, the reason and the time,
+        the Z snapshot is written and till.closed is the last statement, all in
+        one transaction. The signer is never the person who closed the drawer nor
+        its cashier (409 signoff_same_person); a blank reason is a 400; a session
+        that is not waiting is 409. Finance and owner only, never a machine key.
+        A session the caller's branch context hides answers 404; a caller with no
+        branch in context and no grant for it, 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTillSignoffRequest"
+      responses:
+        "200":
+          description: The closed session's report, its sign_off naming the manager.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillReport"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/till/policy:
+    get:
+      operationId: posTillPolicyGet
+      tags: [pos]
+      summary: A branch's variance threshold
+      description: >-
+        The threshold in cents a close's over or short is held to at the branch:
+        the branch's own override, else the database wide default
+        (system_settings till.variance_threshold_cents). source says which; none
+        means no threshold is in force. Finance and owner only; a branch the
+        caller may not target is 403.
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posTillPolicyPut
+      tags: [pos]
+      summary: Set a branch's variance threshold
+      description: >-
+        Sets the branch's own threshold in cents, or clears it with null so the
+        database wide default applies again. Finance and owner only, never a
+        machine key; a branch the caller may not target is 403. Audited.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosTillPolicyRequest"
+      responses:
+        "200":
+          description: The policy now in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTillPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day:
+    get:
+      operationId: posEndOfDayGet
+      tags: [pos]
+      summary: The branch's end of day summary
+      description: >-
+        One branch's business date (date, YYYY-MM-DD in the branch's time zone,
+        defaulting to the branch's today): each register's sessions, tenders by
+        method, movements, expected against counted, over and short, the cash and
+        checks to deposit and the card total, and the branch totals, each the sum
+        of its registers' to the cent. A session belongs to the date it opened.
+        cash_to_deposit is the counted cash (the expected, for a drawer still
+        open) less the opening float plus the drops and pickups; checks_to_deposit
+        the counted checks; card_total the net card collected.
+        collections_net_cents is the branch's net collections of the date as the
+        Daily Till counts them. ready_to_close is true when no drawer is open or
+        waiting for sign off. close is the day's close once it exists. Finance
+        and owner only. A branch the caller may not target is 403; an unknown
+        branch 404.
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The branch day.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosBranchDay"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day/close:
+    post:
+      operationId: posEndOfDayClose
+      tags: [pos]
+      summary: Close the branch's business date
+      description: >-
+        Closes the date for the branch: who, when, the deposit slip reference and
+        a frozen totals snapshot, with the audit row and till.day_closed in one
+        transaction. Refused 409 till_open while a drawer of the branch dated that
+        day or before is open, 409 signoff_pending while one waits for a manager
+        (both blockers when both), 409 day_already_closed for a second close of a
+        branch date, 409 date_not_reached for a date after the branch's today.
+        The close posts the deposit it records in the same transaction: debit the
+        GL account of the bank account named by bank_account_id (required, 400,
+        when cash and checks are to be deposited; 404 for an unknown bank account,
+        409 bank_account_inactive for a retired one) for the cash and checks to
+        deposit, credit 1015 Undeposited Funds for the day's drops and pickups,
+        credit 1010 Cash for the rest (a debit when the drawers held less than the
+        safe's share). Cards are not part of the deposit. The entry is named on the
+        close (gl_entry_id); a closed fiscal period is 409 period_closed. A day with
+        nothing to deposit and nothing in 1015 needs no bank account and posts
+        nothing. The close takes the branch's day lock a drawer opening also takes, so a
+        closed day never holds an open drawer and a branch whose date is closed
+        takes no new drawer (409 day_closed on POST /pos/till/open). Finance and
+        owner only, never a machine key; a branch the caller may not target is 403.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosEndOfDayCloseRequest"
+      responses:
+        "201":
+          description: The closed branch day.
+          headers:
+            Location:
+              description: The day's summary route.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosBranchDay"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day/{id}/reopen:
+    post:
+      operationId: posEndOfDayReopen
+      tags: [pos]
+      summary: Reopen a closed branch day
+      description: >-
+        Reopens a closed branch day for a late drawer or a correction. Under the
+        branch's day lock, the close's deposit entry is reversed (a reversal
+        entry naming it, dated the branch's today; a closed fiscal period is 409
+        period_closed), the close row is marked REOPENED (keeping its frozen
+        totals snapshot and naming the reversal entry) so the day closes again
+        like any open day, and the audit row (with the reason) and
+        till.day_reopened are written, all in one transaction. A blank reason is
+        a 400. A close already reopened answers 409 day_not_closed, and a day
+        whose deposit is matched to a bank statement line cannot reopen: 409
+        deposit_already_matched. A close the caller's branch context hides
+        answers 404; a caller with no branch in context and no grant for it, 403.
+        Finance and owner only, never a machine key.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosEndOfDayReopenRequest"
+      responses:
+        "200":
+          description: The reopened branch day, close null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosBranchDay"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day/{id}/deposit-candidates:
+    get:
+      operationId: posEndOfDayDepositCandidates
+      tags: [pos]
+      summary: Bank statement lines that may be the day's deposit
+      description: >-
+        The unmatched deposit lines of the bank statement dated from three days
+        before the business date to ten days after, nearest to the day's cash and
+        checks to deposit first, at most 20. A close the caller's branch context
+        hides answers 404; a caller with no branch in context and no grant, 403.
+        Finance and owner only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The candidate lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosDepositCandidatePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "503":
+          $ref: "#/components/responses/InternalError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/end-of-day/{id}/deposit-match:
+    post:
+      operationId: posEndOfDayDepositMatch
+      tags: [pos]
+      summary: Match the day's deposit to a bank statement line
+      description: >-
+        Claims an unmatched deposit line of the bank statement through bank
+        reconciliation (status matched) and records on the day's close the line,
+        the difference in cents (the bank's amount less the cash and checks to
+        deposit) and who matched it. A day matches once (409
+        deposit_already_matched); a line that is not an unmatched deposit, or that
+        another day holds, is 409 bank_line_unavailable; a line of another bank
+        account than the day's is 409 bank_account_mismatch; an unknown line is 404.
+        The claimed line is linked to the close's deposit entry
+        (bank_transactions.matched_journal_entry_id).
+        The audit row and till.deposit_matched are written in the same
+        transaction. Finance and owner only, never a machine key.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosDepositMatchRequest"
+      responses:
+        "200":
+          description: The day's close with its deposit match.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosDayClose"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/zreports:
@@ -1463,7 +1944,8 @@ components:
       enum: [cash, card, account]
     PosTillStatus:
       type: string
-      enum: [open, closed]
+      description: "pending_signoff is a counted drawer whose over or short passed the branch's variance threshold."
+      enum: [open, pending_signoff, closed]
     PosTransactionCreateRequest:
       type: object
       properties:
@@ -1833,7 +2315,7 @@ components:
         One drawer shift. The expected cash is the sum of the session's cash
         payments (already net of change) plus the opening float less cash
         refunds.
-      required: [id, register_id, branch_id, cashier_id, status, opening_float_cents, opened_at, closed_at, expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes]
+      required: [id, register_id, branch_id, cashier_id, status, opening_float_cents, opened_at, closed_at, expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes, closed_by, variance_threshold_cents, sign_off]
       properties:
         id: {type: string, format: uuid}
         register_id: {type: string}
@@ -1851,14 +2333,261 @@ components:
           type: object
           additionalProperties: {type: integer, format: int64}
         over_short_cents: {type: [integer, "null"], format: int64, description: "Set by the close."}
-        gl_entry_id: {type: [string, "null"], format: uuid, description: "The 5030 over/short entry the close booked."}
+        gl_entry_id: {type: [string, "null"], format: uuid, description: "The 5030 over/short entry the close (or the sign off) booked."}
         notes: {type: string}
+        closed_by: {type: [string, "null"], description: "Who counted and closed the drawer."}
+        variance_threshold_cents: {type: [integer, "null"], format: int64, description: "The branch's threshold in force at the close; null when none was."}
+        sign_off:
+          description: "The manager's release of a close that passed the threshold; null otherwise."
+          oneOf:
+            - $ref: "#/components/schemas/PosTillSignOff"
+            - type: "null"
+    PosTillMovementRequest:
+      type: object
+      required: [kind, amount_cents]
+      properties:
+        kind: {$ref: "#/components/schemas/PosTillMovementKind"}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reason_code:
+          description: "Required for paid_in and paid_out, absent for a drop or pickup."
+          oneOf:
+            - $ref: "#/components/schemas/PosTillReasonCode"
+            - type: "null"
+        note: {type: [string, "null"], description: "Required, not blank, when the reason_code is other."}
+        taken_by: {type: [string, "null"], description: "A pickup's second person, required there and absent for any other kind."}
+    PosTillMovementKind:
+      type: string
+      enum: [safe_drop, pickup, paid_in, paid_out]
+    PosTillReasonCode:
+      type: string
+      enum: [supplies, freight, fuel, postage, meals, repairs, fee_received, vendor_refund, other]
+    PosTillMovement:
+      type: object
+      required: [id, till_session_id, register_id, branch_id, kind, amount_cents, reason_code, note, actor, taken_by, gl_entry_id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid}
+        register_id: {type: string}
+        branch_id: {type: string, format: uuid}
+        kind: {$ref: "#/components/schemas/PosTillMovementKind"}
+        amount_cents: {type: integer, format: int64}
+        reason_code:
+          oneOf:
+            - $ref: "#/components/schemas/PosTillReasonCode"
+            - type: "null"
+        note: {type: string}
+        actor: {type: string}
+        taken_by: {type: [string, "null"]}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        created_at: {type: string, format: date-time}
+    PosTillMovementPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosTillMovement"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+    PosTillSessionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosTillSession"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+    PosTillSignoffRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: "Why the variance is accepted; not blank."}
+    PosTillSignOff:
+      type: object
+      required: [signed_off_by, reason, signed_off_at]
+      properties:
+        signed_off_by: {type: string}
+        reason: {type: string}
+        signed_off_at: {type: string, format: date-time}
+    PosTillPolicy:
+      type: object
+      required: [branch_id, variance_threshold_cents, branch_threshold_cents, default_threshold_cents, source]
+      properties:
+        branch_id: {type: string, format: uuid}
+        variance_threshold_cents: {type: [integer, "null"], format: int64, description: "The figure in force; null when none exists."}
+        branch_threshold_cents: {type: [integer, "null"], format: int64, description: "The branch's own override."}
+        default_threshold_cents: {type: [integer, "null"], format: int64, description: "The database wide default."}
+        source: {type: string, enum: [branch, default, none]}
+    PosTillPolicyRequest:
+      type: object
+      required: [branch_id, variance_threshold_cents]
+      properties:
+        branch_id: {type: string, format: uuid}
+        variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosEndOfDayCloseRequest:
+      type: object
+      required: [branch_id, date, deposit_slip_ref]
+      properties:
+        branch_id: {type: string, format: uuid}
+        date: {type: string, format: date}
+        deposit_slip_ref: {type: string, minLength: 1, maxLength: 64}
+        bank_account_id:
+          type: [string, "null"]
+          format: uuid
+          description: "The bank account the deposit goes to; required when cash and checks are to be deposited."
+    PosEndOfDayReopenRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, description: "Why the day reopens; not blank."}
+    PosDepositMatchRequest:
+      type: object
+      required: [bank_transaction_id]
+      properties:
+        bank_transaction_id: {type: string, format: uuid}
+    PosDayFigures:
+      type: object
+      required: [session_count, sale_count, sales_total_cents, tendered_by_method, movement_totals_by_kind, expected_by_method, counted_by_method, over_short_cents, cash_to_deposit_cents, checks_to_deposit_cents, card_total_cents]
+      properties:
+        session_count: {type: integer}
+        sale_count: {type: integer}
+        sales_total_cents: {type: integer, format: int64}
+        tendered_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        movement_totals_by_kind:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        expected_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        counted_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        over_short_cents: {type: integer, format: int64}
+        cash_to_deposit_cents: {type: integer, format: int64}
+        checks_to_deposit_cents: {type: integer, format: int64}
+        card_total_cents: {type: integer, format: int64}
+    PosDaySession:
+      type: object
+      required: [id, status, cashier_id, closed_by, opened_at, closed_at, opening_float_cents, sale_count, sales_total_cents, tendered_by_method, movement_totals_by_kind, expected_by_method, counted_by_method, over_short_cents, signed_off_by]
+      properties:
+        id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PosTillStatus"}
+        cashier_id: {type: string, format: uuid}
+        closed_by: {type: [string, "null"]}
+        opened_at: {type: string, format: date-time}
+        closed_at: {type: [string, "null"], format: date-time}
+        opening_float_cents: {type: integer, format: int64}
+        sale_count: {type: integer}
+        sales_total_cents: {type: integer, format: int64}
+        tendered_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        movement_totals_by_kind:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        expected_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        counted_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        over_short_cents: {type: integer, format: int64}
+        signed_off_by: {type: [string, "null"]}
+    PosDayRegister:
+      allOf:
+        - $ref: "#/components/schemas/PosDayFigures"
+        - type: object
+          required: [register_id, sessions]
+          properties:
+            register_id: {type: string}
+            sessions:
+              type: array
+              items: {$ref: "#/components/schemas/PosDaySession"}
+    PosDepositMatch:
+      type: object
+      required: [bank_transaction_id, bank_amount_cents, bank_transaction_date, bank_description, difference_cents, matched_by, matched_at]
+      properties:
+        bank_transaction_id: {type: string, format: uuid}
+        bank_amount_cents: {type: integer, format: int64}
+        bank_transaction_date: {type: string, format: date}
+        bank_description: {type: string}
+        difference_cents: {type: integer, format: int64, description: "The bank's amount less the cash and checks to deposit."}
+        matched_by: {type: string}
+        matched_at: {type: string, format: date-time}
+    PosDayClose:
+      type: object
+      required: [id, branch_id, business_date, deposit_slip_ref, closed_by, closed_at, cash_to_deposit_cents, checks_to_deposit_cents, card_total_cents, totals, bank_account_id, gl_entry_id, deposit_match]
+      properties:
+        id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        business_date: {type: string, format: date}
+        deposit_slip_ref: {type: string}
+        closed_by: {type: string}
+        closed_at: {type: string, format: date-time}
+        cash_to_deposit_cents: {type: integer, format: int64}
+        checks_to_deposit_cents: {type: integer, format: int64}
+        card_total_cents: {type: integer, format: int64}
+        totals:
+          type: object
+          description: "The frozen branch day summary at the close, a JSON object (the PosBranchDay shape with close null)."
+        bank_account_id: {type: [string, "null"], format: uuid, description: "The bank account the deposit goes to."}
+        gl_entry_id: {type: [string, "null"], format: uuid, description: "The journal entry that posted the deposit; null for a day with nothing to bank."}
+        deposit_match:
+          oneOf:
+            - $ref: "#/components/schemas/PosDepositMatch"
+            - type: "null"
+    PosBranchDay:
+      type: object
+      required: [branch_id, business_date, registers, totals, open_session_count, pending_signoff_count, ready_to_close, collections_net_cents, close]
+      properties:
+        branch_id: {type: string, format: uuid}
+        business_date: {type: string, format: date}
+        registers:
+          type: array
+          items: {$ref: "#/components/schemas/PosDayRegister"}
+        totals: {$ref: "#/components/schemas/PosDayFigures"}
+        open_session_count: {type: integer}
+        pending_signoff_count: {type: integer}
+        ready_to_close: {type: boolean}
+        collections_net_cents: {type: integer, format: int64}
+        close:
+          oneOf:
+            - $ref: "#/components/schemas/PosDayClose"
+            - type: "null"
+    PosDepositCandidate:
+      type: object
+      required: [bank_transaction_id, transaction_date, amount_cents, description, reference]
+      properties:
+        bank_transaction_id: {type: string, format: uuid}
+        transaction_date: {type: string, format: date}
+        amount_cents: {type: integer, format: int64}
+        description: {type: string}
+        reference: {type: string}
+    PosDepositCandidatePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosDepositCandidate"}
+        next_cursor: {type: [string, "null"], description: "Always null: at most 20 candidates are listed."}
+        limit: {type: integer}
     PosTillReport:
       type: object
-      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method]
+      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, movements, movement_totals_by_kind]
       properties:
         session:
           $ref: "#/components/schemas/PosTillSession"
+        movements:
+          type: array
+          description: "The session's drops, pickups, paid in and paid out, oldest first; the expected cash carries them."
+          items: {$ref: "#/components/schemas/PosTillMovement"}
+        movement_totals_by_kind:
+          type: object
+          additionalProperties: {type: integer, format: int64}
         sale_count: {type: integer}
         sales_total_cents: {type: integer, format: int64}
         tax_total_cents: {type: integer, format: int64}
