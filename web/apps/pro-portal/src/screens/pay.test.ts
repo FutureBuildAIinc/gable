@@ -245,4 +245,33 @@ describe('Pay screen', () => {
     expect(element.querySelector('[data-testid="pay-offline-banner"]')?.textContent).toBe(OFFLINE_WRITE_REASON)
     expect(element.querySelector<HTMLButtonElement>('[data-testid="submit-payment-btn"]')?.disabled).toBe(true)
   })
+
+  it('renders job balances, manages tokenized payment methods, and restricts roles without see_money', async () => {
+    const element = new GableProPay()
+    element.me = structuredClone(meFixture)
+    document.body.append(element)
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="pay-tab-jobs"]')).not.toBeNull())
+
+    element.querySelector<HTMLButtonElement>('[data-testid="pay-tab-jobs"]')?.click()
+    await element.updateComplete
+    expect(element.querySelector('[data-testid="pay-jobs-view"]')?.textContent).toContain('Glenview Lofts')
+    expect(element.querySelector('[data-testid="pay-jobs-view"]')?.textContent).toContain('$2,125.75 open')
+
+    element.querySelector<HTMLButtonElement>('[data-testid="pay-tab-methods"]')?.click()
+    await element.updateComplete
+    expect(element.querySelector('[data-testid="saved-methods-list"]')?.textContent).toContain('Visa ending in 4242')
+
+    element.querySelector<HTMLButtonElement>('[data-testid="save-payment-method-btn"]')?.click()
+    await vi.waitFor(() => expect(element.textContent).toContain('Saved'))
+
+    element.remove()
+    const siteSuper = structuredClone(meFixture)
+    siteSuper.capabilities.see_money = false
+    siteSuper.capabilities.pay = false
+    const restricted = new GableProPay()
+    restricted.me = siteSuper
+    document.body.append(restricted)
+    await restricted.updateComplete
+    expect(restricted.querySelector('[data-testid="pay-restricted"]')).not.toBeNull()
+  })
 })

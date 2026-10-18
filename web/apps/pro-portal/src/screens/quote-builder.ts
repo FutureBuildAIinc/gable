@@ -6,7 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { ApiError } from '@gable/api-client'
 import { icon } from '@gable/design-system'
 import { Download, Eye, FilePlus2, Link2, PackagePlus, RefreshCw, Send, Trash2, X } from 'lucide'
-import { assertWritesOnline, portalClient } from '../lib/api.ts'
+import { assertWritesOnline, portalClient, portalRequest } from '../lib/api.ts'
 import { can } from '../lib/capabilities.ts'
 import { formatBps, formatCents, formatDollars, statusLabel } from '../lib/format.ts'
 import { OFFLINE_WRITE_REASON } from '../lib/offline.ts'
@@ -254,15 +254,12 @@ export class GableProQuoteBuilder extends LitElement {
     this.error = ''
     try {
       assertWritesOnline()
-      const response = await portalClient.post(
-        '/api/portal/v1/customer-quotes/{id}/confirm',
+      this.quote = await portalRequest<CustomerQuoteView>(
+        'POST',
+        `/api/portal/v1/customer-quotes/${this.quote.id}/confirm`,
         acceptPriceChanges ? { accept_price_changes: true } : undefined,
-        {
-          path: { id: this.quote.id },
-          idempotencyKey: crypto.randomUUID(),
-        },
+        { idempotencyKey: crypto.randomUUID() },
       )
-      this.quote = response.body
       this.confirmPreview = null
       this.message = 'Customer approval confirmed into the dealer order.'
     } catch (error) {

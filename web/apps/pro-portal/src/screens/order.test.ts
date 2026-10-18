@@ -291,4 +291,35 @@ describe('Order screen', () => {
     expect(element.querySelector<HTMLButtonElement>(`[data-testid="cart-add-${testIds.product}"]`)?.disabled).toBe(true)
     expect(element.querySelector<HTMLButtonElement>('[data-testid="checkout-submit-btn"]')?.disabled).toBe(true)
   })
+
+  it('places cart orders, creates jobs, and manages named material lists', async () => {
+    const element = new GableProOrder()
+    element.me = structuredClone(meFixture)
+    document.body.append(element)
+    await vi.waitFor(() => expect(element.querySelector('[data-testid="checkout-submit-btn"]')).not.toBeNull())
+
+    const newProjInput = element.querySelector<HTMLInputElement>('[data-testid="new-project-input"]')!
+    newProjInput.value = 'Harbor Addition'
+    newProjInput.dispatchEvent(new Event('input'))
+    await element.updateComplete
+    element.querySelector<HTMLButtonElement>('[data-testid="create-project-btn"]')?.click()
+    await vi.waitFor(() => expect(element.textContent).toContain('created'))
+
+    element.querySelector<HTMLButtonElement>('[data-testid="checkout-submit-btn"]')?.click()
+    await vi.waitFor(() => expect(element.textContent).toContain('Order placed.'))
+
+    element.querySelector<HTMLButtonElement>('[data-testid="order-tab-lists"]')?.click()
+    await element.updateComplete
+    expect(element.querySelector('[data-testid="active-material-list"]')?.textContent).toContain('First Floor Wall Package')
+
+    const lineDesc = element.querySelector<HTMLInputElement>('[data-testid="list-line-description"]')!
+    lineDesc.value = 'Custom Ridge Beam'
+    lineDesc.dispatchEvent(new Event('input'))
+    await element.updateComplete
+    element.querySelector<HTMLButtonElement>('[data-testid="add-list-line-btn"]')?.click()
+    await vi.waitFor(() => expect(element.textContent).toContain('Line added to material list.'))
+
+    element.querySelector<HTMLButtonElement>('[data-testid="submit-list-rfq-btn"]')?.click()
+    await vi.waitFor(() => expect(element.textContent).toContain('Material list sent to the dealer for pricing.'))
+  })
 })
