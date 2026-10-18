@@ -660,11 +660,22 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 					contra, source = gl.AccountCodeBadDebt, gl.SourceWriteOff
 				}
 				id := a.ID
+				legs := []gl.Leg{
+					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount},
+					{AccountCode: contra, Description: "Reversal", Credit: a.Amount},
+				}
+				if a.Kind == KindPayment && r.payment != nil && r.payment.BranchID != uuid.Nil && inv.BranchID != uuid.Nil && r.payment.BranchID != inv.BranchID {
+					payBranch := r.payment.BranchID
+					invBranch := inv.BranchID
+					legs = []gl.Leg{
+						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount, BranchID: &invBranch},
+						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Credit: a.Amount, BranchID: &invBranch},
+						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Debit: a.Amount, BranchID: &payBranch},
+						{AccountCode: contra, Description: "Reversal", Credit: a.Amount, BranchID: &payBranch},
+					}
+				}
 				rev, err = s.post(ctx, gl.PostingInput{EntryDate: on, Memo: "Reversal of an application to " + inv.Number, Source: source,
-					SourceRefID: &id, BranchID: inv.BranchID, Currency: a.Currency, PostedBy: actor, Legs: []gl.Leg{
-						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount},
-						{AccountCode: contra, Description: "Reversal", Credit: a.Amount},
-					}})
+					SourceRefID: &id, BranchID: inv.BranchID, Currency: a.Currency, PostedBy: actor, Legs: legs})
 			}
 			if err != nil {
 				return err

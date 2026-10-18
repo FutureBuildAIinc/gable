@@ -354,7 +354,7 @@ func (s *Service) RunFinanceCharges(ctx context.Context, in FinanceChargeRunIn) 
 					return fmt.Errorf("failed to write the finance charge invoice: %w", err)
 				}
 				entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.AsOf, Memo: "Finance charge " + number,
-					Source: gl.SourceInvoice, SourceRefID: &invID, Currency: p.currency, PostedBy: in.Actor, Legs: []gl.Leg{
+					Source: gl.SourceInvoice, SourceRefID: &invID, BranchID: p.branch.UUID, Currency: p.currency, PostedBy: in.Actor, Legs: []gl.Leg{
 						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: p.charge},
 						{AccountCode: rules.IncomeAccountCode, Description: "Finance Charge Income", Credit: p.charge},
 					}})
