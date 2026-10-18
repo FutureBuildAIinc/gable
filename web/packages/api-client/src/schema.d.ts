@@ -25956,7 +25956,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
+            /** @description Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
                 headers: {
                     [name: string]: unknown;

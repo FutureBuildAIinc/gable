@@ -10533,7 +10533,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling.
+          description: "Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling."
           content:
             application/json:
               schema:
