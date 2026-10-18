@@ -1341,7 +1341,7 @@ paths:
         register and the device reference. The scheduler runs this act on
         its own over every branch; the route is the manager's own trigger
         and sweeps only the caller's reach (a branch in context, else the
-        granted branches). Admin, owner and finance roles only; a machine
+        granted branches). Finance and owner roles only; a machine
         key is refused in the route itself.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
@@ -1372,7 +1372,7 @@ paths:
         what amount, the device reference, and the transaction it belongs
         to, with the device's own late verdict and reference when its answer
         came after the sweep. A manager reads the terminal's own record and
-        settles each at the resolve route. Admin, owner and finance roles
+        settles each at the resolve route. Finance and owner roles
         only. The list is held to the caller's branch wall in the query
         itself: with a branch in context only that branch's items, with none
         and a user only the branches the user is granted.
@@ -1413,7 +1413,7 @@ paths:
         leg the refund claim the leg names settles through the claim's own
         resolution. Outcome declined closes the item and moves nothing. Both
         write one audit row naming the person, the item, the outcome and the
-        reference. Admin, owner and finance roles only; a machine key is
+        reference. Finance and owner roles only; a machine key is
         refused in the route itself, bound or not. The item's branch is held
         to the caller's reach before either outcome: a caller whose branch
         header names another branch finds a missing row (404), and a caller

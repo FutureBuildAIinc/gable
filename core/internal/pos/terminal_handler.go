@@ -7,22 +7,15 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 // The terminal intent routes (CP-05, IX-01): the desk's waiting state and
 // its honest cancel, the sweep the scheduler or a manager runs, and the
 // manager's lost answer queue with its resolve acts. The money routes of the
-// queue are the manager's alone (admin, owner, finance; a machine key is
-// refused, bound or not), and every route runs behind the branch middleware
-// like every money route of the counter.
-
-// managerGuard wraps the manager routes: the admin, owner and finance roles
-// only (a machine key has no role and is refused before it).
-func managerGuard(handler http.HandlerFunc) http.HandlerFunc {
-	return middleware.RequireRole("admin", "owner", "finance")(handler).ServeHTTP
-}
+// queue are the manager's alone (finance and owner, the same resolution mount
+// as refund claims; a machine key is refused, bound or not), and every route
+// runs behind the branch middleware like every money route of the counter.
 
 // GetTerminalIntentHandler is GET /pos/terminal-intents/{id}: the desk's
 // waiting state of one card leg.

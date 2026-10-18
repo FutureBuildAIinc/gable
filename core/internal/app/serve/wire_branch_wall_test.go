@@ -37,6 +37,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
@@ -283,8 +284,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	// The counter, as serve mounts it: the register routes behind the cashier
 	// wall, the refund claim resolution behind the finance wall (its sale read
 	// carries the branch context).
-	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db)
-	wall.pos(mux, pos.NewHandler(posSvc))
+	termLedger := payment.NewTerminalLedger(db)
+	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db).WithTerminal(payment.NewSimulatedTerminalFromEnv("authorize", termLedger), termLedger)
+	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -1892,3 +1894,35 @@ func TestBranchWall_DealerProfileLocale(t *testing.T) {
 		t.Errorf("the locale read with no role: %d, want 403", s)
 	}
 }
+
+func TestReviewManagerRoutesUnderServeGuard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	resolvePath := "/api/v1/pos/terminal-lost-items/" + uuid.NewString() + "/resolve"
+	resolveBody := `{"outcome":"declined","reason":"no charge on statement"}`
+
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		{"finance lists lost items", "GET", "/api/v1/pos/terminal-lost-items", "", "finance", "u-a", A, http.StatusOK},
+		{"finance sweeps terminal intents", "POST", "/api/v1/pos/terminal-intents/sweep", `{}`, "finance", "u-a", A, http.StatusOK},
+		{"finance reaches resolve handler", "POST", resolvePath, resolveBody, "finance", "u-a", A, http.StatusNotFound},
+		{"owner lists lost items", "GET", "/api/v1/pos/terminal-lost-items", "", "owner", "boss", "", http.StatusOK},
+		{"owner sweeps terminal intents", "POST", "/api/v1/pos/terminal-intents/sweep", `{}`, "owner", "boss", "", http.StatusOK},
+		{"owner reaches resolve handler", "POST", resolvePath, resolveBody, "owner", "boss", "", http.StatusNotFound},
+		{"cashier refused lost items list", "GET", "/api/v1/pos/terminal-lost-items", "", "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier refused sweep", "POST", "/api/v1/pos/terminal-intents/sweep", `{}`, "cashier", "u-a", A, http.StatusForbidden},
+		{"cashier refused resolve", "POST", resolvePath, resolveBody, "cashier", "u-a", A, http.StatusForbidden},
+		{"admin refused lost items list", "GET", "/api/v1/pos/terminal-lost-items", "", "admin", "boss", "", http.StatusForbidden},
+		{"admin refused sweep", "POST", "/api/v1/pos/terminal-intents/sweep", `{}`, "admin", "boss", "", http.StatusForbidden},
+		{"admin refused resolve", "POST", resolvePath, resolveBody, "admin", "boss", "", http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
