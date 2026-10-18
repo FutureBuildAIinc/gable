@@ -32,7 +32,13 @@ type dayWorld struct {
 	yard, other uuid.UUID
 	customer    uuid.UUID
 	zone        string
+	now         func() time.Time
 }
+
+// testDayClockOffset, when non-zero, pins newDayWorld's service clock to that
+// duration after the branch day's UTC midnight (for example 26h30m is 02:30 UTC
+// on the next UTC calendar date, which is 01:30 on the branch's day in AlwaysBehindUTC).
+var testDayClockOffset time.Duration
 
 func newDayWorld(t *testing.T) *dayWorld {
 	t.Helper()
@@ -42,7 +48,13 @@ func newDayWorld(t *testing.T) *dayWorld {
 	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
 	ctx := context.Background()
 	w := &dayWorld{t: t, db: db, repo: NewRepository(db), yard: uuid.New(), other: uuid.New(), customer: uuid.New(), zone: testutil.AlwaysBehindUTC,
+		now: time.Now,
 		svc: account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())}
+	if off := testDayClockOffset; off != 0 {
+		base := testutil.BranchDay(t, db).UTC()
+		w.now = func() time.Time { return base.Add(off) }
+	}
+	w.svc.WithClockForTest(func() time.Time { return w.now() })
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := db.Pool.Exec(ctx, q, args...); err != nil {
@@ -50,7 +62,7 @@ func newDayWorld(t *testing.T) *dayWorld {
 		}
 	}
 	for _, y := range []uuid.UUID{w.yard, w.other} {
-		exec(`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, y, "BDR-"+y.String()[:8])
+		exec(`INSERT INTO locations (id, type, code, timezone) VALUES ($1, 'BRANCH', $2, $3)`, y, "BDR-"+y.String()[:8], w.zone)
 	}
 	exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`,
 		w.customer, "Branch Day Rev "+w.customer.String()[:8], "BDR-"+w.customer.String()[:8], w.yard)
@@ -81,9 +93,16 @@ func (w *dayWorld) day() time.Time { return testutil.BranchDay(w.t, w.db) }
 // record writes a cash payment at yard through the AR core, received on the
 // branch's day plus dayOffset. The writer stamps created_at at NOW() whatever
 // the date it names, as the demo import does for its whole history; no leg
-// moves created_at.
+// moves created_at. When a test seeds a fixture on a day after the branch's
+// today (dayOffset > 0) to prove the read window excludes tomorrow, the
+// service clock is moved to that day for the write so refuseDayToCome accepts
+// the fixture at every wall clock hour.
 func (w *dayWorld) record(yard uuid.UUID, cents int64, dayOffset int) uuid.UUID {
 	w.t.Helper()
+	if dayOffset > 0 {
+		w.svc.WithClockForTest(func() time.Time { return w.now().AddDate(0, 0, dayOffset) })
+		defer w.svc.WithClockForTest(func() time.Time { return w.now() })
+	}
 	var id uuid.UUID
 	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
 		var e error
@@ -481,3 +500,38 @@ func TestSalesSummary_InvoicesAreCutOnTheirBusinessDate(t *testing.T) {
 		t.Errorf("explicit day: invoiced %v over %d, want 123.45 over 1", explicit.TotalInvoiced, explicit.InvoiceCount)
 	}
 }
+
+// The yard newDayWorld inserts shares the default branch's zone, and the day
+// edge and summary window tests hold at every UTC hour of the branch's day,
+// including 01:00 to 04:00 UTC where America/New_York and AlwaysBehindUTC
+// share a calendar date.
+func TestToday_TheDaysEdgesAndSummaryWindowAcrossUTCHours(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		offset time.Duration
+	}{
+		{"01:30_UTC", 25*time.Hour + 30*time.Minute},
+		{"02:30_UTC", 26*time.Hour + 30*time.Minute},
+		{"03:30_UTC", 27*time.Hour + 30*time.Minute},
+		{"12:00_UTC", 36 * time.Hour},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			testDayClockOffset = c.offset
+			t.Cleanup(func() { testDayClockOffset = 0 })
+
+			t.Run("YardZone", func(t *testing.T) {
+				w := newDayWorld(t)
+				yardDay, err := w.svc.LocalDate(context.Background(), w.yard, w.now())
+				if err != nil {
+					t.Fatalf("yard local date: %v", err)
+				}
+				if want := w.day(); !yardDay.Equal(want) {
+					t.Fatalf("yard local date = %v, want the branch day %v", yardDay, want)
+				}
+			})
+			t.Run("DaysEdges", TestToday_TheDaysEdgesAreTheBusinessDate)
+			t.Run("SummaryWindow", TestSalesSummary_TheDefaultWindowIsTheYardsDay)
+		})
+	}
+}
+
