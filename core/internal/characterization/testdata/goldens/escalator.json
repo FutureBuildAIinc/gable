@@ -78,29 +78,29 @@
           "unit": "MBF"
         },
         {
-          "commodity_kind": "COMPOSITE",
-          "created_at": "<ts+0d>",
-          "current_value": 520,
-          "id": "<id-6>",
-          "index_code": "RL_PANEL_COMP",
-          "is_active": true,
-          "last_updated_at": "<ts+0d>",
-          "name": "Random Lengths Structural Panel Composite",
-          "previous_value": 505,
-          "source": "RANDOM_LENGTHS",
-          "unit": "MBF"
-        },
-        {
           "commodity_kind": "DIMENSIONAL_LUMBER",
           "created_at": "<ts+0d>",
           "current_value": 478,
           "description": "Southern Yellow Pine 2x4 spot price",
-          "id": "<id-7>",
+          "id": "<id-6>",
           "index_code": "RL_SYP_2X4",
           "is_active": true,
           "last_updated_at": "<ts+0d>",
           "name": "Random Lengths SYP 2x4",
           "previous_value": 470,
+          "source": "RANDOM_LENGTHS",
+          "unit": "MBF"
+        },
+        {
+          "commodity_kind": "COMPOSITE",
+          "created_at": "<ts+0d>",
+          "current_value": 520,
+          "id": "<id-7>",
+          "index_code": "RL_PANEL_COMP",
+          "is_active": true,
+          "last_updated_at": "<ts+0d>",
+          "name": "Random Lengths Structural Panel Composite",
+          "previous_value": 505,
           "source": "RANDOM_LENGTHS",
           "unit": "MBF"
         }
