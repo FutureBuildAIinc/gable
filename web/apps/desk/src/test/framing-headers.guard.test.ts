@@ -68,7 +68,7 @@ describe('the framing headers guard', () => {
     const frameable = blocks.filter((b) => b.body.includes('gable-headers-frameable.conf'))
     expect(frameable.map((b) => b.header)).toEqual(['/'])
 
-    for (const path of ['= /', '/door/', '/shell/', '^~ /portal/']) {
+    for (const path of ['= /', '/door/', '/shell/', '/field/', '^~ /portal/']) {
       const block = at(path)
       expect(block, `a location block for ${path}`).toBeDefined()
       expect(block?.body, `${path} includes the deny headers`).toContain('gable-headers.conf')
