@@ -84,7 +84,7 @@ export class GableShellRail extends LitElement {
       <nav
         aria-label="Apps"
         data-mode=${this.mode}
-        class=${`fixed left-0 top-14 bottom-0 z-30 flex flex-col border-r border-white/5 bg-deep-space/95 backdrop-blur-xl ${
+        class=${`absolute left-0 top-0 bottom-0 z-30 flex flex-col border-r border-white/5 bg-deep-space/95 backdrop-blur-xl ${
           wide ? 'w-60' : 'w-14'
         }`}
       >

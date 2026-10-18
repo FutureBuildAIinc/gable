@@ -16,7 +16,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: [['list']],
-  outputDir: 'screens/test-results',
+  outputDir: '../../test-results/work-shell-screens',
 
   use: {
     baseURL: 'http://127.0.0.1:18394',

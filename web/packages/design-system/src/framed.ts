@@ -53,6 +53,9 @@ export const FRAME_ACTION_MESSAGE = 'gable-work-shell:action';
 /** The message type the host sends a framed app when the yard changes. */
 export const YARD_CHANGED_MESSAGE = 'gable-work-shell:yard-changed';
 
+/** The message type a framed app sends its parent when it ended its own session inside the frame. */
+export const SWITCH_ROLE_MESSAGE = 'gable-work-shell:switch-role';
+
 /** The message type the host sends a framed app to ask it to run its own sign out. */
 export const SIGN_OUT_REQUEST_MESSAGE = 'gable-work-shell:sign-out';
 
@@ -207,6 +210,15 @@ function titleFeedOf(data: unknown): ChromeTitleFeed | null {
     }
   }
   return { title, actions: kept };
+}
+
+/** The host asks the frame to press one of the controls it carries for it (Theme, Feedback); scoped to the host's origin. */
+export function announceChromeAction(
+  frame: { postMessage(message: unknown, targetOrigin: string): void } | null,
+  origin: string,
+  action: ChromeAction,
+): void {
+  frame?.postMessage({ type: CHROME_ACTION_MESSAGE, action }, origin);
 }
 
 /** A framed app posts its title and page actions up, scoped to its own origin. */
@@ -375,4 +387,63 @@ export interface FramedListenWindow extends FramedWindow {
   readonly parent: unknown & { postMessage(message: unknown, targetOrigin: string): void };
   addEventListener(type: 'message', listener: (event: MessageEvent) => unknown): void;
   removeEventListener(type: 'message', listener: (event: MessageEvent) => unknown): void;
+}
+
+// -- the orphaned frame guard ---------------------------------------------------
+//
+// A framed app that ends its own walk (its own Sign out) navigates to the
+// origin root, which loads the app again INSIDE the frame, standalone: the
+// framed flag is gone and a second header band would paint. Such a page asks
+// the host to switch role with one message, scoped to its own origin, and the
+// host accepts it only from its own content frame.
+
+/** True when this window sits inside another window. */
+export function isFramedWindow(win: { readonly parent: unknown }): boolean {
+  return win.parent !== (win as unknown);
+}
+
+/** Ask the parent host to switch role. The target origin is this window's own. */
+export function announceSwitchRole(win: {
+  readonly parent: { postMessage(message: unknown, targetOrigin: string): void };
+  readonly location: { readonly origin: string };
+}): void {
+  win.parent.postMessage({ type: SWITCH_ROLE_MESSAGE }, win.location.origin);
+}
+
+/**
+ * Whether a message event is the content frame's Switch role request: the
+ * exact type, from the frame's own window, at the host's own origin.
+ */
+export function acceptSwitchRole(
+  event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
+  host: { readonly origin: string; readonly contentWindow: unknown },
+): boolean {
+  if (host.contentWindow === null || host.contentWindow === undefined) return false;
+  if (event.origin !== host.origin) return false;
+  if (event.source !== host.contentWindow) return false;
+  const data = event.data;
+  return data !== null && typeof data === 'object' && (data as { type?: unknown }).type === SWITCH_ROLE_MESSAGE;
+}
+
+/**
+ * The orphaned frame check for an app's entry: the page sits inside a frame
+ * at its own origin but carries no framed flag, so it is a framed app that
+ * lost its frame's flag (its own sign out navigated it). Such a page asks the
+ * host to switch role and answers true; the caller mounts nothing.
+ */
+export function orphanedFrame(win: FramedWindow & { readonly parent: { postMessage(message: unknown, targetOrigin: string): void } }): boolean {
+  if (!isFramedWindow(win)) return false;
+  if (framedFlagFromSearch(win.location.search)) return false;
+  try {
+    const parent = win.parent as unknown as { location: { origin: string } };
+    if (parent.location.origin !== win.location.origin) return false;
+  } catch {
+    return false;
+  }
+  try {
+    announceSwitchRole(win);
+  } catch {
+    // no parent left to tell
+  }
+  return true;
 }

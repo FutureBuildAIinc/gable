@@ -30,6 +30,9 @@ import {
   readFramedByShell,
   signOutRequestFrom,
   signedOutFrom,
+  SWITCH_ROLE_MESSAGE,
+  acceptSwitchRole,
+  orphanedFrame,
   yardChangedFrom,
   type FramedListenWindow,
 } from './framed.ts';
@@ -215,6 +218,60 @@ describe('the yard message', () => {
     expect(yardChangedFrom({ ...good, origin: 'http://evil.example' }, win)).toBeUndefined();
     expect(yardChangedFrom({ ...good, source: {} }, win)).toBeUndefined();
     expect(yardChangedFrom({ ...good, data: { type: 'gable-work-shell:other', branchId: 'b-1' } }, win)).toBeUndefined();
+  });
+});
+
+describe('the switch role guard', () => {
+  it('acceptSwitchRole takes only the frame at the host origin with the exact type', () => {
+    const contentWindow = {};
+    const host = { origin: ORIGIN, contentWindow };
+    const good = { origin: ORIGIN, source: contentWindow, data: { type: SWITCH_ROLE_MESSAGE } };
+    expect(acceptSwitchRole(good, host)).toBe(true);
+    expect(acceptSwitchRole({ ...good, origin: 'http://evil.example' }, host)).toBe(false);
+    expect(acceptSwitchRole({ ...good, source: {} }, host)).toBe(false);
+    expect(acceptSwitchRole({ ...good, data: { type: 'gable-work-shell:other' } }, host)).toBe(false);
+    expect(acceptSwitchRole({ ...good, data: SWITCH_ROLE_MESSAGE }, host)).toBe(false);
+    expect(acceptSwitchRole(good, { origin: ORIGIN, contentWindow: null })).toBe(false);
+  });
+
+  it('an orphaned frame (framed, same origin, no flag) asks the host to switch role', () => {
+    const posted: { message: unknown; targetOrigin: string }[] = [];
+    const win = {
+      location: { search: '', origin: ORIGIN },
+      parent: {
+        location: { origin: ORIGIN },
+        postMessage: (m: unknown, o: string) => posted.push({ message: m, targetOrigin: o }),
+      },
+    };
+    expect(orphanedFrame(win)).toBe(true);
+    expect(posted).toEqual([{ message: { type: SWITCH_ROLE_MESSAGE }, targetOrigin: ORIGIN }]);
+  });
+
+  it('a flagged frame, a top level page, and a cross origin parent are not orphaned', () => {
+    const posted: unknown[] = [];
+    const parent = {
+      location: { origin: ORIGIN },
+      postMessage: (m: unknown) => posted.push(m),
+    };
+    const flagged = {
+      location: { search: `?${FRAMED_PARAM}=${FRAMED_BY_WORK_SHELL}`, origin: ORIGIN },
+      parent,
+    };
+    expect(orphanedFrame(flagged)).toBe(false);
+    const top = { location: { search: '', origin: ORIGIN }, parent: undefined as unknown };
+    top.parent = top;
+    expect(orphanedFrame(top as never)).toBe(false);
+    const foreign = {
+      location: { search: '', origin: ORIGIN },
+      parent: {
+        get location(): never {
+          throw new Error('cross origin');
+        },
+        postMessage: () => {},
+      },
+    };
+    expect(orphanedFrame(foreign as never)).toBe(false);
+    expect(posted).toEqual([]);
   });
 });
 
