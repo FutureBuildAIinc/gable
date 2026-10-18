@@ -103,8 +103,8 @@ func TestWire_CounterControlsOnAContact(t *testing.T) {
 	if r.status != 200 || r.body["authorized_buyer"] != true || num(t, r.body, "buyer_sale_cap_cents") != 12500 {
 		t.Fatalf("a PUT that leaves them out = %d: %s, want both kept", r.status, r.raw)
 	}
-	if actions, _ := f.auditRows(cid); len(actions) != 0 {
-		t.Errorf("a contact edit that changed no authority wrote audit rows %v", actions)
+	if actions, _ := f.auditRows(cid); len(actions) != 1 || actions[0] != "contact.authority_changed" {
+		t.Errorf("a contact edit that changed no authority wrote unexpected audit rows %v, want only the buyer create row", actions)
 	}
 	// named, they change and the change is audited
 	r = f.do("PUT", path, map[string]any{"first_name": "Sam", "last_name": "Ray", "authorized_buyer": false, "buyer_sale_cap_cents": nil}, "If-Match", `"2"`)
@@ -112,11 +112,11 @@ func TestWire_CounterControlsOnAContact(t *testing.T) {
 		t.Fatalf("a PUT that removes the buyer = %d: %s", r.status, r.raw)
 	}
 	actions, changes := f.auditRows(cid)
-	if len(actions) != 1 || actions[0] != "contact.authority_changed" {
-		t.Fatalf("audit rows = %v, want one contact.authority_changed", actions)
+	if len(actions) != 2 || actions[1] != "contact.authority_changed" {
+		t.Fatalf("audit rows = %v, want two contact.authority_changed rows (create and clear)", actions)
 	}
-	flag, _ := changes[0]["authorized_buyer"].(map[string]any)
+	flag, _ := changes[1]["authorized_buyer"].(map[string]any)
 	if flag["from"] != true || flag["to"] != false {
-		t.Errorf("audit row = %v, want the authorized_buyer change", changes[0])
+		t.Errorf("audit row = %v, want the authorized_buyer change", changes[1])
 	}
 }

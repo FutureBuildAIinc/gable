@@ -62,6 +62,25 @@ func contactFrom(d *ContactDraft, id, customerID uuid.UUID, now httpx.Timestamp)
 	}
 }
 
+func contactAuthorityChanges(before, after *Contact) map[string]any {
+	changes := map[string]any{}
+	if before.CanPlaceOrders != after.CanPlaceOrders {
+		changes["can_place_orders"] = map[string]any{"from": before.CanPlaceOrders, "to": after.CanPlaceOrders}
+	}
+	if (before.OrderLimitCents == nil) != (after.OrderLimitCents == nil) ||
+		(before.OrderLimitCents != nil && *before.OrderLimitCents != *after.OrderLimitCents) {
+		changes["order_limit_cents"] = map[string]any{"from": centsPtrValue(before.OrderLimitCents), "to": centsPtrValue(after.OrderLimitCents)}
+	}
+	if before.AuthorizedBuyer != after.AuthorizedBuyer {
+		changes["authorized_buyer"] = map[string]any{"from": before.AuthorizedBuyer, "to": after.AuthorizedBuyer}
+	}
+	if (before.BuyerSaleCapCents == nil) != (after.BuyerSaleCapCents == nil) ||
+		(before.BuyerSaleCapCents != nil && *before.BuyerSaleCapCents != *after.BuyerSaleCapCents) {
+		changes["buyer_sale_cap_cents"] = map[string]any{"from": centsPtrValue(before.BuyerSaleCapCents), "to": centsPtrValue(after.BuyerSaleCapCents)}
+	}
+	return changes
+}
+
 func (s *Service) CreateContact(ctx context.Context, customerID uuid.UUID, d *ContactDraft) (*Contact, error) {
 	var out *Contact
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -75,16 +94,23 @@ func (s *Service) CreateContact(ctx context.Context, customerID uuid.UUID, d *Co
 		now := httpx.TimestampOf(s.now().UTC())
 		c := contactFrom(d, uuid.New(), customerID, now)
 		c.CreatedAt = now
+		baseline := &Contact{CanPlaceOrders: true}
+		if err := s.checkRestricted(ctx, customerID, contactAuthorityChanges(baseline, c)); err != nil {
+			return err
+		}
 		if err := s.repo.InsertContact(ctx, c); err != nil {
 			return err
 		}
 		if out, err = s.repo.GetContact(ctx, c.ID); err != nil {
 			return notFound(err)
 		}
+		if err := s.auditAuthority(ctx, cust, baseline, out); err != nil {
+			return err
+		}
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": out.ID, "action": "created"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -115,6 +141,9 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		}
 		if !d.BuyerCapSet {
 			next.BuyerSaleCapCents = cur.BuyerSaleCapCents
+		}
+		if err := s.checkRestricted(ctx, cur.CustomerID, contactAuthorityChanges(cur, next)); err != nil {
+			return err
 		}
 		if err := s.repo.UpdateContact(ctx, next); err != nil {
 			return err

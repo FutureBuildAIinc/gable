@@ -8429,7 +8429,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two controls, payment_terms_id and po_required, which are required so a left out field cannot reset them. primary_branch_id is refused. */
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
         CustomerUpdateRequest: {
             account_number: string;
             name: string;
@@ -8643,6 +8643,7 @@ export interface components {
              */
             revision?: number;
         };
+        /** @description The body of PUT. Order authority controls (can_place_orders and order_limit_cents) are required, while counter buyer controls (authorized_buyer and buyer_sale_cap_cents) are optional and keep their stored value when omitted so a left out field cannot reset them. */
         ContactUpdateRequest: {
             first_name: string;
             last_name: string;
