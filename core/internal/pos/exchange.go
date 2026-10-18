@@ -82,10 +82,6 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		return nil, conflict("exchange_card_refund",
 			"a card refund of an exchange's surplus is made as a card return of the goods through POST /pos/returns, then the replacement is rung as its own sale")
 	}
-	if s.tax != nil && s.tax.ProviderConfigured() {
-		return nil, conflict("exchange_provider_tax",
-			"the tax provider prices a sale before its transaction opens, which an exchange cannot: ring the return and the replacement as two acts")
-	}
 	for i := range in.Tenders {
 		t := &in.Tenders[i]
 		if t.Method == TenderStoreCredit {
@@ -119,6 +115,19 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		return nil, conflict("walk_in_account",
 			"store credit needs a named customer: a walk-in exchange pays any surplus back in cash")
 	}
+	draftSale := &Sale{RegisterID: in.RegisterID, CashierID: cashierID, CustomerID: saleCustomer,
+		WalkInID: walkInID, BranchID: *st.branchID, Currency: st.currency}
+	preLines, preAudits, err := s.priceReplacementLines(ctx, draftSale, in.Items, actor)
+	if err != nil {
+		return nil, err
+	}
+	if len(preLines) == 0 {
+		return nil, invalid("sale_lines", "name at least one replacement line")
+	}
+	pricedTax, err := s.prepareSaleTax(ctx, draftSale, preLines, *st.customerID)
+	if err != nil {
+		return nil, err
+	}
 	var out *ExchangeResult
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		// Section 11 step 1: the sale rows. The original sale first (a return
@@ -136,15 +145,25 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 				return err
 			}
 		}
-		// The replacement sale, its lines priced as the counter prices them.
+		// The replacement sale, its lines priced before the transaction opened.
 		sale, err := s.StartSale(ctx, &StartSale{RegisterID: in.RegisterID, CashierID: cashierID, CustomerID: saleCustomer}, actor)
 		if err != nil {
 			return err
 		}
-		for i := range in.Items {
-			if _, err := s.AddLine(ctx, sale.ID, []salesdoc.ParsedLine{in.Items[i]}, actor); err != nil {
-				return err
+		if err := s.repo.AddLines(ctx, sale.ID, preLines); err != nil {
+			return err
+		}
+		for i := range preAudits {
+			if s.auditLog != nil {
+				a := preAudits[i]
+				a.EntityID = sale.ID
+				if err := s.auditLog.Log(ctx, a); err != nil {
+					return fmt.Errorf("failed to write the audit row: %w", err)
+				}
 			}
+		}
+		if err := s.recalcTotals(ctx, sale); err != nil {
+			return err
 		}
 		lines, err := s.repo.GetLines(ctx, sale.ID)
 		if err != nil {
@@ -178,7 +197,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		pre.WalkInID = walkInID
 		revision := pre.Revision
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
-			make([]*chargeResult, len(in.Tenders)), nil, leg)
+			make([]*chargeResult, len(in.Tenders)), pricedTax, leg)
 		if err != nil {
 			return err
 		}
@@ -240,6 +259,31 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		return nil, err
 	}
 	return out, nil
+}
+
+func (s *Service) priceReplacementLines(ctx context.Context, sale *Sale, parsed []salesdoc.ParsedLine, actor string) ([]salesdoc.Line, []audit.Entry, error) {
+	var allLines []salesdoc.Line
+	var audits []audit.Entry
+	for i := range parsed {
+		line, out, err := s.priceLine(ctx, sale, parsed[i], actor)
+		if err != nil {
+			return nil, nil, err
+		}
+		audits = append(audits, out.overrides...)
+		audits = append(audits, out.discounts...)
+		exploded, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+		if err != nil {
+			return nil, nil, err
+		}
+		for j := range exploded {
+			if exploded[j].ID == uuid.Nil {
+				exploded[j].ID = uuid.New()
+			}
+			exploded[j].Position = len(allLines) + j
+		}
+		allLines = append(allLines, exploded...)
+	}
+	return allLines, audits, nil
 }
 
 // lockExchangeStock takes the inventory rows of every product the exchange

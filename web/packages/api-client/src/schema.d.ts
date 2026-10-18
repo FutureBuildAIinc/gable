@@ -5293,7 +5293,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange goods in one act
-         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, exchange_provider_tax (the tax provider prices a sale before its transaction opens, which an exchange cannot), exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
          */
         post: operations["posExchangeCreate"];
         delete?: never;
@@ -26420,6 +26420,7 @@ export interface operations {
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     posExchangePreview: {
@@ -26455,6 +26456,7 @@ export interface operations {
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     pricingCalculate: {

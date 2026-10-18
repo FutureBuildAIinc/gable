@@ -9,12 +9,15 @@ package pos_test
 // back when the return is worth more, every figure balanced to the cent.
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
@@ -681,4 +684,67 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 	}
 	f.assertARInvariants(t)
 }
+
+type recordingTaxProvider struct {
+	taxCents int64
+	calls    int
+	sawInTx  bool
+}
+
+func (p *recordingTaxProvider) ProviderConfigured() bool { return true }
+
+func (p *recordingTaxProvider) PreviewTax(ctx context.Context, req *tax.TaxPreviewRequest) (*tax.TaxResult, error) {
+	p.calls++
+	if database.InTx(ctx) {
+		p.sawInTx = true
+	}
+	return &tax.TaxResult{TotalTax: p.taxCents}, nil
+}
+
+// RULE: an exchange with an external tax provider prices the replacement lines
+// and quotes the tax provider before opening the database transaction, on both
+// preview and commit.
+func TestAnExchangeQuotesTheTaxProviderBeforeOpeningTheTransaction(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	prov := &recordingTaxProvider{taxCents: 90} // subtotal 1100 + 90 provider tax = 1190
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	sale, line, _ := f.cashSaleLine(t, "2") // 1198 (599 per unit at branch rate)
+	f.service.WithTaxProvider(prov)
+
+	body := map[string]any{
+		"original_sale_id": sale, "reason": "wrong size",
+		"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("2"),
+	}
+	prev := f.exchange("/preview", body)
+	if prev.status != http.StatusOK {
+		t.Fatalf("preview with tax provider = %d: %s", prev.status, prev.raw)
+	}
+	if num(t, prev.body, "returned_cents") != 599 || num(t, prev.body, "replacement_cents") != 1190 || num(t, prev.body, "difference_cents") != 591 {
+		t.Errorf("preview figures = %v, want returned 599, replacement 1190, difference 591", prev.body)
+	}
+	if prov.calls != 1 || prov.sawInTx {
+		t.Errorf("provider after preview: calls = %d, sawInTx = %v, want 1 call outside tx", prov.calls, prov.sawInTx)
+	}
+
+	body["tenders"] = []map[string]any{tender("cash", 591)}
+	res := f.exchange("", body)
+	if res.status != http.StatusCreated {
+		t.Fatalf("exchange with tax provider = %d: %s", res.status, res.raw)
+	}
+	if num(t, res.body, "returned_cents") != 599 || num(t, res.body, "replacement_cents") != 1190 || num(t, res.body, "difference_cents") != 591 {
+		t.Errorf("exchange figures = %v, want returned 599, replacement 1190, difference 591", res.body)
+	}
+	if prov.calls != 2 || prov.sawInTx {
+		t.Errorf("provider after exchange: calls = %d, sawInTx = %v, want 2 calls outside tx", prov.calls, prov.sawInTx)
+	}
+	newSale := res.body["sale"].(map[string]any)
+	invID := uuid.MustParse(str(t, newSale, "invoice_id"))
+	if src := f.scalar(`SELECT tax_source || ':' || ROUND(tax_amount * 100)::bigint FROM invoices WHERE id = $1`, invID); src != "PROVIDER:90" {
+		t.Errorf("invoice tax = %v, want PROVIDER:90", src)
+	}
+	f.assertARInvariants(t)
+}
+
 
