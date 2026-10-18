@@ -14,12 +14,14 @@ package signinmethods_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/signinmethods"
@@ -329,40 +331,138 @@ func TestUpdateIsAudited(t *testing.T) {
 	if put.status != http.StatusOK {
 		t.Fatalf("the replacement answered %d", put.status)
 	}
-	var n int
+	var rawChanges []byte
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM audit_log WHERE action = 'signin_methods.update'`).Scan(&n); err != nil {
+		`SELECT changes FROM audit_log WHERE action = 'signin_methods.update' ORDER BY created_at DESC LIMIT 1`).Scan(&rawChanges); err != nil {
+		t.Fatalf("reading the audit row: %v", err)
+	}
+	var changes struct {
+		Before []string `json:"before"`
+		After  []string `json:"after"`
+	}
+	if err := json.Unmarshal(rawChanges, &changes); err != nil {
+		t.Fatalf("decoding audit changes: %v", err)
+	}
+	if !eqStrings(changes.Before, []string{"email_password"}) {
+		t.Errorf("audit before = %v, want [email_password]", changes.Before)
+	}
+	if !eqStrings(changes.After, []string{"email_password", "passkey"}) {
+		t.Errorf("audit after = %v, want [email_password passkey]", changes.After)
+	}
+}
+
+type errAfterTx struct {
+	db  *database.DB
+	err error
+}
+
+func (e errAfterTx) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return e.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := fn(txCtx); err != nil {
+			return err
+		}
+		return e.err
+	})
+}
+
+// TestUpdateRollbackOnFailureAfterReplace: when the audit write fails or an
+// error occurs inside RunInTx after Replace, the allowlist rolls back and
+// stays exactly as it was before the call.
+func TestUpdateRollbackOnFailureAfterReplace(t *testing.T) {
+	f := newFixture(t, 0)
+	ctx := context.Background()
+
+	repo, err := signinmethods.NewRepository(f.db)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if n == 0 {
-		t.Error("the replacement wrote no audit row")
+	forcedErr := errors.New("forced failure after replace")
+	failingSvc, err := signinmethods.NewService(repo, errAfterTx{db: f.db, err: forcedErr}, audit.NewLogger(f.db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := failingSvc.Update(ctx, []signinmethods.Input{{Method: "google"}}); !errors.Is(err, forcedErr) {
+		t.Fatalf("Update err = %v, want %v", err, forcedErr)
+	}
+	cur, err := f.svc.Allowlist(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range cur.Methods {
+		got = append(got, m.Method)
+	}
+	if !eqStrings(got, []string{"email_password"}) {
+		t.Fatalf("allowlist after forced post-replace error = %v, want [email_password]", got)
+	}
+
+	// Also verify when the audit_log INSERT itself fails inside the transaction.
+	if _, err := f.db.Pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION test_refuse_signin_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.action = 'signin_methods.update' THEN
+				RAISE EXCEPTION 'forced audit write failure';
+			END IF;
+			RETURN NEW;
+		END;
+		$$;
+		CREATE TRIGGER test_refuse_signin_audit_trg
+			BEFORE INSERT ON audit_log
+			FOR EACH ROW EXECUTE FUNCTION test_refuse_signin_audit();
+	`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `
+			DROP TRIGGER IF EXISTS test_refuse_signin_audit_trg ON audit_log;
+			DROP FUNCTION IF EXISTS test_refuse_signin_audit();
+		`)
+	})
+	if _, err := f.svc.Update(ctx, []signinmethods.Input{{Method: "microsoft"}}); err == nil {
+		t.Fatal("Update succeeded when the audit write failed")
+	}
+	cur, err = f.svc.Allowlist(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	for _, m := range cur.Methods {
+		got = append(got, m.Method)
+	}
+	if !eqStrings(got, []string{"email_password"}) {
+		t.Fatalf("allowlist after failed audit write = %v, want [email_password]", got)
 	}
 }
 
 // TestReplaceConcurrency: the replace transaction runs at pool size 4 with
-// three contenders, so a transaction that reaches for a second connection
+// four contenders, so a transaction that reaches for a second connection
 // deadlocks the test instead of passing on a roomy pool, and the allowlist
 // is never empty however the contenders interleave.
 func TestReplaceConcurrency(t *testing.T) {
 	f := newFixture(t, 4)
 	var wg sync.WaitGroup
+	start := make(chan struct{})
 	lists := [][]signinmethods.Input{
 		{{Method: "email_password"}, {Method: "google"}},
 		{{Method: "microsoft"}, {Method: "email_password"}},
 		{{Method: "magic_link"}, {Method: "email_password"}, {Method: "passkey"}},
+		{{Method: "passkey"}, {Method: "email_password"}},
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	for _, list := range lists {
 		wg.Add(1)
 		go func(list []signinmethods.Input) {
 			defer wg.Done()
-			if _, err := f.svc.Update(context.Background(), list); err != nil {
+			<-start
+			if _, err := f.svc.Update(ctx, list); err != nil {
 				t.Errorf("a contender's update failed: %v", err)
 			}
 		}(list)
 	}
+	close(start)
 	wg.Wait()
-	ctx := context.Background()
-	if !f.svc.Allowed(ctx, signinmethods.MethodEmailPassword) {
+	if !f.svc.Allowed(context.Background(), signinmethods.MethodEmailPassword) {
 		t.Error("the allowlist lost email and password after the contenders")
 	}
 }
