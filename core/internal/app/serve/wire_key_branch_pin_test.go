@@ -175,7 +175,7 @@ var pinKeyScopes = []string{
 	"admin:staff", "reports:read", "reporting:read", "reporting:write", "events:read",
 	"gl:read", "gl:write", "ap:read", "ap:write", "bankrecon:read", "bankrecon:write", "sales-team:read",
 	"market-indices:read", "market-indices:write", "tax:read", "tax:write", "pricing:read", "pricing:write",
-	"pos:read", "pos:write", "accounts:read", "ar:read",
+	"pos:read", "pos:write", "accounts:read", "ar:read", "ar:write",
 	"products:read", "products:write", "charge-codes:read", "charge-codes:write",
 	"payment-terms:read", "payment-terms:write", "purchase-orders:read", "purchase-orders:write",
 	"edi:read", "edi:write", "vendors:read", "vendors:write", "units:read", "units:write",
@@ -1296,6 +1296,15 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		{"PUT", "/api/v1/reporting/saved/" + uuid.NewString(), `{"name":"pin"}`},
 		{"DELETE", "/api/v1/reporting/saved/" + uuid.NewString(), ""},
 		{"DELETE", "/api/v1/reporting/schedules/" + uuid.NewString(), ""},
+		{"POST", "/api/v1/ar/credit-holds/evaluate", `{"over_limit_grace_cents":-1}`},
+		{"GET", "/api/v1/ar/finance-charges/rules", ""},
+		{"PUT", "/api/v1/ar/finance-charges/rules", `{"monthly_rate_bps":-1}`},
+		{"GET", "/api/v1/ar/finance-charges/runs", ""},
+		{"POST", "/api/v1/ar/finance-charges/runs", `{"as_of_date":"bad"}`},
+		{"GET", "/api/v1/ar/finance-charges/runs/" + uuid.NewString(), ""},
+		{"GET", "/api/v1/ar/statements/runs", ""},
+		{"POST", "/api/v1/ar/statements/runs", `{"period_start":"bad"}`},
+		{"GET", "/api/v1/ar/statements/runs/" + uuid.NewString(), ""},
 	} {
 		f.refuseForeign(t, c.method, c.path, c.body, nil)
 		f.parity(t, c.method, c.path, c.body)
@@ -1309,6 +1318,8 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		"/api/v1/events", "/api/v1/quotes/exposure", "/api/v1/gl/accounts",
 		"/api/v1/ap/invoices", "/api/v1/sales-team", "/api/v1/users",
 		"/api/v1/admin/staff", "/api/v1/pricing/rules", "/api/v1/pricing/matrix",
+		"/api/v1/ar/finance-charges/rules", "/api/v1/ar/finance-charges/runs",
+		"/api/v1/ar/statements/runs",
 	} {
 		if sk := f.parity(t, "GET", path, ""); sk != http.StatusOK {
 			t.Errorf("unbound key GET %s: %d, want 200", path, sk)
@@ -1793,13 +1804,16 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.refuseForeign(t, "GET", "/api/v1/accounts/"+custB, "", nil)
 	f.refuseForeign(t, "GET", "/api/v1/accounts/"+custB+"/transactions", "", nil)
 	f.refuseForeign(t, "GET", "/api/v1/ar/customers/"+custB+"/statement", "", nil)
+	f.refuseForeign(t, "GET", "/api/v1/ar/customers/"+custB+"/credit-limit-changes", "", nil)
 	f.refuseForeign(t, "GET", "/api/v1/ar/reconciliation", "", nil)
 	f.allow(t, "bound", "GET", "/api/v1/accounts/"+custA, "", nil, http.StatusOK)
 	f.allow(t, "bound", "GET", "/api/v1/accounts/"+custA+"/transactions", "", nil, http.StatusOK)
 	f.allow(t, "bound", "GET", "/api/v1/ar/customers/"+custA+"/statement", "", nil, http.StatusOK)
+	f.allow(t, "bound", "GET", "/api/v1/ar/customers/"+custA+"/credit-limit-changes", "", nil, http.StatusOK)
 	for _, who := range []string{"unbound", "user"} {
 		f.allow(t, who, "GET", "/api/v1/accounts/"+custB, "", nil, http.StatusOK)
 		f.allow(t, who, "GET", "/api/v1/ar/customers/"+custB+"/statement", "", nil, http.StatusOK)
+		f.allow(t, who, "GET", "/api/v1/ar/customers/"+custB+"/credit-limit-changes", "", nil, http.StatusOK)
 		f.allow(t, who, "GET", "/api/v1/ar/reconciliation", "", nil, http.StatusOK)
 	}
 }
