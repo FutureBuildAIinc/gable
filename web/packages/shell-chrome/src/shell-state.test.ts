@@ -78,8 +78,9 @@ describe('initialsOf', () => {
 });
 
 describe('bannerWords', () => {
-  it('says nothing when there is nothing to say', () => {
+  it('says nothing when there is nothing to say, and says money never queues when offline', () => {
     expect(bannerWords('')).toBe('');
     expect(bannerWords('offline')).toContain('offline');
+    expect(bannerWords('offline')).toContain('money never queues');
   });
 });

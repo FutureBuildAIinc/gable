@@ -585,3 +585,145 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(textarea.className).toContain('placeholder:font-sans');
   });
 });
+
+/**
+ * The front-door console launcher (?console=1): a five-group role picker and
+ * "Continue as" from identity-tap, never storing or showing a bearer token,
+ * with each role opening its target shell (/shell/, /field/, /portal) matching
+ * tauri/core/src/profiles.rs.
+ */
+describe('front door console launcher (?console=1)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    resetAuthMethodsCache();
+    window.history.replaceState(null, '', '/?console=1');
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('renders the five-group role picker in both production and dev mode and never shows a bearer token input', async () => {
+    for (const devMode of [false, true]) {
+      document.body.innerHTML = '';
+      authConfig.devMode = devMode;
+      const el = await mount();
+      await settle(el);
+
+      const groups = [...el.querySelectorAll<HTMLElement>('[data-testid^="role-group-"]')];
+      expect(groups).toHaveLength(5);
+      expect(groups.map((g) => g.querySelector('h2')?.textContent?.trim())).toEqual([
+        'Counter and Sales',
+        'Yard and Delivery',
+        'Purchasing and Finance',
+        'Leadership and Admin',
+        'Contractor Portal',
+      ]);
+
+      const cards = [...el.querySelectorAll<HTMLButtonElement>('button[data-testid^="role-card-"]')];
+      expect(cards).toHaveLength(9);
+
+      // Never shows a bearer token textarea or disclosure in ?console=1.
+      expect(el.querySelector('textarea[aria-label="Bearer token"]')).toBeNull();
+      expect(el.textContent?.toLowerCase()).not.toContain('use a bearer token instead');
+      expect(el.textContent).not.toMatch(/[\u2013\u2014]/);
+
+      for (const card of cards) {
+        expect(card.getAttribute('type')).toBe('button');
+        expect(card.className).toContain('min-h-[44px]');
+        expect(card.className).toContain('focus-visible:ring-2');
+      }
+    }
+  });
+
+  it('routes each role card to its target shell (/shell/, /field/, or /portal) and records identity-tap without storing a token', async () => {
+    const expectedRoutes: ReadonlyArray<readonly [string, string, string]> = [
+      ['owner', 'work-shell', '/shell/'],
+      ['admin', 'work-shell', '/shell/'],
+      ['finance', 'work-shell', '/shell/'],
+      ['sales', 'work-shell', '/shell/'],
+      ['cashier', 'work-shell', '/shell/'],
+      ['purchasing', 'work-shell', '/shell/'],
+      ['warehouse', 'field-shell', '/field/'],
+      ['driver', 'field-shell', '/field/'],
+      ['pro', 'pro-shell', '/portal'],
+    ];
+
+    authConfig.devMode = false;
+    const el = await mount();
+    await settle(el);
+
+    const navigated: string[] = [];
+    el.navigateTo = (path: string) => {
+      navigated.push(path);
+    };
+
+    for (const [role, expectedShell, expectedPath] of expectedRoutes) {
+      localStorage.clear();
+      sessionStorage.clear();
+      navigated.length = 0;
+
+      const card = el.querySelector<HTMLButtonElement>(`button[data-testid="role-card-${role}"]`);
+      expect(card, `card for ${role}`).not.toBeNull();
+      expect(card?.getAttribute('data-shell')).toBe(expectedShell);
+      expect(card?.getAttribute('data-shell-path')).toBe(expectedPath);
+
+      card!.click();
+      await settle(el);
+
+      expect(navigated).toEqual([expectedPath]);
+      const tap = localStorage.getItem('gable.identity-tap.v1');
+      expect(tap).not.toBeNull();
+      expect(JSON.parse(tap!)).toMatchObject({ v: 1, role });
+
+      const allStorage =
+        [...Object.entries({ ...localStorage })].map(([k, v]) => k + v).join(' ') +
+        [...Array(sessionStorage.length).keys()]
+          .map((i) => (sessionStorage.key(i) ?? '') + (sessionStorage.getItem(sessionStorage.key(i) as string) ?? ''))
+          .join(' ');
+      expect(allStorage).not.toContain('eyJ');
+      expect(allStorage).not.toContain('token');
+    }
+  });
+
+  it('renders "Continue as" from identity-tap and navigates to the remembered role shell without a token', async () => {
+    authConfig.devMode = false;
+    const cases: ReadonlyArray<readonly [string, string, string, string]> = [
+      ['Sam Ortiz', 'warehouse', 'Gable Field', '/field/'],
+      ['Avery Brooks', 'sales', 'Gable Work', '/shell/'],
+      ['Tarnwick Construction', 'pro', 'Gable Pro', '/portal'],
+    ];
+
+    for (const [displayName, role, shellLabel, expectedPath] of cases) {
+      document.body.innerHTML = '';
+      localStorage.setItem(
+        'gable.identity-tap.v1',
+        JSON.stringify({ v: 1, displayName, role, yard: 'KEL-MAIN' }),
+      );
+
+      const el = await mount();
+      await settle(el);
+
+      const navigated: string[] = [];
+      el.navigateTo = (path: string) => {
+        navigated.push(path);
+      };
+
+      const continueBtn = el.querySelector<HTMLButtonElement>('button[data-testid="console-continue-as"]');
+      expect(continueBtn).not.toBeNull();
+      expect(continueBtn?.getAttribute('type')).toBe('button');
+      expect(continueBtn?.className).toContain('min-h-[44px]');
+      expect(continueBtn?.className).toContain('focus-visible:ring-2');
+      expect(continueBtn?.textContent).toContain(`Continue as ${displayName}`);
+      expect(continueBtn?.textContent).toContain(shellLabel);
+      expect(continueBtn?.textContent).not.toContain('eyJ');
+
+      continueBtn!.click();
+      await settle(el);
+
+      expect(navigated).toEqual([expectedPath]);
+    }
+  });
+});
+
