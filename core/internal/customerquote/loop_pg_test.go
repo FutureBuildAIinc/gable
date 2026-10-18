@@ -1005,3 +1005,77 @@ func TestExport_CSVDefusesSpreadsheetFormulas(t *testing.T) {
 		t.Error("an unknown kind was accepted")
 	}
 }
+
+func TestConfirm_LabourOnlyQuoteConfirmsWithoutPlacingMaterialOrder(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+
+	// A quote whose only labour is contractor_only cannot be accepted when all materials are declined.
+	inOnlyInternal := w.basicInput()
+	inOnlyInternal.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "10")}}
+	inOnlyInternal.Labour = []customerquote.LabourInput{{Description: "Own travel", RateType: customerquote.RateFlat, RateCents: 12000, ContractorOnly: true}}
+	qInt, tokInt := w.createSent(inOnlyInternal)
+	viewInt, err := w.svc.Choose(ctx, tokInt, anon, []customerquote.Choice{{LineID: qInt.Lines[0].ID, State: customerquote.SelectionDeclined}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Accept(ctx, tokInt, anon, customerquote.AcceptInput{
+		FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: viewInt.SelectionsVersion,
+	}); !errors.Is(err, customerquote.ErrNothingChosen) {
+		t.Fatalf("accepting with only contractor_only labour: %v, want ErrNothingChosen", err)
+	}
+
+	// A quote with customer-facing labour and declined materials can be accepted and confirmed with order_id = nil.
+	inLabour := w.basicInput()
+	inLabour.Lines = []customerquote.LineInput{{ProductID: w.stud.String(), Quantity: qty(t, "10")}}
+	q, token := w.createSent(inLabour)
+	view, err := w.svc.Choose(ctx, token, anon, []customerquote.Choice{{LineID: q.Lines[0].ID, State: customerquote.SelectionDeclined}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Accept(ctx, token, anon, customerquote.AcceptInput{
+		FullName: "Pat Homeowner", Email: "pat@homeowner.example", Signature: typed("Pat Homeowner"), SelectionsVersion: view.SelectionsVersion,
+	}); err != nil {
+		t.Fatalf("accepting customer-facing labour quote: %v", err)
+	}
+	done, err := w.svc.Confirm(ctx, w.a, q.ID)
+	if err != nil {
+		t.Fatalf("confirming labour-only quote: %v", err)
+	}
+	if done.Status != customerquote.StatusConfirmed || done.OrderID != nil || done.ConfirmedAt == nil {
+		t.Fatalf("confirmed labour-only quote: status=%s order_id=%v confirmed_at=%v", done.Status, done.OrderID, done.ConfirmedAt)
+	}
+	if w.orders.calls != 0 {
+		t.Errorf("dealer order placed for labour-only quote: %d calls", w.orders.calls)
+	}
+	log, err := w.svc.Approvals(ctx, w.a, q.ID)
+	if err != nil || len(log) != 2 || log[1].Step != customerquote.StepContractorConfirmed {
+		t.Errorf("approval log for labour-only confirm: %+v, %v", log, err)
+	}
+}
+
+func TestExport_ConfirmedQuoteIncludesOrderStatus(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	q, token := w.createSent(w.basicInput())
+	if _, err := w.acceptAll(token, typed("Pat Homeowner"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.Confirm(ctx, w.a, q.ID); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := w.svc.Export(ctx, w.a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.Quotes) != 1 || ex.Quotes[0].Order == nil || ex.Quotes[0].Order.Fulfilment != customerquote.FulfilmentOrdered {
+		t.Fatalf("exported confirmed quote order: %+v", ex.Quotes)
+	}
+	var sb strings.Builder
+	if err := ex.WriteCSV(&sb, "quotes"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sb.String(), string(customerquote.FulfilmentOrdered)) {
+		t.Errorf("quotes CSV lacks order_status %q:\n%s", customerquote.FulfilmentOrdered, sb.String())
+	}
+}

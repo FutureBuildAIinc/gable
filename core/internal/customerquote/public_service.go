@@ -352,7 +352,13 @@ func decided(q *Quote) error {
 			return ErrIncomplete
 		}
 	}
-	if approved == 0 && len(q.Labour) == 0 {
+	customerLabour := 0
+	for _, l := range q.Labour {
+		if !l.ContractorOnly {
+			customerLabour++
+		}
+	}
+	if approved == 0 && customerLabour == 0 {
 		return ErrNothingChosen
 	}
 	return nil
@@ -434,7 +440,11 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 			}
 			verified = true
 		}
-		body, sum, total, err := BuildSnapshot(cur, "approved")
+		cname, _, err := s.store.ContractorName(ctx, cur.CustomerID)
+		if err != nil {
+			return err
+		}
+		body, sum, total, err := BuildSnapshot(cur, "approved", SnapshotMeta{ContractorName: cname})
 		if err != nil {
 			return err
 		}
@@ -498,7 +508,11 @@ func (s *Service) Decline(ctx context.Context, token string, c Caller, in Declin
 		if in.SelectionsVersion > 0 && in.SelectionsVersion != cur.SelectionsVersion {
 			return ErrSelectionsChanged
 		}
-		body, sum, total, err := BuildSnapshot(cur, "declined")
+		cname, _, err := s.store.ContractorName(ctx, cur.CustomerID)
+		if err != nil {
+			return err
+		}
+		body, sum, total, err := BuildSnapshot(cur, "declined", SnapshotMeta{ContractorName: cname})
 		if err != nil {
 			return err
 		}

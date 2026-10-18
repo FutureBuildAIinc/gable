@@ -116,10 +116,15 @@ func TestDecided_NeedsEveryChoiceAndSomethingApproved(t *testing.T) {
 	if err := decided(q); err != nil {
 		t.Errorf("complete: %v", err)
 	}
-	// Everything declined, labour present: the customer may still sign off on the labour.
+	// Everything declined, customer-facing labour present: the customer may still sign off on the labour.
 	q.Lines[0].Selection, q.Lines[1].Selection = SelectionDeclined, SelectionDeclined
 	if err := decided(q); err != nil {
-		t.Errorf("all material declined but labour remains: %v", err)
+		t.Errorf("all material declined but customer-facing labour remains: %v", err)
+	}
+	// Only contractor_only labour remains: the customer has nothing to sign off on.
+	q.Labour = []Labour{{ID: uuid.New(), Description: "Own travel", RateType: RateFlat, RateCents: 12000, ContractorOnly: true}}
+	if err := decided(q); !errors.Is(err, ErrNothingChosen) {
+		t.Errorf("only contractor_only labour: %v, want ErrNothingChosen", err)
 	}
 	q.Labour = nil
 	if err := decided(q); !errors.Is(err, ErrNothingChosen) {
@@ -129,16 +134,37 @@ func TestDecided_NeedsEveryChoiceAndSomethingApproved(t *testing.T) {
 
 func TestBuildSnapshot_IsStableAndItsHashIsTheHashOfItsBytes(t *testing.T) {
 	q := sampleQuote()
+	q.PaymentTerms = "Net 15"
+	q.CustomerNote = "Thanks for the business"
 	q.Lines[0].Selection = SelectionApproved
 	q.Lines[1].Selection = SelectionApproved
 	q.Lines[2].Selection = SelectionDeclined
-	body1, sum1, total1, err := BuildSnapshot(q, "approved")
+	fixed := SnapshotMeta{ContractorName: "Gable Builders", Nonce: "0123456789abcdef0123456789abcdef"}
+	body1, sum1, total1, err := BuildSnapshot(q, "approved", fixed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body2, sum2, _, _ := BuildSnapshot(q, "approved")
+	body2, sum2, _, _ := BuildSnapshot(q, "approved", fixed)
 	if body1 != body2 || sum1 != sum2 {
-		t.Error("the snapshot is not deterministic")
+		t.Error("the snapshot is not deterministic for a given nonce")
+	}
+	for _, want := range []string{
+		`"contractor_name":"Gable Builders"`,
+		`"payment_terms":"Net 15"`,
+		`"customer_note":"Thanks for the business"`,
+		`"tax_rate_bps":800`,
+		`"deposit_bps":2500`,
+		`"nonce":"0123456789abcdef0123456789abcdef"`,
+	} {
+		if !strings.Contains(body1, want) {
+			t.Errorf("snapshot lacks %s: %s", want, body1)
+		}
+	}
+	// Without a fixed nonce, each call draws a fresh 128-bit random hex nonce.
+	_, sumRand1, _, _ := BuildSnapshot(q, "approved")
+	_, sumRand2, _, _ := BuildSnapshot(q, "approved")
+	if sumRand1 == sumRand2 {
+		t.Error("two snapshots without a fixed nonce produced the same hash")
 	}
 	h := sha256.Sum256([]byte(body1))
 	if hex.EncodeToString(h[:]) != sum1 {
@@ -150,7 +176,7 @@ func TestBuildSnapshot_IsStableAndItsHashIsTheHashOfItsBytes(t *testing.T) {
 	}
 	q.Lines[2].Selection = SelectionApproved
 	q.Lines[1].Selection = SelectionDeclined
-	_, sum3, _, _ := BuildSnapshot(q, "approved")
+	_, sum3, _, _ := BuildSnapshot(q, "approved", fixed)
 	if sum3 == sum1 {
 		t.Error("a different choice gave the same hash")
 	}

@@ -56,7 +56,11 @@ func (s *Service) Export(ctx context.Context, a Actor) (*Export, error) {
 			page = page[:f.Limit]
 		}
 		for _, q := range page {
-			v, err := BuildQuoteView(q, now, nil, nil)
+			order, err := s.OrderOf(ctx, q)
+			if err != nil {
+				return nil, err
+			}
+			v, err := BuildQuoteView(q, now, nil, order)
 			if err != nil {
 				return nil, err
 			}

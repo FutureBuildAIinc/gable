@@ -316,13 +316,18 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = sl.UnitCostTenThousandths, "dealer_quote", now
 			cost, err = SourceLineCostCents(line.Quantity, sl.Quantity, sl.LineTotalCents, line.UnitCostTenThousandths)
 		case dl.ExistingID != nil && prior[*dl.ExistingID].ID != uuid.Nil &&
-			prior[*dl.ExistingID].ProductID == dl.ProductID && prior[*dl.ExistingID].Quantity == dl.Quantity:
+			prior[*dl.ExistingID].ProductID == dl.ProductID && prior[*dl.ExistingID].Quantity == dl.Quantity &&
+			(prior[*dl.ExistingID].PriceBasis != "catalog" || prior[*dl.ExistingID].PricedAt.Add(cfg.priceProtection).After(now)):
 			p := prior[*dl.ExistingID]
 			line.ID = p.ID
 			line.SKU, line.Description, line.UOM, line.CategoryID = p.SKU, p.Description, p.UOM, p.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = p.UnitCostTenThousandths, p.PriceBasis, p.PricedAt
 			cost = p.CostCents
 		default:
+			if dl.ExistingID != nil && prior[*dl.ExistingID].ID != uuid.Nil &&
+				prior[*dl.ExistingID].ProductID == dl.ProductID && prior[*dl.ExistingID].Quantity == dl.Quantity {
+				line.ID = prior[*dl.ExistingID].ID
+			}
 			item, err := s.costs.CatalogCost(ctx, a.CustomerID, dl.ProductID, dl.Quantity)
 			if err != nil {
 				return nil, err
@@ -986,31 +991,41 @@ func (s *Service) Confirm(ctx context.Context, a Actor, id uuid.UUID, opts ...Co
 		if err != nil {
 			return err
 		}
-		if len(lines) == 0 {
-			// Only labour and overhead were approved: nothing for the dealer to order.
+		customerLabour := 0
+		for _, l := range q.Labour {
+			if !l.ContractorOnly {
+				customerLabour++
+			}
+		}
+		if len(lines) == 0 && customerLabour == 0 {
 			return httpx.InvalidStateTransition("no approved material to order")
 		}
-		if prev.PriceChanged && !in.AcceptPriceChanges {
-			return ErrPriceChanged
-		}
 		var note string
-		if prev.PriceChanged {
-			for _, lp := range prev.Lines {
-				if lp.DeltaCents != 0 {
-					if err := s.store.UpdateLineCost(ctx, lp.LineID, unitCosts[lp.LineID], lp.CurrentCostCents, now); err != nil {
-						return err
+		var moved bool
+		if len(lines) > 0 {
+			if prev.PriceChanged && !in.AcceptPriceChanges {
+				return ErrPriceChanged
+			}
+			if prev.PriceChanged {
+				for _, lp := range prev.Lines {
+					if lp.DeltaCents != 0 {
+						if err := s.store.UpdateLineCost(ctx, lp.LineID, unitCosts[lp.LineID], lp.CurrentCostCents, now); err != nil {
+							return err
+						}
 					}
 				}
+				note = fmt.Sprintf("dealer material cost changed from %d to %d cents (delta %+d cents); projected margin %d cents",
+					prev.CapturedMaterialCostCents, prev.CurrentMaterialCostCents, prev.DeltaCents, prev.ProjectedMarginCents)
 			}
-			note = fmt.Sprintf("dealer material cost changed from %d to %d cents (delta %+d cents); projected margin %d cents",
-				prev.CapturedMaterialCostCents, prev.CurrentMaterialCostCents, prev.DeltaCents, prev.ProjectedMarginCents)
+			orderID, err := s.orders.PlaceOrder(ctx, OrderPlacement{CustomerID: q.CustomerID, ProjectID: *q.ProjectID,
+				Reference: q.Reference, SiteAddress: q.JobSiteAddress, Lines: lines})
+			if err != nil {
+				return err
+			}
+			moved, err = s.store.Transition(ctx, q.ID, StatusApproved, StatusConfirmed, "confirmed_at = $4, confirmed_by = $5, order_id = $6", now, a.UserID, orderID)
+		} else {
+			moved, err = s.store.Transition(ctx, q.ID, StatusApproved, StatusConfirmed, "confirmed_at = $4, confirmed_by = $5, order_id = NULL", now, a.UserID)
 		}
-		orderID, err := s.orders.PlaceOrder(ctx, OrderPlacement{CustomerID: q.CustomerID, ProjectID: *q.ProjectID,
-			Reference: q.Reference, SiteAddress: q.JobSiteAddress, Lines: lines})
-		if err != nil {
-			return err
-		}
-		moved, err := s.store.Transition(ctx, q.ID, StatusApproved, StatusConfirmed, "confirmed_at = $4, confirmed_by = $5, order_id = $6", now, a.UserID, orderID)
 		if err != nil {
 			return err
 		}

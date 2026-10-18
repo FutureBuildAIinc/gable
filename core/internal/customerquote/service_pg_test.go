@@ -521,3 +521,38 @@ func TestLink_UnknownTokensCreateNoPerLinkKeys(t *testing.T) {
 		t.Errorf("a real link did not get its key")
 	}
 }
+
+func TestUpdate_RepricesRetainedCatalogLinePastProtectionHorizon(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	draft, err := w.svc.Create(ctx, w.a, w.basicInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	origLineID := draft.Lines[0].ID
+
+	// Advance past the 30-day catalog price protection horizon and change the dealer's catalog price.
+	w.advance(31 * 24 * time.Hour)
+	it := w.costs.items[w.stud]
+	it.UnitCostTenThousandths = 60000
+	w.costs.items[w.stud] = it
+
+	in := w.basicInput()
+	lid0 := draft.Lines[0].ID.String()
+	lid1 := draft.Lines[1].ID.String()
+	lid2 := draft.Lines[2].ID.String()
+	in.Lines[0].ID = &lid0
+	in.Lines[1].ID = &lid1
+	in.Lines[2].ID = &lid2
+
+	updated, err := w.svc.Update(ctx, w.a, draft.ID, `"`+itoa(draft.Revision)+`"`, in)
+	if err != nil {
+		t.Fatalf("updating stale draft past price protection horizon: %v", err)
+	}
+	if updated.Lines[0].ID != origLineID {
+		t.Errorf("retained line ID changed: got %s, want %s", updated.Lines[0].ID, origLineID)
+	}
+	if updated.Lines[0].CostCents != 60000 || !updated.Lines[0].PricedAt.Equal(w.now) {
+		t.Errorf("retained line after horizon: cost=%d priced_at=%v, want 60000 at %v", updated.Lines[0].CostCents, updated.Lines[0].PricedAt, w.now)
+	}
+}
