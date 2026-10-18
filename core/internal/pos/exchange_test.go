@@ -3,7 +3,7 @@
 
 package pos_test
 
-// The exchange in one act (CP-06): the returned lines and the replacement
+// The exchange in one act: the returned lines and the replacement
 // sale lines in one transaction in section 11's lock order, one credit memo
 // and one sale linked to each other, tender only for the difference and money
 // back when the return is worth more, every figure balanced to the cent.

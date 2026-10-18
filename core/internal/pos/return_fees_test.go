@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Returns, what M0b leaves (CP-06): a closed lowercase list of reasons on
+// Returns, what M0b leaves: a closed lowercase list of reasons on
 // each returned line (other asks for the note), and a restocking fee in
 // basis points per reason (a database wide setting; the exempt reasons carry
 // none), half even on each line's refund, shown on the credit memo as its own

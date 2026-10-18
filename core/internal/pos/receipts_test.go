@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Counter documents (CP-14): a print count per sale so the second and later
+// Counter documents: a print count per sale so the second and later
 // prints say REPRINT with the count, the layout choice on the receipt route,
 // and the sealed signature a sale carries (the typed name, the drawn PNG, the
 // time and a SHA-256 seal that never changes). The 80mm render itself is a
@@ -412,16 +412,16 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 	}
 
 	failInvoice = false
-	r1 := f.printReceipt(sale1, "layout=invoice")
-	if r1.status != http.StatusOK {
-		t.Fatalf("invoice receipt print = %d: %s", r1.status, r1.raw)
+	firstPrint := f.printReceipt(sale1, "layout=invoice")
+	if firstPrint.status != http.StatusOK {
+		t.Fatalf("invoice receipt print = %d: %s", firstPrint.status, firstPrint.raw)
 	}
-	if r1.header.Get("X-Receipt-Print") != "1" {
-		t.Errorf("X-Receipt-Print after failed render = %q, want 1", r1.header.Get("X-Receipt-Print"))
+	if firstPrint.header.Get("X-Receipt-Print") != "1" {
+		t.Errorf("X-Receipt-Print after failed render = %q, want 1", firstPrint.header.Get("X-Receipt-Print"))
 	}
-	r2 := f.printReceipt(sale1, "layout=thermal80")
-	if r2.status != http.StatusOK || r2.header.Get("X-Receipt-Print") != "2" {
-		t.Fatalf("thermal receipt print = %d (%q): %s", r2.status, r2.header.Get("X-Receipt-Print"), r2.raw)
+	secondPrint := f.printReceipt(sale1, "layout=thermal80")
+	if secondPrint.status != http.StatusOK || secondPrint.header.Get("X-Receipt-Print") != "2" {
+		t.Fatalf("thermal receipt print = %d (%q): %s", secondPrint.status, secondPrint.header.Get("X-Receipt-Print"), secondPrint.raw)
 	}
 	if got := f.printCount(sale1); got != 2 {
 		t.Errorf("print_count = %d, want 2", got)

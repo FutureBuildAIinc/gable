@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// The verdict words and reasons of "can this sale go on account?" (CP-11,
-// CP-02, CP-04). The reasons are blocker codes: the completion refuses with
+// The verdict words and reasons of "can this sale go on account?".
+// The reasons are blocker codes: the completion refuses with
 // the same code the read states.
 const (
 	VerdictAllowed = "allowed"

@@ -126,7 +126,7 @@ type ThermalReprint struct {
 
 // GenerateThermalReceiptPDF renders the 80mm thermal receipt for one
 // committed counter sale, in the package's PDF library and style. The
-// function takes a plain input struct so the counter side of M24 owns the
+// function takes a plain input struct so the counter service owns the
 // lookups; the package only formats the data.
 func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUID, r ThermalReceipt) ([]byte, error) {
 	b := s.branding(ctx, branch)

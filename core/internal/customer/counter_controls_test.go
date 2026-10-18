@@ -3,7 +3,7 @@
 
 package customer_test
 
-// The counter's account controls on the customer wire (CP-02, CP-04): the
+// The counter's account controls on the customer wire: the
 // named buyer requirement and the check limit on the customer, the authorized
 // buyer flag and per sale cap on a contact. Each is optional: left out of a
 // PUT it keeps its value, and a change to one is audited with the other

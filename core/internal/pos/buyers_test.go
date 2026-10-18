@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Who may buy on the account (CP-02): an authorized buyer flag and an
+// Who may buy on the account: an authorized buyer flag and an
 // optional per sale cap on the contacts, a per customer "named buyer
 // required" setting, and the sale on account that names a buyer from the
 // roster or is refused in words naming the account.

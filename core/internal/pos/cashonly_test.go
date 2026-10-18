@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Cash only accounts (CP-04): an account whose terms are due on receipt, by
+// Cash only accounts: an account whose terms are due on receipt, by
 // the terms master's kind and never a text, takes no on account tender; the
 // counter offers the payment shapes the server enumerates for it, and the
 // sale is not released (no stock out, no invoice) until paid in full.

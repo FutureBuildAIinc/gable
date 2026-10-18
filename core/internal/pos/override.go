@@ -225,7 +225,7 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, o)
 }
 
-// checkBuyer is the roster rule of CP-02: an account that asks for a named
+// checkBuyer is the buyer roster rule: an account that asks for a named
 // buyer is refused, in words naming the account, a sale on account that
 // names none; a named buyer must be on the roster still and the sale's
 // account portion must fit the buyer's own cap.

@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Can this sale go on account? (CP-11, CP-02): the standing read states the
+// Can this sale go on account?: the standing read states the
 // credit, the open credit memos, the hold, the terms and a verdict with its
 // reason and the ways forward; the completion enforces the same verdict and
 // the manager override is one act for one sale, consumed by its completion.

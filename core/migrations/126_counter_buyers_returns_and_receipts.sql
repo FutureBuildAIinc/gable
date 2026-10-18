@@ -1,21 +1,21 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- 126: the counter's account sales, tenders and documents (M24) and the
--- returns M0b leaves (M28), one migration for both items.
+-- 126: the counter's account sales, tenders and documents and the
+-- returns M0b leaves, one migration for both items.
 --
---   1  Who may buy on the account (CP-02): customer_contacts.authorized_buyer
+--   1  Who may buy on the account: customer_contacts.authorized_buyer
 --      and buyer_sale_cap, customers.named_buyer_required, and the sale's own
 --      buyer_contact_id.
---   2  The manager override (CP-11): pos_account_overrides, one act for one
+--   2  The manager override: pos_account_overrides, one act for one
 --      sale, consumed by that sale's completion.
---   3  Tenders (CP-03, CP-04): customers.check_limit (a null limit falls to
+--   3  Tenders: customers.check_limit (a null limit falls to
 --      the database wide pos.check_limit_cents setting, and no setting means
 --      no limit), and "ID checked" with the ID type on a tender (never an ID
 --      number).
---   4  Receipts (CP-14): pos_transactions.print_count and the sealed
+--   4  Receipts: pos_transactions.print_count and the sealed
 --      signature, pos_signatures, whose rows a trigger refuses to update.
---   5  Returns (CP-06): the closed reason code and the restocking fee on each
+--   5  Returns: the closed reason code and the restocking fee on each
 --      returned line, the fee on the return, the credit memo line shape that
 --      admits a restocking fee line, and the exchange link between a return
 --      and the sale that replaced it.

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // The counter's account sale, tenders, returns, exchange and documents on the
-// screen (Gable Cut 1 Wave 2, M24 and M28): the standing line and its three
+// screen: the standing line and its three
 // ways forward, the buyer pick, the check limit and ID checked, store credit
 // as a tender, the reason list and restocking fee on a return, the exchange
 // with the server's own figures, the signature pad and the reprint.

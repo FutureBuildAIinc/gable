@@ -275,7 +275,7 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
 7. Change the FB Connect address and Save without entering the id again: the id shows empty with "Enter the webhook id
    again for the new address", and the Market check says it is off until it is entered.
 
-### Counter account sales, tenders, returns and receipts (M24, M28)
+### Counter account sales, tenders, returns and receipts
 
 Needs the demo seed with at least two yards (Kelowna Main Yard and Lake Country Outpost), signed in as the cashier
 of a yard (Jordan Pike at Kelowna Main Yard, Drew Patel at Lake Country Outpost) with the till open. The demo

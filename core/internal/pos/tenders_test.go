@@ -3,7 +3,7 @@
 
 package pos_test
 
-// Tenders (CP-03, CP-04): check limits (per customer, else a database wide
+// Tenders: check limits (per customer, else a database wide
 // default; over the limit refused or approved by a manager override), "ID
 // checked" with the ID type and never an ID number, store credit as a tender
 // through the AR core's single writer, one account leg per sale, legs that
