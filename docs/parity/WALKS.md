@@ -344,6 +344,54 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
 7. Change the FB Connect address and Save without entering the id again: the id shows empty with "Enter the webhook id
    again for the new address", and the Market check says it is off until it is entered.
 
+### Counter account sales, tenders, returns and receipts
+
+Needs the demo seed with at least two yards (Kelowna Main Yard and Lake Country Outpost), signed in as the cashier
+of a yard (Jordan Pike at Kelowna Main Yard, Drew Patel at Lake Country Outpost) with the till open. The demo
+runs with sign in off, so a manager's approval in step 3 is recorded as "dev-mode"; a real deployment needs a
+signed in admin or owner other than the cashier. The setup calls are the same ones the customer screens make, shown
+as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
+`curl ".../api/v1/customers?q=Tarnwick"`, `$REV` its current revision.
+
+1. **Set up the account.** Give Tarnwick Construction a small credit limit, a named buyer requirement and a check
+   limit: `curl -X PUT .../api/v1/customers/$TARNWICK -H 'If-Match: "'$REV'"'` with the customer's own fields and
+   `"credit_limit_cents": 100000, "named_buyer_required": true, "check_limit_cents": 20000`. Add a buyer:
+   `POST .../api/v1/customers/$TARNWICK/contacts` with `"first_name": "Ada", "last_name": "Buyer",
+   "authorized_buyer": true, "buyer_sale_cap_cents": 50000`.
+2. **Can this go on account? (Jordan Pike, Kelowna Main Yard).** Open Point of Sale and find "Tarnwick". Under the
+   standing line the screen says "Credit available" and, once there is a line, whether the sale can go on the
+   account. Add 12 of `LUM-248-PREM` (more than the limit allows): the standing line turns red and says by how much
+   the sale would put the account over its limit, and offers three actions: Take the amount on the account (opens
+   the account's own page), Ask a manager to approve, and Pay another way. Charge to account is off, and the words
+   under the tenders are the same as the standing line's. The Buyer pick says the account asks for a named buyer.
+3. **A manager approves one sale.** Pick Ada Buyer. Press Ask a manager to approve, type a reason: the standing line
+   now says a manager approved the sale on account and the Charge to account tender opens. Pay: "Sale complete". Start
+   the next sale for Tarnwick with the same lines: it is blocked again, because the approval went with its sale.
+   (A cashier's own approval, or a sale taken by another sale's approval, is refused in words.)
+4. **A cash only account.** Give Snowfern Cabin Co the terms "Due on receipt" (the terms master's kind
+   `DUE_ON_RECEIPT`, whatever the terms are named). At either yard find Snowfern: the standing line says the
+   account's terms are due on receipt and nothing can be put on the account; the only way forward is Pay another
+   way, and the sale is not released until it is paid in full.
+5. **A check, its ID and its limit.** Choose Check: the screen asks for the check number, the check limit
+   ($200.00) and "ID checked"; ticking it asks for the kind of ID (never its number). A check of $250.00 is refused
+   in words with Ask a manager beside it; with the approval the check goes, and the sale's tender shows the ID kind.
+6. **Store credit.** Take a return of one line of a completed sale for Tarnwick as "Account credit". On the next sale
+   for Tarnwick the Store credit tender is offered with what the account holds; pay half in store credit and half in
+   cash. The credit memo is used up by that much, the till expects only the cash, and Void of that sale gives the
+   credit back.
+7. **Returns with reasons and a fee.** Set a fee for one reason (`INSERT INTO system_settings (key, value) VALUES
+   ('pos.restocking_fee_bps.changed_mind', '1500')`). On a completed sale press Return, name a line and pick "Changed
+   their mind (15% restocking fee)": the return refunds the line less the fee, and the credit memo (open it from
+   Credit Memos) shows "Restocking fee" as its own line. "Other" asks for a note.
+8. **An exchange.** On a completed sale press Return, name a line and a reason, press Exchange and pick the goods
+   that replace it. The screen states the credit the return is worth, the replacement and what the customer pays or
+   is paid back; take the exchange: one credit memo and one sale point at each other, only the difference is
+   tendered, and the stock goes back and out at the yard's register. At Lake Country Outpost the same walk uses
+   that yard's stock.
+9. **The signature and the reprint.** On the completed account sale type the signer's name, draw in the box and
+   press Seal signature: "Signed by ... sealed" with the first characters of the seal. Print the 80mm receipt
+   twice: the second says Reprint with its count (the 80mm layout needs the receipt renderer; without it the screen
+   says the layout is not available).
 
 ### The card terminal at the counter, from the claim to the manager's queue
 

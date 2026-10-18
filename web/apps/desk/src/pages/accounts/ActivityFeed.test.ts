@@ -34,6 +34,8 @@ const CONTACT: Contact = {
   is_active: true,
   can_place_orders: true,
   order_limit_cents: null,
+  authorized_buyer: false,
+  buyer_sale_cap_cents: null,
   revision: 1,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',

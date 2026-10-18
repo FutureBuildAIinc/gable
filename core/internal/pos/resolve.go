@@ -528,6 +528,11 @@ func (s *Service) completeVoidFromResolution(ctx context.Context, sale *Sale, te
 			mergeEffects(&fxAll, fx)
 		}
 	}
+	if fx, err := s.reverseStoreCredit(ctx, *sale.InvoiceID, tenders, reason, actor, date); err != nil {
+		return nil, err
+	} else {
+		mergeEffects(&fxAll, fx)
+	}
 	var entryID *uuid.UUID
 	if err := s.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT gl_entry_id FROM invoices WHERE id = $1`, sale.InvoiceID).Scan(&entryID); err != nil {

@@ -58,6 +58,9 @@ type fixture struct {
 	// paymentGateway, when an opt sets it, wires the payment route's card
 	// refunds at a terminal too, the way serve wires Run Payments.
 	paymentGateway payment.PaymentGateway
+	// mounts add routes to the fixture's mux after the counter's own, the way
+	// serve mounts the receipt pair of the document handler beside them.
+	mounts []func(f *fixture, mux *http.ServeMux)
 	// terminal, when an opt sets it, is the simulated card terminal the
 	// counter's card legs ride (CP-05), with its intent ledger.
 	terminal *payment.SimulatedTerminal
@@ -181,6 +184,9 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	// terminal rail as serve wires it (C2-5, FROM-PRINCIPAL 60b)
 	payments = payments.WithTenderCreditGuard(f.service)
 	payment.NewHandler(payments).RegisterRoutes(mux)
+	for _, m := range f.mounts {
+		m(f, mux)
+	}
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(roleClaims(middleware.NewBranchMiddleware(db).Handler(mux))))
 	t.Cleanup(func() {
 		f.srv.Close()

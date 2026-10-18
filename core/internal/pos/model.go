@@ -39,7 +39,14 @@ const (
 	TenderCheck   TenderMethod = "CHECK"
 	TenderCard    TenderMethod = "CARD"
 	TenderAccount TenderMethod = "ACCOUNT"
+	// TenderStoreCredit pays with the customer's open credit memos, applied to
+	// the sale's invoice through the AR core. It is no drawer money.
+	TenderStoreCredit TenderMethod = "STORE_CREDIT"
 )
+
+// The closed list of ID types a counter may record beside "ID checked": the
+// kind of ID looked at, never its number.
+var idTypes = []string{"drivers_license", "state_id", "passport", "military_id", "other"}
 
 // Status returns the wire spelling.
 func (m TenderMethod) Status() string { return strings.ToLower(string(m)) }
@@ -58,6 +65,8 @@ func ParseTenderMethod(name string) (TenderMethod, bool) {
 		return TenderCard, true
 	case "account":
 		return TenderAccount, true
+	case "store_credit":
+		return TenderStoreCredit, true
 	}
 	return "", false
 }
@@ -105,6 +114,14 @@ type Sale struct {
 	CustomerPO *string    `json:"customer_po"`
 	JobID      *uuid.UUID `json:"job_id"`
 
+	// BuyerContactID is the roster buyer an on account sale names when the
+	// account asks for one; PrintCount is how many times the receipt has been
+	// printed; ExchangeReturnID is the return an exchange's replacement sale
+	// stands against.
+	BuyerContactID   *uuid.UUID `json:"buyer_contact_id"`
+	PrintCount       int        `json:"print_count"`
+	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
+
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`
 
@@ -136,17 +153,22 @@ type SaleSummary struct {
 // amount less any change given from it, so the payment it became is the
 // money kept (ADR 0005 section 14.2 C2-5).
 type Tender struct {
-	ID          uuid.UUID       `json:"id"`
-	SaleID      uuid.UUID       `json:"sale_id"`
-	Method      TenderMethod    `json:"method"`
-	AmountCents httpx.Cents     `json:"amount_cents"`
-	PaymentID   *uuid.UUID      `json:"payment_id"`
-	Reference   *string         `json:"reference"`
-	CardLast4   *string         `json:"card_last4"`
-	CardBrand   *string         `json:"card_brand"`
-	GatewayTxID *string         `json:"gateway_tx_id"`
-	AuthCode    *string         `json:"auth_code"`
-	CreatedAt   httpx.Timestamp `json:"created_at"`
+	ID          uuid.UUID    `json:"id"`
+	SaleID      uuid.UUID    `json:"sale_id"`
+	Method      TenderMethod `json:"method"`
+	AmountCents httpx.Cents  `json:"amount_cents"`
+	PaymentID   *uuid.UUID   `json:"payment_id"`
+	Reference   *string      `json:"reference"`
+	CardLast4   *string      `json:"card_last4"`
+	CardBrand   *string      `json:"card_brand"`
+	GatewayTxID *string      `json:"gateway_tx_id"`
+	AuthCode    *string      `json:"auth_code"`
+	// IDChecked and IDType record that the cashier looked at the payer's ID
+	// (a check or an account charge) and what kind it was; the number is
+	// never taken.
+	IDChecked bool            `json:"id_checked"`
+	IDType    *string         `json:"id_type"`
+	CreatedAt httpx.Timestamp `json:"created_at"`
 }
 
 // Return is one counter return: a credit memo created and posted in one act
@@ -170,6 +192,12 @@ type Return struct {
 	Reason         string          `json:"reason"`
 	CreditMemoID   *uuid.UUID      `json:"credit_memo_id"`
 	CreatedAt      httpx.Timestamp `json:"created_at"`
+	// RestockingFeeCents is the fee withheld from the refund, shown on the
+	// credit memo as its own line; the subtotal and total already carry it.
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+	// ExchangeSaleID is the sale that replaced the goods when the return was
+	// one half of an exchange.
+	ExchangeSaleID *uuid.UUID `json:"exchange_sale_id"`
 
 	Lines []ReturnLine `json:"lines"`
 }
@@ -186,6 +214,10 @@ type ReturnLine struct {
 	UnitPrice   *httpx.Price    `json:"unit_price_ten_thousandths"`
 	LineTotal   *httpx.Cents    `json:"line_total_cents"`
 	Restock     bool            `json:"restock"`
+	// ReasonCode is the line's reason from the closed list; the fee is what
+	// its reason withheld from the line's refund.
+	ReasonCode         string      `json:"reason_code"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
 
 	// The pair, price unit and stocking unit the line carries, read by the
 	// memo line's and return line's inserts; internal, never on the wire.

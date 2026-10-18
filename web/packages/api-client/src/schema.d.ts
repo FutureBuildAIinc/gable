@@ -6130,7 +6130,7 @@ export interface paths {
         };
         /**
          * Print the sale's receipt
-         * @description The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt.
+         * @description The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt. The layout query chooses the document: invoice (the default, as it has always printed) or thermal80, the 80mm till receipt. Each print is counted against the sale (the print_count on the sale, and the X-Receipt-Print header names this print): the second and later prints of the 80mm receipt carry a REPRINT marker with the count, and the receipt prints the sale's sealed signature block when one exists. thermal80 answers 409 with the blocker layout_unavailable, counting nothing, on a server that has no 80mm renderer; any other layout is 400.
          */
         get: operations["posTransactionReceipt"];
         put?: never;
@@ -6276,7 +6276,7 @@ export interface paths {
         put?: never;
         /**
          * Tender and complete the sale
-         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, insufficient_stock; 503 when the tax provider fails before any row is written. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
          */
         post: operations["posTransactionComplete"];
         delete?: never;
@@ -6871,6 +6871,126 @@ export interface paths {
          * @description The manager's settlement of one lost card leg, the terminal's own record the authority (CP-05). The item is claimed first by one guarded statement, so a second or racing resolve is 409 lost_item_settled and calls nothing. Outcome authorized on a sale leg: a sale still open keeps the authorized leg for its completion (never charged again); a completed sale applies the money up to its invoice's open amount and the rest goes back to the card; a sale paid in full or voided has the whole charge reversed (the same day void first, the refund when the void is refused, under the intent's idempotency key; a reversal that fails answers 502 charge_not_reversed and the item is open again). On a refund or void leg the refund claim the leg names settles through the claim's own resolution. Outcome declined closes the item and moves nothing. Both write one audit row naming the person, the item, the outcome and the reference. Finance and owner roles only; a machine key is refused in the route itself, bound or not. The item's branch is held to the caller's reach before either outcome: a caller whose branch header names another branch finds a missing row (404), and a caller with no header and no grant to the branch is 403.
          */
         post: operations["posTerminalLostItemResolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/customers/{id}/standing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Can this sale go on account?
+         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+         */
+        get: operations["posCustomerStanding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A manager approves one sale
+         * @description One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold or credit_limit, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
+         */
+        post: operations["posOverrideCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Seal a signature to a completed sale
+         * @description Stores the signer's typed name, the drawn image (a PNG of at most 131072 bytes, as standard base64 or a data URL), the time, and a SHA-256 seal over the sale id, the total in cents, the signer, the time and the image's hash. A sale is signed once: the row never changes after it is written (a trigger refuses an update), a second capture is 409 signature_exists, and a sale that is not completed is 409 not_completed. The image is never answered; the 80mm receipt prints the signature block. A sale that does not exist or that the caller's wall hides is 404.
+         */
+        post: operations["posSignatureCapture"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/return-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The closed list of return reasons
+         * @description The lowercase reasons a returned line may carry (defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other) with each reason's restocking fee in basis points (the database wide setting pos.restocking_fee_bps.<reason>; none set is no fee) and whether it needs the return's note, in the list envelope.
+         */
+        get: operations["posReturnReasonList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/exchanges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange goods in one act
+         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+         */
+        post: operations["posExchangeCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/exchanges/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * State what an exchange comes to
+         * @description The same request as the exchange, answered with the figures only: the credit the return is worth (net of the restocking fee), the replacement's total with its tax and the difference (positive is what the customer pays, negative is what goes back). Computed from read-only pricing and tax queries without opening a transaction, taking row locks, or advancing sequences; a short tender is not refused here.
+         */
+        post: operations["posExchangePreview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10637,6 +10757,13 @@ export interface components {
             payment_terms: components["schemas"]["PaymentTermsRef"];
             /** @description Whether an order of this customer must carry a purchase order number. */
             po_required: boolean;
+            /** @description Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer. */
+            named_buyer_required: boolean;
+            /**
+             * Format: int64
+             * @description The largest check the counter takes from this customer; null defers to the database wide default (none set is no limit).
+             */
+            check_limit_cents: number | null;
             /**
              * Format: int64
              * @description Starts at 1 and moves on every write to the customer row; send it back as If-Match.
@@ -10689,13 +10816,20 @@ export interface components {
              */
             payment_terms_id?: string;
             po_required?: boolean;
+            /** @description Optional; left out keeps the value on a PUT (false on create). */
+            named_buyer_required?: boolean;
+            /**
+             * Format: int64
+             * @description Optional; left out keeps the value on a PUT, null defers to the database wide check limit.
+             */
+            check_limit_cents?: number | null;
             /**
              * Format: int64
              * @description PUT only, beside If-Match; a revision on create is a 400.
              */
             revision?: number;
         };
-        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two controls, payment_terms_id and po_required, which are required so a left out field cannot reset them. primary_branch_id is refused. */
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
         CustomerUpdateRequest: {
             account_number: string;
             name: string;
@@ -10728,6 +10862,13 @@ export interface components {
              */
             payment_terms_id: string;
             po_required: boolean;
+            /** @description Optional; left out keeps the value on a PUT (false on create). */
+            named_buyer_required?: boolean;
+            /**
+             * Format: int64
+             * @description Optional; left out keeps the value on a PUT, null defers to the database wide check limit.
+             */
+            check_limit_cents?: number | null;
             /**
              * Format: int64
              * @description PUT only, beside If-Match; a revision on create is a 400.
@@ -10854,6 +10995,13 @@ export interface components {
              * @description The largest order this contact may place; null is no limit of their own.
              */
             order_limit_cents: number | null;
+            /** @description On the account's buyer roster at the counter. */
+            authorized_buyer: boolean;
+            /**
+             * Format: int64
+             * @description The most this buyer may put on the account in one sale; null is no cap of their own.
+             */
+            buyer_sale_cap_cents: number | null;
             /** Format: int64 */
             revision: number;
             /** Format: date-time */
@@ -10884,12 +11032,20 @@ export interface components {
             can_place_orders?: boolean;
             /** Format: int64 */
             order_limit_cents?: number | null;
+            /** @description Optional; false on create, kept when left out on a PUT. */
+            authorized_buyer?: boolean;
+            /**
+             * Format: int64
+             * @description Optional; kept when left out on a PUT, null is no cap of the buyer's own.
+             */
+            buyer_sale_cap_cents?: number | null;
             /**
              * Format: int64
              * @description PUT only, beside If-Match.
              */
             revision?: number;
         };
+        /** @description The body of PUT. Order authority controls (can_place_orders and order_limit_cents) are required, while counter buyer controls (authorized_buyer and buyer_sale_cap_cents) are optional and keep their stored value when omitted so a left out field cannot reset them. */
         ContactUpdateRequest: {
             first_name: string;
             last_name: string;
@@ -10907,6 +11063,13 @@ export interface components {
              * @description Required on a PUT; null is an explicit no limit of the contact's own.
              */
             order_limit_cents: number | null;
+            /** @description Optional; left out keeps the value. */
+            authorized_buyer?: boolean;
+            /**
+             * Format: int64
+             * @description Optional; left out keeps the value, null is no cap of the buyer's own.
+             */
+            buyer_sale_cap_cents?: number | null;
             /**
              * Format: int64
              * @description PUT only, beside If-Match.
@@ -15806,7 +15969,7 @@ export interface components {
         /** @enum {string} */
         PosStatus: "open" | "held" | "completed" | "voided";
         /** @enum {string} */
-        PosTenderMethod: "cash" | "check" | "card" | "account";
+        PosTenderMethod: "cash" | "check" | "card" | "account" | "store_credit";
         /** @enum {string} */
         PosRefundMethod: "cash" | "card" | "account";
         /**
@@ -15855,6 +16018,13 @@ export interface components {
             reference?: string | null;
             /** @description The card token a card tender charges. */
             token_id?: string | null;
+            /** @description The cashier looked at the payer's ID; on a check or an account tender only. The ID's number is never taken. */
+            id_checked?: boolean | null;
+            /**
+             * @description The kind of ID looked at; needs id_checked true.
+             * @enum {string|null}
+             */
+            id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other" | null;
         };
         PosVoidRequest: {
             reason: string;
@@ -15938,6 +16108,7 @@ export interface components {
             /** Format: uuid */
             customer_id?: string | null;
             refund_method?: components["schemas"]["PosRefundMethod"];
+            /** @description The return's note. Required when a line's reason is other (a line with no reason_code is other); otherwise the memo states the reasons in words. */
             reason: string;
             /** @description Refused on a card return: the refund goes to the sale's own card tender, never a transaction the client names. */
             gateway_tx_id?: string | null;
@@ -15964,6 +16135,200 @@ export interface components {
             unit_price_ten_thousandths?: number;
             /** @description Default true; damaged goods stay out of stock. */
             restock?: boolean;
+            reason_code?: components["schemas"]["PosReturnReasonCode"];
+        };
+        /**
+         * @description The closed lowercase list of return reasons; an absent reason is other.
+         * @enum {string}
+         */
+        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "other";
+        PosWayForward: {
+            /** @enum {string} */
+            kind: "pay_down" | "manager_override" | "switch_tender";
+            available: boolean;
+            /**
+             * Format: int64
+             * @description For pay_down, what paying would clear.
+             */
+            amount_cents?: number;
+            message: string;
+        };
+        PosOnAccountVerdict: {
+            /** @enum {string} */
+            verdict: "allowed" | "blocked";
+            /**
+             * @description Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override.
+             * @enum {string}
+             */
+            reason: "" | "credit_hold" | "credit_limit" | "cash_only_terms" | "manager_override";
+            /** @description The verdict in plain words, with the amount. */
+            message: string;
+            /**
+             * Format: int64
+             * @description How far past the limit the sale puts the account (credit_limit only).
+             */
+            over_cents: number | null;
+            ways_forward: components["schemas"]["PosWayForward"][];
+        };
+        PosBuyer: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description The most this buyer may put on the account in one sale; null for no cap of the buyer's own.
+             */
+            cap_cents: number | null;
+        };
+        PosAccountStanding: {
+            /** Format: uuid */
+            customer_id: string;
+            name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description Null is unlimited; 0 is no credit.
+             */
+            credit_limit_cents: number | null;
+            /** Format: int64 */
+            open_receivable_cents: number;
+            /**
+             * Format: int64
+             * @description The customer's open store credit, positive.
+             */
+            open_credit_memo_cents: number;
+            /** Format: int64 */
+            available_credit_cents: number | null;
+            /** @description The hold the counter has today: a credit limit of zero. */
+            on_hold: boolean;
+            /** @enum {string} */
+            terms_kind: "net_days" | "day_of_month" | "due_on_receipt";
+            named_buyer_required: boolean;
+            buyers: components["schemas"]["PosBuyer"][];
+            /**
+             * Format: int64
+             * @description The customer's own check limit, else the database wide default; null is no limit.
+             */
+            check_limit_cents: number | null;
+            /** @description The payment shapes the server takes from this customer now, in the order the counter shows them. */
+            payment_options: components["schemas"]["PosTenderMethod"][];
+            on_account: components["schemas"]["PosOnAccountVerdict"];
+        };
+        PosOverrideRequest: {
+            /** @enum {string} */
+            kind: "account" | "check";
+            reason: string;
+            /**
+             * Format: int64
+             * @description The most the manager approves: the account portion, or the largest check.
+             */
+            cap_cents: number;
+        };
+        PosOverride: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** @enum {string} */
+            kind: "account" | "check";
+            /** @description The approving manager's subject. */
+            approved_by: string;
+            reason: string;
+            /** Format: int64 */
+            cap_cents: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            consumed_at: string | null;
+        };
+        PosSignatureRequest: {
+            signer_name: string;
+            /** @description The drawn PNG, at most 131072 bytes, standard base64 or a data URL. */
+            image_png_base64: string;
+        };
+        PosSignature: {
+            /** Format: uuid */
+            sale_id: string;
+            signer_name: string;
+            /** Format: date-time */
+            signed_at: string;
+            /** Format: int64 */
+            total_cents: number;
+            /** @description The SHA-256 of the image, hex. */
+            image_sha256: string;
+            /** @description SHA-256 hex over the sale id, the total in cents, the signer, the time and the image's hash. */
+            seal: string;
+            captured_by: string;
+        };
+        PosReturnReason: {
+            code: components["schemas"]["PosReturnReasonCode"];
+            label: string;
+            restocking_fee_bps: number;
+            needs_note: boolean;
+        };
+        PosReturnReasonPage: {
+            items: components["schemas"]["PosReturnReason"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PosExchangeRequest: {
+            /** @description Defaults REG-01. */
+            register_id?: string;
+            /**
+             * Format: uuid
+             * @description The sale the goods came from.
+             */
+            original_sale_id?: string | null;
+            /** Format: uuid */
+            customer_id?: string | null;
+            /**
+             * @description How a surplus goes back: cash (the default) or account (store credit on a named account). card is refused (exchange_card_refund).
+             * @enum {string}
+             */
+            refund_method?: "cash" | "account" | "card";
+            /** @description The return's note, as on a return. */
+            reason?: string;
+            returned_lines: components["schemas"]["PosReturnLineRequest"][];
+            sale_lines: components["schemas"]["PosLineRequest"][];
+            /** @description Tender for the difference only. Not store_credit (the returned credit is applied itself). */
+            tenders?: components["schemas"]["PosTenderRequest"][];
+            picked_up_by?: string | null;
+        };
+        PosExchangeFigures: {
+            /**
+             * Format: int64
+             * @description The credit the return is worth, net of any restocking fee.
+             */
+            returned_cents: number;
+            /** Format: int64 */
+            restocking_fee_cents: number;
+            /**
+             * Format: int64
+             * @description The replacement sale's total with its tax.
+             */
+            replacement_cents: number;
+            /**
+             * Format: int64
+             * @description Replacement less return: positive is what the customer pays, negative what goes back.
+             */
+            difference_cents: number;
+        };
+        PosExchange: {
+            return: components["schemas"]["PosReturn"];
+            sale: components["schemas"]["PosTransaction"];
+            /** Format: int64 */
+            returned_cents: number;
+            /** Format: int64 */
+            restocking_fee_cents: number;
+            /** Format: int64 */
+            replacement_cents: number;
+            /** Format: int64 */
+            difference_cents: number;
+            /**
+             * Format: int64
+             * @description The surplus paid back in cash; zero when it stayed as store credit or there was none.
+             */
+            refunded_cents: number;
         };
         PosTillOpenRequest: {
             /** @description Defaults REG-01. */
@@ -16121,6 +16486,18 @@ export interface components {
              * @description The customer's job the sale belongs to.
              */
             job_id: string | null;
+            /**
+             * Format: uuid
+             * @description The roster buyer a sale on account names.
+             */
+            buyer_contact_id: string | null;
+            /** @description How many times the receipt has been printed. */
+            print_count: number;
+            /**
+             * Format: uuid
+             * @description The return an exchange's replacement sale stands against.
+             */
+            exchange_return_id: string | null;
             lines: components["schemas"]["PosLineItem"][];
             tenders: components["schemas"]["PosTender"][];
         };
@@ -16161,6 +16538,11 @@ export interface components {
             customer_po?: string | null;
             /** Format: uuid */
             job_id?: string | null;
+            /**
+             * Format: uuid
+             * @description A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named.
+             */
+            buyer_contact_id?: string | null;
         };
         PosTransactionPage: {
             items: components["schemas"]["PosTransactionSummary"][];
@@ -16251,9 +16633,13 @@ export interface components {
             amount_cents: number;
             /**
              * Format: uuid
-             * @description The payment the completion recorded.
+             * @description The payment the completion recorded (none for an account or store credit leg).
              */
             payment_id: string | null;
+            /** @description The cashier looked at the payer's ID. */
+            id_checked: boolean;
+            /** @description The kind of ID looked at, never its number. */
+            id_type: string | null;
             reference: string | null;
             card_last4: string | null;
             card_brand: string | null;
@@ -16297,6 +16683,16 @@ export interface components {
             credit_memo_id: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: int64
+             * @description The fee withheld from the refund (a positive figure, its own line on the credit memo); the subtotal and total already carry it.
+             */
+            restocking_fee_cents: number;
+            /**
+             * Format: uuid
+             * @description The replacement sale when the return was one half of an exchange.
+             */
+            exchange_sale_id: string | null;
             lines: components["schemas"]["PosReturnLine"][];
         };
         /** @description One returned line, its quantity and extension negative. */
@@ -16315,6 +16711,12 @@ export interface components {
             /** Format: int64 */
             line_total_cents: number | null;
             restock: boolean;
+            reason_code: components["schemas"]["PosReturnReasonCode"];
+            /**
+             * Format: int64
+             * @description The fee this line's reason withheld from its refund, half even to the cent.
+             */
+            restocking_fee_cents: number;
         };
         /** @description One drawer shift. The expected cash is the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. */
         PosTillSession: {
@@ -32173,7 +32575,9 @@ export interface operations {
     };
     posTransactionReceipt: {
         parameters: {
-            query?: never;
+            query?: {
+                layout?: "invoice" | "thermal80";
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -32185,9 +32589,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The sale's invoice as a PDF document. */
+            /** @description The sale's receipt as a PDF document. */
             200: {
                 headers: {
+                    /** @description The number of this print of the sale's receipt, 1 for the first. */
+                    "X-Receipt-Print"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -33541,6 +33947,214 @@ export interface operations {
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    posCustomerStanding: {
+        parameters: {
+            query?: {
+                amount_cents?: number;
+                sale_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's standing and the verdict. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosAccountStanding"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOverrideCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description The approval. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOverride"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSignatureCapture: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSignatureRequest"];
+            };
+        };
+        responses: {
+            /** @description The sealed signature. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSignature"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnReasonList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reasons. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturnReasonPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posExchangeCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosExchangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The return, the replacement sale and the figures. */
+            201: {
+                headers: {
+                    /** @description The return's route. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosExchange"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posExchangePreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosExchangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The figures. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosExchangeFigures"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     pricingCalculate: {

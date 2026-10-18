@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { answerAppDialog, fillAppDialogPrompt } from './app-controls';
+import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -130,6 +130,7 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Return', exact: true }).click();
   const firstQty = page.locator('input[type="number"]').first();
   await firstQty.fill('1');
+  await pickOptionByValue(page.getByTestId('return-reason').first(), 'defective');
   await page.getByRole('button', { name: /Take the Return/ }).click();
   await expect(page.getByText(/Return RTN-\d+ complete/)).toBeVisible({ timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-return.png'), fullPage: true });

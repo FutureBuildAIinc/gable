@@ -28,6 +28,7 @@
         "credit_memo_id": "<id-4>",
         "currency": "USD",
         "customer_id": "<id-5>",
+        "exchange_sale_id": null,
         "id": "<id-6>",
         "lines": [
           {
@@ -37,7 +38,9 @@
             "position": 0,
             "product_id": "<id-1>",
             "quantity": "2",
+            "reason_code": "other",
             "restock": true,
+            "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 125000,
             "uom": "PCS"
           }
@@ -47,6 +50,7 @@
         "reason": "r1b c wrong size",
         "refund_method": "cash",
         "register_id": "REG-01",
+        "restocking_fee_cents": 0,
         "revision": 0,
         "subtotal_cents": -2500,
         "tax_cents": -300,
@@ -85,6 +89,7 @@
         "credit_memo_id": "<id-11>",
         "currency": "USD",
         "customer_id": "<id-9>",
+        "exchange_sale_id": null,
         "id": "<id-12>",
         "lines": [
           {
@@ -94,7 +99,9 @@
             "position": 0,
             "product_id": "<id-10>",
             "quantity": "1",
+            "reason_code": "other",
             "restock": false,
+            "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 300000,
             "uom": "PCS"
           }
@@ -104,6 +111,7 @@
         "reason": "r1b c credit the account",
         "refund_method": "account",
         "register_id": "REG-01",
+        "restocking_fee_cents": 0,
         "revision": 0,
         "subtotal_cents": -3000,
         "tax_cents": 0,
@@ -295,6 +303,7 @@
         "credit_memo_id": "<id-4>",
         "currency": "USD",
         "customer_id": "<id-5>",
+        "exchange_sale_id": null,
         "id": "<id-6>",
         "lines": [
           {
@@ -304,7 +313,9 @@
             "position": 0,
             "product_id": "<id-1>",
             "quantity": "2",
+            "reason_code": "other",
             "restock": true,
+            "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 125000,
             "uom": "PCS"
           }
@@ -314,6 +325,7 @@
         "reason": "r1b c wrong size",
         "refund_method": "cash",
         "register_id": "REG-01",
+        "restocking_fee_cents": 0,
         "revision": 1,
         "subtotal_cents": -2500,
         "tax_cents": -300,
@@ -387,6 +399,7 @@
           "credit_memo_id": "<id-4>",
           "currency": "USD",
           "customer_id": "<id-5>",
+          "exchange_sale_id": null,
           "id": "<id-6>",
           "lines": [],
           "number": "RTN-000001",
@@ -394,6 +407,7 @@
           "reason": "r1b c wrong size",
           "refund_method": "cash",
           "register_id": "REG-01",
+          "restocking_fee_cents": 0,
           "revision": 1,
           "subtotal_cents": -2500,
           "tax_cents": -300,
@@ -407,6 +421,7 @@
           "credit_memo_id": "<id-11>",
           "currency": "USD",
           "customer_id": "<id-9>",
+          "exchange_sale_id": null,
           "id": "<id-12>",
           "lines": [],
           "number": "RTN-000002",
@@ -414,6 +429,7 @@
           "reason": "r1b c credit the account",
           "refund_method": "account",
           "register_id": "REG-01",
+          "restocking_fee_cents": 0,
           "revision": 1,
           "subtotal_cents": -3000,
           "tax_cents": 0,

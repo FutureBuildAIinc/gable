@@ -59,7 +59,8 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 	}
 
 	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(customeraudit.New(audit.NewLogger(db))).
-		WithBranchGuard(customerguard.New(middleware.NewBranchGuard(db)))
+		WithBranchGuard(customerguard.New(middleware.NewBranchGuard(db))).
+		WithSharedGuard(customerguard.NewShared(middleware.NewKeyBranchWall(db, nil)))
 	mux := http.NewServeMux()
 	customer.NewHandler(svc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +71,19 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 			id := uuid.MustParse(b)
 			bc.BranchID = &id
 		}
-		mux.ServeHTTP(w, r.WithContext(branchctx.With(r.Context(), bc)))
+		ctx := branchctx.With(r.Context(), bc)
+		if role := r.Header.Get("X-Test-Role"); role != "" {
+			ctx = context.WithValue(ctx, middleware.UserContextKey, &middleware.UserClaims{
+				Role: role, Roles: []string{role},
+			})
+		}
+		if keyID := r.Header.Get("X-Test-Key"); keyID != "" {
+			ctx = middleware.WithKeyID(ctx, keyID)
+			if bc.BranchID != nil {
+				ctx = branchctx.WithKeyBranch(ctx, *bc.BranchID)
+			}
+		}
+		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(wallMux))
 
@@ -1691,3 +1704,164 @@ func TestWire_CreatePayloadBranchRule(t *testing.T) {
 		t.Errorf("a payload branch with no branch context = %d, want 403 (fail closed)", res.StatusCode)
 	}
 }
+
+func TestWire_SharedCustomerContactAuthorityGuardAndCreateAudit(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	ctx := context.Background()
+
+	otherBranch := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, otherBranch, "SHB-"+otherBranch.String()[:8]); err != nil {
+		t.Fatalf("seed other branch: %v", err)
+	}
+	for _, sub := range []string{"sub-sales", "sub-fin", "sub-owner"} {
+		if _, err := f.db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, f.branch); err != nil {
+			t.Fatalf("seed user grant %s: %v", sub, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub IN ('sub-sales', 'sub-fin', 'sub-owner')`)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE branch_id = $1`, otherBranch)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, otherBranch)
+	})
+
+	cid := str(t, f.create().body, "id")
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, cid, otherBranch); err != nil {
+		t.Fatalf("share customer: %v", err)
+	}
+	base := "/api/v1/customers/" + cid + "/contacts"
+	boundKey := []string{"X-Test-Key", "bound-key-1", "X-Test-Branch", f.branch.String()}
+
+	// 1. CreateContact on a shared customer with authorized_buyer or buyer_sale_cap_cents:
+	// sales user and branch-bound key are refused (403); finance and owner succeed and write contact.authority_changed.
+	for _, tc := range []struct {
+		name    string
+		body    map[string]any
+		headers []string
+		wantSub string
+	}{
+		{
+			name:    "sales user creating authorized buyer",
+			body:    map[string]any{"first_name": "Sam", "last_name": "Sales", "authorized_buyer": true},
+			headers: []string{"X-Test-Role", "sales", "X-Test-Sub", "sub-sales"},
+			wantSub: "this role may not change a shared customer's restricted fields",
+		},
+		{
+			name:    "sales user creating contact with buyer cap",
+			body:    map[string]any{"first_name": "Sam", "last_name": "Cap", "buyer_sale_cap_cents": 15000},
+			headers: []string{"X-Test-Role", "sales", "X-Test-Sub", "sub-sales"},
+			wantSub: "this role may not change a shared customer's restricted fields",
+		},
+		{
+			name:    "bound key creating authorized buyer",
+			body:    map[string]any{"first_name": "Key", "last_name": "Bound", "authorized_buyer": true, "buyer_sale_cap_cents": 15000},
+			headers: boundKey,
+			wantSub: "this key may act only on its own branch",
+		},
+	} {
+		r := f.do("POST", base, tc.body, tc.headers...)
+		if r.status != http.StatusForbidden || !strings.Contains(string(r.raw), tc.wantSub) {
+			t.Fatalf("%s: status = %d, body = %s, want 403 containing %q", tc.name, r.status, r.raw, tc.wantSub)
+		}
+	}
+	if actions, _ := f.auditRows(cid); len(actions) != 0 {
+		t.Fatalf("refused creates wrote audit rows %v, want none", actions)
+	}
+
+	finCreate := f.do("POST", base, map[string]any{
+		"first_name": "Fin", "last_name": "Buyer", "authorized_buyer": true, "buyer_sale_cap_cents": 15000,
+	}, "X-Test-Role", "finance", "X-Test-Sub", "sub-fin")
+	if finCreate.status != http.StatusCreated {
+		t.Fatalf("finance create authorized buyer = %d: %s, want 201", finCreate.status, finCreate.raw)
+	}
+	actions, changes := f.auditRows(cid)
+	if len(actions) != 1 || actions[0] != "contact.authority_changed" {
+		t.Fatalf("after finance create: audit rows = %v, want 1 contact.authority_changed", actions)
+	}
+	if ab, _ := changes[0]["authorized_buyer"].(map[string]any); ab["from"] != false || ab["to"] != true {
+		t.Errorf("finance create authorized_buyer audit = %v, want false -> true", changes[0])
+	}
+
+	ownerCreate := f.do("POST", base, map[string]any{
+		"first_name": "Own", "last_name": "Buyer", "authorized_buyer": true,
+	}, "X-Test-Role", "owner", "X-Test-Sub", "sub-owner")
+	if ownerCreate.status != http.StatusCreated {
+		t.Fatalf("owner create authorized buyer = %d: %s, want 201", ownerCreate.status, ownerCreate.raw)
+	}
+	actions, _ = f.auditRows(cid)
+	if len(actions) != 2 || actions[1] != "contact.authority_changed" {
+		t.Fatalf("after owner create: audit rows = %v, want 2 contact.authority_changed", actions)
+	}
+
+	// 2. UpdateContact on a shared customer:
+	// A plain contact created with default fields can have non-authority fields edited by sales,
+	// but changing authorized_buyer or buyer_sale_cap_cents (or order authority) is refused for sales and bound key,
+	// while finance and owner succeed and write contact.authority_changed.
+	plain := f.do("POST", base, map[string]any{"first_name": "Pat", "last_name": "Plain"}, "X-Test-Role", "sales", "X-Test-Sub", "sub-sales")
+	if plain.status != http.StatusCreated {
+		t.Fatalf("sales create plain contact = %d: %s, want 201", plain.status, plain.raw)
+	}
+	cpath := "/api/v1/contacts/" + str(t, plain.body, "id")
+
+	// Non-authority edit by sales succeeds.
+	if r := f.do("PUT", cpath, map[string]any{"first_name": "Pat", "last_name": "Plain", "title": "Coordinator"},
+		"If-Match", `"1"`, "X-Test-Role", "sales", "X-Test-Sub", "sub-sales"); r.status != http.StatusOK {
+		t.Fatalf("sales non-authority contact update = %d: %s, want 200", r.status, r.raw)
+	}
+
+	// Authority edits by sales and bound key are refused (403).
+	for _, tc := range []struct {
+		name    string
+		body    map[string]any
+		headers []string
+		wantSub string
+	}{
+		{
+			name:    "sales user granting authorized_buyer on PUT",
+			body:    map[string]any{"first_name": "Pat", "last_name": "Plain", "authorized_buyer": true},
+			headers: []string{"If-Match", `"2"`, "X-Test-Role", "sales", "X-Test-Sub", "sub-sales"},
+			wantSub: "this role may not change a shared customer's restricted fields",
+		},
+		{
+			name:    "sales user setting buyer_sale_cap_cents on PUT",
+			body:    map[string]any{"first_name": "Pat", "last_name": "Plain", "buyer_sale_cap_cents": 20000},
+			headers: []string{"If-Match", `"2"`, "X-Test-Role", "sales", "X-Test-Sub", "sub-sales"},
+			wantSub: "this role may not change a shared customer's restricted fields",
+		},
+		{
+			name:    "bound key updating contact on shared customer",
+			body:    map[string]any{"first_name": "Pat", "last_name": "Plain", "authorized_buyer": true},
+			headers: append([]string{"If-Match", `"2"`}, boundKey...),
+			wantSub: "this key may act only on its own branch",
+		},
+	} {
+		r := f.do("PUT", cpath, tc.body, tc.headers...)
+		if r.status != http.StatusForbidden || !strings.Contains(string(r.raw), tc.wantSub) {
+			t.Fatalf("%s: status = %d, body = %s, want 403 containing %q", tc.name, r.status, r.raw, tc.wantSub)
+		}
+	}
+
+	// Finance and owner succeed on PUT and write contact.authority_changed.
+	finPut := f.do("PUT", cpath, map[string]any{
+		"first_name": "Pat", "last_name": "Plain", "authorized_buyer": true, "buyer_sale_cap_cents": 20000,
+	}, "If-Match", `"2"`, "X-Test-Role", "finance", "X-Test-Sub", "sub-fin")
+	if finPut.status != http.StatusOK {
+		t.Fatalf("finance PUT authorized buyer = %d: %s, want 200", finPut.status, finPut.raw)
+	}
+	actions, _ = f.auditRows(cid)
+	if len(actions) != 3 || actions[2] != "contact.authority_changed" {
+		t.Fatalf("after finance PUT: audit rows = %v, want 3 contact.authority_changed", actions)
+	}
+
+	ownerPut := f.do("PUT", cpath, map[string]any{
+		"first_name": "Pat", "last_name": "Plain", "authorized_buyer": true, "buyer_sale_cap_cents": 30000,
+	}, "If-Match", `"3"`, "X-Test-Role", "owner", "X-Test-Sub", "sub-owner")
+	if ownerPut.status != http.StatusOK {
+		t.Fatalf("owner PUT buyer cap = %d: %s, want 200", ownerPut.status, ownerPut.raw)
+	}
+	actions, _ = f.auditRows(cid)
+	if len(actions) != 4 || actions[3] != "contact.authority_changed" {
+		t.Fatalf("after owner PUT: audit rows = %v, want 4 contact.authority_changed", actions)
+	}
+}
+

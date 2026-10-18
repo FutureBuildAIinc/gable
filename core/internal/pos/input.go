@@ -100,6 +100,8 @@ type attachCustomerRequest struct {
 	CustomerID *string `json:"customer_id"`
 	CustomerPO *string `json:"customer_po"`
 	JobID      *string `json:"job_id"`
+	// BuyerContactID names the roster buyer an on account sale is for.
+	BuyerContactID *string `json:"buyer_contact_id"`
 }
 
 func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
@@ -110,6 +112,9 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 	}
 	if id, ok := v.UUID("job_id", r.JobID, false); ok {
 		out.JobID = &id
+	}
+	if id, ok := v.UUID("buyer_contact_id", r.BuyerContactID, false); ok {
+		out.BuyerContactID = &id
 	}
 	if r.CustomerPO != nil {
 		out.CustomerPO = strings.TrimSpace(*r.CustomerPO)
@@ -133,6 +138,8 @@ type tenderRequest struct {
 	AmountCents json.RawMessage `json:"amount_cents"`
 	Reference   *string         `json:"reference"`
 	TokenID     *string         `json:"token_id"`
+	IDChecked   *bool           `json:"id_checked"`
+	IDType      *string         `json:"id_type"`
 }
 
 func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []TenderIn {
@@ -150,8 +157,10 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 			in.Method = TenderCard
 		case "account":
 			in.Method = TenderAccount
+		case "store_credit":
+			in.Method = TenderStoreCredit
 		default:
-			v.Check(false, field("method"), "must be cash, check, card or account")
+			v.Check(false, field("method"), "must be cash, check, card, account or store_credit")
 		}
 		if n, ok := v.Int(field("amount_cents"), t.AmountCents, true); ok {
 			v.Check(n > 0, field("amount_cents"), "must be greater than zero")
@@ -162,6 +171,22 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 		}
 		if t.TokenID != nil {
 			in.TokenID = *t.TokenID
+		}
+		// "ID checked" and its type ride on a check or an account charge; the
+		// ID's number is never taken (the body has no field for it).
+		if t.IDChecked != nil {
+			in.IDChecked = *t.IDChecked
+		}
+		if t.IDType != nil {
+			in.IDType = *t.IDType
+		}
+		if in.IDChecked || in.IDType != "" {
+			v.Check(in.Method == TenderCheck || in.Method == TenderAccount, field("id_checked"),
+				"ID is recorded on a check or an account tender only")
+			v.Check(in.IDChecked, field("id_checked"), "must be true when an ID type is named")
+			if in.IDType != "" {
+				v.Enum(field("id_type"), in.IDType, idTypes...)
+			}
 		}
 		out = append(out, in)
 	}
@@ -239,9 +264,15 @@ type returnLineRequest struct {
 	UOM         *string         `json:"uom"`
 	UnitPrice   json.RawMessage `json:"unit_price_ten_thousandths"`
 	Restock     *bool           `json:"restock"`
+	// ReasonCode is the line's reason from the closed list (absent is other).
+	ReasonCode *string `json:"reason_code"`
 }
 
-func (r *returnRequest) parse() (*ReturnIn, error) {
+func (r *returnRequest) parse() (*ReturnIn, error) { return r.parseWith("lines") }
+
+// parseWith reads the request with the returned lines named under the prefix
+// in its field errors (an exchange names them returned_lines).
+func (r *returnRequest) parseWith(prefix string) (*ReturnIn, error) {
 	v := &httpx.Validator{}
 	out := &ReturnIn{}
 	if r.RegisterID != nil {
@@ -269,18 +300,17 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		v.Check(false, "refund_method", "must be cash, card or account")
 	}
 	if r.Reason != nil {
-		out.Reason = *r.Reason
+		out.Reason = strings.TrimSpace(*r.Reason)
 	}
-	v.Required("reason", out.Reason)
 	if r.GatewayTxID != nil {
 		out.GatewayTxID = *r.GatewayTxID
 	}
 	if len(r.Lines) == 0 {
-		v.Check(false, "lines", "name at least one returned line")
+		v.Check(false, prefix, "name at least one returned line")
 	}
 	for i := range r.Lines {
 		l := &r.Lines[i]
-		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
+		field := func(name string) string { return fmt.Sprintf("%s[%d].%s", prefix, i, name) }
 		rl := ReturnLineIn{Restock: true}
 		if id, ok := v.UUID(field("product_id"), l.ProductID, false); ok {
 			rl.ProductID = &id
@@ -312,7 +342,27 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		if l.Restock != nil {
 			rl.Restock = *l.Restock
 		}
+		// the reason is from the closed lowercase list; none named is other
+		if l.ReasonCode != nil && *l.ReasonCode != "" {
+			rl.ReasonCode = *l.ReasonCode
+			v.Enum(field("reason_code"), rl.ReasonCode, returnReasonCodes()...)
+		} else {
+			rl.ReasonCode = ReasonOther
+		}
 		out.Lines = append(out.Lines, rl)
+	}
+	// other asks for the return's note; a return whose every line names a
+	// reason of the list needs none, and the memo says the reasons in words
+	needsNote := false
+	for i := range out.Lines {
+		if out.Lines[i].ReasonCode == ReasonOther {
+			needsNote = true
+		}
+	}
+	if needsNote {
+		v.Required("reason", out.Reason)
+	} else if out.Reason == "" {
+		out.Reason = reasonNote(out.Lines)
 	}
 	if err := v.Err(); err != nil {
 		return nil, err
@@ -360,13 +410,14 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 	for m, raw := range r.CountedByMethod {
 		method, ok := ParseTenderMethod(m)
 		if !ok {
-			v.Check(false, "counted_by_method."+m, "must be cash, check, card or account")
+			v.Check(false, "counted_by_method."+m, "must be cash, check, card, account or store_credit")
 			continue
 		}
-		if method == TenderAccount {
-			// an account charge is not money in the drawer: counted less
-			// expected over it would post the whole charge as a shortage
-			v.Check(false, "counted_by_method."+m, "an account charge is not in the drawer, so it is not counted")
+		if method == TenderAccount || method == TenderStoreCredit {
+			// an account charge or store credit is not money in the drawer:
+			// counted less expected over it would post the whole amount as a
+			// shortage
+			v.Check(false, "counted_by_method."+m, "an account charge or store credit is not in the drawer, so it is not counted")
 			continue
 		}
 		if isAbsentRaw(raw) {
