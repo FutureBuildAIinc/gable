@@ -9443,7 +9443,6 @@ export interface components {
             memo?: string;
             /** Format: uuid */
             branch_id: string;
-            posted_by?: string;
             lines?: components["schemas"]["GlJournalLineRequest"][];
         };
         GlJournalLineRequest: {

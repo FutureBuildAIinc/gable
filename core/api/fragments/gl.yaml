@@ -1003,8 +1003,6 @@ components:
         branch_id:
           type: string
           format: uuid
-        posted_by:
-          type: string
         lines:
           type: array
           items:

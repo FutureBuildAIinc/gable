@@ -384,7 +384,6 @@ type createJournalEntryRequest struct {
 	EntryDate string           `json:"entry_date"` // YYYY-MM-DD
 	Memo      string           `json:"memo"`
 	BranchID  string           `json:"branch_id"`
-	PostedBy  string           `json:"posted_by"`
 	Lines     []journalLineReq `json:"lines"`
 }
 
@@ -451,7 +450,7 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 		Memo:      req.Memo,
 		Source:    SourceManual,
 		BranchID:  branchID,
-		PostedBy:  req.PostedBy,
+		PostedBy:  actor.FromContext(r.Context()).ID,
 		Status:    StatusDraft,
 		Lines:     lines,
 	}

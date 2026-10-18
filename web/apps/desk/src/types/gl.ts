@@ -145,7 +145,6 @@ export interface CreateJournalEntryRequest {
     entry_date: string;
     memo: string;
     branch_id: string;
-    posted_by?: string;
     lines: {
         account_id: string;
         description: string;
