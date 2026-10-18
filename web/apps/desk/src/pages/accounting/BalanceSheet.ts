@@ -5,6 +5,10 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import '../../components/ui/gable-date-field.ts';
+import './branch-scope.ts';
+import './gl-detail.ts';
+import { branchContext } from '../../services/BranchContext';
+import { loadFailure } from './load-failure';
 import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatStatementCents, statementAmountClasses } from './statement-format';
@@ -20,6 +24,9 @@ export class BalanceSheet extends LitElement {
     @state() private report: BalanceSheetReport | null = null;
     @state() private loading = true;
     @state() private asOfDate = todayDay();
+    /** The branch id the books are cut to, empty for the consolidated view. */
+    @state() private scope = branchContext.currentId ?? '';
+    @state() private drill: { id: string; label: string } | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -29,10 +36,10 @@ export class BalanceSheet extends LitElement {
     private async _load() {
         this.loading = true;
         try {
-            this.report = await fetchBalanceSheet(this.asOfDate);
+            this.report = await fetchBalanceSheet(this.asOfDate, this.scope || undefined);
         } catch (err) {
             console.error(err);
-            ToastService.show('Failed to load Balance Sheet', 'error');
+            ToastService.show(loadFailure(err, 'Balance Sheet'), 'error');
         } finally {
             this.loading = false;
         }
@@ -57,7 +64,11 @@ export class BalanceSheet extends LitElement {
             `;
         }
         return items.map(item => html`
-            <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+            <tr
+                class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                title="Show the ledger lines"
+                @click=${() => { this.drill = { id: item.account_id, label: `${item.account_code} ${item.account_name}` }; }}
+            >
                 <td class="px-4 py-2.5 font-mono text-emerald-400 pl-8">${item.account_code}</td>
                 <td class="px-4 py-2.5 text-white">${item.account_name}</td>
                 <td class="px-4 py-2.5 text-right font-mono text-zinc-200">${formatStatementCents(item.amount)}</td>
@@ -93,6 +104,10 @@ export class BalanceSheet extends LitElement {
                         </p>
                     </div>
                     <div class="flex items-center gap-3">
+                        <gable-branch-scope
+                            .value=${this.scope}
+                            @branch-scope-change=${(e: CustomEvent) => { this.scope = e.detail.value; this.drill = null; this._load(); }}
+                        ></gable-branch-scope>
                         <label class="text-sm text-zinc-400">As of:</label>
                         <gable-date-field
                             label="As of"
@@ -225,6 +240,17 @@ export class BalanceSheet extends LitElement {
                             </table>
                         </div>
                     </div>
+
+                    ${this.drill ? html`
+                        <gable-gl-detail
+                            account-id=${this.drill.id}
+                            account-label=${this.drill.label}
+                            from="1900-01-01"
+                            to=${report.as_of_date}
+                            branch-id=${this.scope}
+                            @gl-detail-close=${() => { this.drill = null; }}
+                        ></gable-gl-detail>
+                    ` : nothing}
                 `}
             </div>
         `;

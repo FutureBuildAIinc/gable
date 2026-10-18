@@ -14,6 +14,7 @@ export interface GLAccount {
     is_active: boolean;
     description: string;
     balance: number; // Cents
+    revision: number;
     created_at: string;
     updated_at: string;
 }
@@ -25,6 +26,7 @@ export interface JournalEntry {
     memo: string;
     source: 'MANUAL' | 'INVOICE' | 'PAYMENT' | 'ADJUSTMENT' | 'CLOSING';
     source_ref_id?: string;
+    branch_id: string;
     status: 'DRAFT' | 'POSTED' | 'VOID';
     posted_by: string;
     total_debit: number;  // Cents
@@ -41,6 +43,7 @@ export interface JournalLine {
     account_code?: string;
     account_name?: string;
     description: string;
+    branch_id?: string;
     debit: number;  // Cents
     credit: number; // Cents
 }
@@ -53,6 +56,10 @@ export interface FiscalPeriod {
     status: 'OPEN' | 'CLOSED';
     closed_at?: string;
     closed_by?: string;
+    reopen_reason?: string;
+    reopened_by?: string;
+    reopened_at?: string;
+    revision: number;
     created_at: string;
 }
 
@@ -61,6 +68,8 @@ export interface TrialBalanceRow {
     account_code: string;
     account_name: string;
     account_type: string;
+    currency?: string;
+    branch_id: string;
     debit: number;  // Cents
     credit: number; // Cents
 }
@@ -85,8 +94,21 @@ export interface AccountLineItem {
     amount: number; // Cents
 }
 
+/** The previous period's totals beside the current ones, cents. */
+export interface ProfitAndLossComparison {
+    start_date: string;
+    end_date: string;
+    total_revenue: number;
+    total_cogs: number;
+    gross_profit: number;
+    total_expenses: number;
+    net_income: number;
+}
+
 /** Income statement for the window [start_date, end_date]. */
 export interface ProfitAndLossReport {
+    branch_id?: string;
+    comparison?: ProfitAndLossComparison;
     start_date: string;
     end_date: string;
     revenue: AccountLineItem[];
@@ -108,6 +130,7 @@ export interface ProfitAndLossReport {
  * accounts and then print `total_equity` — do not add the two together.
  */
 export interface BalanceSheetReport {
+    branch_id?: string;
     as_of_date: string;
     assets: AccountLineItem[];
     liabilities: AccountLineItem[];
@@ -121,10 +144,45 @@ export interface BalanceSheetReport {
 export interface CreateJournalEntryRequest {
     entry_date: string;
     memo: string;
+    branch_id: string;
+    posted_by?: string;
     lines: {
         account_id: string;
         description: string;
-        debit: number;
-        credit: number;
+        debit_cents: number;
+        credit_cents: number;
     }[];
+}
+
+/** One posted ledger line behind a statement row (the drill down). */
+export interface GLDetailRow {
+    entry_id: string;
+    entry_number: number;
+    entry_date: string;
+    memo: string;
+    source: string;
+    line_id: string;
+    account_id: string;
+    account_code: string;
+    account_name: string;
+    description: string;
+    branch_id: string;
+    debit_cents: number;
+    credit_cents: number;
+}
+
+/** One control account against its subledger, the difference in cents. */
+export interface TieOutLeg {
+    control_cents: number;
+    subledger_cents: number;
+    difference_cents: number;
+}
+
+/** The AR and AP subledger tie out of one day. */
+export interface TieOutReport {
+    as_of: string;
+    currency: string;
+    branch_id?: string;
+    ar: TieOutLeg;
+    ap: TieOutLeg;
 }
