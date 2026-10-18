@@ -35,3 +35,32 @@ export function icon(
   if (cls) el.setAttribute('class', cls);
   return html`${unsafeHTML(el.outerHTML)}`;
 }
+
+/**
+ * The two provider marks a sign in button carries, drawn here by hand in the
+ * helper's own idiom (a 24 box, currentColor, the stroke width and caps
+ * lucide uses) rather than brought in as files: monochrome on purpose, so
+ * each follows the theme exactly like every other icon on a card.
+ */
+
+/** Google's mark: the ring and crossbar of a G, in the icon stroke style. */
+export function googleGlyph(size: number = 20, cls: string = '') {
+  return glyph(size, cls, '<path d="M19.79 7.5A9 9 0 1 0 21 12h-9"/>');
+}
+
+/** Microsoft's mark: the four panes of the window, in the icon stroke style. */
+export function microsoftGlyph(size: number = 20, cls: string = '') {
+  return glyph(size, cls,
+    '<rect x="3" y="3" width="7.5" height="7.5" rx="1"/>' +
+    '<rect x="13.5" y="3" width="7.5" height="7.5" rx="1"/>' +
+    '<rect x="3" y="13.5" width="7.5" height="7.5" rx="1"/>' +
+    '<rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1"/>');
+}
+
+function glyph(size: number, cls: string, body: string) {
+  const classAttr = cls ? ` class="${cls}"` : '';
+  return html`${unsafeHTML(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}"${classAttr} ` +
+    `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+  )}`;
+}

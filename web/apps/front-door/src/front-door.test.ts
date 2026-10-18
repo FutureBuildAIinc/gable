@@ -10,7 +10,7 @@
  * "Display name" field sits under a "Sign in with another name" heading.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { authConfig, authCustody } from '@gable/auth';
+import { authConfig, authCustody, resetAuthMethodsCache } from '@gable/auth';
 import './front-door.ts';
 import { TILE_ICONS, type GableFrontDoor } from './front-door.ts';
 import { DESK_ENTRIES } from './apps-catalog.ts';
@@ -211,9 +211,18 @@ describe('front door persona cards (dev mode)', () => {
  * so the production build must not render "Gable Building Supply".
  */
 describe('front door production build (no dev mode)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetAuthMethodsCache();
+    // The door asks for the dealer's allowed methods at boot; a failed
+    // answer fails closed to email and password with the token paste.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+  });
+
   it('renders the token door with no persona cards', async () => {
     authConfig.devMode = false;
     const el = await mount();
+    await settle(el);
     expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
     expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
     expect(el.querySelector('button[aria-label^="Sign in as"]')).toBeNull();
@@ -223,6 +232,140 @@ describe('front door production build (no dev mode)', () => {
   it('does not include the tenant name in the heading', async () => {
     authConfig.devMode = false;
     const el = await mount();
+    await settle(el);
     expect(el.querySelector('h1')?.textContent).not.toContain('Building Supply');
+  });
+});
+
+/**
+ * The production door renders the dealer's allowed sign in methods,
+ * discovered at runtime from /api/v1/auth/config, in the server's order;
+ * a failure fails closed to email and password with the visible notice, and
+ * a method the server has not built yet shows its plain refusal inline.
+ * The dev sign-in stokes the identity tap with the display block alone.
+ */
+describe('front door runtime sign in methods (S8)', () => {
+  function stubConfig(body: unknown, status = 200) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/api/v1/auth/config')) {
+        return new Response(JSON.stringify(body), { status });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    resetAuthMethodsCache();
+  });
+
+  it('renders only the allowed methods, in the server\'s order (allowlist one)', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
+    // The subtitle speaks to the methods shown, not the token paste.
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Sign in with your work account');
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+    // The form's submit is the card's one primary button, named Sign in.
+    const primary = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Sign in');
+    expect(primary).toBeDefined();
+    expect(primary?.className).toContain('bg-gable-green');
+    // The quiet divider between the form and the other methods.
+    expect(el.textContent).toContain('or');
+    const methodButtons = [...el.querySelectorAll('button[aria-label^="Sign in with"]')] as HTMLButtonElement[];
+    expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual(['Sign in with Google']);
+    // Each method button leads with a mark in the icon style.
+    expect(methodButtons[0].querySelector('svg')).not.toBeNull();
+    // The token sentence moved inside the disclosure.
+    expect(el.querySelector('h1 + p')?.textContent).not.toContain('bearer token');
+    expect(el.querySelector('details')?.textContent).toContain('bearer token');
+  });
+
+  it('renders a different allowlist the same way (allowlist two)', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'oidc', kind: 'redirect', label: 'Dealer SSO', start_url: '/api/v1/auth/start/oidc', issuer_url: 'https://id.example.com', client_id: 'gable' },
+        { method: 'passkey', kind: 'passkey', label: 'Passkey', start_url: '/api/v1/auth/start/passkey', issuer_url: null, client_id: null },
+        { method: 'magic_link', kind: 'link', label: 'Email a sign in link', start_url: '/api/v1/auth/start/magic_link', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+    const methodButtons = [...el.querySelectorAll('button[aria-label^="Sign in with"]')] as HTMLButtonElement[];
+    expect(methodButtons.map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Sign in with Dealer SSO',
+      'Sign in with Passkey',
+      'Sign in with Email a sign in link',
+      'Sign in with Microsoft',
+    ]);
+    for (const btn of methodButtons) {
+      expect(btn.querySelector('svg')).not.toBeNull();
+    }
+    // With only redirect style methods, the choice leads the subtitle and no
+    // divider shows (one kind only).
+    expect(el.querySelector('h1 + p')?.textContent).toContain('Choose how you sign in');
+    const orDividers = [...el.querySelectorAll('span')].filter((s) => s.textContent?.trim() === 'or');
+    expect(orDividers).toHaveLength(0);
+    // No email form: the dealer allows no form method.
+    expect(el.querySelector('input[aria-label="Email"]')).toBeNull();
+    // The out of band token paste stays available either way.
+    expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
+  });
+
+  it('fails closed to email and password with the visible notice when the config call fails', async () => {
+    authConfig.devMode = false;
+    stubConfig({}, 500);
+    const el = await mount();
+    await settle(el);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('email and password');
+    expect(el.querySelector('input[aria-label="Email"]')).not.toBeNull();
+  });
+
+  it('shows the server\'s plain refusal inline when a method is not built yet', async () => {
+    authConfig.devMode = false;
+    stubConfig({
+      auth_mode: 'production',
+      methods: [
+        { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+      ],
+    });
+    const el = await mount();
+    await settle(el);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
+      { status: 501 },
+    )));
+    el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!.click();
+    await settle(el);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('not available on this server yet');
+  });
+
+  it('a dev persona sign in stokes the identity tap and writes no token anywhere', async () => {
+    authConfig.devMode = true;
+    stubConfig({});
+    const el = await mount();
+    const ownerCard = [...el.querySelectorAll('button[aria-label^="Sign in as"]')].find(
+      (b) => b.textContent?.includes('Morgan Hale'),
+    ) as HTMLButtonElement;
+    ownerCard.click();
+    await settle(el);
+    const tap = localStorage.getItem('gable.identity-tap.v1');
+    expect(tap).not.toBeNull();
+    expect(tap).toContain('Morgan Hale');
+    const allStorage = [...Object.entries({ ...localStorage })].map(([k, v]) => k + v).join(' ')
+      + [...Array(sessionStorage.length).keys()].map((i) => sessionStorage.key(i) + sessionStorage.getItem(sessionStorage.key(i) as string)).join(' ');
+    expect(allStorage).not.toContain('eyJ');
+    expect(allStorage).not.toContain('token');
   });
 });

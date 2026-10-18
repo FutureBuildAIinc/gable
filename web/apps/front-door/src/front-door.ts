@@ -29,12 +29,16 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
-  Building2, ClipboardList, CreditCard, FileText, Hammer, ScrollText, LayoutDashboard,
+  Building2, ClipboardList, CreditCard, FileText, Fingerprint, Hammer, Mail, ScrollText, LayoutDashboard,
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
-import { icon, cn, useThemeSubject } from '@gable/design-system';
-import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
+import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/design-system';
+import {
+  authCustody, authConfig, InvalidTokenError,
+  authMethodsConfig, recordIdentity, readIdentity, forgetIdentity,
+  type AuthMethodsRuntimeConfig, type SignInMethodConfig,
+} from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
 
@@ -74,6 +78,19 @@ function initialsFor(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+/** The error envelope's message off a refusal, when the body carries one. */
+async function serverMessage(resp: Response): Promise<string | null> {
+  const body = await resp.json().catch(() => null);
+  if (body !== null && typeof body === 'object' && 'error' in body) {
+    const err = (body as Record<string, unknown>)['error'];
+    if (err !== null && typeof err === 'object' && 'message' in err) {
+      const message = (err as Record<string, unknown>)['message'];
+      if (typeof message === 'string' && message !== '') return message;
+    }
+  }
+  return null;
+}
+
 @customElement('gable-front-door')
 export class GableFrontDoor extends LitElement {
   // Light DOM so the shared Tailwind tokens apply, exactly like the desk.
@@ -85,6 +102,12 @@ export class GableFrontDoor extends LitElement {
   @state() private _devName = 'Local Developer';
   @state() private _token = '';
   @state() private _signInError: string | null = null;
+  // The runtime auth methods config (S8): the dealer's allowed sign in
+  // methods, discovered from the server, in the server's order. Null until
+  // the answer arrives (or fails closed) in a production build.
+  @state() private _authCfg: AuthMethodsRuntimeConfig | null = null;
+  @state() private _email = '';
+  @state() private _password = '';
 
   connectedCallback() {
     super.connectedCallback();
@@ -95,6 +118,64 @@ export class GableFrontDoor extends LitElement {
       this._userName = authCustody.displayName;
       this._roles = authCustody.roles;
       void this._loadCatalog();
+    }
+    // A production build discovers the dealer's allowed sign in methods at
+    // boot; a dev build keeps its persona cards and never asks.
+    if (!authConfig.devMode) {
+      void this._loadAuthConfig();
+    }
+  }
+
+  private async _loadAuthConfig() {
+    this._authCfg = await authMethodsConfig(import.meta.env.VITE_API_URL || '');
+  }
+
+  /** One method's start attempt: the server's plain refusal shows inline. */
+  private async _startMethod(method: SignInMethodConfig) {
+    this._signInError = null;
+    if (method.start_url === null) {
+      this._signInError = 'This method cannot start here.';
+      return;
+    }
+    try {
+      const resp = await fetch(method.start_url, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      if (resp.ok) {
+        // No method answers a redirect yet; when one does, this is where
+        // the navigation happens.
+        return;
+      }
+      this._signInError = await serverMessage(resp) ?? 'Sign in did not start.';
+    } catch {
+      this._signInError = 'The server could not be reached.';
+    }
+  }
+
+  /** The email and password form: the portal login answers the session cookie. */
+  private async _signInEmailPassword() {
+    this._signInError = null;
+    if (this._email === '' || this._password === '') {
+      this._signInError = 'Enter your email and password.';
+      return;
+    }
+    try {
+      const resp = await fetch('/api/portal/v1/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: this._email, password: this._password }),
+      });
+      if (resp.ok) {
+        // The session rides the portal cookie; the portal is where this
+        // sign in continues.
+        window.location.assign('/portal');
+        return;
+      }
+      this._signInError = await serverMessage(resp) ?? 'Sign in failed.';
+    } catch {
+      this._signInError = 'The server could not be reached.';
     }
   }
 
@@ -133,6 +214,7 @@ export class GableFrontDoor extends LitElement {
     useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.roles;
+    this._tapIdentity();
     void this._loadCatalog();
   }
 
@@ -158,11 +240,21 @@ export class GableFrontDoor extends LitElement {
     useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.personaRole !== null ? [authCustody.personaRole] : [];
+    this._tapIdentity(persona.homeYardCode);
     void this._loadCatalog();
+  }
+
+  /** Remember the last signed in user's display block for the next visit. */
+  private _tapIdentity(yard: string | null = null) {
+    const name = authCustody.displayName;
+    if (name === null) return;
+    const role = authCustody.personaRole ?? this._roles[0] ?? null;
+    recordIdentity(localStorage, { displayName: name, role, yard: yard ?? null });
   }
 
   private _signOut() {
     authCustody.signOut();
+    forgetIdentity(localStorage);
     useThemeSubject(null);
     this._signInError = null;
     this._userName = null;
@@ -298,33 +390,178 @@ export class GableFrontDoor extends LitElement {
             <p class="text-sm text-zinc-400">
               ${dev
                 ? 'This is the local demo. Each card signs in as that person, shaping what the screens offer.'
-                : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
+                : this._signInSubtitle()}
             </p>
           </div>
-          ${dev ? this._renderPersonaCards() : html`
-            <label class="block space-y-1.5">
-              <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
-              <textarea
-                .value=${this._token}
-                @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
-                rows="4"
-                aria-label="Bearer token"
-                placeholder="eyJhbGciOi…"
-                class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
-              ></textarea>
-            </label>
-            ${this._signInError ? html`
-              <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
-            ` : nothing}
-            <button
-              @click=${() => this._signIn()}
-              class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
-            >
-              Sign in
-            </button>
-          `}
+          ${dev ? this._renderPersonaCards() : this._renderMethodsSignIn()}
         </div>
       </div>
+    `;
+  }
+
+  /**
+   * The production sign in's word: the form leads ("your work account");
+   * with only redirect style methods on the card, the choice leads.
+   */
+  private _signInSubtitle(): string {
+    const cfg = this._authCfg;
+    if (cfg !== null && !cfg.degraded && !cfg.methods.some((m) => m.kind === 'form')) {
+      return 'Choose how you sign in.';
+    }
+    return 'Sign in with your work account.';
+  }
+
+  /**
+   * The production sign in: the dealer's allowed methods, in the server's
+   * order, discovered at runtime. The bearer token paste stays as the out of
+   * band path it always was, under its own disclosure.
+   */
+  private _renderMethodsSignIn() {
+    if (this._authCfg === null) {
+      return html`
+        <div class="flex items-center justify-center gap-3 py-8" role="status">
+          <div class="h-6 w-6 animate-spin rounded-full border-2 border-gable-green border-t-transparent"></div>
+          <span class="text-sm text-muted-foreground font-medium tracking-wide">Reading the sign in methods…</span>
+        </div>
+      `;
+    }
+    const last = readIdentity(localStorage);
+    return html`
+      ${this._authCfg.degraded && this._authCfg.notice ? html`
+        <p role="alert" class="text-sm text-amber-300">${this._authCfg.notice}</p>
+      ` : nothing}
+      ${last ? html`
+        <div class="rounded-xl border border-zinc-500 bg-surface-2 px-4 py-3 flex items-center gap-3">
+          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green">
+            ${initialsFor(last.displayName)}
+          </div>
+          <div class="leading-tight">
+            <div class="text-sm text-white">Continue as ${last.displayName}</div>
+            <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+              ${[last.role, last.yard].filter(Boolean).join(' · ') || 'previous visit'}
+            </div>
+          </div>
+        </div>
+      ` : nothing}
+      <div class="space-y-2.5">
+        ${this._renderMethodList(this._authCfg.methods)}
+      </div>
+      ${this._signInError ? html`
+        <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+      ` : nothing}
+      <details class="border-t border-white/15 pt-4">
+        <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none">
+          Use a bearer token instead
+        </summary>
+        <div class="pt-3 space-y-3">
+          <p class="text-xs text-zinc-400">
+            Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.
+          </p>
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
+            <textarea
+              .value=${this._token}
+              @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
+              rows="4"
+              aria-label="Bearer token"
+              placeholder="Paste the token"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            ></textarea>
+          </label>
+          <button
+            type="button"
+            @click=${() => this._signIn()}
+            class="w-full rounded-lg bg-surface-2 border border-zinc-500 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green transition-all"
+          >
+            Sign in with the token
+          </button>
+        </div>
+      </details>
+    `;
+  }
+
+  /**
+   * The methods in the server's order, with a quiet "or" divider between the
+   * form and the other kinds; no divider when only one kind shows.
+   */
+  private _renderMethodList(methods: readonly SignInMethodConfig[]) {
+    const out: unknown[] = [];
+    for (let i = 0; i < methods.length; i++) {
+      if (i > 0 && (methods[i - 1].kind === 'form') !== (methods[i].kind === 'form')) {
+        out.push(html`
+          <div class="flex items-center gap-3 py-1" role="presentation">
+            <span class="h-px flex-1 bg-white/15"></span>
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">or</span>
+            <span class="h-px flex-1 bg-white/15"></span>
+          </div>
+        `);
+      }
+      out.push(this._renderMethod(methods[i]));
+    }
+    return out;
+  }
+
+  /** One allowed method's leading mark, in the icon style the door already uses. */
+  private _methodIcon(m: SignInMethodConfig) {
+    switch (m.method) {
+      case 'passkey': return icon(Fingerprint, 18);
+      case 'magic_link': return icon(Mail, 18);
+      case 'google': return googleGlyph(18);
+      case 'microsoft': return microsoftGlyph(18);
+      case 'oidc': return icon(Building2, 18);
+      default: return nothing;
+    }
+  }
+
+  /** One allowed method: the form, or the button that starts it. */
+  private _renderMethod(m: SignInMethodConfig) {
+    if (m.kind === 'form') {
+      return html`
+        <div class="space-y-2.5">
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Email</span>
+            <input
+              type="email"
+              .value=${this._email}
+              @input=${(e: Event) => { this._email = (e.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
+              aria-label="Email"
+              autocomplete="username"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            />
+          </label>
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
+            <input
+              type="password"
+              .value=${this._password}
+              @input=${(e: Event) => { this._password = (e.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
+              aria-label="Password"
+              autocomplete="current-password"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            />
+          </label>
+          <button
+            type="button"
+            @click=${() => void this._signInEmailPassword()}
+            class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+          >
+            Sign in
+          </button>
+        </div>
+      `;
+    }
+    return html`
+      <button
+        type="button"
+        @click=${() => void this._startMethod(m)}
+        aria-label="Sign in with ${m.label}"
+        class="w-full flex items-center justify-center gap-2.5 rounded-lg border border-zinc-500 bg-surface-2 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 transition-all"
+      >
+        <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
+        <span>${m.label}</span>
+      </button>
     `;
   }
 
@@ -350,7 +587,7 @@ export class GableFrontDoor extends LitElement {
         ` : nothing}
         <button
           @click=${() => this._signIn()}
-          class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+          class="w-full rounded-lg bg-gable-green/10 border border-gable-green px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
         >
           Sign in
         </button>
