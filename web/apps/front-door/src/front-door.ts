@@ -102,6 +102,7 @@ export class GableFrontDoor extends LitElement {
   @state() private _devName = 'Local Developer';
   @state() private _token = '';
   @state() private _signInError: string | null = null;
+  @state() private _errorSource: SignInMethodCode | 'continue-as' | 'token' | 'session' | null = null;
   // The runtime auth methods config (S8): the dealer's allowed sign in
   // methods, discovered from the server, in the server's order. Null until
   // the answer arrives (or fails closed) in a production build.
@@ -136,8 +137,12 @@ export class GableFrontDoor extends LitElement {
   }
 
   /** One method's start attempt: the server's plain refusal shows inline. */
-  private async _startMethod(method: SignInMethodConfig) {
+  private async _startMethod(
+    method: SignInMethodConfig,
+    source: SignInMethodCode | 'continue-as' = method.method,
+  ) {
     this._signInError = null;
+    this._errorSource = source;
     if (method.start_url === null) {
       this._signInError = 'This method cannot start here.';
       return;
@@ -161,6 +166,7 @@ export class GableFrontDoor extends LitElement {
   /** The email and password form: the portal login answers the session cookie. */
   private async _signInEmailPassword() {
     this._signInError = null;
+    this._errorSource = 'email_password';
     if (this._email === '' || this._password === '') {
       this._signInError = 'Enter your email and password.';
       return;
@@ -194,6 +200,7 @@ export class GableFrontDoor extends LitElement {
       // retry could only 401 again, so go back to the sign in card.
       if (authCustody.session === null) {
         this._signOut();
+        this._errorSource = 'session';
         this._signInError = 'Your session expired. Sign in again.';
         return;
       }
@@ -203,6 +210,7 @@ export class GableFrontDoor extends LitElement {
 
   private _signIn() {
     this._signInError = null;
+    this._errorSource = 'token';
     try {
       if (authConfig.devMode) {
         authCustody.signInDev(this._devName);
@@ -236,6 +244,7 @@ export class GableFrontDoor extends LitElement {
    */
   private _signInAsPersona(persona: DemoPersona) {
     this._signInError = null;
+    this._errorSource = null;
     try {
       authCustody.signInDev(persona.name, { role: persona.role, homeYardCode: persona.homeYardCode });
     } catch (err) {
@@ -299,7 +308,7 @@ export class GableFrontDoor extends LitElement {
         }
         return;
       }
-      void this._startMethod(allowed);
+      void this._startMethod(allowed, 'continue-as');
       return;
     }
     this._focusFirstAllowedMethod();
@@ -310,6 +319,7 @@ export class GableFrontDoor extends LitElement {
     forgetIdentity(localStorage);
     useThemeSubject(null);
     this._signInError = null;
+    this._errorSource = null;
     this._userName = null;
     this._roles = [];
     this._state = { kind: 'signed-out' };
@@ -523,30 +533,35 @@ export class GableFrontDoor extends LitElement {
           </button>
         </div>
       ` : nothing}
+      ${this._signInError && this._errorSource === 'session' ? html`
+        <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+      ` : nothing}
       ${last ? html`
-        <button
-          type="button"
-          @click=${() => this._continueAs(last)}
-          aria-label="Continue as ${last.displayName}${lastMethodLabel ? ` with ${lastMethodLabel}` : ''}"
-          class="w-full rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 flex items-center gap-3 text-left hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
-        >
-          <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0">
-            ${initialsFor(last.displayName)}
-          </div>
-          <div class="min-w-0 leading-tight">
-            <div class="text-sm font-medium text-white truncate">Continue as ${last.displayName}</div>
-            ${lastMethodLabel ? html`
-              <div class="text-xs text-muted-foreground truncate">with ${lastMethodLabel}</div>
-            ` : nothing}
-          </div>
-        </button>
+        <div class="space-y-1.5">
+          <button
+            type="button"
+            @click=${() => this._continueAs(last)}
+            aria-label="Continue as ${last.displayName}${lastMethodLabel ? ` with ${lastMethodLabel}` : ''}"
+            class="w-full rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 flex items-center gap-3 text-left hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+          >
+            <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0">
+              ${initialsFor(last.displayName)}
+            </div>
+            <div class="min-w-0 leading-tight">
+              <div class="text-sm font-medium text-white truncate">Continue as ${last.displayName}</div>
+              ${lastMethodLabel ? html`
+                <div class="text-xs text-muted-foreground truncate">with ${lastMethodLabel}</div>
+              ` : nothing}
+            </div>
+          </button>
+          ${this._signInError && this._errorSource === 'continue-as' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
+        </div>
       ` : nothing}
       <div class="space-y-2.5">
         ${this._renderMethodList(this._authCfg.methods)}
       </div>
-      ${this._signInError ? html`
-        <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
-      ` : nothing}
       <details class="border-t border-white/15 pt-4">
         <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none">
           Use a bearer token instead
@@ -573,6 +588,9 @@ export class GableFrontDoor extends LitElement {
           >
             Sign in with the token
           </button>
+          ${this._signInError && this._errorSource === 'token' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
         </div>
       </details>
     `;
@@ -647,19 +665,27 @@ export class GableFrontDoor extends LitElement {
           >
             Sign in
           </button>
+          ${this._signInError && this._errorSource === 'email_password' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
         </div>
       `;
     }
     return html`
-      <button
-        type="button"
-        @click=${() => void this._startMethod(m)}
-        aria-label="Sign in with ${m.label}"
-        class="w-full flex items-center justify-center gap-2.5 rounded-lg border border-zinc-500 bg-surface-2 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 transition-all"
-      >
-        <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
-        <span>${m.label}</span>
-      </button>
+      <div class="space-y-1.5">
+        <button
+          type="button"
+          @click=${() => void this._startMethod(m)}
+          aria-label="Sign in with ${m.label}"
+          class="w-full flex items-center justify-center gap-2.5 rounded-lg border border-zinc-500 bg-surface-2 px-4 py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 transition-all"
+        >
+          <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
+          <span>${m.label}</span>
+        </button>
+        ${this._signInError && this._errorSource === m.method ? html`
+          <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+        ` : nothing}
+      </div>
     `;
   }
 

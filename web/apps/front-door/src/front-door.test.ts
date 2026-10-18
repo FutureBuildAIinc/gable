@@ -355,23 +355,59 @@ describe('front door runtime sign in methods (S8)', () => {
     expect(el.querySelector('button[aria-label="Sign in with Google"]')).not.toBeNull();
   });
 
-  it('shows the server\'s plain refusal inline when a method is not built yet', async () => {
+  it('places the error message directly under the control that raised it (form, method button, or token button)', async () => {
     authConfig.devMode = false;
     stubConfig({
       auth_mode: 'production',
       methods: [
+        { method: 'email_password', kind: 'form', label: 'Email and password', start_url: '/api/portal/v1/login', issuer_url: null, client_id: null },
         { method: 'google', kind: 'redirect', label: 'Google', start_url: '/api/v1/auth/start/google', issuer_url: null, client_id: null },
+        { method: 'microsoft', kind: 'redirect', label: 'Microsoft', start_url: '/api/v1/auth/start/microsoft', issuer_url: null, client_id: null },
       ],
     });
     const el = await mount();
     await settle(el);
+
+    // 1. Form error renders inside the form block, above the Google button.
+    const signInBtn = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === 'Sign in',
+    )!;
+    const googleBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!;
+    const microsoftBtn = el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Microsoft"]')!;
+
+    signInBtn.click();
+    await settle(el);
+
+    let alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alertEl).not.toBeNull();
+    expect(alertEl.textContent).toContain('Enter your email and password.');
+    expect(signInBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(googleBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 2. Method start error renders directly under the clicked Google button, above Microsoft.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       JSON.stringify({ error: { code: 'not_implemented', message: 'sign in by google is not available on this server yet' } }),
       { status: 501 },
     )));
-    el.querySelector<HTMLButtonElement>('button[aria-label="Sign in with Google"]')!.click();
+    googleBtn.click();
     await settle(el);
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('not available on this server yet');
+
+    alertEl = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(alertEl).not.toBeNull();
+    expect(alertEl.textContent).toContain('not available on this server yet');
+    expect(googleBtn.compareDocumentPosition(alertEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alertEl.compareDocumentPosition(microsoftBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // 3. Token error renders inside the <details> disclosure under the token button.
+    const tokenBtn = [...el.querySelectorAll<HTMLButtonElement>('details button')].find(
+      (b) => b.textContent?.trim() === 'Sign in with the token',
+    )!;
+    tokenBtn.click();
+    await settle(el);
+
+    const detailsAlert = el.querySelector<HTMLElement>('details [role="alert"]')!;
+    expect(detailsAlert).not.toBeNull();
+    expect(detailsAlert.textContent).toContain('not a readable, unexpired JWT');
   });
 
   it('a dev persona sign in stokes the identity tap and writes no token anywhere', async () => {
