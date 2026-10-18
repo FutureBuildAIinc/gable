@@ -46,8 +46,9 @@ const (
 	// AnswerLateQueued: the answer arrived on an intent the sweep already
 	// turned lost; audited and queued for a manager beside the sweep's item.
 	AnswerLateQueued AnswerOutcome = "late_queued"
-	// AnswerReopened: a late authorized answer contradicted a declined
-	// resolution; the item is open again for a manager, carrying the verdict.
+	// AnswerReopened: a late answer contradicted a closed resolution (authorized
+	// after resolved_declined, or declined after resolved_authorized); the item
+	// is open again for a manager, carrying the verdict.
 	AnswerReopened AnswerOutcome = "reopened"
 )
 
@@ -384,9 +385,9 @@ func (l *TerminalLedger) ApplyDeviceAnswer(ctx context.Context, a TerminalAnswer
 // verdict contradicting the recorded one, or an answer after the sweep) in
 // ONE statement: the item is inserted or, when the sweep or an earlier
 // answer filed it, updated to carry the device's verdict, reference and
-// safe fields. A late authorized answer reopens an item a manager resolved
-// declined; an answer against any other resolution is kept on the item and
-// audited, never reopening it (the books already moved).
+// safe fields. Any late verdict that contradicts a closed resolution
+// (authorized after resolved_declined, or declined after resolved_authorized)
+// reopens the item for a manager.
 func (l *TerminalLedger) queueAnswer(ctx context.Context, in *TerminalIntent, a TerminalAnswer, why string) (AnswerOutcome, error) {
 	var state string
 	var reopened bool
@@ -400,13 +401,17 @@ func (l *TerminalLedger) queueAnswer(ctx context.Context, in *TerminalIntent, a 
 			late_brand = EXCLUDED.late_brand, late_last4 = EXCLUDED.late_last4,
 			late_auth_code = EXCLUDED.late_auth_code, late_at = NOW(),
 			provider_ref = COALESCE(NULLIF(payment_terminal_lost_items.provider_ref, ''), EXCLUDED.provider_ref),
-			state = CASE WHEN payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized'
+			state = CASE WHEN (payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized')
+			               OR (payment_terminal_lost_items.state = 'resolved_authorized' AND EXCLUDED.late_verdict = 'declined')
 			             THEN 'open' ELSE payment_terminal_lost_items.state END,
-			resolved_by = CASE WHEN payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized'
+			resolved_by = CASE WHEN (payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized')
+			                     OR (payment_terminal_lost_items.state = 'resolved_authorized' AND EXCLUDED.late_verdict = 'declined')
 			                   THEN '' ELSE payment_terminal_lost_items.resolved_by END,
-			resolved_at = CASE WHEN payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized'
+			resolved_at = CASE WHEN (payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized')
+			                     OR (payment_terminal_lost_items.state = 'resolved_authorized' AND EXCLUDED.late_verdict = 'declined')
 			                   THEN NULL ELSE payment_terminal_lost_items.resolved_at END,
-			reopened_at = CASE WHEN payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized'
+			reopened_at = CASE WHEN (payment_terminal_lost_items.state = 'resolved_declined' AND EXCLUDED.late_verdict = 'authorized')
+			                     OR (payment_terminal_lost_items.state = 'resolved_authorized' AND EXCLUDED.late_verdict = 'declined')
 			                   THEN NOW() ELSE payment_terminal_lost_items.reopened_at END
 		RETURNING state, COALESCE(reopened_at = NOW(), FALSE)`,
 		in.ID, in.BranchID, in.RegisterID, in.TransactionID, in.Kind, in.AmountCents, in.DeviceID, a.ProviderRef,

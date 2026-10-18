@@ -165,10 +165,10 @@ func TestLateAuthorizedAfterDeclinedResolutionReopens(t *testing.T) {
 	}
 }
 
-// TestLateAnswerAfterAuthorizedResolutionIsFlaggedNotReopened: an answer that
-// contradicts a resolved_authorized item is kept on the item and audited but
-// never reopens it (the books already took the money).
-func TestLateAnswerAfterAuthorizedResolutionIsFlaggedNotReopened(t *testing.T) {
+// TestLateDeclinedAfterAuthorizedResolutionReopens: a manager resolved the
+// item authorized, then the device's late answer says declined. The item
+// reopens for the manager with the contradicting verdict and reference on it.
+func TestLateDeclinedAfterAuthorizedResolutionReopens(t *testing.T) {
 	l, sale := newTerminalFixture(t)
 	ctx := context.Background()
 	in, item := lostItemOf(t, l, sale, "devref-flag")
@@ -180,12 +180,12 @@ func TestLateAnswerAfterAuthorizedResolutionIsFlaggedNotReopened(t *testing.T) {
 		t.Fatalf("the intent's move: %t %v", ok, err)
 	}
 	out, err := l.ApplyDeviceAnswer(ctx, payment.TerminalAnswer{IntentID: in.ID, ProviderRef: "devref-flag", Verdict: "declined"})
-	if err != nil || out != payment.AnswerConflictQueued {
-		t.Fatalf("the contradicting late answer = %s %v, wanted conflict_queued", out, err)
+	if err != nil || out != payment.AnswerReopened {
+		t.Fatalf("the contradicting late answer = %s %v, wanted reopened", out, err)
 	}
 	fresh, _ := l.LostItem(ctx, item.ID)
-	if fresh.State != "resolved_authorized" {
-		t.Fatalf("the contradicting answer moved the resolved item to %s", fresh.State)
+	if fresh.State != "open" {
+		t.Fatalf("the contradicting answer left the item %s, wanted open", fresh.State)
 	}
 	db := testutil.RequireDB(t)
 	var verdict string
