@@ -76,6 +76,35 @@ state only, the contractor's quote shows the order, the dealer's project
 shows the order. The approval record keeps every step with who and when,
 and the database refuses to update, delete or truncate it.
 
+## Decisions
+
+Plain words for the choices a reader should see before merge.
+
+- **A `contractor_only` line is the contractor's own cost.** It counts against
+  the margin the contractor sees. It never enters a price, a total, the
+  customer's page or PDF, the snapshot, or anything the dealer reads.
+- **The markup applies to materials only.** Labour and overhead lines are
+  priced as the contractor enters them, with no markup on top. A percentage
+  overhead is a percentage of the customer-facing materials plus labour.
+- **The site tax rate applies to materials only.** Labour and overhead carry
+  no tax in the total. The other two tax treatments ("tax included" and
+  "material tax at checkout") add no tax line.
+- **The deposit is a percentage of the total including tax.**
+- **A verification code never goes to a sender that writes message bodies to
+  a log, and never to the text stub.** While the server's only email sender is
+  the log-only one and text is the stub, the contractor's "require a code"
+  toggle refuses to turn on ("Verification codes need a real email or text
+  sender on this server."), a code request answers the same sentence, and a
+  quote whose toggle was already on cannot be accepted until the contractor
+  turns the toggle off; the customer's page says so in plain words. Declining
+  stays possible.
+- **The dealer's acceptance records the desk user's id and display name.**
+  Contractors and customers see the dealer's business name and that display
+  name, never a staff email address.
+- **Roles.** Today's portal roles map as: `Admin` and `Buyer` may quote and see
+  money, `View-Only` may do neither. The portal roles of the pro portal branch
+  replace this one rule at merge.
+
 ## The two price walls
 
 - **Price wall 2, contractor to customer.** The customer's page and PDF
