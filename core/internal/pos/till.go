@@ -164,6 +164,25 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 				fmt.Sprintf("a card refund claim of one of this session's sales is still in flight (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before closing the drawer",
 					strings.Join(ids, ", ")))
 		}
+		// A card terminal intent of this register still standing (claimed or
+		// at the device) refuses the close the same way (CP-05): its device
+		// may still move money after the drawer was counted, and the manager
+		// item behind it would name a closed session's register.
+		if s.terminalWired() {
+			intents, err := s.terminalLedger.OpenIntentsAtRegister(ctx, report.Session.RegisterID)
+			if err != nil {
+				return err
+			}
+			if len(intents) > 0 {
+				ids := make([]string, 0, len(intents))
+				for _, id := range intents {
+					ids = append(ids, id.String())
+				}
+				return conflict("terminal_intent_in_flight",
+					fmt.Sprintf("a card terminal intent of this register is still in flight (intents %s): settle each at POST /api/v1/pos/terminal-intents/{id} before closing the drawer",
+						strings.Join(ids, ", ")))
+			}
+		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
 		now := time.Now()
 		session := report.Session

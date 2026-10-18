@@ -131,6 +131,13 @@ type Config struct {
 	// silently broken. Container deployments set EDI_OUTPUT_DIR=/app/edi_out.
 	EDIOutputDir string // EDI_OUTPUT_DIR
 
+	// POSTerminalSimulator selects the simulated card terminal on a demo
+	// stack (CP-05, IX-01): one of approve, decline, no_answer,
+	// crash_after_dispatch, duplicate_answer, late_answer. An unset or
+	// unrecognized value wires no terminal at all, so the simulator is never
+	// the default in a production configuration.
+	POSTerminalSimulator string // POS_TERMINAL_SIMULATOR
+
 	// Database Pool
 	DBMaxConns        int32 // Max open connections (default: 10)
 	DBMinConns        int32 // Min idle connections (default: 2)
@@ -183,6 +190,7 @@ func Load() (*Config, error) {
 		AuthIssuer:  getEnv("AUTH_ISSUER", ""),
 
 		EDIOutputDir: getEnv("EDI_OUTPUT_DIR", "edi_out"),
+		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
 
 		// Run Payments — defaults to sandbox mode
 		RunPaymentsAPIKey:      getEnv("RUN_PAYMENTS_API_KEY", ""),

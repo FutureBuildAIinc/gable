@@ -227,7 +227,33 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	charges := make([]*chargeResult, len(tenders))
 	for i := range tenders {
 		t := &tenders[i]
-		if t.Method != TenderCard || t.TokenID == "" {
+		if t.Method != TenderCard {
+			continue
+		}
+		// A wired terminal takes the card leg through the intent ledger
+		// (CP-05): the claim is committed before the device call, the
+		// answer is waited for, and the completion's transaction records
+		// the verdict. The plain gateway path below stays for the token
+		// bearing tender no terminal answers.
+		if s.terminalWired() {
+			res, err := s.chargeCardAtTerminal(ctx, pre, i, t)
+			if err != nil {
+				var firstErr error
+				for _, c := range chargesMade {
+					if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
+						firstErr = rerr
+					}
+				}
+				if firstErr != nil {
+					return nil, firstErr
+				}
+				return nil, err
+			}
+			charges[i] = res
+			chargesMade = append(chargesMade, chargeMade{result: res, amountCents: int64(t.AmountCents)})
+			continue
+		}
+		if t.TokenID == "" {
 			continue
 		}
 		if s.gateway == nil {

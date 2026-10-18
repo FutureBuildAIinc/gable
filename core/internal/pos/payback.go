@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
@@ -162,8 +163,9 @@ func (s *Service) PaybackRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	}
 	// The terminal call, bounded: every path it can take ends inside the
 	// bound, so the claim it holds never sits in flight past its lease.
+	termLeg := s.terminalRefundLeg(ctx, claim.SaleID, claim.TenderID, payment.TerminalKindRefund, claim.AmountCents, "")
 	callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
-	res, err := s.gateway.Refund(callCtx, claim.GatewayTxID, claim.AmountCents)
+	res, err := payment.RefundUnderKey(callCtx, s.gateway, claim.GatewayTxID, claim.AmountCents, terminalRefundKey(termLeg))
 	cancel()
 	if err != nil {
 		s.unknownRefundOutcome(ctx, claim, err)
@@ -173,11 +175,13 @@ func (s *Service) PaybackRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	if verdict != refundAccepted {
 		if verdict == refundDeclined {
 			s.failRefundIntent(ctx, claim)
+			s.terminalRefundVerdict(ctx, termLeg, false, res.TransactionID)
 		} else {
 			s.unknownRefundOutcome(ctx, claim, noVerdictOf(res))
 		}
 		return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 	}
+	s.terminalRefundVerdict(ctx, termLeg, true, res.TransactionID)
 	// The terminal's own refund id, on the claim the moment it answers, in
 	// its own committed write whatever happens next.
 	if err := s.repo.MarkRefundIntentRefunded(ctx, claim.ID, res.TransactionID); err != nil {
