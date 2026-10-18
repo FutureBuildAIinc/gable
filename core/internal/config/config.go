@@ -248,7 +248,7 @@ func Load() (*Config, error) {
 		DraftFeedMaxStreamsPerPrincipal: getEnvInt("DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL", 8),
 		DraftFeedMaxStreams:             getEnvInt("DRAFT_FEED_MAX_STREAMS", 500),
 
-		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
+		RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
 
 		// Database Pool

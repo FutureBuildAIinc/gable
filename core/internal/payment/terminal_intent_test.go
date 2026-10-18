@@ -36,6 +36,7 @@ func newTerminalFixture(t *testing.T) (*payment.TerminalLedger, uuid.UUID) {
 // (0 is the shared default pool): the concurrency proofs run at size 4.
 func newTerminalFixtureConns(t *testing.T, conns int32) (*payment.TerminalLedger, uuid.UUID) {
 	t.Helper()
+	testutil.LockTerminalTables(t)
 	db := testutil.RequireDB(t)
 	if conns > 0 {
 		db = testutil.RequireDBMaxConns(t, conns)
@@ -262,6 +263,7 @@ func TestLateAnswerAfterSweepBecomesManagerItem(t *testing.T) {
 // TestThreeClaimsLeaveOneIntent: three contenders claim one
 // (transaction_id, leg_key, kind) at pool size 4; one intent stands.
 func TestThreeClaimsLeaveOneIntent(t *testing.T) {
+	testutil.LockTerminalTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
 	var branch uuid.UUID
@@ -309,6 +311,7 @@ func TestThreeClaimsLeaveOneIntent(t *testing.T) {
 // ends in exactly one final state (authorized or lost), never both, never
 // neither, and its verdict never changes after it lands.
 func TestAnswerRacingSweepOneFinalState(t *testing.T) {
+	testutil.LockTerminalTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
 	var branch uuid.UUID

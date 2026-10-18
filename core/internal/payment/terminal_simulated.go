@@ -58,6 +58,8 @@ type SimulatedTerminal struct {
 	answers    AnswerSink
 	dispatched []TerminalDispatch
 	held       map[string]TerminalAnswer
+	outcomes   []AnswerOutcome
+	delivered  int
 }
 
 // NewSimulatedTerminal builds the driver with a default outcome and the sink
@@ -143,8 +145,24 @@ func (s *SimulatedTerminal) deliver(ctx context.Context, a TerminalAnswer) {
 	time.AfterFunc(20*time.Millisecond, func() {
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_, _ = s.answers.ApplyDeviceAnswer(dctx, a)
+		out, err := s.answers.ApplyDeviceAnswer(dctx, a)
+		if err != nil {
+			out = AnswerOutcome("error: " + err.Error())
+		}
+		s.mu.Lock()
+		s.outcomes = append(s.outcomes, out)
+		s.mu.Unlock()
 	})
+}
+
+// Outcomes lists what the sink answered for each answer the device delivered,
+// in the order they landed (applied, duplicate, late_queued and so on).
+func (s *SimulatedTerminal) Outcomes() []AnswerOutcome {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]AnswerOutcome, len(s.outcomes))
+	copy(out, s.outcomes)
+	return out
 }
 
 // DeliverLate releases the answer a late_answer script holds, after the test
