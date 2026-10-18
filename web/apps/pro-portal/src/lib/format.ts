@@ -35,6 +35,13 @@ export function shortDate(value: string | null | undefined, timeZone?: string): 
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(date)
 }
 
+export function calendarDay(value: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? '')
+  if (match === null) return NO_FIGURE
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date)
+}
+
 export function timeOfDay(value: string | null | undefined, timeZone?: string): string {
   if (!value) return NO_FIGURE
   const date = new Date(value)

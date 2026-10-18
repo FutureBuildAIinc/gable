@@ -9,7 +9,7 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 
 function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString()
-  return fetchWithAuth(url, init)
+  return fetchWithAuth(url, { retries: 0, ...init })
 }
 
 export const portalClient = createClient({ baseUrl: API_URL, fetch: authFetch })

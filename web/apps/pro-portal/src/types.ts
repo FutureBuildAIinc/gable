@@ -14,7 +14,9 @@ export type PortalQuote = components['schemas']['PortalQuote']
 export type PortalCatalogProduct = components['schemas']['PortalCatalogProduct']
 export type PortalCatalogDetail = components['schemas']['PortalCatalogDetail']
 export type PortalCart = components['schemas']['PortalCart']
-export type PortalOrderTimeline = components['schemas']['PortalOrderTimeline']
+export type PortalOrderTimeline = Omit<components['schemas']['PortalOrderTimeline'], 'pod'> & {
+  pod: components['schemas']['PortalTimelinePOD'] | null
+}
 export type PortalScheduleSlot = components['schemas']['PortalScheduleSlot']
 export type PortalScheduleHold = components['schemas']['PortalScheduleHold']
 export type CustomerQuoteView = components['schemas']['CustomerQuoteView']

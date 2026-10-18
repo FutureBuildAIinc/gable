@@ -3,6 +3,7 @@
 
 import type { Page, Route } from '@playwright/test'
 import type { PortalConfig, PortalMe } from '../src/types.ts'
+import { holdFixture, orderFixture, slotsFixture, testIds, timelineFixture, todayFixture } from '../src/test/fixtures.ts'
 
 export const ids = {
   user: '11111111-1111-4111-8111-111111111111',
@@ -91,6 +92,25 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
     if (path === '/api/portal/v1/logout' && request.method() === 'POST') {
       signedIn = false
       return json(route, {})
+    }
+    if (path === '/api/portal/v1/today') {
+      return json(route, todayFixture, 200, { ETag: 'pro-e2e-v1', 'X-Portal-Latest-Change': iso() })
+    }
+    if (path === '/api/portal/v1/orders') {
+      return json(route, [orderFixture], 200, { ETag: 'pro-e2e-v1', 'X-Portal-Latest-Change': iso() })
+    }
+    if (path === `/api/portal/v1/orders/${testIds.order}/timeline`) return json(route, timelineFixture)
+    if (path === `/api/portal/v1/orders/${testIds.order}/delivery-instructions`) return json(route, orderFixture)
+    if (path === `/api/portal/v1/orders/${testIds.order}`) return json(route, orderFixture)
+    if (path === '/api/portal/v1/schedule/windows') {
+      const yardId = url.searchParams.get('yard_id')
+      const kind = url.searchParams.get('kind')
+      return json(route, slotsFixture.filter((slot) => slot.yard_id === yardId && slot.kind === kind))
+    }
+    if (path === '/api/portal/v1/schedule/holds' && request.method() === 'POST') return json(route, holdFixture, 201)
+    if (path === `/api/portal/v1/schedule/holds/${testIds.hold}`) {
+      if (request.method() === 'DELETE') return route.fulfill({ status: 204 })
+      return json(route, holdFixture)
     }
     return json(route, { error: 'not mocked' }, 404)
   })

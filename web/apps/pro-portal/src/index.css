@@ -243,6 +243,15 @@
     @apply min-w-0 rounded-2xl border border-zinc-800 bg-slate-steel p-3;
   }
 
+  button.pro-stat,
+  a.pro-stat {
+    @apply border-zinc-500;
+  }
+
+  .pro-stat[aria-pressed="true"] {
+    @apply border-gable-green;
+  }
+
   .pro-stat-value {
     @apply block truncate font-mono text-xl font-medium tabular-nums text-white;
   }
