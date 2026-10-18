@@ -677,12 +677,19 @@ func TestTheDayClosePostsTheDeposit(t *testing.T) {
 	}
 	day := d.today(a)
 
-	// the deposit needs a bank account to go to
+	// the deposit needs an active bank account to go to
 	if r := d.closeDay(a, day, "DEP-1"); r.status != http.StatusBadRequest {
 		t.Fatalf("a close of a day with a deposit and no bank account = %d, want 400: %s", r.status, r.raw)
 	}
 	if r := d.closeDay(a, day, "DEP-1", uuid.New()); r.status != http.StatusNotFound {
 		t.Fatalf("a close naming an unknown bank account = %d, want 404: %s", r.status, r.raw)
+	}
+	inactive := d.bankAccountOn(glCode)
+	mustExec(t, d.db, `UPDATE bank_accounts SET is_active = FALSE WHERE id = $1`, inactive)
+	if r := d.closeDay(a, day, "DEP-1", inactive); r.status != http.StatusConflict {
+		t.Fatalf("a close naming an inactive bank account = %d, want 409: %s", r.status, r.raw)
+	} else if _, bl, _ := errorOf(t, r); len(bl) != 1 || bl[0] != "bank_account_inactive" {
+		t.Errorf("blockers = %v, want bank_account_inactive", bl)
 	}
 	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1`, a.id); got != 0 {
 		t.Fatalf("%d closes written by refused requests", got)
@@ -717,9 +724,46 @@ func TestTheDayClosePostsTheDeposit(t *testing.T) {
 	if got := d.netOn("1015", drop, closeID); got != 0 {
 		t.Errorf("1015 nets %d over the drop and the deposit, want 0", got)
 	}
+
+	// when cash_to_deposit_cents < undeposited (rest < 0), 1010 is debited for -rest:
+	// 10000 float, 300 cash sale, 500 safe_drop, counted at 9600, so deposit = 100, undeposited = 500, rest = -400
+	b := d.makeBranch()
+	bReg := b.registers[0]
+	sb := d.openTillOn(bReg, 10000)
+	d.saleAtPrice(bReg, 27600, 300) // 2.76 + 0.24 tax = 3.00
+	bDrop := d.mustMovement(sb, map[string]any{"kind": "safe_drop", "amount_cents": 500}, mustUUID(t))
+	if r := d.count(sb, map[string]any{"cash": 9600}); r.status != http.StatusOK || sessionOf(t, r)["status"] != "closed" {
+		t.Fatalf("count b = %d: %s", r.status, r.raw)
+	}
+	rb := d.closeDay(b, d.today(b), "DEP-2", bank)
+	if rb.status != http.StatusCreated {
+		t.Fatalf("close b = %d: %s", rb.status, rb.raw)
+	}
+	cb := obj(t, rb.body, "close")
+	closeBID := str(t, cb, "id")
+	if num(t, cb, "cash_to_deposit_cents") != 100 {
+		t.Fatalf("close b cash_to_deposit_cents = %v, want 100", cb["cash_to_deposit_cents"])
+	}
+	bEntries, bLegs := d.legsFor(closeBID)
+	if bEntries != 1 {
+		t.Fatalf("%d entries sourced by close b, want 1", bEntries)
+	}
+	wantB := map[string]leg{glCode: {debit: 100}, "1010": {debit: 400}, "1015": {credit: 500}}
+	for code, w := range wantB {
+		if bLegs[code] != w {
+			t.Errorf("close b account %s = %+v, want %+v", code, bLegs[code], w)
+		}
+	}
+	if len(bLegs) != len(wantB) {
+		t.Errorf("close b legs = %v, want exactly %v", bLegs, wantB)
+	}
+	if got := d.netOn("1015", bDrop, closeBID); got != 0 {
+		t.Errorf("close b 1015 nets %d over the drop and deposit, want 0", got)
+	}
 }
 
-// RULE (P2-1): the deposit match reconciles the bank line against the close's
+// RULE (P2-1, P3-1): the deposit candidates offer only lines of the close's
+// bank account, the deposit match reconciles the bank line against the close's
 // deposit entry, and a line of another bank account is refused.
 func TestTheDepositMatchLinksTheDepositEntry(t *testing.T) {
 	testutil.LockOutboxTables(t)
@@ -730,6 +774,24 @@ func TestTheDepositMatchLinksTheDepositEntry(t *testing.T) {
 	other := d.bankAccountOn("1010")
 	elsewhere := d.bankLineOn(other, deposit, day)
 	line := d.bankLine(deposit, day)
+	cands := d.do("GET", "/api/v1/pos/end-of-day/"+closeID+"/deposit-candidates", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if cands.status != http.StatusOK {
+		t.Fatalf("candidates = %d: %s", cands.status, cands.raw)
+	}
+	items := cands.body["items"].([]any)
+	foundOwn := false
+	for _, it := range items {
+		id := it.(map[string]any)["bank_transaction_id"]
+		if id == elsewhere.String() {
+			t.Errorf("deposit-candidates returned line %s from another bank account: %s", elsewhere, cands.raw)
+		}
+		if id == line.String() {
+			foundOwn = true
+		}
+	}
+	if !foundOwn {
+		t.Errorf("deposit-candidates did not return the close's own bank account line %s: %s", line, cands.raw)
+	}
 	match := func(l uuid.UUID) resp {
 		return d.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/deposit-match", map[string]any{"bank_transaction_id": l.String()},
 			"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))

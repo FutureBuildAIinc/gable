@@ -38,7 +38,7 @@ type BankLines interface {
 	Line(ctx context.Context, id uuid.UUID) (*bankrecon.BankTransaction, error)
 	Claim(ctx context.Context, id uuid.UUID, entry *uuid.UUID) (*bankrecon.BankTransaction, error)
 	AccountGL(ctx context.Context, id uuid.UUID) (string, error)
-	Candidates(ctx context.Context, from, to time.Time, amount int64, limit int) ([]bankrecon.BankTransaction, error)
+	Candidates(ctx context.Context, bankAccountID *uuid.UUID, from, to time.Time, amount int64, limit int) ([]bankrecon.BankTransaction, error)
 }
 
 // WithBankLines wires the bank statement lines the deposit match reads.
@@ -425,7 +425,7 @@ func (s *Service) DepositCandidates(ctx context.Context, closeID uuid.UUID) ([]b
 		return nil, err
 	}
 	date, _ := time.Parse("2006-01-02", c.BusinessDate)
-	return s.bank.Candidates(ctx, date.AddDate(0, 0, -dayCandidateSpanBefore), date.AddDate(0, 0, dayCandidateSpanAfter),
+	return s.bank.Candidates(ctx, c.BankAccountID, date.AddDate(0, 0, -dayCandidateSpanBefore), date.AddDate(0, 0, dayCandidateSpanAfter),
 		int64(c.CashToDepositCents+c.ChecksToDepositCents), dayCandidateLimit)
 }
 

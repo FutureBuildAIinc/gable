@@ -97,13 +97,15 @@ func (d *DepositLines) Claim(ctx context.Context, id uuid.UUID, entry *uuid.UUID
 	return txn, nil
 }
 
-// Candidates lists the unmatched deposit lines dated from..to inclusive,
-// nearest to the amount first (then the earliest), at most limit.
-func (d *DepositLines) Candidates(ctx context.Context, from, to time.Time, amount int64, limit int) ([]BankTransaction, error) {
+// Candidates lists the unmatched deposit lines dated from..to inclusive on the
+// bank account given (or any when bankAccountID is nil), nearest to the amount
+// first (then the earliest), at most limit.
+func (d *DepositLines) Candidates(ctx context.Context, bankAccountID *uuid.UUID, from, to time.Time, amount int64, limit int) ([]BankTransaction, error) {
 	rows, err := d.db.GetExecutor(ctx).Query(ctx, `SELECT `+depositLineColumns+` FROM bank_transactions
 		WHERE status = $1 AND amount > 0 AND transaction_date BETWEEN $2::date AND $3::date
-		ORDER BY abs(amount - $4::bigint), transaction_date, id LIMIT $5`,
-		string(TransactionStatusUnmatched), from, to, amount, limit)
+		  AND ($4::uuid IS NULL OR bank_account_id = $4)
+		ORDER BY abs(amount - $5::bigint), transaction_date, id LIMIT $6`,
+		string(TransactionStatusUnmatched), from, to, bankAccountID, amount, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the deposit lines: %w", err)
 	}
