@@ -299,7 +299,8 @@ func TestToday_Board(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("today answered %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("ETag") == "" {
+	ownerETag := rec.Header().Get("ETag")
+	if ownerETag == "" {
 		t.Error("today carries no ETag")
 	}
 
@@ -330,24 +331,63 @@ func TestToday_Board(t *testing.T) {
 	}
 
 	// A role without see_money still reads the board, with the invoice
-	// section zeroed.
-	mux = muxFor(repo, f.aCustomer, f.users[RoleSiteSuper], RoleSiteSuper)
-	rec, body = call(mux, "GET", "/api/portal/v1/today", "", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("site_super today answered %d", rec.Code)
-	}
-	invoices, _ = body["invoices_due"].(map[string]any)
-	if n, _ := invoices["count"].(float64); n != 0 {
-		t.Errorf("site_super invoices_due.count = %v, want 0", invoices["count"])
+	// section zeroed and every quote and open order total_cents hidden,
+	// and never shares an ETag with a role that has see_money.
+	for _, role := range []string{RoleSiteSuper, RoleEstimator} {
+		mux = muxFor(repo, f.aCustomer, f.users[role], role)
+		rec, body = call(mux, "GET", "/api/portal/v1/today", "", map[string]string{"If-None-Match": ownerETag})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s today answered %d", role, rec.Code)
+		}
+		if rec.Header().Get("ETag") == ownerETag {
+			t.Errorf("%s ETag %s matched owner ETag %s", role, rec.Header().Get("ETag"), ownerETag)
+		}
+		invoices, _ = body["invoices_due"].(map[string]any)
+		if n, _ := invoices["count"].(float64); n != 0 {
+			t.Errorf("%s invoices_due.count = %v, want 0", role, invoices["count"])
+		}
+		qSection, _ := body["quotes_awaiting_pro"].(map[string]any)
+		qFirst, _ := qSection["first"].([]any)
+		if len(qFirst) == 0 {
+			t.Fatalf("%s quotes_awaiting_pro.first is empty", role)
+		}
+		for i, item := range qFirst {
+			qm, _ := item.(map[string]any)
+			if qm["total_cents"] != float64(0) {
+				t.Errorf("%s quotes_awaiting_pro.first[%d].total_cents = %v, want 0", role, i, qm["total_cents"])
+			}
+		}
+		oSection, _ := body["open_orders"].(map[string]any)
+		oFirst, _ := oSection["first"].([]any)
+		if len(oFirst) == 0 {
+			t.Fatalf("%s open_orders.first is empty", role)
+		}
+		for i, item := range oFirst {
+			om, _ := item.(map[string]any)
+			if om["total_cents"] != float64(0) {
+				t.Errorf("%s open_orders.first[%d].total_cents = %v, want 0", role, i, om["total_cents"])
+			}
+		}
 	}
 
-	// The conditional GET is cheap: an unchanged board answers 304.
+	// The conditional GET is cheap: an unchanged board answers 304, while a
+	// since cursor produces a distinct ETag even when every row passes the
+	// cursor, and owner vs site_super produce distinct ETags even when open
+	// invoice count is zero.
 	mux = muxFor(repo, f.aCustomer, f.users[RoleOwner], RoleOwner)
 	rec, _ = call(mux, "GET", "/api/portal/v1/today", "", nil)
 	etag := rec.Header().Get("ETag")
 	rec, _ = call(mux, "GET", "/api/portal/v1/today", "", map[string]string{"If-None-Match": etag})
 	if rec.Code != http.StatusNotModified {
 		t.Errorf("unchanged today answered %d, want 304", rec.Code)
+	}
+	epoch := "2000-01-01T00:00:00Z"
+	rec, _ = call(mux, "GET", "/api/portal/v1/today?since="+epoch, "", map[string]string{"If-None-Match": etag})
+	if rec.Code != http.StatusOK {
+		t.Errorf("today with since cursor and unfiltered ETag answered %d, want 200", rec.Code)
+	}
+	if rec.Header().Get("ETag") == etag {
+		t.Errorf("today with since cursor returned same ETag %s as unfiltered board", etag)
 	}
 }
 
