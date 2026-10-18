@@ -19,6 +19,7 @@ import type {
   PortalStatement,
   PortalStatementRunItem,
 } from '../types.ts'
+import '../components/pro-select.ts'
 
 type PayView = 'invoices' | 'statement' | 'jobs' | 'methods'
 
@@ -422,12 +423,20 @@ export class GableProPay extends LitElement {
           <fieldset class="mt-4" ?disabled=${!this.canPay || this.offline || this.busy}>
             <label class="pro-field">
               <span class="pro-label">Payment source</span>
-              <select
-                class="pro-select"
+              <pro-select
                 data-testid="pay-method-select"
-                .value=${this.useHostedToken ? '__hosted__' : this.selectedMethodId}
+                aria-label="Payment source"
+                .value=${this.useHostedToken || this.methods.length === 0 ? '__hosted__' : this.selectedMethodId}
+                .options=${[
+                  ...this.methods.map((method) => ({
+                    value: method.id,
+                    label: `${method.brand || method.method_type} ending in ${method.last4}${method.is_default ? ' (Default)' : ''}`,
+                  })),
+                  { value: '__hosted__', label: 'One-time hosted gateway token' },
+                ]}
+                ?disabled=${!this.canPay || this.offline || this.busy}
                 @change=${(event: Event) => {
-                  const val = (event.target as HTMLSelectElement).value
+                  const val = (event.target as HTMLElement & { value: string }).value
                   if (val === '__hosted__') {
                     this.useHostedToken = true
                   } else {
@@ -435,26 +444,23 @@ export class GableProPay extends LitElement {
                     this.selectedMethodId = val
                   }
                 }}
-              >
-                ${this.methods.map((method) => html`<option value=${method.id}>
-                  ${method.brand || method.method_type} ending in ${method.last4}${method.is_default ? ' (Default)' : ''}
-                </option>`)}
-                <option value="__hosted__">One-time hosted gateway token</option>
-              </select>
+              ></pro-select>
             </label>
 
             ${this.useHostedToken || this.methods.length === 0
               ? html`<label class="pro-field">
                   <span class="pro-label">Hosted gateway token profile</span>
-                  <select
-                    class="pro-select"
+                  <pro-select
                     data-testid="pay-hosted-preset"
+                    aria-label="Hosted gateway token profile"
                     .value=${this.hostedPreset}
-                    @change=${(event: Event) => { this.hostedPreset = (event.target as HTMLSelectElement).value === 'ach' ? 'ach' : 'visa' }}
-                  >
-                    <option value="visa">Hosted Card Token (Visa **** 4242)</option>
-                    <option value="ach">Hosted Bank ACH Token (Checking **** 6789)</option>
-                  </select>
+                    .options=${[
+                      { value: 'visa', label: 'Hosted Card Token (Visa **** 4242)' },
+                      { value: 'ach', label: 'Hosted Bank ACH Token (Checking **** 6789)' },
+                    ]}
+                    ?disabled=${!this.canPay || this.offline || this.busy}
+                    @change=${(event: Event) => { this.hostedPreset = (event.target as HTMLElement & { value: string }).value === 'ach' ? 'ach' : 'visa' }}
+                  ></pro-select>
                 </label>`
               : nothing}
 
@@ -514,7 +520,8 @@ export class GableProPay extends LitElement {
               <span class="pro-label">From date</span>
               <input
                 class="pro-input pro-data"
-                type="date"
+                type="text"
+                placeholder="YYYY-MM-DD"
                 data-testid="statement-from"
                 .value=${this.statementFrom}
                 @change=${(event: Event) => {
@@ -527,7 +534,8 @@ export class GableProPay extends LitElement {
               <span class="pro-label">To date</span>
               <input
                 class="pro-input pro-data"
-                type="date"
+                type="text"
+                placeholder="YYYY-MM-DD"
                 data-testid="statement-to"
                 .value=${this.statementTo}
                 @change=${(event: Event) => {
@@ -662,18 +670,20 @@ export class GableProPay extends LitElement {
             <div class="pro-form-grid">
               <label class="pro-field">
                 <span class="pro-label">Method type</span>
-                <select
-                  class="pro-select"
+                <pro-select
                   data-testid="new-method-type"
+                  aria-label="Method type"
                   .value=${this.newMethodType}
+                  .options=${[
+                    { value: 'CARD', label: 'Commercial card' },
+                    { value: 'BANK', label: 'Bank ACH' },
+                  ]}
+                  ?disabled=${!this.canPay || this.offline || this.busy}
                   @change=${(event: Event) => {
-                    this.newMethodType = (event.target as HTMLSelectElement).value === 'BANK' ? 'BANK' : 'CARD'
+                    this.newMethodType = (event.target as HTMLElement & { value: string }).value === 'BANK' ? 'BANK' : 'CARD'
                     this.newMethodBrand = this.newMethodType === 'BANK' ? 'Operating ACH' : 'Visa'
                   }}
-                >
-                  <option value="CARD">Commercial card</option>
-                  <option value="BANK">Bank ACH</option>
-                </select>
+                ></pro-select>
               </label>
               <label class="pro-field">
                 <span class="pro-label">Label or brand</span>

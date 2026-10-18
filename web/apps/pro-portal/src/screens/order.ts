@@ -27,6 +27,7 @@ import type {
   Project,
   ProjectPage,
 } from '../types.ts'
+import '../components/pro-select.ts'
 
 type OrderView = 'catalog' | 'reorder' | 'lists' | 'requests'
 
@@ -569,19 +570,19 @@ export class GableProOrder extends LitElement {
             </label>
             <label class="pro-field mb-0">
               <span class="pro-label">Category</span>
-              <select
-                class="pro-select"
+              <pro-select
                 aria-label="Filter by category"
                 data-testid="catalog-category-select"
                 .value=${this.categoryId}
+                .options=${[
+                  { value: '', label: 'All categories' },
+                  ...this.categories.map((cat) => ({ value: cat.id, label: `${cat.name} (${cat.product_count})` })),
+                ]}
                 @change=${(event: Event) => {
-                  this.categoryId = (event.target as HTMLSelectElement).value
+                  this.categoryId = (event.target as HTMLElement & { value: string }).value
                   void this.searchCatalog()
                 }}
-              >
-                <option value="">All categories</option>
-                ${this.categories.map((cat) => html`<option value=${cat.id}>${cat.name} (${cat.product_count})</option>`)}
-              </select>
+              ></pro-select>
             </label>
           </div>
         </div>
@@ -676,15 +677,17 @@ export class GableProOrder extends LitElement {
           <fieldset class="mt-4 border-t border-zinc-800 pt-4" ?disabled=${!this.canOrder || this.offline || this.busy}>
             <label class="pro-field">
               <span class="pro-label">Job / project tag</span>
-              <select
-                class="pro-select"
+              <pro-select
                 data-testid="checkout-project-select"
+                aria-label="Job / project tag"
                 .value=${this.checkoutProjectId}
-                @change=${(event: Event) => { this.checkoutProjectId = (event.target as HTMLSelectElement).value }}
-              >
-                <option value="">No project tag</option>
-                ${this.projects.map((proj) => html`<option value=${proj.id}>${proj.name}</option>`)}
-              </select>
+                .options=${[
+                  { value: '', label: 'No project tag' },
+                  ...this.projects.map((proj) => ({ value: proj.id, label: proj.name })),
+                ]}
+                ?disabled=${!this.canOrder || this.offline || this.busy}
+                @change=${(event: Event) => { this.checkoutProjectId = (event.target as HTMLElement & { value: string }).value }}
+              ></pro-select>
             </label>
             <div class="pro-row mb-3">
               <input
@@ -698,15 +701,17 @@ export class GableProOrder extends LitElement {
             </div>
             <label class="pro-field">
               <span class="pro-label">Fulfillment</span>
-              <select
-                class="pro-select"
+              <pro-select
                 data-testid="checkout-delivery-method"
+                aria-label="Fulfillment"
                 .value=${this.checkoutDeliveryMethod}
-                @change=${(event: Event) => { this.checkoutDeliveryMethod = (event.target as HTMLSelectElement).value === 'PICKUP' ? 'PICKUP' : 'DELIVERY' }}
-              >
-                <option value="DELIVERY">Site delivery</option>
-                <option value="PICKUP">Yard pickup</option>
-              </select>
+                .options=${[
+                  { value: 'DELIVERY', label: 'Site delivery' },
+                  { value: 'PICKUP', label: 'Yard pickup' },
+                ]}
+                ?disabled=${!this.canOrder || this.offline || this.busy}
+                @change=${(event: Event) => { this.checkoutDeliveryMethod = (event.target as HTMLElement & { value: string }).value === 'PICKUP' ? 'PICKUP' : 'DELIVERY' }}
+              ></pro-select>
             </label>
             <label class="pro-field">
               <span class="pro-label">Site address or gate note</span>
@@ -758,17 +763,18 @@ export class GableProOrder extends LitElement {
               <div class="pro-row mt-3 flex-wrap">
                 <label class="pro-row-grow">
                   <span class="pro-sr-only">Assign project</span>
-                  <select
-                    class="pro-select min-h-9 py-1 text-xs"
+                  <pro-select
+                    buttonClass="min-h-9 py-1 text-xs"
                     aria-label=${`Job tag for order ${order.id.slice(0, 8)}`}
                     data-testid=${`order-project-select-${order.id}`}
                     .value=${order.project_id ?? ''}
+                    .options=${[
+                      { value: '', label: 'No job tag' },
+                      ...this.projects.map((proj) => ({ value: proj.id, label: proj.name })),
+                    ]}
                     ?disabled=${!this.canOrder || this.offline || this.busy}
-                    @change=${(event: Event) => void this.assignOrderProject(order.id, (event.target as HTMLSelectElement).value)}
-                  >
-                    <option value="">No job tag</option>
-                    ${this.projects.map((proj) => html`<option value=${proj.id} ?selected=${proj.id === order.project_id}>${proj.name}</option>`)}
-                  </select>
+                    @change=${(event: Event) => void this.assignOrderProject(order.id, (event.target as HTMLElement & { value: string }).value)}
+                  ></pro-select>
                 </label>
                 <button
                   type="button"
@@ -914,22 +920,24 @@ export class GableProOrder extends LitElement {
                 <div class="pro-form-grid">
                   <label class="pro-field">
                     <span class="pro-label">Catalog product (optional)</span>
-                    <select
-                      class="pro-select"
+                    <pro-select
                       data-testid="list-line-product"
+                      aria-label="Catalog product (optional)"
                       .value=${this.lineProductId}
+                      .options=${[
+                        { value: '', label: 'Custom or special order line' },
+                        ...this.products.map((prod) => ({ value: prod.id, label: `${prod.sku} · ${prod.name}` })),
+                      ]}
+                      ?disabled=${!this.canOrder || this.offline || this.busy}
                       @change=${(event: Event) => {
-                        this.lineProductId = (event.target as HTMLSelectElement).value
+                        this.lineProductId = (event.target as HTMLElement & { value: string }).value
                         const found = this.products.find((item) => item.id === this.lineProductId)
                         if (found) {
                           this.lineDescription = found.name
                           this.lineUom = found.uom
                         }
                       }}
-                    >
-                      <option value="">Custom or special order line</option>
-                      ${this.products.map((prod) => html`<option value=${prod.id}>${prod.sku} · ${prod.name}</option>`)}
-                    </select>
+                    ></pro-select>
                   </label>
                   <label class="pro-field">
                     <span class="pro-label">Description</span>
@@ -1005,25 +1013,29 @@ export class GableProOrder extends LitElement {
             <div class="pro-form-grid">
               <label class="pro-field">
                 <span class="pro-label">Job / project</span>
-                <select
-                  class="pro-select"
+                <pro-select
+                  aria-label="Job / project"
                   .value=${this.intakeProjectId}
-                  @change=${(event: Event) => { this.intakeProjectId = (event.target as HTMLSelectElement).value }}
-                >
-                  <option value="">No project tag</option>
-                  ${this.projects.map((proj) => html`<option value=${proj.id}>${proj.name}</option>`)}
-                </select>
+                  .options=${[
+                    { value: '', label: 'No project tag' },
+                    ...this.projects.map((proj) => ({ value: proj.id, label: proj.name })),
+                  ]}
+                  ?disabled=${!this.canRequestQuotes || this.offline || this.busy}
+                  @change=${(event: Event) => { this.intakeProjectId = (event.target as HTMLElement & { value: string }).value }}
+                ></pro-select>
               </label>
               <label class="pro-field">
                 <span class="pro-label">Fulfillment</span>
-                <select
-                  class="pro-select"
+                <pro-select
+                  aria-label="Fulfillment"
                   .value=${this.intakeDelivery}
-                  @change=${(event: Event) => { this.intakeDelivery = (event.target as HTMLSelectElement).value === 'PICKUP' ? 'PICKUP' : 'DELIVERY' }}
-                >
-                  <option value="DELIVERY">Site delivery</option>
-                  <option value="PICKUP">Yard pickup</option>
-                </select>
+                  .options=${[
+                    { value: 'DELIVERY', label: 'Site delivery' },
+                    { value: 'PICKUP', label: 'Yard pickup' },
+                  ]}
+                  ?disabled=${!this.canRequestQuotes || this.offline || this.busy}
+                  @change=${(event: Event) => { this.intakeDelivery = (event.target as HTMLElement & { value: string }).value === 'PICKUP' ? 'PICKUP' : 'DELIVERY' }}
+                ></pro-select>
               </label>
             </div>
             <div class="pro-row flex-wrap">

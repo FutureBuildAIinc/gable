@@ -81,7 +81,8 @@ test('site_super with see_money false sees zero dollar amounts on today and orde
 test('a pickup can be held at the other yard', async ({ page }) => {
   await installPortalMocks(page)
   await page.goto('/schedule')
-  await page.getByTestId('schedule-yard-select').selectOption(testIds.yardB)
+  await page.getByTestId('schedule-yard-select').click()
+  await page.getByRole('option', { name: /North Yard/i }).click()
   await page.getByTestId('schedule-kind-pickup').click()
   await expect(page.getByTestId(`schedule-slot-${testIds.windowB}`)).toBeVisible()
   await page.getByTestId(`schedule-slot-${testIds.windowB}`).click()

@@ -16,6 +16,7 @@ import { bpsToPercent, emptyQuoteInput, percentToBps, quoteToInput, revisionHead
 import type { CustomerQuoteConfirmPreview, CustomerQuoteInput, CustomerQuoteSummary, CustomerQuoteView, PortalCatalogProduct, PortalMe, Project } from '../types.ts'
 import { sanitizePublicQuote, type PublicQuote } from '../public/public-view.ts'
 import '../public/public-page.ts'
+import '../components/pro-select.ts'
 
 type LineInput = NonNullable<CustomerQuoteInput['lines']>[number]
 type LabourInput = NonNullable<CustomerQuoteInput['labour']>[number]
@@ -312,13 +313,19 @@ export class GableProQuoteBuilder extends LitElement {
   private markupEditor(value: QuoteMarkup | null | undefined, onChange: (markup: QuoteMarkup | null) => void, placeholder = 'Default'): TemplateResult {
     const kind = value?.kind ?? 'markup'
     return html`<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      <select class="pro-select" aria-label="Markup kind" .value=${kind} @change=${(event: Event) => {
-        const next = (event.target as HTMLSelectElement).value === 'margin' ? 'margin' as const : 'markup' as const
-        onChange({ kind: next, bps: value?.bps ?? 0 })
-      }}>
-        <option value="markup">Markup on cost</option>
-        <option value="margin">Target margin</option>
-      </select>
+      <pro-select
+        aria-label="Markup kind"
+        .value=${kind}
+        .options=${[
+          { value: 'markup', label: 'Markup on cost' },
+          { value: 'margin', label: 'Target margin' },
+        ]}
+        ?disabled=${!this.canEdit || this.offline}
+        @change=${(event: Event) => {
+          const next = (event.target as HTMLElement & { value: string }).value === 'margin' ? 'margin' as const : 'markup' as const
+          onChange({ kind: next, bps: value?.bps ?? 0 })
+        }}
+      ></pro-select>
       <input class="pro-input" aria-label="Markup percent" type="number" min="0" step="0.01" placeholder=${placeholder} .value=${bpsToPercent(value?.bps)} @input=${(event: Event) => {
         const raw = (event.target as HTMLInputElement).value
         onChange(raw === '' ? null : { kind, bps: percentToBps(raw) })
@@ -331,11 +338,19 @@ export class GableProQuoteBuilder extends LitElement {
       <h2 class="pro-card-title">Project and customer</h2>
       <div class="pro-form-grid mt-3">
         <label class="pro-field sm:col-span-2"><span class="pro-label">Quote title</span><input class="pro-input" data-testid="quote-title" .value=${this.input.title} @input=${(event: Event) => this.patchInput({ title: (event.target as HTMLInputElement).value })} required /></label>
-        <label class="pro-field"><span class="pro-label">Project</span><select class="pro-select" .value=${this.input.project_id ?? ''} @change=${(event: Event) => { const value = (event.target as HTMLSelectElement).value; this.patchInput({ project_id: value === '' ? null : value }) }}>
-          <option value="">No project</option>
-          ${this.projects.map((project) => html`<option value=${project.id} ?selected=${project.id === this.input.project_id}>${project.name}</option>`)}
-          ${this.input.project_id !== null && !this.projects.some((project) => project.id === this.input.project_id) ? html`<option value=${this.input.project_id} selected>Current project</option>` : nothing}
-        </select></label>
+        <label class="pro-field"><span class="pro-label">Project</span><pro-select
+          aria-label="Project"
+          .value=${this.input.project_id ?? ''}
+          .options=${[
+            { value: '', label: 'No project' },
+            ...this.projects.map((project) => ({ value: project.id, label: project.name })),
+            ...(this.input.project_id !== null && this.input.project_id !== undefined && !this.projects.some((project) => project.id === this.input.project_id)
+              ? [{ value: this.input.project_id, label: 'Current project' }]
+              : []),
+          ]}
+          ?disabled=${!this.canEdit || this.offline}
+          @change=${(event: Event) => { const value = (event.target as HTMLElement & { value: string }).value; this.patchInput({ project_id: value === '' ? null : value }) }}
+        ></pro-select></label>
         <label class="pro-field"><span class="pro-label">Job site address</span><input class="pro-input" .value=${this.input.job_site_address ?? ''} @input=${(event: Event) => this.patchInput({ job_site_address: (event.target as HTMLInputElement).value })} /></label>
         <label class="pro-field"><span class="pro-label">Customer name</span><input class="pro-input" .value=${this.input.end_customer.name} @input=${(event: Event) => this.patchInput({ end_customer: { ...this.input.end_customer, name: (event.target as HTMLInputElement).value } })} required /></label>
         <label class="pro-field"><span class="pro-label">Customer email</span><input class="pro-input" type="email" .value=${this.input.end_customer.email ?? ''} @input=${(event: Event) => this.patchInput({ end_customer: { ...this.input.end_customer, email: (event.target as HTMLInputElement).value } })} /></label>
@@ -361,10 +376,16 @@ export class GableProQuoteBuilder extends LitElement {
               <button type="button" class="pro-icon-btn" aria-label="Remove line" ?disabled=${!this.canEdit || this.offline} @click=${() => this.patchInput({ lines: lines.filter((_item, itemIndex) => itemIndex !== index) })}>${icon(Trash2, 15)}</button></div>
             <div class="pro-form-grid mt-3">
               <label class="pro-field"><span class="pro-label">Quantity</span><input class="pro-input pro-data" inputmode="decimal" .value=${line.quantity} @input=${(event: Event) => this.patchLine(index, { quantity: (event.target as HTMLInputElement).value })} /></label>
-              <label class="pro-field"><span class="pro-label">Option group</span><select class="pro-select" .value=${line.group_key ?? ''} @change=${(event: Event) => { const value = (event.target as HTMLSelectElement).value; this.patchLine(index, { group_key: value === '' ? null : value }) }}>
-                <option value="">Standalone line</option>
-                ${(this.input.groups ?? []).map((group) => html`<option value=${group.key} ?selected=${group.key === line.group_key}>${group.label}</option>`)}
-              </select></label>
+              <label class="pro-field"><span class="pro-label">Option group</span><pro-select
+                aria-label="Option group"
+                .value=${line.group_key ?? ''}
+                .options=${[
+                  { value: '', label: 'Standalone line' },
+                  ...(this.input.groups ?? []).map((group) => ({ value: group.key, label: group.label })),
+                ]}
+                ?disabled=${!this.canEdit || this.offline}
+                @change=${(event: Event) => { const value = (event.target as HTMLElement & { value: string }).value; this.patchLine(index, { group_key: value === '' ? null : value }) }}
+              ></pro-select></label>
             </div>
             <span class="pro-label">Line markup</span>
             ${this.markupEditor(line.markup, (markup) => this.patchLine(index, { markup }), 'Category or quote')}
@@ -430,7 +451,7 @@ export class GableProQuoteBuilder extends LitElement {
       ${(this.input.labour ?? []).map((line, index) => html`<div class="mt-3 rounded-lg border border-zinc-800 p-3" data-testid=${`labour-${index}`}>
         <div class="pro-form-grid">
           <label class="pro-field sm:col-span-2"><span class="pro-label">Labour description</span><input class="pro-input" .value=${line.description} @input=${(event: Event) => this.patchLabour(index, { description: (event.target as HTMLInputElement).value })} /></label>
-          <label class="pro-field"><span class="pro-label">Rate type</span><select class="pro-select" .value=${line.rate_type} @change=${(event: Event) => this.patchLabour(index, { rate_type: (event.target as HTMLSelectElement).value === 'hourly' ? 'hourly' : 'flat' })}><option value="flat">Flat</option><option value="hourly">Hourly</option></select></label>
+          <label class="pro-field"><span class="pro-label">Rate type</span><pro-select aria-label="Rate type" .value=${line.rate_type} .options=${[{ value: 'flat', label: 'Flat' }, { value: 'hourly', label: 'Hourly' }]} ?disabled=${!this.canEdit || this.offline} @change=${(event: Event) => this.patchLabour(index, { rate_type: (event.target as HTMLElement & { value: string }).value === 'hourly' ? 'hourly' : 'flat' })}></pro-select></label>
           <label class="pro-field"><span class="pro-label">Rate in cents</span><input class="pro-input pro-data" type="number" min="0" .value=${String(line.rate_cents)} @input=${(event: Event) => this.patchLabour(index, { rate_cents: Number((event.target as HTMLInputElement).value) })} /></label>
           ${line.rate_type === 'hourly' ? html`<label class="pro-field"><span class="pro-label">Hours</span><input class="pro-input pro-data" inputmode="decimal" .value=${line.hours ?? ''} @input=${(event: Event) => this.patchLabour(index, { hours: (event.target as HTMLInputElement).value })} /></label>` : nothing}
         </div>
@@ -442,7 +463,7 @@ export class GableProQuoteBuilder extends LitElement {
       ${(this.input.overhead ?? []).map((line, index) => html`<div class="mt-3 rounded-lg border border-zinc-800 p-3" data-testid=${`overhead-${index}`}>
         <div class="pro-form-grid">
           <label class="pro-field sm:col-span-2"><span class="pro-label">Overhead label</span><input class="pro-input" .value=${line.label} @input=${(event: Event) => this.patchOverhead(index, { label: (event.target as HTMLInputElement).value })} /></label>
-          <label class="pro-field"><span class="pro-label">Amount type</span><select class="pro-select" .value=${line.amount_type} @change=${(event: Event) => this.patchOverhead(index, { amount_type: (event.target as HTMLSelectElement).value === 'percent' ? 'percent' : 'flat', value: 0 })}><option value="flat">Flat</option><option value="percent">Percent</option></select></label>
+          <label class="pro-field"><span class="pro-label">Amount type</span><pro-select aria-label="Amount type" .value=${line.amount_type} .options=${[{ value: 'flat', label: 'Flat' }, { value: 'percent', label: 'Percent' }]} ?disabled=${!this.canEdit || this.offline} @change=${(event: Event) => this.patchOverhead(index, { amount_type: (event.target as HTMLElement & { value: string }).value === 'percent' ? 'percent' : 'flat', value: 0 })}></pro-select></label>
           <label class="pro-field"><span class="pro-label">${line.amount_type === 'percent' ? 'Percent' : 'Amount in cents'}</span><input class="pro-input pro-data" type="number" min="0" step="0.01" .value=${line.amount_type === 'percent' ? bpsToPercent(line.value) : String(line.value)} @input=${(event: Event) => { const raw = (event.target as HTMLInputElement).value; this.patchOverhead(index, { value: line.amount_type === 'percent' ? percentToBps(raw) : Number(raw) }) }} /></label>
         </div>
         <label class="pro-text-small flex items-center gap-2"><input class="pro-check" type="checkbox" .checked=${line.contractor_only ?? false} @change=${(event: Event) => this.patchOverhead(index, { contractor_only: (event.target as HTMLInputElement).checked })} /> Keep this line off the customer page</label>
@@ -458,7 +479,7 @@ export class GableProQuoteBuilder extends LitElement {
       <h2 class="pro-card-title">Customer terms</h2>
       <label class="pro-text-small mt-3 flex items-center gap-2"><input class="pro-check" data-testid="hide-line-prices" type="checkbox" .checked=${this.input.hide_line_prices ?? false} @change=${(event: Event) => this.patchInput({ hide_line_prices: (event.target as HTMLInputElement).checked })} /> Hide line prices and show one lump sum</label>
       <div class="pro-form-grid mt-3">
-        <label class="pro-field"><span class="pro-label">Tax mode</span><select class="pro-select" .value=${tax.mode} @change=${(event: Event) => { const mode = (event.target as HTMLSelectElement).value as typeof tax.mode; this.patchInput({ tax: { mode, rate_bps: mode === 'site_rate' ? tax.rate_bps : 0 } }) }}><option value="site_rate">Site rate</option><option value="included">Tax included</option><option value="at_checkout">Tax at checkout</option></select></label>
+        <label class="pro-field"><span class="pro-label">Tax mode</span><pro-select aria-label="Tax mode" .value=${tax.mode} .options=${[{ value: 'site_rate', label: 'Site rate' }, { value: 'included', label: 'Tax included' }, { value: 'at_checkout', label: 'Tax at checkout' }]} ?disabled=${!this.canEdit || this.offline} @change=${(event: Event) => { const mode = (event.target as HTMLElement & { value: string }).value as typeof tax.mode; this.patchInput({ tax: { mode, rate_bps: mode === 'site_rate' ? tax.rate_bps : 0 } }) }}></pro-select></label>
         ${tax.mode === 'site_rate' ? html`<label class="pro-field"><span class="pro-label">Site tax percent</span><input class="pro-input pro-data" type="number" min="0" step="0.01" .value=${bpsToPercent(tax.rate_bps)} @input=${(event: Event) => this.patchInput({ tax: { mode: 'site_rate', rate_bps: percentToBps((event.target as HTMLInputElement).value) } })} /></label>` : nothing}
         <label class="pro-field"><span class="pro-label">Deposit percent</span><input class="pro-input pro-data" type="number" min="0" step="0.01" .value=${bpsToPercent(this.input.deposit_bps)} @input=${(event: Event) => this.patchInput({ deposit_bps: percentToBps((event.target as HTMLInputElement).value) })} /></label>
         <label class="pro-field sm:col-span-2"><span class="pro-label">Payment terms</span><textarea class="pro-textarea" .value=${this.input.payment_terms ?? ''} @input=${(event: Event) => this.patchInput({ payment_terms: (event.target as HTMLTextAreaElement).value })}></textarea></label>
@@ -535,10 +556,16 @@ export class GableProQuoteBuilder extends LitElement {
       <h1 class="pro-page-title">Your price, your customer</h1>
       <p class="pro-page-subtitle">Build from dealer products at your cost. Your customer sees only the sell price you choose.</p>
       <div class="pro-row mt-4 flex-wrap">
-        <select class="pro-select basis-full sm:basis-auto sm:flex-1 sm:max-w-md" aria-label="Open customer quote" .value=${this.quote?.id ?? ''} @change=${(event: Event) => { const id = (event.target as HTMLSelectElement).value; if (id !== '') navigate(`/quotes/${id}`) }}>
-          ${this.quote === null ? html`<option value="" selected>New customer quote</option>` : nothing}
-          ${this.summaries.map((summary) => html`<option value=${summary.id} ?selected=${summary.id === this.quote?.id}>${summary.reference} · ${summary.title}</option>`)}
-        </select>
+        <pro-select
+          class="basis-full sm:basis-auto sm:flex-1 sm:max-w-md"
+          aria-label="Open customer quote"
+          .value=${this.quote?.id ?? ''}
+          .options=${[
+            ...(this.quote === null ? [{ value: '', label: 'New customer quote' }] : []),
+            ...this.summaries.map((summary) => ({ value: summary.id, label: `${summary.reference} · ${summary.title}` })),
+          ]}
+          @change=${(event: Event) => { const id = (event.target as HTMLElement & { value: string }).value; if (id !== '') navigate(`/quotes/${id}`) }}
+        ></pro-select>
         <button type="button" class="pro-btn pro-btn-secondary pro-btn-small" data-testid="new-quote" ?disabled=${!can(this.me.capabilities, 'request_quotes')} @click=${() => navigate('/quotes')}>New</button>
         <span class="pro-row-grow"></span>
         <button type="button" class="pro-icon-btn" aria-label="Export JSON" data-testid="export-json" @click=${() => void this.exportQuotes('json')}>${icon(Download, 16)}<span class="pro-sr-only">JSON</span></button>

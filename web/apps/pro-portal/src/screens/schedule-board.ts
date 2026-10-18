@@ -13,6 +13,7 @@ import { holdWhen } from '../lib/yard.ts'
 import { navigate } from '../lib/router.ts'
 import { statusChip } from '../lib/status.ts'
 import type { PortalMe, PortalOrder, PortalScheduleSlot } from '../types.ts'
+import '../components/pro-select.ts'
 
 function isoDay(offset = 0): string {
   const value = new Date()
@@ -187,16 +188,26 @@ export class GableProScheduleBoard extends LitElement {
       <div class="mt-4 grid gap-3">
         <label class="pro-field">
           <span class="pro-label">Order</span>
-          <select class="pro-select" data-testid="schedule-order-select" .value=${this.selectedOrderId} @change=${(event: Event) => { this.selectedOrderId = (event.target as HTMLSelectElement).value }}>
-            <option value="">For a later checkout</option>
-            ${this.orders.map((item) => html`<option value=${item.id} ?selected=${item.id === this.selectedOrderId}>${item.project_name ?? item.id.slice(0, 8)}</option>`)}
-          </select>
+          <pro-select
+            data-testid="schedule-order-select"
+            aria-label="Order"
+            .value=${this.selectedOrderId}
+            .options=${[
+              { value: '', label: 'For a later checkout' },
+              ...this.orders.map((item) => ({ value: item.id, label: item.project_name ?? item.id.slice(0, 8) })),
+            ]}
+            @change=${(event: Event) => { this.selectedOrderId = (event.target as HTMLElement & { value: string }).value }}
+          ></pro-select>
         </label>
         <label class="pro-field">
           <span class="pro-label">Yard</span>
-          <select class="pro-select" data-testid="schedule-yard-select" .value=${this.yardId} @change=${(event: Event) => { this.yardId = (event.target as HTMLSelectElement).value; void this.loadWindows() }}>
-            ${this.me.yards.map((yard) => html`<option value=${yard.id} ?selected=${yard.id === this.yardId}>${yard.name}</option>`)}
-          </select>
+          <pro-select
+            data-testid="schedule-yard-select"
+            aria-label="Yard"
+            .value=${this.yardId}
+            .options=${this.me.yards.map((yard) => ({ value: yard.id, label: yard.name }))}
+            @change=${(event: Event) => { this.yardId = (event.target as HTMLElement & { value: string }).value; void this.loadWindows() }}
+          ></pro-select>
         </label>
       </div>
       <div class="pro-tabs" role="group" aria-label="Window kind">

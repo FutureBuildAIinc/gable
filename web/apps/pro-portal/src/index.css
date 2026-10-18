@@ -40,6 +40,10 @@
   button:disabled {
     @apply cursor-not-allowed opacity-50;
   }
+
+  pro-select {
+    @apply block min-w-0;
+  }
 }
 
 @layer components {
