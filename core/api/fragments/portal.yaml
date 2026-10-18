@@ -1455,7 +1455,7 @@ paths:
         yard_id is required and must be one of the account's own yards (any
         other yard is a 404, never a 403); kind, from and to are optional
         (from defaults to today, to fourteen days out; the range is capped at
-        62 days). Every instant is UTC and each slot carries its local HH:MM
+        62 days). Every instant is UTC and each slot carries its local hh:mm
         spellings in the yard's own zone.
       security:
         - PortalSession: []
@@ -2748,7 +2748,7 @@ components:
           format: date-time
         start_local:
           type: string
-          description: HH:MM in the yard's zone, for display.
+          description: hh:mm in the yard's zone, for display.
         end_local:
           type: string
         capacity:

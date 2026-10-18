@@ -83,9 +83,10 @@ type TodayResult struct {
 	LatestUpdatedAt *time.Time
 }
 
-// GetTodayBoard builds the board, scoped to the customer. seeMoney gates the
-// invoice section: a role without it gets a zeroed section rather than a
-// refusal, because the board itself is still that role's to read.
+// GetTodayBoard builds the board, scoped to the customer. seeMoney gates every
+// money figure on the board (the invoice section, quote totals and open order
+// totals): a role without it gets zeroed money fields rather than a refusal,
+// because the board itself is still that role's to read.
 func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps Capabilities, since *time.Time) (*TodayResult, error) {
 	dto := &TodayDTO{}
 	var latest *time.Time
@@ -99,6 +100,11 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 	quotes, err := s.repo.TodayQuotes(ctx, customerID, since, todayFirstRows)
 	if err != nil {
 		return nil, err
+	}
+	if !caps.SeeMoney {
+		for i := range quotes {
+			quotes[i].TotalCents = 0
+		}
 	}
 	dto.QuotesAwaitingPro.First = quotes
 	dto.QuotesAwaitingPro.Count = len(quotes)
@@ -124,25 +130,18 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 		keep(d.UpdatedAt)
 	}
 
-	next, err := s.repo.NextDeliveries(ctx, customerID, true, todayFirstRows)
+	next, err := s.repo.NextDeliveries(ctx, customerID, true, since, todayFirstRows)
 	if err != nil {
 		return nil, err
 	}
 	if next == nil {
 		next = []TodayDeliveryRow{}
 	}
-	if since != nil {
-		filtered := make([]TodayDeliveryRow, 0, len(next))
-		for _, d := range next {
-			if d.UpdatedAt.After(*since) {
-				filtered = append(filtered, d)
-			}
-		}
-		dto.NextDeliveries.First = filtered
-	} else {
-		dto.NextDeliveries.First = next
+	dto.NextDeliveries.First = next
+	dto.NextDeliveries.Count, err = s.repo.NextDeliveriesCount(ctx, customerID, true)
+	if err != nil {
+		return nil, err
 	}
-	dto.NextDeliveries.Count = len(next)
 	for _, d := range dto.NextDeliveries.First {
 		keep(d.UpdatedAt)
 	}
@@ -168,6 +167,11 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 	if err != nil {
 		return nil, err
 	}
+	if !caps.SeeMoney {
+		for i := range orders {
+			orders[i].TotalCents = 0
+		}
+	}
 	dto.OpenOrders.First = orders
 	dto.OpenOrders.Count, err = s.repo.TodayOpenOrdersCount(ctx, customerID)
 	if err != nil {
@@ -179,18 +183,26 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 
 	return &TodayResult{
 		Today:           dto,
-		ETag:            todayETag(customerID, dto, latest),
+		ETag:            todayETag(customerID, dto, caps, since, latest),
 		LatestUpdatedAt: latest,
 	}, nil
 }
 
-// todayETag hashes the customer, the section counts and the newest change so
-// a validator can never match across tenants or across different boards.
-func todayETag(customerID uuid.UUID, dto *TodayDTO, latest *time.Time) string {
+// todayETag hashes the customer, the money visibility capability, the since
+// cursor, the section counts and first-slice lengths, and the newest change so
+// a validator can never match across tenants, across roles with different
+// money visibility, or across different boards.
+func todayETag(customerID uuid.UUID, dto *TodayDTO, caps Capabilities, since *time.Time, latest *time.Time) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "c=%s;q=%d;d=%d;n=%d;i=%d;o=%d;", customerID,
-		dto.QuotesAwaitingPro.Count, dto.DeliveriesToday.Count, dto.NextDeliveries.Count,
-		dto.InvoicesDue.Count, dto.OpenOrders.Count)
+	fmt.Fprintf(h, "c=%s;m=%t;q=%d/%d;d=%d/%d;n=%d/%d;i=%d/%d;o=%d/%d;", customerID, caps.SeeMoney,
+		dto.QuotesAwaitingPro.Count, len(dto.QuotesAwaitingPro.First),
+		dto.DeliveriesToday.Count, len(dto.DeliveriesToday.First),
+		dto.NextDeliveries.Count, len(dto.NextDeliveries.First),
+		dto.InvoicesDue.Count, len(dto.InvoicesDue.First),
+		dto.OpenOrders.Count, len(dto.OpenOrders.First))
+	if since != nil {
+		fmt.Fprintf(h, "s=%d;", since.UTC().UnixNano())
+	}
 	if latest != nil {
 		fmt.Fprintf(h, "t=%d;", latest.UTC().UnixNano())
 	}
@@ -249,13 +261,17 @@ func (r *PostgresRepository) TodayDeliveries(ctx context.Context, customerID uui
 }
 
 // NextDeliveries lists the upcoming stops after today, soonest first.
-func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, limit int) ([]TodayDeliveryRow, error) {
+func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error) {
 	q := todayDeliverySelect
 	if !pickup {
 		q += ` AND o.delivery_type <> 'PICKUP'`
 	}
 	q += ` AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE + interval '1 day'`
 	args := []any{customerID}
+	if since != nil {
+		q += ` AND d.updated_at > $2`
+		args = append(args, *since)
+	}
 	q += ` ORDER BY COALESCE(d.scheduled_start, rt.scheduled_date) ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
@@ -263,6 +279,22 @@ func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid
 	}
 	defer rows.Close()
 	return scanTodayDelivery(rows)
+}
+
+// NextDeliveriesCount counts upcoming stops after today for the section headline.
+func (r *PostgresRepository) NextDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error) {
+	q := `
+		SELECT COUNT(*) FROM deliveries d
+		JOIN orders o ON o.id = d.order_id
+		LEFT JOIN delivery_routes rt ON rt.id = d.route_id
+		WHERE o.customer_id = $1
+		  AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE + interval '1 day'`
+	if !pickup {
+		q += ` AND o.delivery_type <> 'PICKUP'`
+	}
+	var n int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, q, customerID).Scan(&n)
+	return n, err
 }
 
 // TodayDeliveriesCount counts today's stops for the section headline.

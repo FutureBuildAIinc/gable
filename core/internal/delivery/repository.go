@@ -934,9 +934,9 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, d *Stop) error 
 			if lErr != nil {
 				loc = time.UTC
 			}
-			localDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-			s := localDay.Add(time.Duration(int(startMin)) * time.Minute).UTC()
-			e := localDay.Add(time.Duration(int(endMin)) * time.Minute).UTC()
+			sm, em := int(startMin), int(endMin)
+			s := time.Date(day.Year(), day.Month(), day.Day(), sm/60, sm%60, 0, 0, loc).UTC()
+			e := time.Date(day.Year(), day.Month(), day.Day(), em/60, em%60, 0, 0, loc).UTC()
 			schedStart = &s
 			schedEnd = &e
 		}
@@ -951,6 +951,8 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, d *Stop) error 
 	if err != nil {
 		return mapWriteError(err, "failed to create delivery")
 	}
+	d.DeliveryInstructions = instructions
+	d.ScheduledStart, d.ScheduledEnd = httpx.PtrTimestamp(schedStart), httpx.PtrTimestamp(schedEnd)
 	d.CreatedAt, d.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
 }

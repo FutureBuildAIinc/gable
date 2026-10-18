@@ -10,7 +10,7 @@ import (
 )
 
 // The window definition's own rules, before any database: the two kinds, the
-// weekday range, HH:MM times with end after start, positive capacity and a
+// weekday range, hh:mm times with end after start, positive capacity and a
 // non negative cutoff.
 func TestService_Validation(t *testing.T) {
 	svc := NewService(nil)
@@ -36,7 +36,13 @@ func TestService_Validation(t *testing.T) {
 	mustRefuse(req("courier", 3, "08:00", "12:00", 2, 0), "an unknown kind")
 	mustRefuse(req("delivery", 7, "08:00", "12:00", 2, 0), "weekday 7")
 	mustRefuse(req("delivery", -1, "08:00", "12:00", 2, 0), "weekday -1")
-	mustRefuse(req("delivery", 3, "08am", "12:00", 2, 0), "a time that is not HH:MM")
+	mustRefuse(req("delivery", 3, "08am", "12:00", 2, 0), "a time that is not hh:mm")
+	if _, err := svc.Create(t.Context(), req("delivery", 3, "08am", "12:00", 2, 0)); err == nil || err.Error() != "start_time must be hh:mm" {
+		t.Errorf("invalid start_time error = %v, want start_time must be hh:mm", err)
+	}
+	if _, err := svc.Create(t.Context(), req("delivery", 3, "08:00", "12pm", 2, 0)); err == nil || err.Error() != "end_time must be hh:mm" {
+		t.Errorf("invalid end_time error = %v, want end_time must be hh:mm", err)
+	}
 	mustRefuse(req("delivery", 3, "12:00", "12:00", 2, 0), "end equal to start")
 	mustRefuse(req("delivery", 3, "13:00", "12:00", 2, 0), "end before start")
 	mustRefuse(req("delivery", 3, "08:00", "12:00", 0, 0), "capacity zero")

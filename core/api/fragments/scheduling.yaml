@@ -4,7 +4,7 @@
 # The dealer side of the pro portal's scheduling (PE-08): the per yard
 # delivery windows and pickup slots a yard manager defines. The contractor
 # reads and holds them through the portal fragment's /api/portal/v1/schedule
-# routes. Times of day are HH:MM strings in the yard's own zone
+# routes. Times of day are hh:mm strings in the yard's own zone
 # (locations.timezone); instants are UTC.
 paths:
   /api/v1/scheduling/windows:
@@ -57,7 +57,7 @@ paths:
         Creates one recurring weekly rule for a yard. The yard is held to the
         caller's branch wall (a caller held to branch A cannot define branch
         B's windows); an unknown yard and every validation failure (kind,
-        weekday 0 to 6, HH:MM times with end after start, positive capacity,
+        weekday 0 to 6, hh:mm times with end after start, positive capacity,
         non negative cutoff) are 400s.
       security:
         - BearerJWT: []
@@ -208,10 +208,10 @@ components:
           description: 0 Sunday to 6 Saturday.
         start_time:
           type: string
-          description: HH:MM, the yard's local time of day.
+          description: hh:mm, the yard's local time of day.
         end_time:
           type: string
-          description: HH:MM, the yard's local time of day.
+          description: hh:mm, the yard's local time of day.
         capacity:
           type: integer
         cutoff_minutes:

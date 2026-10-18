@@ -39,8 +39,11 @@ func (f *fakePortalRepo) TodayDeliveries(_ context.Context, _ uuid.UUID, _ bool,
 func (f *fakePortalRepo) TodayDeliveriesCount(_ context.Context, _ uuid.UUID, _ bool) (int, error) {
 	return len(f.todayDeliveries), nil
 }
-func (f *fakePortalRepo) NextDeliveries(_ context.Context, _ uuid.UUID, _ bool, _ int) ([]TodayDeliveryRow, error) {
+func (f *fakePortalRepo) NextDeliveries(_ context.Context, _ uuid.UUID, _ bool, _ *time.Time, _ int) ([]TodayDeliveryRow, error) {
 	return nil, nil
+}
+func (f *fakePortalRepo) NextDeliveriesCount(_ context.Context, _ uuid.UUID, _ bool) (int, error) {
+	return 0, nil
 }
 func (f *fakePortalRepo) TodayInvoices(_ context.Context, _ uuid.UUID, _ *time.Time, _ int) ([]TodayInvoiceRow, error) {
 	return f.todayInvoices, nil
@@ -60,6 +63,9 @@ func (f *fakePortalRepo) ReadOrderDeliveryState(_ context.Context, _ uuid.UUID, 
 func (f *fakePortalRepo) SetOrderSiteInstructions(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ string) error {
 	return nil
 }
+func (f *fakePortalRepo) InTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
 func (f *fakePortalRepo) ListScheduleWindows(_ context.Context, _ uuid.UUID, _ uuid.UUID, _, _, _ string) ([]ScheduleWindowView, error) {
 	return nil, nil
 }
@@ -68,6 +74,9 @@ func (f *fakePortalRepo) CreateScheduleHold(_ context.Context, _ uuid.UUID, _ *u
 }
 func (f *fakePortalRepo) ChangeScheduleHold(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ uuid.UUID, _ ScheduleWindowRequest) (*ScheduleHoldDTO, error) {
 	return nil, errors.New("not wired in the fake")
+}
+func (f *fakePortalRepo) AttachScheduleHoldToOrder(_ context.Context, _, _, _ uuid.UUID) error {
+	return nil
 }
 func (f *fakePortalRepo) ReleaseScheduleHold(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil

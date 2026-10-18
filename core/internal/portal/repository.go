@@ -92,16 +92,19 @@ type Repository interface {
 	TodayQuotesCount(ctx context.Context, customerID uuid.UUID) (int, error)
 	TodayDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error)
 	TodayDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error)
-	NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, limit int) ([]TodayDeliveryRow, error)
+	NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error)
+	NextDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error)
 	TodayInvoices(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayInvoiceRow, error)
 	TodayInvoicesCount(ctx context.Context, customerID uuid.UUID) (int, error)
 	TodayOpenOrders(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayOrderRow, error)
 	TodayOpenOrdersCount(ctx context.Context, customerID uuid.UUID) (int, error)
 	ReadOrderDeliveryState(ctx context.Context, orderID, customerID uuid.UUID) (*orderDeliveryState, error)
 	SetOrderSiteInstructions(ctx context.Context, orderID, customerID uuid.UUID, instructions string) error
+	InTx(ctx context.Context, fn func(context.Context) error) error
 	ListScheduleWindows(ctx context.Context, customerID, yardID uuid.UUID, kind, from, to string) ([]ScheduleWindowView, error)
 	CreateScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
 	ChangeScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, holdID uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
+	AttachScheduleHoldToOrder(ctx context.Context, customerID, holdID, orderID uuid.UUID) error
 	ReleaseScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) error
 	GetScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) (*ScheduleHoldDTO, error)
 }

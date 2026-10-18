@@ -144,13 +144,7 @@ func (h *Handler) HandleListScheduleWindows(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	from := r.URL.Query().Get("from")
-	if from == "" {
-		from = time.Now().UTC().Format("2006-01-02")
-	}
 	to := r.URL.Query().Get("to")
-	if to == "" {
-		to = time.Now().UTC().AddDate(0, 0, 14).Format("2006-01-02")
-	}
 
 	views, err := h.svc.ListOpenScheduleWindows(r.Context(), customerID, yardID, r.URL.Query().Get("kind"), from, to)
 	if err != nil {
@@ -245,7 +239,7 @@ func (h *Handler) HandleReleaseScheduleHold(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := h.svc.ReleaseScheduleHold(r.Context(), customerID, holdID); err != nil {
-		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusNotFound))
+		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -237,30 +237,35 @@ func (s *Service) SetOrderSiteInstructions(ctx context.Context, orderID, custome
 }
 
 // SetOrderSiteInstructions writes the instructions on an unfulfilled order and
-// mirrors them onto any open delivery stop so Dispatch sees the update.
+// mirrors them onto any open delivery stop inside one transaction so Dispatch
+// sees the update.
 func (r *PostgresRepository) SetOrderSiteInstructions(ctx context.Context, orderID, customerID uuid.UUID, instructions string) error {
-	ex := r.db.GetExecutor(ctx)
-	tag, err := ex.Exec(ctx, `
-		UPDATE orders SET site_delivery_instructions = $1, updated_at = NOW()
-		WHERE id = $2 AND customer_id = $3 AND status NOT IN ('FULFILLED', 'CANCELLED')
-	`, instructions, orderID, customerID)
-	if err != nil {
-		return fmt.Errorf("failed to set site instructions: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		// Either not the caller's order (a 404 either way) or one the gate
-		// refuses; the order's own state decides which, read it back.
-		var status string
-		err := ex.QueryRow(ctx,
-			`SELECT status FROM orders WHERE id = $1 AND customer_id = $2`, orderID, customerID).Scan(&status)
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		ex := r.db.GetExecutor(txCtx)
+		tag, err := ex.Exec(txCtx, `
+			UPDATE orders SET site_delivery_instructions = $1, updated_at = NOW()
+			WHERE id = $2 AND customer_id = $3 AND status NOT IN ('FULFILLED', 'CANCELLED')
+		`, instructions, orderID, customerID)
 		if err != nil {
-			return ErrOrderNotFound
+			return fmt.Errorf("failed to set site instructions: %w", err)
 		}
-		return fmt.Errorf("%w: a %s order's site instructions are read only", ErrInvalidRequest, status)
-	}
-	_, _ = ex.Exec(ctx, `
-		UPDATE deliveries SET delivery_instructions = $1, updated_at = NOW()
-		WHERE order_id = $2 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
-	`, instructions, orderID)
-	return nil
+		if tag.RowsAffected() == 0 {
+			// Either not the caller's order (a 404 either way) or one the gate
+			// refuses; the order's own state decides which, read it back.
+			var status string
+			err := ex.QueryRow(txCtx,
+				`SELECT status FROM orders WHERE id = $1 AND customer_id = $2`, orderID, customerID).Scan(&status)
+			if err != nil {
+				return ErrOrderNotFound
+			}
+			return fmt.Errorf("%w: a %s order's site instructions are read only", ErrInvalidRequest, status)
+		}
+		if _, err := ex.Exec(txCtx, `
+			UPDATE deliveries SET delivery_instructions = $1, updated_at = NOW()
+			WHERE order_id = $2 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
+		`, instructions, orderID); err != nil {
+			return fmt.Errorf("failed to mirror site instructions to delivery: %w", err)
+		}
+		return nil
+	})
 }
