@@ -190,7 +190,6 @@ func Load() (*Config, error) {
 		AuthIssuer:  getEnv("AUTH_ISSUER", ""),
 
 		EDIOutputDir: getEnv("EDI_OUTPUT_DIR", "edi_out"),
-		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
 
 		// Run Payments — defaults to sandbox mode
 		RunPaymentsAPIKey:      getEnv("RUN_PAYMENTS_API_KEY", ""),
@@ -250,6 +249,7 @@ func Load() (*Config, error) {
 		DraftFeedMaxStreams:             getEnvInt("DRAFT_FEED_MAX_STREAMS", 500),
 
 		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
+		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),
