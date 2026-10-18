@@ -5253,7 +5253,7 @@ export interface paths {
         put?: never;
         /**
          * Sweep the card terminal intents past their lease
-         * @description The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The scheduler runs this act on its own over every branch; the route is the manager's own trigger and sweeps only the caller's reach (a branch in context, else the granted branches). Finance and owner roles only; a machine key is refused in the route itself.
+         * @description The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The worker runs this act on its own over every branch; the route is the manager's own trigger and sweeps only the caller's reach (a branch in context, else the granted branches). Finance and owner roles only; a machine key is refused in the route itself.
          */
         post: operations["posTerminalIntentsSweep"];
         delete?: never;

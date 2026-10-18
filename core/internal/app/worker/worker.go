@@ -2,11 +2,12 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // Package worker is the worker role of the core binary: the background
-// jobs that do not belong to the HTTP server. Today those are six: the
+// jobs that do not belong to the HTTP server. Today those are seven: the
 // idempotency retention purge, which R1-4 moved out of serve; the outbox
 // drain (R1-12), which delivers committed events to their subscribers; the
-// outbox retention purge (R1-12b); the draft events purge; and the order
-// module's allocation and fulfilment queue jobs. The cron schedulers that
+// outbox retention purge (R1-12b); the draft events purge; the order
+// module's allocation and fulfilment queue jobs; and the counter terminal
+// intent sweep (CP-05). The cron schedulers that
 // serve mounts beside its own HTTP surface (auto-reorder and scheduled
 // report delivery) stay in serve.
 package worker
@@ -144,8 +145,13 @@ func Run() {
 	// first; a failure is counted on the request and parks it after ten.
 	fulfilment := newQueueRunner("order-fulfilment", orderSvc.ServeFulfilmentRequest, logger)
 	fulfilment.Start()
+	// The counter terminal's intent sweep (CP-05): turns expired claimed and
+	// pending_at_device intents into lost across every branch, filing one
+	// manager item per dispatched leg.
+	terminalSweep := newTerminalSweepRunner(db, logger)
+	terminalSweep.Start()
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment")
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment,terminal-intent-sweep")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -153,6 +159,8 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping the terminal intent sweep...")
+	terminalSweep.Stop()
 	logger.Info("Shutdown step 1/2: stopping the order queue jobs...")
 	allocation.Stop()
 	fulfilment.Stop()

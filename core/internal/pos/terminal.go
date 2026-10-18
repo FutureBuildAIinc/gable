@@ -433,7 +433,7 @@ func (s *Service) reverseTerminalLeg(ctx context.Context, c chargeMade, saleID u
 	return nil
 }
 
-// SweepTerminalIntents is the sweep act: the scheduler or the guarded route
+// SweepTerminalIntents is the sweep act: the worker or the guarded route
 // runs it, and it turns intents past their lease into lost, filing one
 // manager item per dispatched leg (a claim that never reached the device is
 // simply closed). The sweep reaches the caller's branch wall: from an HTTP

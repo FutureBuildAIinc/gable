@@ -180,7 +180,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 					ids = append(ids, id.String())
 				}
 				return conflict("terminal_intent_in_flight",
-					fmt.Sprintf("a card terminal intent of this register is still open (intents %s): complete or void the open sale using an authorized leg, cancel a claim the terminal never reached at POST /api/v1/pos/terminal-intents/{id}/cancel, or have a manager resolve it after the sweep at POST /api/v1/pos/terminal-intents/sweep before closing the drawer",
+					fmt.Sprintf("a card terminal intent of this register is still open (intents %s): complete or void the open sale using an authorized leg, cancel a claim the terminal never reached at POST /api/v1/pos/terminal-intents/{id}/cancel, or wait for the worker's sweep (or a manager with finance or owner role at POST /api/v1/pos/terminal-intents/sweep) and have a manager (finance or owner) settle it before closing the drawer",
 						strings.Join(ids, ", ")))
 			}
 		}

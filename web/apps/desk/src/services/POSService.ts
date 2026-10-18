@@ -348,7 +348,7 @@ export const posService = {
         return response.json();
     },
 
-    /** The manager's own trigger of the sweep act; the scheduler runs it too. */
+    /** The manager's own trigger of the sweep act; the worker runs it too. */
     async sweepTerminalIntents(): Promise<TerminalSweepResult> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-intents/sweep`, { method: 'POST' }),
