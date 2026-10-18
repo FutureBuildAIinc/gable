@@ -186,13 +186,39 @@ func TestMigration125BackfillsEachSource(t *testing.T) {
 	memo := doc("credit_memos", &other)
 	vendorInv := doc("vendor_invoices", &other)
 	session := doc("till_sessions", &other)
+
+	payRefund := uuid.New()
+	if _, err := base.Exec(ctx, `INSERT INTO payment_refunds (id, payment_id, amount, status, method, refunded_on)
+		VALUES ($1, $2, 5.00, 'COMPLETE', 'CASH', CURRENT_DATE)`, payRefund, payment); err != nil {
+		t.Fatalf("seed payment refund: %v", err)
+	}
+	cmRefund := uuid.New()
+	if _, err := base.Exec(ctx, `INSERT INTO payment_refunds (id, credit_memo_id, amount, status, method, refunded_on)
+		VALUES ($1, $2, 5.00, 'COMPLETE', 'CASH', CURRENT_DATE)`, cmRefund, memo); err != nil {
+		t.Fatalf("seed credit memo refund: %v", err)
+	}
+	posTx := uuid.New()
+	var regID string
+	var cashierID uuid.UUID
+	if err := base.QueryRow(ctx, `SELECT register_id, cashier_id FROM till_sessions WHERE id = $1`, session).Scan(&regID, &cashierID); err != nil {
+		t.Fatalf("read session register/cashier: %v", err)
+	}
+	if _, err := base.Exec(ctx, `INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, till_session_id, subtotal, tax_amount, total, status, currency)
+		VALUES ($1, $2, $3, $4, $5, 10.00, 0, 10.00, 'COMPLETED', 'USD')`, posTx, regID, cashierID, other, session); err != nil {
+		t.Fatalf("seed pos_transactions: %v", err)
+	}
+
 	invEntry := entry("INVOICE", invoice, nil)
-	entry("PAYMENT", payment, nil)
-	entry("CREDIT_MEMO", memo, nil)
-	entry("VENDOR_INVOICE", vendorInv, nil)
-	entry("ADJUSTMENT", session, nil)
-	entry("REVERSAL", uuid.New(), &invEntry)
-	entry("MANUAL", uuid.New(), nil)
+	payEntry := entry("PAYMENT", payment, nil)
+	cmEntry := entry("CREDIT_MEMO", memo, nil)
+	viEntry := entry("VENDOR_INVOICE", vendorInv, nil)
+	adjEntry := entry("ADJUSTMENT", session, nil)
+	rev1Entry := entry("REVERSAL", invEntry, &invEntry)
+	rev2Entry := entry("REVERSAL", rev1Entry, &rev1Entry)
+	payRefundEntry := entry("PAYMENT", payRefund, nil)
+	cmRefundEntry := entry("CREDIT_MEMO", cmRefund, nil)
+	posTxEntry := entry("PAYMENT", posTx, nil)
+	manEntry := entry("MANUAL", uuid.New(), nil)
 
 	sql, err := os.ReadFile("../../migrations/125_gl_branch_and_finstmt.sql")
 	if err != nil {
@@ -202,21 +228,34 @@ func TestMigration125BackfillsEachSource(t *testing.T) {
 		t.Fatalf("apply 125: %v", err)
 	}
 
-	for source, want := range map[string]uuid.UUID{
-		"INVOICE": other, "PAYMENT": other, "CREDIT_MEMO": other,
-		"VENDOR_INVOICE": other, "ADJUSTMENT": other, "REVERSAL": other, "MANUAL": def,
+	for _, tc := range []struct {
+		name string
+		id   uuid.UUID
+		want uuid.UUID
+	}{
+		{"INVOICE", invEntry, other},
+		{"PAYMENT", payEntry, other},
+		{"CREDIT_MEMO", cmEntry, other},
+		{"VENDOR_INVOICE", viEntry, other},
+		{"ADJUSTMENT", adjEntry, other},
+		{"REVERSAL_1", rev1Entry, other},
+		{"REVERSAL_2", rev2Entry, other},
+		{"PAYMENT_REFUND", payRefundEntry, other},
+		{"CREDIT_MEMO_REFUND", cmRefundEntry, other},
+		{"POS_TRANSACTION", posTxEntry, other},
+		{"MANUAL", manEntry, def},
 	} {
 		var got, line uuid.UUID
 		if err := base.QueryRow(ctx, `SELECT e.branch_id, l.branch_id FROM gl_journal_entries e
 			JOIN gl_journal_lines l ON l.journal_entry_id = e.id
-			WHERE e.memo = 'm6 backfill' AND e.source = $1`, source).Scan(&got, &line); err != nil {
-			t.Fatalf("%s: %v", source, err)
+			WHERE e.id = $1`, tc.id).Scan(&got, &line); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
 		}
-		if got != want {
-			t.Errorf("%s entry branch = %v, want %v (def %v other %v)", source, got, want, def, other)
+		if got != tc.want {
+			t.Errorf("%s entry branch = %v, want %v (def %v other %v)", tc.name, got, tc.want, def, other)
 		}
 		if line != got {
-			t.Errorf("%s line branch = %v, want the entry's %v", source, line, got)
+			t.Errorf("%s line branch = %v, want the entry's %v", tc.name, line, got)
 		}
 	}
 	_ = name

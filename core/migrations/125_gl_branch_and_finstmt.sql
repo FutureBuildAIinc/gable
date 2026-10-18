@@ -20,6 +20,9 @@ FROM (
                m.branch_id,                                   -- CREDIT_MEMO
                p.branch_id,                                   -- PAYMENT
                ai.branch_id,                                  -- PAYMENT applied / WRITE_OFF (via the invoice)
+               pr_p.branch_id,                                -- PAYMENT refund (via payment_refunds -> payments)
+               pr_cm.branch_id,                               -- CREDIT_MEMO refund (via payment_refunds -> credit_memos)
+               pt.branch_id,                                  -- PAYMENT from POS cash sale (pos_transactions)
                r.branch_id,                                   -- RETURN
                dep.branch_id,                                 -- DEPOSIT
                ts.branch_id,                                  -- ADJUSTMENT (till over/short)
@@ -33,6 +36,10 @@ FROM (
     LEFT JOIN payments p         ON e.source = 'PAYMENT'        AND p.id = e.source_ref_id
     LEFT JOIN ar_applications aar ON e.source IN ('PAYMENT', 'WRITE_OFF') AND aar.id = e.source_ref_id
     LEFT JOIN invoices ai ON ai.id = aar.invoice_id
+    LEFT JOIN payment_refunds pr ON e.source IN ('PAYMENT', 'CREDIT_MEMO') AND pr.id = e.source_ref_id
+    LEFT JOIN payments pr_p      ON pr_p.id = pr.payment_id
+    LEFT JOIN credit_memos pr_cm ON pr_cm.id = pr.credit_memo_id
+    LEFT JOIN pos_transactions pt ON e.source = 'PAYMENT'       AND pt.id = e.source_ref_id
     LEFT JOIN pos_returns r      ON e.source = 'RETURN'         AND r.id = e.source_ref_id
     LEFT JOIN customer_deposits_legacy dep ON e.source = 'DEPOSIT' AND dep.id = e.source_ref_id
     LEFT JOIN till_sessions ts   ON e.source = 'ADJUSTMENT'     AND ts.id = e.source_ref_id
@@ -49,12 +56,22 @@ FROM (
 ) d
 WHERE e.id = d.id AND e.branch_id IS NULL;
 
--- A reversal belongs to the branch of the entry it reverses (the default the
--- source pass leaves it is not its branch).
+-- A reversal belongs to the branch of the root entry it reverses, walked
+-- recursively along reverses_entry_id chains of any depth.
+WITH RECURSIVE rev_chain AS (
+    SELECT e.id, orig.branch_id
+    FROM gl_journal_entries e
+    JOIN gl_journal_entries orig ON orig.id = e.reverses_entry_id
+    WHERE orig.reverses_entry_id IS NULL
+    UNION ALL
+    SELECT child.id, rc.branch_id
+    FROM gl_journal_entries child
+    JOIN rev_chain rc ON child.reverses_entry_id = rc.id
+)
 UPDATE gl_journal_entries e
-SET branch_id = orig.branch_id
-FROM gl_journal_entries orig
-WHERE e.reverses_entry_id = orig.id;
+SET branch_id = rc.branch_id
+FROM rev_chain rc
+WHERE e.id = rc.id AND rc.branch_id IS NOT NULL;
 
 -- Whatever no source named lands on the default branch, so the column can go
 -- NOT NULL: an entry with no derivable branch is the default branch's.
