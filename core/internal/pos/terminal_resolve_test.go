@@ -13,11 +13,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -307,11 +309,14 @@ func TestResolveAuthorizedWhenTheReversalFailsReleasesTheItem(t *testing.T) {
 	if got := itemStateOf(t, f, itemID); got != "open" {
 		t.Fatalf("the item is %s after the failed reversal, wanted open", got)
 	}
-	if state, spent, _ := f.intentFacts(t, intentID); state != "lost" || spent {
-		t.Fatalf("the intent is %s spent=%t after the failed reversal, wanted lost", state, spent)
+	if state, spent, _ := f.intentFacts(t, intentID); state != "authorized" || spent {
+		t.Fatalf("the intent is %s spent=%t after the failed reversal, wanted authorized and unspent", state, spent)
 	}
 	if r2 := f.resolveItem(itemID, "authorized", "devref-502"); r2.status != http.StatusOK {
 		t.Fatalf("the retry after the gateway recovered = %d: %s", r2.status, r2.raw)
+	}
+	if state, spent, _ := f.intentFacts(t, intentID); state != "authorized" || !spent {
+		t.Fatalf("the intent is %s spent=%t after the retry, wanted authorized and spent", state, spent)
 	}
 }
 
@@ -659,3 +664,210 @@ func TestResolveAuthorizedSettlesALostCompensationVoid(t *testing.T) {
 		t.Fatalf("the item is %s", got)
 	}
 }
+
+// requireBlocker asserts that a 409 response carries the expected blocker code.
+func requireBlocker(t *testing.T, r resp, want string) {
+	t.Helper()
+	if r.status != http.StatusConflict {
+		t.Fatalf("status = %d, wanted 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	for _, b := range blockers {
+		if b == want {
+			return
+		}
+	}
+	t.Fatalf("blockers = %v, wanted %q in %s", blockers, want, r.raw)
+}
+
+// TestReviewConflictItemResolvedAuthorized: a card sale completed on an
+// authorized leg, then the device delivered a conflicting declined answer that
+// filed an open manager item. Resolving the item as authorized agrees with the
+// books: 200 OK, zero gateway voids or refunds, the item closes as
+// resolved_authorized, and the sale stays COMPLETED with its one card payment.
+func TestReviewConflictItemResolvedAuthorized(t *testing.T) {
+	gw := &fakeGateway{}
+	f, saleID := settledCardSale(t, gw)
+	intentID, state, _ := f.terminalIntentOf(t, saleID)
+	if state != "authorized" {
+		t.Fatalf("the completed sale's leg is %s, wanted authorized", state)
+	}
+	ledger := payment.NewTerminalLedger(f.db)
+	out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+		IntentID: intentID, ProviderRef: "devref-conflict", Verdict: "declined",
+	})
+	if err != nil || out != payment.AnswerConflictQueued {
+		t.Fatalf("conflicting answer = %s %v, wanted conflict_queued", out, err)
+	}
+	itemID := f.itemOfSale(t, saleID)
+	r := f.resolveItem(itemID, "authorized", "devref-conflict")
+	if r.status != http.StatusOK || str(t, r.body, "state") != "resolved_authorized" {
+		t.Fatalf("resolve authorized = %d: %s; gateway voids %v refunds %v; item %s",
+			r.status, r.raw, gw.voids, gw.refunds, itemStateOf(t, f, itemID))
+	}
+	if len(gw.voids) != 0 || len(gw.refunds) != 0 {
+		t.Fatalf("gateway voids %v refunds %v, wanted none", gw.voids, gw.refunds)
+	}
+	if got := itemStateOf(t, f, itemID); got != "resolved_authorized" {
+		t.Fatalf("item state = %s, wanted resolved_authorized", got)
+	}
+	if st, spent, _ := f.intentFacts(t, intentID); st != "authorized" || !spent {
+		t.Fatalf("intent = %s spent=%t, wanted authorized and spent", st, spent)
+	}
+	if got := f.saleStatus(t, saleID); got != "COMPLETED" {
+		t.Fatalf("sale status = %s, wanted COMPLETED", got)
+	}
+	if got := f.cardTendersOf(t, saleID); got != 1 {
+		t.Fatalf("card tenders = %d, wanted 1", got)
+	}
+	if got := f.counterPayments(t); got != 1 {
+		t.Fatalf("payments = %d, wanted 1", got)
+	}
+	if got := f.accountBalance("1010"); got != f.totalOf(t, saleID) {
+		t.Fatalf("1010 = %d, wanted %d", got, f.totalOf(t, saleID))
+	}
+	f.assertARInvariants(t)
+}
+
+// TestReviewConflictItemOnDeclinedLeg: a card leg was declined at the counter,
+// then a conflicting authorized answer arrived and filed an open manager item.
+// Resolving the item as authorized on an open sale moves the leg to authorized
+// (unspent) so the completion reuses it; on a sale subsequently paid in cash,
+// resolving as authorized reverses the charge cleanly at the gateway.
+func TestReviewConflictItemOnDeclinedLeg(t *testing.T) {
+	gw := &fakeGateway{}
+	f := terminalFixture(t, payment.SimDecline, gw)
+	ledger := payment.NewTerminalLedger(f.db)
+
+	// Case A: open sale keeps the authorized leg unspent for completion.
+	saleOpen := f.openSale(t, nil)
+	if r := f.completeSale(saleOpen, f.cardAll(t, saleOpen)); r.status != http.StatusConflict {
+		t.Fatalf("declined completion = %d, wanted 409: %s", r.status, r.raw)
+	}
+	intentOpen, state, _ := f.terminalIntentOf(t, saleOpen)
+	if state != "declined" {
+		t.Fatalf("intent is %s, wanted declined", state)
+	}
+	if out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+		IntentID: intentOpen, ProviderRef: "devref-decl-open", Verdict: "authorized",
+		Brand: "VISA", Last4: "4242", AuthCode: "AUTH1",
+	}); err != nil || out != payment.AnswerConflictQueued {
+		t.Fatalf("conflicting authorized answer = %s %v, wanted conflict_queued", out, err)
+	}
+	itemOpen := f.itemOfSale(t, saleOpen)
+	if r := f.resolveItem(itemOpen, "authorized", "devref-decl-open"); r.status != http.StatusOK {
+		t.Fatalf("resolve authorized on open sale = %d: %s; item %s", r.status, r.raw, itemStateOf(t, f, itemOpen))
+	}
+	if st, spent, ref := f.intentFacts(t, intentOpen); st != "authorized" || spent || ref != "devref-decl-open" {
+		t.Fatalf("intent after resolve = %s spent=%t ref=%q, wanted authorized unspent", st, spent, ref)
+	}
+	dispatchesBefore := len(f.terminal.Dispatched())
+	if done := f.completeSale(saleOpen, f.cardAll(t, saleOpen)); done.status != http.StatusOK {
+		t.Fatalf("completion on resolved leg = %d: %s", done.status, done.raw)
+	}
+	if got := len(f.terminal.Dispatched()); got != dispatchesBefore {
+		t.Fatalf("completion dispatched again: %d vs %d", got, dispatchesBefore)
+	}
+	if st, spent, _ := f.intentFacts(t, intentOpen); st != "authorized" || !spent {
+		t.Fatalf("intent after completion = %s spent=%t, wanted authorized spent", st, spent)
+	}
+
+	// Case B: sale completed in cash after the decline, then manager resolves
+	// the conflicting authorized answer -> reverses cleanly at the gateway.
+	salePaid := f.openSale(t, nil)
+	if r := f.completeSale(salePaid, f.cardAll(t, salePaid)); r.status != http.StatusConflict {
+		t.Fatalf("declined completion = %d, wanted 409: %s", r.status, r.raw)
+	}
+	intentPaid, _, _ := f.terminalIntentOf(t, salePaid)
+	if out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+		IntentID: intentPaid, ProviderRef: "devref-decl-paid", Verdict: "authorized",
+	}); err != nil || out != payment.AnswerConflictQueued {
+		t.Fatalf("conflicting authorized answer = %s %v", out, err)
+	}
+	if r := f.completeSale(salePaid, f.cashAll(t, salePaid)); r.status != http.StatusOK {
+		t.Fatalf("cash completion = %d: %s", r.status, r.raw)
+	}
+	itemPaid := f.itemOfSale(t, salePaid)
+	if r := f.resolveItem(itemPaid, "authorized", "devref-decl-paid"); r.status != http.StatusOK {
+		t.Fatalf("resolve authorized on paid sale = %d: %s", r.status, r.raw)
+	}
+	if len(gw.voids) != 1 || gw.voids[0] != "devref-decl-paid" {
+		t.Fatalf("gateway voids = %v, wanted [devref-decl-paid]", gw.voids)
+	}
+	if st, spent, _ := f.intentFacts(t, intentPaid); st != "authorized" || !spent {
+		t.Fatalf("intent after reversal = %s spent=%t, wanted authorized spent", st, spent)
+	}
+	f.assertARInvariants(t)
+}
+
+// TestReviewConflictItemResolvedDeclinedOnBookedLegIsRefused: a completed card
+// sale receives a conflicting declined answer; resolving the item as declined
+// is refused with 409 terminal_leg_already_booked naming the booked tender, and
+// the item remains open so the books never silently keep a payment the manager
+// marked declined.
+func TestReviewConflictItemResolvedDeclinedOnBookedLegIsRefused(t *testing.T) {
+	gw := &fakeGateway{}
+	f, saleID := settledCardSale(t, gw)
+	intentID, _, _ := f.terminalIntentOf(t, saleID)
+	var tenderID string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id::text FROM pos_tenders WHERE transaction_id = $1 AND method = 'CARD'`, saleID).Scan(&tenderID); err != nil {
+		t.Fatal(err)
+	}
+	ledger := payment.NewTerminalLedger(f.db)
+	if out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+		IntentID: intentID, ProviderRef: "devref-booked-decl", Verdict: "declined",
+	}); err != nil || out != payment.AnswerConflictQueued {
+		t.Fatalf("conflicting declined answer = %s %v", out, err)
+	}
+	itemID := f.itemOfSale(t, saleID)
+	r := f.resolveItem(itemID, "declined", "terminal tape shows declined")
+	requireBlocker(t, r, "terminal_leg_already_booked")
+	if !strings.Contains(string(r.raw), tenderID) {
+		t.Fatalf("refusal does not name booked tender %s: %s", tenderID, r.raw)
+	}
+	if got := itemStateOf(t, f, itemID); got != "open" {
+		t.Fatalf("item state = %s, wanted open", got)
+	}
+}
+
+// TestReviewConflictItemResolvedDeclinedOnUnspentAuthorizedLeg: an open sale
+// has an authorized unspent card leg (stopped after answer before booking),
+// then a conflicting declined answer files an open manager item. Resolving the
+// item as declined moves the intent to declined and closes the item as
+// resolved_declined so the open sale can charge again.
+func TestReviewConflictItemResolvedDeclinedOnUnspentAuthorizedLeg(t *testing.T) {
+	f, seam := crashFixture(t, payment.SimApprove, nil)
+	saleID := f.openSale(t, nil)
+	seam.set(pos.TerminalPointAfterAnswer)
+	if r := f.completeSale(saleID, f.cardAll(t, saleID)); r.status != http.StatusInternalServerError {
+		t.Fatalf("stopped act = %d, wanted 500: %s", r.status, r.raw)
+	}
+	intentID, state, _ := f.terminalIntentOf(t, saleID)
+	if state != "authorized" {
+		t.Fatalf("intent state = %s, wanted authorized", state)
+	}
+	ledger := payment.NewTerminalLedger(f.db)
+	if out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+		IntentID: intentID, ProviderRef: "devref-unspent-decl", Verdict: "declined",
+	}); err != nil || out != payment.AnswerConflictQueued {
+		t.Fatalf("conflicting declined answer = %s %v", out, err)
+	}
+	itemID := f.itemOfSale(t, saleID)
+	r := f.resolveItem(itemID, "declined", "terminal tape shows declined")
+	if r.status != http.StatusOK || str(t, r.body, "state") != "resolved_declined" {
+		t.Fatalf("resolve declined = %d: %s", r.status, r.raw)
+	}
+	if st, spent, _ := f.intentFacts(t, intentID); st != "declined" || spent {
+		t.Fatalf("intent after resolve = %s spent=%t, wanted declined unspent", st, spent)
+	}
+	if got := itemStateOf(t, f, itemID); got != "resolved_declined" {
+		t.Fatalf("item state = %s, wanted resolved_declined", got)
+	}
+	seam.set("")
+	if done := f.completeSale(saleID, f.cardAll(t, saleID)); done.status != http.StatusOK {
+		t.Fatalf("retry after declined resolution = %d: %s", done.status, done.raw)
+	}
+	f.assertARInvariants(t)
+}
+

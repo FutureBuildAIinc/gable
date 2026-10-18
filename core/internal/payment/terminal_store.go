@@ -290,6 +290,46 @@ func (l *TerminalLedger) AuthorizeLost(ctx context.Context, id uuid.UUID, provid
 	return err == nil, err
 }
 
+// AuthorizeForResolution moves an unspent intent (lost, declined, or
+// authorized and unspent) to authorized (unspent) in the first transaction of
+// a manager's authorized resolution, before BeginReversal commits, so every
+// state check that can refuse runs before any gateway call and a failed
+// gateway reversal never leaves the intent wrongly marked spent.
+func (l *TerminalLedger) AuthorizeForResolution(ctx context.Context, id uuid.UUID, providerRef string) (bool, error) {
+	var got uuid.UUID
+	err := l.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE payment_terminal_intents i
+		SET state = 'authorized', answer_verdict = 'authorized', answered_at = NOW(),
+		    answer_provider_ref = $2,
+		    answer_brand = COALESCE(NULLIF(i.answer_brand, ''), (SELECT NULLIF(late_brand, '') FROM payment_terminal_lost_items WHERE intent_id = i.id), ''),
+		    answer_last4 = COALESCE(NULLIF(i.answer_last4, ''), (SELECT NULLIF(late_last4, '') FROM payment_terminal_lost_items WHERE intent_id = i.id), ''),
+		    answer_auth_code = COALESCE(NULLIF(i.answer_auth_code, ''), (SELECT NULLIF(late_auth_code, '') FROM payment_terminal_lost_items WHERE intent_id = i.id), ''),
+		    updated_at = NOW()
+		WHERE i.id = $1 AND (i.state IN ('lost', 'declined') OR (i.state = 'authorized' AND i.spent_at IS NULL))
+		RETURNING i.id`, id, providerRef).Scan(&got)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// DeclineUnspentAuthorized moves an unspent authorized intent to declined when
+// a manager resolves a conflicting answer item as declined before the sale
+// used the leg. One guarded statement with RETURNING.
+func (l *TerminalLedger) DeclineUnspentAuthorized(ctx context.Context, id uuid.UUID, providerRef string) (bool, error) {
+	var got uuid.UUID
+	err := l.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE payment_terminal_intents
+		SET state = 'declined', answer_verdict = 'declined', answered_at = NOW(),
+		    answer_provider_ref = COALESCE(NULLIF($2, ''), answer_provider_ref), updated_at = NOW()
+		WHERE id = $1 AND state = 'authorized' AND spent_at IS NULL
+		RETURNING id`, id, providerRef).Scan(&got)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // ApplyDeviceAnswer lands one asynchronous verdict, idempotent by provider
 // reference: the same verdict twice is a no-op; a conflicting verdict is
 // audited and queued for a manager; an answer on an intent the sweep already

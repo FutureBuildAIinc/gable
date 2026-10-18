@@ -94,12 +94,35 @@ func settleItemView(item *payment.TerminalLostItem, state string) *TerminalLostI
 	return &v
 }
 
-// resolveDeclined closes the item: the terminal's own record said no, so
-// nothing moved and nothing is booked.
+// resolveDeclined closes the item when the terminal's own record said no:
+//   - if the intent is already authorized and booked (spent_at IS NOT NULL),
+//     refuses with 409 terminal_leg_already_booked naming the booked tender or
+//     refund claim so the manager voids or returns through the sale;
+//   - if the intent is authorized and unspent (spent_at IS NULL), moves the
+//     intent to declined by a guarded statement and closes the item so the
+//     open sale can charge again;
+//   - if the intent is lost or already declined, closes the item and moves
+//     nothing.
 func (s *Service) resolveDeclined(ctx context.Context, item *payment.TerminalLostItem, entry audit.Entry) (*TerminalLostItemView, error) {
 	if err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockSale(ctx, item.TransactionID); err != nil {
 			return err
+		}
+		intent, err := s.terminalLedger.Get(ctx, item.IntentID)
+		if err != nil {
+			return err
+		}
+		if intent.State == payment.TerminalAuthorized {
+			if intent.SpentAt != nil {
+				return s.refuseDeclinedBookedLeg(ctx, item, intent)
+			}
+			moved, err := s.terminalLedger.DeclineUnspentAuthorized(ctx, intent.ID, entryRef(entry))
+			if err != nil {
+				return err
+			}
+			if !moved {
+				return conflict("terminal_intent_moved", "the card leg moved while the resolution ran: read the item again")
+			}
 		}
 		ok, err := s.terminalLedger.ResolveLostItemDeclined(ctx, item.ID, entry.UserID, entryRef(entry))
 		if err != nil {
@@ -113,6 +136,41 @@ func (s *Service) resolveDeclined(ctx context.Context, item *payment.TerminalLos
 		return nil, err
 	}
 	return settleItemView(item, "resolved_declined"), nil
+}
+
+// refuseDeclinedBookedLeg refuses a declined resolution when the intent's
+// money was already booked on the sale or refund claim, naming the booked
+// tender or refund claim so the manager voids or returns through the sale.
+func (s *Service) refuseDeclinedBookedLeg(ctx context.Context, item *payment.TerminalLostItem, intent *payment.TerminalIntent) error {
+	if intent.Kind == payment.TerminalKindRefund || intent.Kind == payment.TerminalKindVoid {
+		return conflict("terminal_leg_already_booked",
+			fmt.Sprintf("the %s leg %s is already booked on sale %s (refund claim %s): reconcile it through the sale instead of closing the item declined",
+				intent.Kind, intent.ID, item.TransactionID, intent.LegKey))
+	}
+	tenders, err := s.repo.GetTenders(ctx, item.TransactionID)
+	if err != nil {
+		return err
+	}
+	ref := firstNonEmpty(intent.AnswerProviderRef, intent.ProviderRef)
+	var tenderName string
+	for _, t := range tenders {
+		if t.Method != TenderCard {
+			continue
+		}
+		if tenderName == "" {
+			tenderName = t.ID.String()
+		}
+		if t.GatewayTxID != nil && ref != "" && *t.GatewayTxID == ref {
+			tenderName = t.ID.String()
+			break
+		}
+	}
+	if tenderName == "" {
+		tenderName = intent.LegKey
+	}
+	return conflict("terminal_leg_already_booked",
+		fmt.Sprintf("the card leg %s is already booked on sale %s (tender %s): void or return the sale instead of closing the item declined",
+			intent.LegKey, item.TransactionID, tenderName))
 }
 
 // entryRef reads the reference an audit entry carries.
@@ -154,23 +212,52 @@ func (s *Service) planSaleLeg(ctx context.Context, sale *Sale, amountCents int64
 	return salePlan{reverse: amountCents}, nil
 }
 
-// resolveSaleAuthorized settles an authorized sale leg the completion never
-// took.
+// resolveSaleAuthorized settles an authorized sale leg:
+//   - if the intent is already authorized and spent (spent_at IS NOT NULL),
+//     the books already agree with the resolution, so the item closes and
+//     nothing moves (no reversal, no second booking);
+//   - if the intent is lost, declined, or authorized and unspent, moves the
+//     intent to authorized (unspent) by a guarded statement in the first
+//     transaction before BeginReversal commits, and marks spent_at only after
+//     the reversal or booking succeeds.
 func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.TerminalLostItem, intent *payment.TerminalIntent,
 	in ResolveTerminalLostItemIn, ref string, entry audit.Entry) (*TerminalLostItemView, error) {
-	if ref == "" {
-		return nil, conflict("no_provider_reference",
-			"the intent carries no provider reference to book or reverse: name the terminal's reference")
-	}
 	var plan salePlan
-	// First transaction: the sale row, then the item's claim (one guarded
-	// statement), then the plan. A leg that books or records needs no gateway
-	// call and finishes here; a leg that reverses commits the claim (the
-	// resolving state) and goes on to the gateway.
+	// First transaction: the sale row, then the intent's actual state check,
+	// then the item's claim (one guarded statement), then the intent's move to
+	// authorized (unspent) before BeginReversal commits. A leg already spent
+	// or a leg that books or records needs no gateway call and finishes here;
+	// a leg that reverses commits the claim and goes on to the gateway.
 	var finished bool
 	if err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockSale(ctx, item.TransactionID); err != nil {
 			return err
+		}
+		fresh, err := s.terminalLedger.Get(ctx, item.IntentID)
+		if err != nil {
+			return err
+		}
+		*intent = *fresh
+		intent.AnswerBrand = firstNonEmpty(intent.AnswerBrand, item.LateBrand)
+		intent.AnswerLast4 = firstNonEmpty(intent.AnswerLast4, item.LateLast4)
+		intent.AnswerAuthCode = firstNonEmpty(intent.AnswerAuthCode, item.LateAuthCode)
+		if intent.State == payment.TerminalAuthorized && intent.SpentAt != nil {
+			ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return conflict("lost_item_settled", "the lost item was already resolved or is being resolved")
+			}
+			if err := s.writeResolveAudit(ctx, entry); err != nil {
+				return err
+			}
+			finished = true
+			return nil
+		}
+		if ref == "" {
+			return conflict("no_provider_reference",
+				"the intent carries no provider reference to book or reverse: name the terminal's reference")
 		}
 		sale, err := s.repo.GetSale(ctx, item.TransactionID)
 		if err != nil {
@@ -192,6 +279,13 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 			if !ok {
 				return conflict("lost_item_settled", "the lost item was already resolved or is being resolved")
 			}
+			moved, err := s.terminalLedger.AuthorizeForResolution(ctx, intent.ID, ref)
+			if err != nil {
+				return err
+			}
+			if !moved {
+				return conflict("terminal_intent_moved", "the intent is no longer unspent: read the item again")
+			}
 			return nil
 		}
 		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
@@ -200,6 +294,13 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 		}
 		if !ok {
 			return conflict("lost_item_settled", "the lost item was already resolved or is being resolved")
+		}
+		moved, err := s.terminalLedger.AuthorizeForResolution(ctx, intent.ID, ref)
+		if err != nil {
+			return err
+		}
+		if !moved {
+			return conflict("terminal_intent_moved", "the intent is no longer unspent: read the item again")
 		}
 		if err := s.settleSaleLeg(ctx, sale, intent, item, plan, ref, in, entry); err != nil {
 			return err
@@ -272,18 +373,21 @@ func (s *Service) reverseTerminalCharge(ctx context.Context, ref string, plan sa
 }
 
 // settleSaleLeg writes everything a sale leg's resolution books, inside the
-// transaction that closed (or finishes) the item: the intent's move, the
-// payment and tender of the applied part, the audit row and the events.
+// transaction that closed (or finishes) the item: marking the intent spent
+// when its money is booked or reversed, the payment and tender of the applied
+// part, the audit row and the events.
 func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment.TerminalIntent, item *payment.TerminalLostItem,
 	plan salePlan, ref string, in ResolveTerminalLostItemIn, entry audit.Entry) error {
 	// an open sale keeps the authorized leg unspent for its completion; every
-	// other plan has booked or reversed the money, so the leg is spent
-	moved, err := s.terminalLedger.AuthorizeLost(ctx, intent.ID, ref, !plan.record)
-	if err != nil {
-		return err
-	}
-	if !moved {
-		return conflict("terminal_intent_moved", "the intent is no longer lost: the device's answer landed first, read the item again")
+	// other plan has booked or reversed the money, so the leg is marked spent
+	if !plan.record {
+		spent, err := s.terminalLedger.MarkSpent(ctx, intent.ID)
+		if err != nil {
+			return err
+		}
+		if !spent {
+			return conflict("terminal_intent_moved", "the intent was already booked or reversed by another act")
+		}
 	}
 	var fx *account.Effects
 	if plan.applyC > 0 {
@@ -366,12 +470,27 @@ func (s *Service) resolveRefundAuthorized(ctx context.Context, item *payment.Ter
 		if err := s.repo.LockSale(ctx, item.TransactionID); err != nil {
 			return err
 		}
+		fresh, err := s.terminalLedger.Get(ctx, item.IntentID)
+		if err != nil {
+			return err
+		}
+		*intent = *fresh
 		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return conflict("lost_item_settled", "the lost item was already resolved or is being resolved")
+		}
+		if intent.State == payment.TerminalAuthorized && intent.SpentAt != nil {
+			return s.writeResolveAudit(ctx, entry)
+		}
+		moved, err := s.terminalLedger.AuthorizeForResolution(ctx, intent.ID, ref)
+		if err != nil {
+			return err
+		}
+		if !moved {
+			return conflict("terminal_intent_moved", "the intent is no longer unspent: read the item again")
 		}
 		if compensation {
 			// the C2-5 compensation void of a sale's charge: it names a sale
@@ -410,8 +529,12 @@ func (s *Service) resolveRefundAuthorized(ctx context.Context, item *payment.Ter
 					fmt.Sprintf("the refund claim is %s: the books released it, reconcile the terminal's refund by hand", rec.State))
 			}
 		}
-		if _, err := s.terminalLedger.AuthorizeLost(ctx, intent.ID, ref, true); err != nil {
+		spent, err := s.terminalLedger.MarkSpent(ctx, intent.ID)
+		if err != nil {
 			return err
+		}
+		if !spent {
+			return conflict("terminal_intent_moved", "the intent was already marked spent")
 		}
 		return s.writeResolveAudit(ctx, entry)
 	}); err != nil {
