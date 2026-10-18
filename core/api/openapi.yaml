@@ -4057,6 +4057,169 @@ paths:
           $ref: "#/components/responses/WireConflict"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/quotes/{id}/share-link:
+    post:
+      operationId: quoteShareLink
+      tags: [customerquote]
+      summary: Issue the link of a sent dealer quote
+      description: >-
+        The dealer's own quote to a contractor, accepted or declined from a link with no login (PE-05), on the same token module as the customer quote link: 256 random bits, only the SHA-256 hash stored, expiring at the quote's expiry bounded by the configured maximum lifetime. Only a sent, unexpired quote has a link; issuing again kills the earlier link. The token is returned here once (Cache-Control: no-store); send_to emails it through the email path. The quote module's role and branch wall guards the route.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                send_to:
+                  type: string
+                  description: An email address to send the link to.
+      responses:
+        "200":
+          description: The link, shown once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerLink"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/dealer-quotes/{token}:
+    get:
+      operationId: dealerQuotePublicView
+      tags: [customerquote]
+      summary: The dealer's quote, from its link
+      description: >-
+        No session. An unknown token, including a customer quote token, is a bare 404; an expired, revoked or rotated link is 410. Every answer is Cache-Control: no-store. The body is a strict allowlist: the lines at the contractor's own account prices, never the dealer's cost or margin.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerQuoteView"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/dealer-quotes/{token}/accept:
+    post:
+      operationId: dealerQuotePublicAccept
+      tags: [customerquote]
+      summary: Accept the dealer's quote
+      description: >-
+        A typed full name. The quote moves through the quote module's own lifecycle (only a sent quote can be accepted, once), and the audit log records who, from which address and user agent, in the same transaction.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name]
+              properties:
+                full_name:
+                  type: string
+      responses:
+        "200":
+          description: The accepted quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/public/v1/dealer-quotes/{token}/decline:
+    post:
+      operationId: dealerQuotePublicDecline
+      tags: [customerquote]
+      summary: Decline the dealer's quote
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{43}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name]
+              properties:
+                full_name:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: The declined quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerQuoteDealerQuoteView"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "410":
+          $ref: "#/components/responses/CustomerQuoteLinkGone"
+        "429":
+          $ref: "#/components/responses/CustomerQuoteRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/dashboard/summary:
     get:
       operationId: dashboardSummary
@@ -20273,6 +20436,64 @@ components:
           type: [string, "null"]
         limit:
           type: integer
+    CustomerQuoteDealerLink:
+      type: object
+      required: [path, expires_at, delivered]
+      properties:
+        path:
+          type: string
+          description: The page path, /dq/ then the token. The raw token appears here, once.
+        url:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        delivered:
+          type: boolean
+    CustomerQuoteDealerQuoteView:
+      type: object
+      required: [number, status, dealer_name, customer_name, expires_at, can_decide, lines, freight_cents, total_cents]
+      properties:
+        number:
+          type: string
+        status:
+          type: string
+          enum: [open, accepted, declined, expired, withdrawn]
+        dealer_name:
+          type: string
+        customer_name:
+          type: string
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        can_decide:
+          type: boolean
+        lines:
+          type: array
+          items:
+            type: object
+            required: [description, quantity, uom, price_uom, unit_price_ten_thousandths, line_total_cents]
+            properties:
+              description:
+                type: string
+              quantity:
+                type: string
+              uom:
+                type: string
+              price_uom:
+                type: string
+              unit_price_ten_thousandths:
+                type: integer
+                format: int64
+              line_total_cents:
+                type: integer
+                format: int64
+        freight_cents:
+          type: integer
+          format: int64
+        total_cents:
+          type: integer
+          format: int64
     DashboardSummary:
       type: object
       description: dashboard.DashboardSummary. Money is int64 cents.

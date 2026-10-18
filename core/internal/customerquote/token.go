@@ -83,12 +83,16 @@ func LinkExpiry(now, validUntil time.Time, maxTTL time.Duration) (time.Time, err
 
 // Link is a stored share token row.
 type Link struct {
-	ID        string
-	QuoteID   string
-	Hash      string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	RevokedAt *time.Time
+	ID string
+	// QuoteID is the contractor's customer quote the link opens, empty for a
+	// link to a dealer quote; DealerQuoteID is the converse. A link opens one
+	// kind of target and no other.
+	QuoteID       string
+	DealerQuoteID string
+	Hash          string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
 }
 
 // Live reports whether the link answers at now: not revoked, not expired.

@@ -11,6 +11,7 @@ import "strings"
 // path records SafePath of it.
 var capabilityPrefixes = []string{
 	"/api/public/v1/customer-quotes/",
+	"/api/public/v1/dealer-quotes/",
 }
 
 // SafePath returns path with a capability token segment replaced by ":token".

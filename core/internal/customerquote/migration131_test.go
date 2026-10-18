@@ -264,11 +264,31 @@ func TestMigration131_Constraints(t *testing.T) {
 	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (quote_id, token_hash, expires_at) VALUES ($1, 'not-a-hash', now() + interval '1 day')`, quoteID); err == nil {
 		t.Error("a token hash that is not a sha256 hex was accepted")
 	}
+	// A link names exactly one target: a customer quote or a dealer quote.
+	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (token_hash, expires_at) VALUES ($1, now() + interval '1 day')`, strings.Repeat("ef", 32)); err == nil {
+		t.Error("a link that names no target was accepted")
+	}
+	var dealerQuote string
+	if err := conn.QueryRow(ctx, `INSERT INTO quotes (customer_id, state, branch_id)
+		SELECT customer_id, 'SENT', (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id') FROM pro_customer_quotes WHERE id = $1 RETURNING id`, quoteID).Scan(&dealerQuote); err != nil {
+		t.Fatalf("seed dealer quote: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (quote_id, dealer_quote_id, token_hash, expires_at) VALUES ($1, $2, $3, now() + interval '1 day')`,
+		quoteID, dealerQuote, strings.Repeat("ef", 32)); err == nil {
+		t.Error("a link that names two targets was accepted")
+	}
 	good := strings.Repeat("ab", 32)
 	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (quote_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 day')`, quoteID, good); err != nil {
 		t.Fatalf("a good token hash was refused: %v", err)
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (quote_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 day')`, quoteID, strings.Repeat("cd", 32)); err == nil {
 		t.Error("two live links for one quote were accepted")
+	}
+	// A dealer quote has its own single live link too.
+	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (dealer_quote_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 day')`, dealerQuote, strings.Repeat("12", 32)); err != nil {
+		t.Errorf("a link to a dealer quote was refused: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO pro_portal_share_tokens (dealer_quote_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 day')`, dealerQuote, strings.Repeat("34", 32)); err == nil {
+		t.Error("two live links for one dealer quote were accepted")
 	}
 }

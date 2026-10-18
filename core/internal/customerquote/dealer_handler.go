@@ -109,3 +109,51 @@ func (h *DealerHandler) Accept(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, d)
 }
+
+// ShareLinkBody is the optional body of issuing a dealer quote link.
+type ShareLinkBody struct {
+	SendTo string `json:"send_to"`
+}
+
+// shareLinkBody is the answer: the raw token appears here, once.
+type shareLinkAnswer struct {
+	Path      string          `json:"path"`
+	URL       string          `json:"url,omitempty"`
+	ExpiresAt httpx.Timestamp `json:"expires_at"`
+	Delivered bool            `json:"delivered"`
+}
+
+// RegisterShareLinkRoute registers the dealer's route that issues the link of
+// one of its own quotes. guard is the quote module's own role and branch
+// wall, so the desk reaches only the quotes it may already read.
+func (h *DealerHandler) RegisterShareLinkRoute(mux *http.ServeMux, guard func(http.Handler) http.Handler) {
+	mux.Handle("POST /api/v1/quotes/{id}/share-link", guard(http.HandlerFunc(h.ShareLink)))
+}
+
+// ShareLink issues (or rotates) the link of a sent dealer quote.
+func (h *DealerHandler) ShareLink(w http.ResponseWriter, r *http.Request) {
+	id, err := idOf(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	var body ShareLinkBody
+	if r.ContentLength != 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
+	who := DealerActor{Ref: "desk", Name: "dealer"}
+	if c := middleware.ClaimsFromContext(r.Context()); c != nil {
+		who.Ref, who.Name = c.Subject, c.Email
+	}
+	res, err := h.svc.ShareDealerQuote(r.Context(), who, id, body.SendTo)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, shareLinkAnswer{Path: res.Path, URL: res.URL, ExpiresAt: httpx.TimestampOf(res.ExpiresAt), Delivered: res.Delivered})
+}

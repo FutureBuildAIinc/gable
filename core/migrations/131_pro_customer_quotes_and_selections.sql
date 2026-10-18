@@ -183,23 +183,30 @@ CREATE TABLE IF NOT EXISTS pro_customer_quote_selections (
     PRIMARY KEY (quote_id, line_id)
 );
 
--- The capability link. Only the SHA-256 hash of the 256 bit token is held.
+-- The capability link. Only the SHA-256 hash of the 256 bit token is held. A
+-- link names exactly one target: a contractor's customer quote (the selections
+-- loop) or the dealer's own quote to the contractor (accept a dealer quote
+-- from a link, PE-05), both on this one token module.
 CREATE TABLE IF NOT EXISTS pro_portal_share_tokens (
-    id             UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    quote_id       UUID        NOT NULL REFERENCES pro_customer_quotes (id) ON DELETE CASCADE,
-    token_hash     TEXT        NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at     TIMESTAMPTZ NOT NULL,
-    revoked_at     TIMESTAMPTZ NULL,
-    revoked_reason TEXT        NULL CHECK (revoked_reason IN ('revoked', 'rotated')),
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    quote_id        UUID        NULL REFERENCES pro_customer_quotes (id) ON DELETE CASCADE,
+    dealer_quote_id UUID        NULL REFERENCES quotes (id) ON DELETE CASCADE,
+    token_hash      TEXT        NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at      TIMESTAMPTZ NOT NULL,
+    revoked_at      TIMESTAMPTZ NULL,
+    revoked_reason  TEXT        NULL CHECK (revoked_reason IN ('revoked', 'rotated')),
     first_viewed_at TIMESTAMPTZ NULL,
     last_viewed_at  TIMESTAMPTZ NULL,
-    CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL))
+    CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL)),
+    CHECK ((quote_id IS NULL) <> (dealer_quote_id IS NULL))
 );
 
--- One live link per quote.
+-- One live link per target.
 CREATE UNIQUE INDEX IF NOT EXISTS pro_portal_share_tokens_live_idx
-    ON pro_portal_share_tokens (quote_id) WHERE revoked_at IS NULL;
+    ON pro_portal_share_tokens (quote_id) WHERE revoked_at IS NULL AND quote_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pro_portal_share_tokens_dealer_live_idx
+    ON pro_portal_share_tokens (dealer_quote_id) WHERE revoked_at IS NULL AND dealer_quote_id IS NOT NULL;
 
 -- The six digit code that may gate acceptance: hashed with a per row salt,
 -- single use, short lived, attempt limited.

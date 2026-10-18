@@ -94,6 +94,9 @@ POST	/api/public/v1/customer-quotes/{token}/decline	internal/customerquote	h.Dec
 GET	/api/public/v1/customer-quotes/{token}/logo	internal/customerquote	h.Logo
 GET	/api/public/v1/customer-quotes/{token}/pdf	internal/customerquote	h.PDF
 PUT	/api/public/v1/customer-quotes/{token}/selections	internal/customerquote	h.Selections
+GET	/api/public/v1/dealer-quotes/{token}	internal/customerquote	h.DealerQuoteView
+POST	/api/public/v1/dealer-quotes/{token}/accept	internal/customerquote	h.DealerQuoteAccept
+POST	/api/public/v1/dealer-quotes/{token}/decline	internal/customerquote	h.DealerQuoteDecline
 POST	/api/v1/a2a/purchase-order	cmd/server	a2aReceiver.ReceiveWebhook
 GET	/api/v1/accounts/{id}	internal/account	wrap(guard, h.HandleSummary)
 GET	/api/v1/accounts/{id}/transactions	internal/account	wrap(guard, h.HandleTransactions)
@@ -432,6 +435,7 @@ POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
 PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
+POST	/api/v1/quotes/{id}/share-link	internal/customerquote	h.ShareLink
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview

@@ -92,6 +92,19 @@ and the database refuses to update, delete or truncate it.
   decision. A draft is the contractor's own work and is not shared. The
   same test method covers every dealer route and the converted order.
 
+## The dealer's own quote link
+
+The same token module carries the dealer's quote to a contractor. A desk user
+issues a link for a sent, unexpired quote with `POST
+/api/v1/quotes/{id}/share-link` (the quote module's role and branch wall; a
+branch bound machine key is refused), optionally emailing it. The contractor
+opens `/api/public/v1/dealer-quotes/{token}` with no login, sees the lines at
+their own account prices (never the dealer's cost or margin), and accepts or
+declines with a typed full name. The decision goes through the quote module's
+own lifecycle, once, and the audit log records who, from which address and
+user agent. A link opens one kind of target: a dealer quote link never opens a
+customer quote, and the converse.
+
 ## Settings and operations
 
 | Setting (`system_settings`) | Default | Meaning |

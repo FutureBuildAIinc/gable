@@ -42,6 +42,10 @@ type Service struct {
 
 	publicURL string
 
+	// The dealer's own quote link (PE-05); both are optional.
+	dealerQuotes DealerQuotes
+	audit        AuditSink
+
 	// Rate limits of the public routes: per link and per source address, with
 	// a tighter budget for addresses that keep presenting unknown tokens.
 	perLink *Limiter

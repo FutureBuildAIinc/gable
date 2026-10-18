@@ -38,6 +38,7 @@ import (
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
@@ -154,6 +155,11 @@ func newCQStack(t *testing.T) *cqStack {
 	t.Cleanup(func() {
 		testutil.DeleteCustomerQuotes(t, db, s.custA, s.custB)
 		cs := []uuid.UUID{s.custA, s.custB}
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pro_portal_share_tokens WHERE dealer_quote_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quote_lines WHERE quote_id IN (SELECT id FROM quotes WHERE customer_id = ANY($1))`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE customer_id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = ANY($1)`, cs)
@@ -195,12 +201,14 @@ func newCQStack(t *testing.T) *cqStack {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.PortalClaimsKey, claims)))
 		})
 	}
+	wall := newBranchWall(db)
+	quoteSvc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	s.svc = wireCustomerQuotes(mux, customerQuoteDeps{
 		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
 		Email: nil, Docs: document.NewService(product.NewRepository(db)), PublicURL: "https://quotes.example", Trusted: clientip.Trusted{},
+		Quotes: quoteSvc, Audit: audit.NewLogger(db), Wall: wall,
 	}, chain)
 	s.svc.WithNotifier(s.mail).WithLimits(10000, 10000, 10000)
-	wall := newBranchWall(db)
 	wall.orders(mux, orderSvc)
 
 	h := buildChain(ChainDeps{Mux: mux, DB: db, Logger: logger, AuditLog: audit.NewLogger(db)})
@@ -911,5 +919,135 @@ func TestWire_Logo_TheContractorsMarkReachesTheCustomersPageAndPDF(t *testing.T)
 	}
 	if r := s.do("GET", s.pub(token)+"/logo", nil, nil); r.status != 404 {
 		t.Errorf("logo after delete: %d", r.status)
+	}
+}
+
+// dealerQuote seeds a sent dealer quote to contractor A with a margin the
+// contractor must never see.
+func (s *cqStack) dealerQuote(state string) uuid.UUID {
+	s.t.Helper()
+	ctx := context.Background()
+	id := uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quotes (id, customer_id, state, total_amount, freight_amount, margin_total, expires_at, branch_id, delivery_type, source)
+		VALUES ($1, $2, $3::quote_state, 775.00, 25.00, 3333.33, now() + interval '10 days', $4, 'PICKUP', 'manual')`, id, s.custA, state, s.branch); err != nil {
+		s.t.Fatal(err)
+	}
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, position)
+		VALUES ($1, $2, $3, 'CQW-SKU', '2x4 stud', 100, 'EA', 7.5000, 750.00, 0)`, uuid.New(), id, s.stud); err != nil {
+		s.t.Fatal(err)
+	}
+	return id
+}
+
+var dealerQuoteKeys = []string{"number", "status", "dealer_name", "customer_name", "expires_at", "can_decide", "lines", "description",
+	"quantity", "uom", "price_uom", "unit_price_ten_thousandths", "line_total_cents", "freight_cents", "total_cents"}
+
+func TestWire_DealerQuoteLink_AcceptFromALinkWithNoLogin(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+	qid := s.dealerQuote("SENT")
+	path := "/api/v1/quotes/" + qid.String() + "/share-link"
+
+	// The dealer's desk issues the link; other roles and anonymous callers cannot.
+	if r := s.do("POST", path, map[string]string{"X-Test-Role": "warehouse", "X-Test-Sub": "w"}, nil); r.status != 403 {
+		t.Errorf("a warehouse role issued a link: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", "/api/v1/quotes/"+uuid.NewString()+"/share-link", asDesk, nil); r.status != 404 {
+		t.Errorf("a quote that does not exist: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", "/api/v1/quotes/"+s.dealerQuote("DRAFT").String()+"/share-link", asDesk, nil); r.status != 409 {
+		t.Errorf("a draft quote: %d %s", r.status, r.body)
+	}
+	r := s.do("POST", path, asDesk, map[string]any{"send_to": "buyer@contractor.example"})
+	if r.status != 200 || r.header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("issue: %d %s", r.status, r.body)
+	}
+	link := jsonOf(t, r.body)
+	token := strings.TrimPrefix(link["path"].(string), "/dq/")
+	if len(token) != 43 || !strings.HasPrefix(link["url"].(string), "https://quotes.example/dq/") {
+		t.Fatalf("link %v", link)
+	}
+
+	// The contractor opens it, no account: the allowlist, and none of the dealer's margin.
+	pub := "/api/public/v1/dealer-quotes/" + token
+	r = s.do("GET", pub, nil, nil)
+	if r.status != 200 || r.header.Get("Cache-Control") != "no-store" || r.header.Get("Set-Cookie") != "" {
+		t.Fatalf("view: %d %v %s", r.status, r.header, r.body)
+	}
+	assertKeysWithin(t, "the dealer quote page", r.body, dealerQuoteKeys)
+	assertNoNumbers(t, "the dealer quote page", r.body, 333333, 3333)
+	assertNoStrings(t, "the dealer quote page", r.body, "margin", "unit_cost", "average_unit_cost", "CQW-SKU")
+	v := jsonOf(t, r.body)
+	if v["status"] != "open" || v["can_decide"] != true || v["total_cents"].(float64) != 77500 || len(v["lines"].([]any)) != 1 {
+		t.Fatalf("view %s", r.body)
+	}
+
+	// One kind of token opens one kind of target.
+	_, customerToken := s.createAndSend(s.quoteBody(false, false))
+	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+customerToken, nil, nil); r.status != 404 {
+		t.Errorf("a customer quote token on the dealer quote page: %d", r.status)
+	}
+	if r := s.do("GET", s.pub(token), nil, nil); r.status != 404 {
+		t.Errorf("a dealer quote token on the customer quote page: %d", r.status)
+	}
+
+	// Accept: a name is required; the quote moves through its own lifecycle; the audit log keeps who and from where.
+	if r := s.do("POST", pub+"/accept", nil, map[string]any{"full_name": ""}); r.status != 400 {
+		t.Errorf("accept without a name: %d %s", r.status, r.body)
+	}
+	r = s.do("POST", pub+"/accept", nil, map[string]any{"full_name": "Pat Contractor"})
+	if r.status != 200 || jsonOf(t, r.body)["status"] != "accepted" {
+		t.Fatalf("accept: %d %s", r.status, r.body)
+	}
+	assertKeysWithin(t, "the accepted dealer quote", r.body, dealerQuoteKeys)
+	var state string
+	_ = s.db.Pool.QueryRow(ctx, `SELECT state::text FROM quotes WHERE id = $1`, qid).Scan(&state)
+	if state != "ACCEPTED" {
+		t.Errorf("the quote is %s", state)
+	}
+	var who, token_hash string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT changes->>'decided_by', changes->>'token_hash' FROM audit_log WHERE entity_type = 'quote' AND entity_id = $1 AND action = 'quote.accepted_from_link'`, qid).Scan(&who, &token_hash); err != nil {
+		t.Fatalf("no audit row: %v", err)
+	}
+	if who != "Pat Contractor" || token_hash != customerquote.HashToken(token) {
+		t.Errorf("audit: %q %q", who, token_hash)
+	}
+	if r := s.do("POST", pub+"/accept", nil, map[string]any{"full_name": "Pat Contractor"}); r.status != 409 {
+		t.Errorf("accepting twice: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", pub+"/decline", nil, map[string]any{"full_name": "Pat Contractor"}); r.status != 409 {
+		t.Errorf("declining an accepted quote: %d %s", r.status, r.body)
+	}
+
+	// A new link replaces the old; the old is gone (410), never logged.
+	r = s.do("POST", path, asDesk, nil)
+	if r.status != 409 {
+		t.Errorf("a link for an accepted quote: %d %s", r.status, r.body)
+	}
+	if strings.Contains(s.logs.String(), token) || strings.Contains(s.logs.String(), customerToken) {
+		t.Errorf("a token reached the log")
+	}
+}
+
+func TestWire_DealerQuoteLink_DeclineAndReissue(t *testing.T) {
+	s := newCQStack(t)
+	qid := s.dealerQuote("SENT")
+	path := "/api/v1/quotes/" + qid.String() + "/share-link"
+	first := strings.TrimPrefix(jsonOf(t, s.do("POST", path, asDesk, nil).body)["path"].(string), "/dq/")
+	second := strings.TrimPrefix(jsonOf(t, s.do("POST", path, asDesk, nil).body)["path"].(string), "/dq/")
+	if first == second {
+		t.Fatal("the same token was issued twice")
+	}
+	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+first, nil, nil); r.status != 410 {
+		t.Errorf("the replaced link: %d", r.status)
+	}
+	r := s.do("POST", "/api/public/v1/dealer-quotes/"+second+"/decline", nil, map[string]any{"full_name": "Pat Contractor", "reason": "too dear"})
+	if r.status != 200 || jsonOf(t, r.body)["status"] != "declined" {
+		t.Fatalf("decline: %d %s", r.status, r.body)
+	}
+	var state string
+	_ = s.db.Pool.QueryRow(context.Background(), `SELECT state::text FROM quotes WHERE id = $1`, qid).Scan(&state)
+	if state != "REJECTED" {
+		t.Errorf("the quote is %s", state)
 	}
 }

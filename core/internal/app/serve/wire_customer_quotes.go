@@ -16,7 +16,9 @@ import (
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -48,6 +50,12 @@ type customerQuoteDeps struct {
 	Docs      *document.Service
 	PublicURL string
 	Trusted   clientip.Trusted
+	// Quotes, Audit and Wall serve the dealer's own quote link (PE-05): the
+	// quote lifecycle the link decides through, the audit log the decision is
+	// recorded in, and the branch wall the dealer's issuing route sits behind.
+	Quotes *quote.Service
+	Audit  *audit.Logger
+	Wall   *branchWall
 }
 
 // wireCustomerQuotes mounts the three surfaces of the contractor's customer
@@ -65,10 +73,22 @@ func wireCustomerQuotes(mux *http.ServeMux, d customerQuoteDeps, portalChain fun
 		WithNotifier(customerquote.NewMailNotifier(d.Email, customerquote.NewStubSMS(d.Logger), d.Logger)).
 		WithPDF(d.Docs).
 		WithPublicURL(d.PublicURL)
+	if d.Quotes != nil {
+		svc.WithDealerQuotes(customerquote.QuoteLifecycle{Quotes: d.Quotes}, d.Audit)
+	}
 	customerquote.NewHandler(svc).RegisterRoutes(mux, portalChain)
 	customerquote.NewPublicHandler(svc, d.Trusted).RegisterRoutes(mux)
-	customerquote.NewDealerHandler(svc).RegisterRoutes(mux,
+	dealer := customerquote.NewDealerHandler(svc)
+	dealer.RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner", "sales"),
 		middleware.RequireRole("admin", "owner", "sales"))
+	if d.Wall != nil {
+		// The dealer's own quote link sits behind the quote module's role and
+		// branch wall: the quote is read under the caller's branches, so the desk
+		// reaches only the quotes it may already read. A branch bound machine key
+		// is refused it outright (the route allowlist): the link is a public
+		// credential, issued by a named desk user.
+		dealer.RegisterShareLinkRoute(mux, d.Wall.scoped("admin", "owner", "sales"))
+	}
 	return svc
 }

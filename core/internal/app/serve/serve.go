@@ -1010,6 +1010,7 @@ func Run() {
 	wireCustomerQuotes(mux, customerQuoteDeps{
 		DB: db, Logger: logger, Portal: portalSvc, Pricing: pricingSvc, Customers: customerSvc, Products: productSvc,
 		Email: emailSvc, Docs: docSvc, PublicURL: cfg.PublicURL, Trusted: cfg.TrustedProxies,
+		Quotes: quoteSvc, Audit: auditLog, Wall: wall,
 	}, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of

@@ -7,11 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -88,4 +91,61 @@ func (p *PortalCostSource) DealerQuote(ctx context.Context, customerID, quoteID 
 		src.Lines = append(src.Lines, l)
 	}
 	return src, rows.Err()
+}
+
+// QuoteLifecycle answers DealerQuotes over the quote module: reads through its
+// service (under the caller's branch wall on the dealer side, as a system
+// caller on the link's side, where the link is the authority) and decisions
+// through its lifecycle, the same transition the portal's accept uses.
+type QuoteLifecycle struct {
+	Quotes *quote.Service
+}
+
+func (q QuoteLifecycle) doc(qt *quote.Quote) *DealerQuoteDoc {
+	d := &DealerQuoteDoc{ID: qt.ID, Number: qt.Number, State: string(qt.Status), CustomerName: qt.CustomerName,
+		FreightCents: int64(qt.FreightCents), TotalCents: int64(qt.TotalCents)}
+	if qt.ExpiresAt != nil {
+		t := qt.ExpiresAt.Time
+		d.ExpiresAt = &t
+	}
+	for _, l := range qt.Lines {
+		price := l.PriceUOM
+		if price == "" {
+			price = string(l.UOM)
+		}
+		d.Lines = append(d.Lines, DealerQuoteLine{Description: l.Description, Quantity: l.Quantity, UOM: string(l.UOM),
+			PriceUOM: price, UnitPrice: l.UnitPrice, LineTotal: int64(l.LineTotal)})
+	}
+	return d
+}
+
+// Read reads a quote under the caller's wall.
+func (q QuoteLifecycle) Read(ctx context.Context, id uuid.UUID) (*DealerQuoteDoc, error) {
+	qt, err := q.Quotes.GetQuote(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return q.doc(qt), nil
+}
+
+// ReadByLink reads the quote a link names.
+func (q QuoteLifecycle) ReadByLink(ctx context.Context, id uuid.UUID) (*DealerQuoteDoc, error) {
+	qt, err := q.Quotes.GetQuote(branchctx.WithSystem(ctx), id)
+	if err != nil {
+		var he *httpx.Error
+		if errors.As(err, &he) && he.Status == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return q.doc(qt), nil
+}
+
+// Decide moves the quote through the lifecycle.
+func (q QuoteLifecycle) Decide(ctx context.Context, id uuid.UUID, accept bool) error {
+	to := quote.QuoteStateRejected
+	if accept {
+		to = quote.QuoteStateAccepted
+	}
+	return q.Quotes.UpdateState(branchctx.WithSystem(ctx), id, to)
 }

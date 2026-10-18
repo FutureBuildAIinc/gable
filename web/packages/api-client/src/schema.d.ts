@@ -1668,6 +1668,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{id}/share-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the link of a sent dealer quote
+         * @description The dealer's own quote to a contractor, accepted or declined from a link with no login (PE-05), on the same token module as the customer quote link: 256 random bits, only the SHA-256 hash stored, expiring at the quote's expiry bounded by the configured maximum lifetime. Only a sent, unexpired quote has a link; issuing again kills the earlier link. The token is returned here once (Cache-Control: no-store); send_to emails it through the email path. The quote module's role and branch wall guards the route.
+         */
+        post: operations["quoteShareLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's quote, from its link
+         * @description No session. An unknown token, including a customer quote token, is a bare 404; an expired, revoked or rotated link is 410. Every answer is Cache-Control: no-store. The body is a strict allowlist: the lines at the contractor's own account prices, never the dealer's cost or margin.
+         */
+        get: operations["dealerQuotePublicView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the dealer's quote
+         * @description A typed full name. The quote moves through the quote module's own lifecycle (only a sent quote can be accepted, once), and the audit log records who, from which address and user agent, in the same transaction.
+         */
+        post: operations["dealerQuotePublicAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline the dealer's quote */
+        post: operations["dealerQuotePublicDecline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboard/summary": {
         parameters: {
             query?: never;
@@ -9553,6 +9630,38 @@ export interface components {
             items: components["schemas"]["CustomerQuoteDealerProject"][];
             next_cursor: string | null;
             limit: number;
+        };
+        CustomerQuoteDealerLink: {
+            /** @description The page path, /dq/ then the token. The raw token appears here, once. */
+            path: string;
+            url?: string;
+            /** Format: date-time */
+            expires_at: string;
+            delivered: boolean;
+        };
+        CustomerQuoteDealerQuoteView: {
+            number: string;
+            /** @enum {string} */
+            status: "open" | "accepted" | "declined" | "expired" | "withdrawn";
+            dealer_name: string;
+            customer_name: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            can_decide: boolean;
+            lines: {
+                description: string;
+                quantity: string;
+                uom: string;
+                price_uom: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths: number;
+                /** Format: int64 */
+                line_total_cents: number;
+            }[];
+            /** Format: int64 */
+            freight_cents: number;
+            /** Format: int64 */
+            total_cents: number;
         };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
@@ -19764,6 +19873,136 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteShareLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description An email address to send the link to. */
+                    send_to?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerLink"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The accepted quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicDecline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The declined quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

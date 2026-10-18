@@ -36,7 +36,13 @@ func (h *PublicHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+publicBase+"/code", h.guard(h.Code))
 	mux.HandleFunc("POST "+publicBase+"/accept", h.guard(h.Accept))
 	mux.HandleFunc("POST "+publicBase+"/decline", h.guard(h.Decline))
+	mux.HandleFunc("GET "+dealerQuoteBase, h.guard(h.DealerQuoteView))
+	mux.HandleFunc("POST "+dealerQuoteBase+"/accept", h.guard(h.DealerQuoteAccept))
+	mux.HandleFunc("POST "+dealerQuoteBase+"/decline", h.guard(h.DealerQuoteDecline))
 }
+
+// dealerQuoteBase is the prefix of the dealer's own quote link.
+const dealerQuoteBase = "/api/public/v1/dealer-quotes/{token}"
 
 // publicBase is the capability link's route prefix.
 const publicBase = "/api/public/v1/customer-quotes/{token}"
@@ -153,6 +159,45 @@ func (h *PublicHandler) Decline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := h.svc.Decline(r.Context(), r.PathValue("token"), h.caller(r), in)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *PublicHandler) DealerQuoteView(w http.ResponseWriter, r *http.Request) {
+	v, err := h.svc.DealerQuoteView(r.Context(), r.PathValue("token"), h.caller(r))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *PublicHandler) DealerQuoteAccept(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	var in DealerQuoteAcceptInput
+	if err := httpx.DecodeJSON(r, &in); err != nil {
+		fail(w, r, err)
+		return
+	}
+	v, err := h.svc.DealerQuoteDecide(r.Context(), r.PathValue("token"), h.caller(r), true, in.FullName, "")
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (h *PublicHandler) DealerQuoteDecline(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var in DealerQuoteDeclineInput
+	if err := httpx.DecodeJSON(r, &in); err != nil {
+		fail(w, r, err)
+		return
+	}
+	v, err := h.svc.DealerQuoteDecide(r.Context(), r.PathValue("token"), h.caller(r), false, in.FullName, in.Reason)
 	if err != nil {
 		fail(w, r, err)
 		return

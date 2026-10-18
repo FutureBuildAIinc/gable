@@ -551,6 +551,40 @@ func (s *Store) InsertLink(ctx context.Context, quoteID uuid.UUID, hash string, 
 	return &l, nil
 }
 
+// InsertDealerLink stores a link to one of the dealer's own quotes by hash.
+func (s *Store) InsertDealerLink(ctx context.Context, dealerQuoteID uuid.UUID, hash string, expires time.Time) (*Link, error) {
+	var l Link
+	var id uuid.UUID
+	err := s.exec(ctx).QueryRow(ctx, `INSERT INTO pro_portal_share_tokens (dealer_quote_id, token_hash, expires_at) VALUES ($1,$2,$3)
+		RETURNING id, dealer_quote_id::text, token_hash, created_at, expires_at`, dealerQuoteID, hash, expires).
+		Scan(&id, &l.DealerQuoteID, &l.Hash, &l.CreatedAt, &l.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("store dealer quote share token: %w", err)
+	}
+	l.ID = id.String()
+	return &l, nil
+}
+
+// RevokeLiveDealer revokes the dealer quote's live link, if any.
+func (s *Store) RevokeLiveDealer(ctx context.Context, dealerQuoteID uuid.UUID, reason string, at time.Time) (int64, error) {
+	tag, err := s.exec(ctx).Exec(ctx, `UPDATE pro_portal_share_tokens SET revoked_at = $2, revoked_reason = $3
+		WHERE dealer_quote_id = $1 AND revoked_at IS NULL`, dealerQuoteID, at, reason)
+	if err != nil {
+		return 0, fmt.Errorf("revoke dealer quote share token: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DealerName is the dealer's own name for a page the dealer's quote is shown on.
+func (s *Store) DealerName(ctx context.Context) (string, error) {
+	var n string
+	err := s.exec(ctx).QueryRow(ctx, `SELECT COALESCE(NULLIF(trim(trading_name), ''), NULLIF(trim(legal_name), ''), '') FROM dealer_profile WHERE id = 1`).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return n, err
+}
+
 // RevokeLive revokes the quote's live link, if any, and says how many.
 func (s *Store) RevokeLive(ctx context.Context, quoteID uuid.UUID, reason string, at time.Time) (int64, error) {
 	tag, err := s.exec(ctx).Exec(ctx, `UPDATE pro_portal_share_tokens SET revoked_at = $2, revoked_reason = $3
@@ -563,19 +597,19 @@ func (s *Store) RevokeLive(ctx context.Context, quoteID uuid.UUID, reason string
 
 // LiveLink returns the quote's live link, if any.
 func (s *Store) LiveLink(ctx context.Context, quoteID uuid.UUID) (*Link, error) {
-	return s.scanLink(s.exec(ctx).QueryRow(ctx, `SELECT id::text, quote_id::text, token_hash, created_at, expires_at, revoked_at
+	return s.scanLink(s.exec(ctx).QueryRow(ctx, `SELECT id::text, COALESCE(quote_id::text, ''), COALESCE(dealer_quote_id::text, ''), token_hash, created_at, expires_at, revoked_at
 		FROM pro_portal_share_tokens WHERE quote_id = $1 AND revoked_at IS NULL`, quoteID))
 }
 
 // LinkByHash finds a link by the SHA-256 hash of the presented token.
 func (s *Store) LinkByHash(ctx context.Context, hash string) (*Link, error) {
-	return s.scanLink(s.exec(ctx).QueryRow(ctx, `SELECT id::text, quote_id::text, token_hash, created_at, expires_at, revoked_at
+	return s.scanLink(s.exec(ctx).QueryRow(ctx, `SELECT id::text, COALESCE(quote_id::text, ''), COALESCE(dealer_quote_id::text, ''), token_hash, created_at, expires_at, revoked_at
 		FROM pro_portal_share_tokens WHERE token_hash = $1`, hash))
 }
 
 func (s *Store) scanLink(row pgx.Row) (*Link, error) {
 	var l Link
-	if err := row.Scan(&l.ID, &l.QuoteID, &l.Hash, &l.CreatedAt, &l.ExpiresAt, &l.RevokedAt); err != nil {
+	if err := row.Scan(&l.ID, &l.QuoteID, &l.DealerQuoteID, &l.Hash, &l.CreatedAt, &l.ExpiresAt, &l.RevokedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}

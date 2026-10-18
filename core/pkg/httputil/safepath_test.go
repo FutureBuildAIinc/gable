@@ -19,6 +19,8 @@ func TestSafePath(t *testing.T) {
 		"/api/public/v1/customer-quotes/" + tok + "/accept":     "/api/public/v1/customer-quotes/:token/accept",
 		"/api/public/v1/customer-quotes/" + tok + "/selections": "/api/public/v1/customer-quotes/:token/selections",
 		"/api/public/v1/customer-quotes/":                       "/api/public/v1/customer-quotes/",
+		"/api/public/v1/dealer-quotes/" + tok:                   "/api/public/v1/dealer-quotes/:token",
+		"/api/public/v1/dealer-quotes/" + tok + "/accept":       "/api/public/v1/dealer-quotes/:token/accept",
 		"/api/portal/v1/orders/123":                             "/api/portal/v1/orders/123",
 		"/api/v1/orders":                                        "/api/v1/orders",
 		"":                                                      "",

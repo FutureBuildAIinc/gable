@@ -54,7 +54,8 @@ func (s *Service) resolve(ctx context.Context, token string, c Caller) (*Link, *
 	if err != nil {
 		return nil, nil, err
 	}
-	if link == nil || !HashesEqual(link.Hash, hash) {
+	// A link to a dealer quote opens nothing here: to this route it never existed.
+	if link == nil || !HashesEqual(link.Hash, hash) || link.QuoteID == "" {
 		if !s.misses.Allow(clientKey(c.Address)) {
 			return nil, nil, ErrRateLimited
 		}
