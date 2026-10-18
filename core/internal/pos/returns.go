@@ -27,6 +27,10 @@ type ReturnIn struct {
 	Reason         string
 	GatewayTxID    string
 	Lines          []ReturnLineIn
+	// Exchange marks the return half of an exchange: its credit is applied to
+	// the replacement sale in the same act, so the walk-in customer's return
+	// is no credit left on an account.
+	Exchange bool
 }
 
 // ReturnLineIn is one parsed returned line.
@@ -188,7 +192,7 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			}
 		}
 		customerID = original.CustomerID
-		if customerID == nil && in.RefundMethod == RefundAccount {
+		if customerID == nil && in.RefundMethod == RefundAccount && !in.Exchange {
 			return nil, invalid("refund_method",
 				"the sale named no customer: its goods are refunded to the drawer or the card, not to an account")
 		}
@@ -212,7 +216,7 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 	// The walk-in customer cannot hold account credit: as the sale side
 	// refuses an ACCOUNT tender for it, a return left on its account is
 	// refused the same way.
-	if isWalkIn && in.RefundMethod == RefundAccount {
+	if isWalkIn && in.RefundMethod == RefundAccount && !in.Exchange {
 		return nil, conflict("walk_in_account",
 			"account credit needs a named customer: the walk-in customer is refunded from the drawer or to the card")
 	}
@@ -1043,6 +1047,17 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
 			}
 		}
+		// The stock returns (section 11, step 6, before the customer row of
+		// step 7 and the memo's number of step 8): each restock act back on
+		// hand, a product line's own units or a kit's components (the kit
+		// product itself never stocks), in product order so two acts that
+		// move the same products agree on the order.
+		sort.SliceStable(restocks, func(a, b int) bool { return restocks[a].productID.String() < restocks[b].productID.String() })
+		for i := range restocks {
+			if err := s.inventory.RestockQty(ctx, restocks[i].productID, *branchID, restocks[i].qty); err != nil {
+				return err
+			}
+		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, amount,
 				subtotal, tax_amount, total_amount, amount_open, memo_date, created_at, updated_at, revision)
@@ -1135,13 +1150,6 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		}
 		var fxAll *account.Effects
 		mergeEffects(&fxAll, fxPost)
-		// The stock returns: each restock act back on hand (a product line's
-		// own units, a kit's components; the kit product itself never stocks).
-		for i := range restocks {
-			if err := s.inventory.RestockQty(ctx, restocks[i].productID, *branchID, restocks[i].qty); err != nil {
-				return err
-			}
-		}
 		// The refund: cash or card pays the credit out (DR 1020 / CR 1010),
 		// account leaves the credit open.
 		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {

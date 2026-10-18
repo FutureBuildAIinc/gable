@@ -266,7 +266,11 @@ type returnLineRequest struct {
 	ReasonCode *string `json:"reason_code"`
 }
 
-func (r *returnRequest) parse() (*ReturnIn, error) {
+func (r *returnRequest) parse() (*ReturnIn, error) { return r.parseWith("lines") }
+
+// parseWith reads the request with the returned lines named under the prefix
+// in its field errors (an exchange names them returned_lines).
+func (r *returnRequest) parseWith(prefix string) (*ReturnIn, error) {
 	v := &httpx.Validator{}
 	out := &ReturnIn{}
 	if r.RegisterID != nil {
@@ -300,11 +304,11 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		out.GatewayTxID = *r.GatewayTxID
 	}
 	if len(r.Lines) == 0 {
-		v.Check(false, "lines", "name at least one returned line")
+		v.Check(false, prefix, "name at least one returned line")
 	}
 	for i := range r.Lines {
 		l := &r.Lines[i]
-		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
+		field := func(name string) string { return fmt.Sprintf("%s[%d].%s", prefix, i, name) }
 		rl := ReturnLineIn{Restock: true}
 		if id, ok := v.UUID(field("product_id"), l.ProductID, false); ok {
 			rl.ProductID = &id

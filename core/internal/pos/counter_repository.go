@@ -281,3 +281,35 @@ func (r *PostgresRepository) RestockingFeeBps(ctx context.Context) (map[string]i
 	}
 	return out, rows.Err()
 }
+
+// LockStock takes the inventory rows of the products at the branch FOR
+// UPDATE in (product id, inventory id) order: the product ids come sorted by
+// the caller, and the statement keeps the order (ADR 0005 section 11, step
+// 6). An act that moves stock in two directions holds them all first.
+func (r *PostgresRepository) LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error {
+	if len(productIDs) == 0 {
+		return nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT i.id FROM inventory i JOIN locations l ON l.id = i.location_id
+		WHERE i.product_id = ANY($1) AND l.branch_id = $2
+		ORDER BY i.product_id, i.id FOR UPDATE OF i`, productIDs, branchID)
+	if err != nil {
+		return fmt.Errorf("failed to lock the stock: %w", err)
+	}
+	rows.Close()
+	return rows.Err()
+}
+
+// LinkExchange points a return and the sale that replaced its goods at each
+// other, and records how the surplus went (cash, or left as credit).
+func (r *PostgresRepository) LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error {
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_returns SET exchange_sale_id = $2, refund_method = $3, updated_at = NOW()
+		WHERE id = $1`, returnID, saleID, string(method)); err != nil {
+		return fmt.Errorf("failed to link the exchange's return: %w", err)
+	}
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET exchange_return_id = $2 WHERE id = $1`, saleID, returnID); err != nil {
+		return fmt.Errorf("failed to link the exchange's sale: %w", err)
+	}
+	return nil
+}

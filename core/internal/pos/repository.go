@@ -203,6 +203,8 @@ type Repository interface {
 	BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error)
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
 	RestockingFeeBps(ctx context.Context) (map[string]int, error)
+	LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error
+	LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error
 	InsertOverride(ctx context.Context, o *AccountOverride) error
 	LiveOverride(ctx context.Context, saleID uuid.UUID, kind string) (*AccountOverride, error)
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)

@@ -278,7 +278,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -308,7 +308,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 // come with it.
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
-	charges []*chargeResult, priced *providerTax) (*Sale, error) {
+	charges []*chargeResult, priced *providerTax, ex *exchangeLeg) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -405,10 +405,29 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// lines locked): the change is the tenders less the total, an under
 		// tender is refused and so is a change above the cash taken; a
 		// negative change is never written.
-		change := totalTendered - total
+		// An exchange's returned credit is a leg of this sale: it covers the
+		// total as far as it goes, and what is tendered is the difference.
+		var credit int64
+		if ex != nil {
+			credit = min64(ex.creditCents, total)
+			ex.appliedCents = credit
+			ex.totalCents = total
+			if credit >= total && totalTendered > 0 {
+				return conflict("no_tender_due",
+					"the returned goods cover the replacement: no tender is due, so none is taken")
+			}
+		}
+		tendered := totalTendered + credit
+		change := tendered - total
+		// an exchange preview states the difference instead of refusing the
+		// tender that is not yet offered; nothing it writes is kept
+		previewShort := ex != nil && ex.preview && change < 0
+		if previewShort {
+			change = 0
+		}
 		if change < 0 {
 			return conflict("insufficient_tender",
-				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total, totalTendered))
+				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total-credit, totalTendered))
 		}
 		if change > cashTendered {
 			return conflict("change_from_cash",
@@ -416,9 +435,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		// The legs the sale keeps, change taken out of the cash, sum exactly to
 		// the total; the two checks above make it so and this holds it.
-		if totalTendered-change != total {
+		if !previewShort && tendered-change != total {
 			return conflict("legs_do_not_sum",
-				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", totalTendered-change, total))
+				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
 		}
 
 		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
@@ -454,20 +473,24 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			return err
 		}
 		var storeMemos []openMemo
-		if sums.storeCredit > 0 {
-			if sale.CustomerID == nil {
+		if sums.storeCredit > 0 || credit > 0 {
+			if sale.CustomerID == nil && sums.storeCredit > 0 {
 				return conflict("walk_in_store_credit",
 					"store credit belongs to a named account: the walk-in customer holds none")
 			}
 			if storeMemos, err = s.repo.LockOpenCreditMemos(ctx, customerID, sale.Currency); err != nil {
 				return err
 			}
+			if ex != nil {
+				// the exchange spends the memo its own return made, no other
+				storeMemos = onlyMemo(storeMemos, ex.memoID)
+			}
 			var held int64
 			for _, m := range storeMemos {
 				held += m.OpenCents
 			}
-			if sums.storeCredit > held {
-				return conflict("store_credit_short", storeCreditShort(sale.Currency, held, sums.storeCredit))
+			if need := sums.storeCredit + credit; need > held {
+				return conflict("store_credit_short", storeCreditShort(sale.Currency, held, need))
 			}
 		}
 
@@ -584,13 +607,20 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// the subledger), so the invoice's open amount is what the payments
 		// then apply against.
 		var storeRefs []string
-		if sums.storeCredit > 0 {
-			fx, refs, err := s.applyStoreCredit(ctx, storeMemos, inv.ID, sums.storeCredit, date, actor)
+		if sums.storeCredit > 0 || credit > 0 {
+			fx, refs, err := s.applyStoreCredit(ctx, storeMemos, inv.ID, sums.storeCredit+credit, date, actor)
 			if err != nil {
 				return err
 			}
 			mergeEffects(&fxAll, fx)
 			storeRefs = refs
+		}
+		if credit > 0 {
+			ref := strings.Join(storeRefs, ",")
+			if err := s.repo.AddTender(ctx, &Tender{SaleID: saleID, Method: TenderStoreCredit,
+				AmountCents: httpx.Cents(credit), Reference: &ref}); err != nil {
+				return err
+			}
 		}
 		for i := range tenders {
 			t := &tenders[i]
@@ -934,4 +964,27 @@ func (s *Service) checkTenderLimits(ctx context.Context, saleID, customerID uuid
 	return conflict("check_over_limit", fmt.Sprintf(
 		"a check of %s is over this customer's check limit of %s: take another payment, or ask a manager to approve the check",
 		moneyWords(facts.Currency, biggest), moneyWords(facts.Currency, *limit)))
+}
+
+// exchangeLeg is the returned credit an exchange's replacement sale takes as
+// a leg: the credit memo its own return made and the cents it holds. The
+// completion fills in what it applied and the total it came to.
+type exchangeLeg struct {
+	memoID       uuid.UUID
+	creditCents  int64
+	appliedCents int64
+	totalCents   int64
+	// preview runs the act to state its figures and rolls it back: a short
+	// tender is not refused.
+	preview bool
+}
+
+// onlyMemo keeps the one memo of the list.
+func onlyMemo(memos []openMemo, id uuid.UUID) []openMemo {
+	for _, m := range memos {
+		if m.ID == id {
+			return []openMemo{m}
+		}
+	}
+	return nil
 }
