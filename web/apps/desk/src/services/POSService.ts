@@ -23,6 +23,9 @@ import type {
     DayClose,
     CounterCustomer,
     CounterRegister,
+    TerminalIntent,
+    TerminalLostItem,
+    TerminalSweepResult,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -322,6 +325,62 @@ export const posService = {
                 body: JSON.stringify({ counted_by_method: countedByMethod, notes }),
             }),
             'Failed to close the till',
+        );
+        return response.json();
+    },
+
+    /* ---- The card terminal's intents (CP-05) ---- */
+
+    /** One card leg's own record: the desk's waiting state reads it while the terminal has the card. */
+    async getTerminalIntent(id: string): Promise<TerminalIntent> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-intents/${id}`),
+            'Failed to read the card terminal intent',
+        );
+        return response.json();
+    },
+
+    /**
+     * The desk's cancel of a waiting card leg, honest about the device: the
+     * server refuses it when the terminal has the leg, and the button's own
+     * words say the charge may still go through.
+     */
+    async cancelTerminalIntent(id: string): Promise<TerminalIntent> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-intents/${id}/cancel`, { method: 'POST' }),
+            'Failed to cancel the card terminal intent',
+        );
+        return response.json();
+    },
+
+    /** The manager's own trigger of the sweep act; the worker runs it too. */
+    async sweepTerminalIntents(): Promise<TerminalSweepResult> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-intents/sweep`, { method: 'POST' }),
+            'Failed to sweep the card terminal intents',
+        );
+        return response.json();
+    },
+
+    /** The manager's queue of card legs the sweep lost: who resolves it, what amount, the device reference. */
+    async listTerminalLostItems(): Promise<TerminalLostItem[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-lost-items`),
+            'Failed to read the lost card answers',
+        );
+        const body = await response.json();
+        return body.items ?? [];
+    },
+
+    /** The manager's settlement of one lost answer: what the terminal's own record said. */
+    async resolveTerminalLostItem(id: string, outcome: 'authorized' | 'declined', reference: string, reason: string): Promise<TerminalLostItem> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/terminal-lost-items/${id}/resolve`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ outcome, reference, reason }),
+            }),
+            'Failed to resolve the lost card answer',
         );
         return response.json();
     },

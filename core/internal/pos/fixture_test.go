@@ -58,6 +58,9 @@ type fixture struct {
 	// paymentGateway, when an opt sets it, wires the payment route's card
 	// refunds at a terminal too, the way serve wires Run Payments.
 	paymentGateway payment.PaymentGateway
+	// terminal, when an opt sets it, is the simulated card terminal the
+	// counter's card legs ride (CP-05), with its intent ledger.
+	terminal *payment.SimulatedTerminal
 	// noAutoTill, when an opt sets it, stops startSale from opening the
 	// register's drawer: the API refuses a sale at a register with no open
 	// till (CP-08), so the helper opens one with no float, as a cashier would,
@@ -267,6 +270,8 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM customer_transactions WHERE customer_id IN ($1, `+walkIn+`)`, f.customerID)
+	exec(`DELETE FROM payment_terminal_lost_items`)
+	exec(`DELETE FROM payment_terminal_intents`)
 	exec(`DELETE FROM pos_refund_intents`)
 	exec(`DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns)`)
 	exec(`DELETE FROM pos_returns`)
