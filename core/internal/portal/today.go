@@ -128,9 +128,22 @@ func (s *Service) GetTodayBoard(ctx context.Context, customerID uuid.UUID, caps 
 	if err != nil {
 		return nil, err
 	}
-	dto.NextDeliveries.First = next
+	if next == nil {
+		next = []TodayDeliveryRow{}
+	}
+	if since != nil {
+		filtered := make([]TodayDeliveryRow, 0, len(next))
+		for _, d := range next {
+			if d.UpdatedAt.After(*since) {
+				filtered = append(filtered, d)
+			}
+		}
+		dto.NextDeliveries.First = filtered
+	} else {
+		dto.NextDeliveries.First = next
+	}
 	dto.NextDeliveries.Count = len(next)
-	for _, d := range next {
+	for _, d := range dto.NextDeliveries.First {
 		keep(d.UpdatedAt)
 	}
 
@@ -187,7 +200,7 @@ func todayETag(customerID uuid.UUID, dto *TodayDTO, latest *time.Time) string {
 // --- repository reads --------------------------------------------------------
 
 const todayDeliverySelect = `
-	SELECT d.id, d.order_id, COALESCE(d.status, ''), rt.scheduled_date,
+	SELECT d.id, d.order_id, COALESCE(d.status, ''), COALESCE(d.scheduled_start, rt.scheduled_date),
 	       COALESCE(l.code, ''), (o.delivery_type = 'PICKUP'), d.updated_at
 	FROM deliveries d
 	JOIN orders o ON o.id = d.order_id
@@ -211,22 +224,22 @@ func scanTodayDelivery(rows interface {
 	return out, nil
 }
 
-// TodayDeliveries lists today's stops (or pickups when pickup is true), the
-// soonest first, capped by limit.
+// TodayDeliveries lists today's stops (including pickups when pickup is true),
+// the soonest first, capped by limit.
 func (r *PostgresRepository) TodayDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error) {
-	kind := `<> 'PICKUP'`
-	if pickup {
-		kind = `= 'PICKUP'`
+	q := todayDeliverySelect
+	if !pickup {
+		q += ` AND o.delivery_type <> 'PICKUP'`
 	}
-	q := todayDeliverySelect + ` AND o.delivery_type ` + kind + `
-		AND rt.scheduled_date >= CURRENT_DATE
-		AND rt.scheduled_date < CURRENT_DATE + interval '1 day'`
+	q += `
+		AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE
+		AND COALESCE(d.scheduled_start, rt.scheduled_date) < CURRENT_DATE + interval '1 day'`
 	args := []any{customerID}
 	if since != nil {
 		q += ` AND d.updated_at > $2`
 		args = append(args, *since)
 	}
-	q += ` ORDER BY rt.scheduled_date ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
+	q += ` ORDER BY COALESCE(d.scheduled_start, rt.scheduled_date) ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list today deliveries: %w", err)
@@ -237,9 +250,13 @@ func (r *PostgresRepository) TodayDeliveries(ctx context.Context, customerID uui
 
 // NextDeliveries lists the upcoming stops after today, soonest first.
 func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, limit int) ([]TodayDeliveryRow, error) {
-	q := todayDeliverySelect + ` AND rt.scheduled_date >= CURRENT_DATE + interval '1 day'`
+	q := todayDeliverySelect
+	if !pickup {
+		q += ` AND o.delivery_type <> 'PICKUP'`
+	}
+	q += ` AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE + interval '1 day'`
 	args := []any{customerID}
-	q += ` ORDER BY rt.scheduled_date ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
+	q += ` ORDER BY COALESCE(d.scheduled_start, rt.scheduled_date) ASC, d.stop_sequence NULLS LAST LIMIT ` + strconv.Itoa(limit)
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list next deliveries: %w", err)
@@ -250,15 +267,18 @@ func (r *PostgresRepository) NextDeliveries(ctx context.Context, customerID uuid
 
 // TodayDeliveriesCount counts today's stops for the section headline.
 func (r *PostgresRepository) TodayDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error) {
-	var n int
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+	q := `
 		SELECT COUNT(*) FROM deliveries d
 		JOIN orders o ON o.id = d.order_id
-		JOIN delivery_routes rt ON rt.id = d.route_id
-		WHERE o.customer_id = $1 AND o.delivery_type <> 'PICKUP'
-		  AND rt.scheduled_date >= CURRENT_DATE
-		  AND rt.scheduled_date < CURRENT_DATE + interval '1 day'
-	`, customerID).Scan(&n)
+		LEFT JOIN delivery_routes rt ON rt.id = d.route_id
+		WHERE o.customer_id = $1
+		  AND COALESCE(d.scheduled_start, rt.scheduled_date) >= CURRENT_DATE
+		  AND COALESCE(d.scheduled_start, rt.scheduled_date) < CURRENT_DATE + interval '1 day'`
+	if !pickup {
+		q += ` AND o.delivery_type <> 'PICKUP'`
+	}
+	var n int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, q, customerID).Scan(&n)
 	return n, err
 }
 

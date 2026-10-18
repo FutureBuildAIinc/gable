@@ -220,6 +220,10 @@ func (h *Handler) HandleChangeScheduleHold(w http.ResponseWriter, r *http.Reques
 		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
+	if req.WindowID == uuid.Nil || req.Date == "" {
+		httputil.RespondError(w, r, "window_id and date are required", http.StatusBadRequest, nil)
+		return
+	}
 
 	dto, err := h.svc.ChangeScheduleHold(r.Context(), customerID, getPortalUserID(r), holdID, req)
 	if err != nil {

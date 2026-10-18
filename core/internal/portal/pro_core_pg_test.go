@@ -250,9 +250,18 @@ func TestCapabilityRefusals_OnEveryGatedRoute(t *testing.T) {
 	}{
 		{"POST", "/api/portal/v1/orders/reorder", `{"order_id":"` + f.aFulfilled.String() + `"}`},
 		{"POST", "/api/portal/v1/orders/" + f.aDraft.String() + "/cancel", "{}"},
+		{"PUT", "/api/portal/v1/orders/" + f.aDraft.String() + "/project", `{"project_id":null}`},
 		{"PUT", "/api/portal/v1/orders/" + f.aDraft.String() + "/delivery-instructions", `{"instructions":"Gate side"}`},
+		{"POST", "/api/portal/v1/deliveries/" + f.aDelivery.String() + "/reschedule", `{"requested_date":"` + f.winDate + `"}`},
 		{"POST", "/api/portal/v1/quotes", `{"lines":[{"description":"Boards","quantity":10,"uom":"EA"}]}`},
+		{"POST", "/api/portal/v1/quotes/" + f.aQuote.String() + "/accept", "{}"},
+		{"POST", "/api/portal/v1/quotes/" + f.aQuote.String() + "/decline", "{}"},
 		{"POST", "/api/portal/v1/schedule/holds", `{"window_id":"` + f.winCap1.String() + `","date":"` + f.winDate + `"}`},
+		{"PUT", "/api/portal/v1/schedule/holds/" + uuid.NewString(), `{"window_id":"` + f.winCap1.String() + `","date":"` + f.winDate + `"}`},
+		{"DELETE", "/api/portal/v1/schedule/holds/" + uuid.NewString(), ""},
+		{"POST", "/api/portal/v1/cart/items", `{"product_id":"` + uuid.NewString() + `","quantity":1}`},
+		{"PUT", "/api/portal/v1/cart/items/" + uuid.NewString(), `{"quantity":2}`},
+		{"DELETE", "/api/portal/v1/cart/items/" + uuid.NewString(), ""},
 		{"POST", "/api/portal/v1/checkout", `{"delivery_method":"PICKUP"}`},
 		{"GET", "/api/portal/v1/users", ""},
 	}
@@ -263,12 +272,18 @@ func TestCapabilityRefusals_OnEveryGatedRoute(t *testing.T) {
 		}
 	}
 
-	// site_super cannot see money or manage the team.
+	// site_super cannot see money, approve quotes or manage the team.
 	mux = muxFor(repo, f.aCustomer, f.users[RoleSiteSuper], RoleSiteSuper)
-	for _, path := range []string{"/api/portal/v1/dashboard", "/api/portal/v1/invoices", "/api/portal/v1/users"} {
+	for _, path := range []string{"/api/portal/v1/dashboard", "/api/portal/v1/invoices", "/api/portal/v1/invoices/" + f.aInvoice.String(), "/api/portal/v1/users", "/api/portal/v1/invites"} {
 		rec, _ := call(mux, "GET", path, "", nil)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("site_super GET %s answered %d, want 403", path, rec.Code)
+		}
+	}
+	for _, path := range []string{"/api/portal/v1/quotes/" + f.aQuote.String() + "/accept", "/api/portal/v1/quotes/" + f.aQuote.String() + "/decline"} {
+		rec, _ := call(mux, "POST", path, "{}", nil)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("site_super POST %s answered %d, want 403", path, rec.Code)
 		}
 	}
 }
@@ -305,8 +320,13 @@ func TestToday_Board(t *testing.T) {
 	if row["total_cents"] != float64(10000) {
 		t.Errorf("invoice total_cents = %v, want integer 10000 (100.00 dollars)", row["total_cents"])
 	}
-	if deliveries, _ := body["deliveries_today"].(map[string]any); deliveries["count"] != float64(1) {
+	deliveries, _ := body["deliveries_today"].(map[string]any)
+	if deliveries["count"] != float64(1) {
 		t.Errorf("deliveries_today.count = %v, want 1", deliveries["count"])
+	}
+	delivFirst, _ := deliveries["first"].([]any)
+	if len(delivFirst) != 1 {
+		t.Errorf("deliveries_today.first has %d rows, want 1", len(delivFirst))
 	}
 
 	// A role without see_money still reads the board, with the invoice
@@ -388,11 +408,29 @@ func TestSchedule_ListHoldChangeRelease(t *testing.T) {
 		t.Errorf("changing the superseded hold answered %d, want 404", rec.Code)
 	}
 
-	// Change the first hold to the capacity 1 delivery window.
+	// Change the active hold to the capacity 1 delivery window.
 	rec, _ = call(mux, "PUT", "/api/portal/v1/schedule/holds/"+holdID, fmt.Sprintf(
 		`{"window_id":"%s","date":"%s"}`, f.winCap1, f.winDate), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("change answered %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Both the order and Dispatch (the order's open delivery stop) show the chosen window.
+	rec, ordBody := call(mux, "GET", "/api/portal/v1/orders/"+f.aConfirmed.String(), "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get order answered %d", rec.Code)
+	}
+	ordHold, _ := ordBody["schedule_hold"].(map[string]any)
+	if ordHold == nil || ordHold["id"] != holdID || ordHold["window_id"] != f.winCap1.String() {
+		t.Errorf("order schedule_hold = %v, want hold %s on window %s", ordBody["schedule_hold"], holdID, f.winCap1)
+	}
+	var schedStart, schedEnd *time.Time
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT scheduled_start, scheduled_end FROM deliveries WHERE order_id = $1`, f.aConfirmed).Scan(&schedStart, &schedEnd); err != nil {
+		t.Fatalf("query stop scheduled bounds: %v", err)
+	}
+	if schedStart == nil || schedEnd == nil {
+		t.Errorf("dispatch stop scheduled_start=%v scheduled_end=%v, want the chosen window bounds", schedStart, schedEnd)
 	}
 
 	// Release it.
@@ -559,9 +597,7 @@ func TestOrderTimeline_PickupFlowSpeaksPickup(t *testing.T) {
 	f := setupPro(t)
 	repo := NewRepository(f.db)
 	mux := muxFor(repo, f.aCustomer, f.users[RoleOwner], RoleOwner)
-	rec, body := call(mux, "GET", "/api/portal/v1/orders/"+f.bOrder.String()+"/timeline", "", nil)
-	// bOrder is not A's; use A's draft (a PICKUP order).
-	rec, body = call(mux, "GET", "/api/portal/v1/orders/"+f.aDraft.String()+"/timeline", "", nil)
+	rec, body := call(mux, "GET", "/api/portal/v1/orders/"+f.aDraft.String()+"/timeline", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("timeline answered %d", rec.Code)
 	}
@@ -569,11 +605,11 @@ func TestOrderTimeline_PickupFlowSpeaksPickup(t *testing.T) {
 		t.Fatalf("pickup order's delivery_type = %v, want PICKUP", body["delivery_type"])
 	}
 	s, _ := body["steps"].([]any)
-	if len(s) != 4 {
-		t.Fatalf("pickup flow has %d steps, want 4", len(s))
+	if len(s) != 5 {
+		t.Fatalf("pickup flow has %d steps, want 5", len(s))
 	}
-	if s[2].(map[string]any)["key"] != "ready_for_pickup" {
-		t.Errorf("pickup flow step 3 = %v, want ready_for_pickup", s[2])
+	if s[2].(map[string]any)["key"] != "loaded" || s[3].(map[string]any)["key"] != "ready_for_pickup" || s[4].(map[string]any)["key"] != "picked_up" {
+		t.Errorf("pickup flow steps = %v, want loaded -> ready_for_pickup -> picked_up", s)
 	}
 }
 
@@ -585,10 +621,13 @@ func TestSiteDeliveryInstructions(t *testing.T) {
 	repo := NewRepository(f.db)
 	mux := muxFor(repo, f.aCustomer, f.users[RoleSiteSuper], RoleSiteSuper)
 
-	rec, _ := call(mux, "PUT", "/api/portal/v1/orders/"+f.aConfirmed.String()+"/delivery-instructions",
+	rec, ordBody := call(mux, "PUT", "/api/portal/v1/orders/"+f.aConfirmed.String()+"/delivery-instructions",
 		`{"instructions":"Leave at the gate, code 1234"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("instructions answered %d: %s", rec.Code, rec.Body.String())
+	}
+	if ordBody["site_delivery_instructions"] != "Leave at the gate, code 1234" {
+		t.Errorf("order DTO site_delivery_instructions = %v, want Leave at the gate, code 1234", ordBody["site_delivery_instructions"])
 	}
 
 	// The dealer's own read is scoped the same way: the row carries it.

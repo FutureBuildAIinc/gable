@@ -581,6 +581,9 @@ func (h *Handler) HandleDeclineQuote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) decideQuote(w http.ResponseWriter, r *http.Request, decide func(context.Context, uuid.UUID, uuid.UUID) (*PortalQuoteDTO, error)) {
+	if !requireCapability(w, r, CapApproveQuotes) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	quoteID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -832,7 +835,7 @@ func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.Checkout(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, r, "Checkout failed", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Checkout failed", err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
 	portalWriteJSONStatus(w, http.StatusCreated, resp)

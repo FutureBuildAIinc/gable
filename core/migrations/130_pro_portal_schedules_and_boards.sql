@@ -30,30 +30,34 @@
 
 -- 1. Roles -------------------------------------------------------------------
 
+ALTER TABLE customer_users DROP CONSTRAINT IF EXISTS customer_users_role_check;
+
 UPDATE customer_users
 SET role = CASE role
         WHEN 'Admin' THEN 'owner'
         WHEN 'Buyer' THEN 'project_manager'
         WHEN 'View-Only' THEN 'estimator'
-        ELSE role
+        ELSE 'estimator'
     END,
     updated_at = NOW()
-WHERE role IN ('Admin', 'Buyer', 'View-Only');
+WHERE role NOT IN ('owner', 'estimator', 'project_manager', 'site_super', 'ap_clerk');
+
+ALTER TABLE customer_users ALTER COLUMN role SET DEFAULT 'estimator';
+ALTER TABLE customer_users ADD CONSTRAINT customer_users_role_check
+    CHECK (role IN ('owner', 'estimator', 'project_manager', 'site_super', 'ap_clerk'));
+
+ALTER TABLE portal_invites DROP CONSTRAINT IF EXISTS portal_invites_role_check;
 
 UPDATE portal_invites
 SET role = CASE role
         WHEN 'Admin' THEN 'owner'
         WHEN 'Buyer' THEN 'project_manager'
         WHEN 'View-Only' THEN 'estimator'
-        ELSE role
+        ELSE 'estimator'
     END
-WHERE role IN ('Admin', 'Buyer', 'View-Only');
+WHERE role NOT IN ('owner', 'estimator', 'project_manager', 'site_super', 'ap_clerk');
 
-ALTER TABLE customer_users DROP CONSTRAINT IF EXISTS customer_users_role_check;
-ALTER TABLE customer_users ADD CONSTRAINT customer_users_role_check
-    CHECK (role IN ('owner', 'estimator', 'project_manager', 'site_super', 'ap_clerk'));
-
-ALTER TABLE portal_invites DROP CONSTRAINT IF EXISTS portal_invites_role_check;
+ALTER TABLE portal_invites ALTER COLUMN role SET DEFAULT 'estimator';
 ALTER TABLE portal_invites ADD CONSTRAINT portal_invites_role_check
     CHECK (role IN ('owner', 'estimator', 'project_manager', 'site_super', 'ap_clerk'));
 

@@ -95,6 +95,12 @@ type PortalOrderDTO struct {
 	// returns only what has moved since, and it advances on every ERP status
 	// write (order.UpdateStatus sets updated_at = NOW()).
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// SiteDeliveryInstructions and ScheduleHold are the contractor's site
+	// instructions and active window hold (M35 Part 4). Omitted when absent so
+	// orders without instructions or a hold keep their existing wire shape.
+	SiteDeliveryInstructions *string          `json:"site_delivery_instructions,omitempty"`
+	ScheduleHold             *ScheduleHoldDTO `json:"schedule_hold,omitempty"`
 }
 
 // OrderListFilter narrows GET /api/portal/v1/orders. Both fields are optional;
@@ -174,6 +180,8 @@ type PortalDeliveryDTO struct {
 	VehicleName          *string    `json:"vehicle_name"`
 	VehiclePhotoURL      *string    `json:"vehicle_photo_url"`
 	ScheduledDate        *time.Time `json:"scheduled_date"`
+	ScheduledStart       *time.Time `json:"scheduled_start,omitempty"`
+	ScheduledEnd         *time.Time `json:"scheduled_end,omitempty"`
 	EstimatedArrival     *time.Time `json:"estimated_arrival"`
 	DeliveryAddress      *string    `json:"delivery_address"`
 	StopSequence         *int       `json:"stop_sequence"`
@@ -321,14 +329,15 @@ type UpdateCartItemRequest struct {
 
 // CheckoutRequest is the payload for placing an order from the cart.
 //
-// ProjectID is optional and additive; when supplied it must name a project
-// owned by the calling customer, or checkout is refused.
+// ProjectID and ScheduleHoldID are optional and additive; when supplied they
+// must name records owned by the calling customer, or checkout is refused.
 type CheckoutRequest struct {
 	DeliveryMethod  string     `json:"delivery_method"` // DELIVERY or PICKUP
 	DeliveryAddress string     `json:"delivery_address"`
 	PaymentMethod   string     `json:"payment_method"` // ACCOUNT or CARD
 	Notes           string     `json:"notes"`
 	ProjectID       *uuid.UUID `json:"project_id"`
+	ScheduleHoldID  *uuid.UUID `json:"schedule_hold_id,omitempty"`
 }
 
 // CheckoutResponse confirms a placed order.

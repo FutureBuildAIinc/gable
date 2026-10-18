@@ -118,6 +118,18 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		}
 	}
 
+	var heldWindow *ScheduleHoldDTO
+	if req.ScheduleHoldID != nil {
+		h, hErr := s.repo.GetScheduleHold(ctx, customerID, *req.ScheduleHoldID)
+		if hErr != nil {
+			return nil, hErr
+		}
+		if h.Status != "held" || h.OrderID != nil {
+			return nil, fmt.Errorf("%w: schedule hold is not available", ErrInvalidRequest)
+		}
+		heldWindow = h
+	}
+
 	// Build the order draft from the cart. The lines carry no price: the
 	// order prices them through the same engine the catalog priced the cart
 	// with (price_source PRICE_LIST), so the money never crosses the portal
@@ -147,6 +159,12 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		branch := cust.PrimaryBranchID
 		draft.BranchID = &branch
 	}
+	if heldWindow != nil {
+		yardID := heldWindow.YardID
+		date := heldWindow.Date
+		draft.BranchID = &yardID
+		draft.ScheduledDeliveryDate = &date
+	}
 
 	// The portal is a trusted in process caller naming the customer's own
 	// branch; it carries no branch context of its own, so the payload branch
@@ -155,6 +173,17 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 	newOrder, err := s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
+	}
+
+	if heldWindow != nil {
+		orderID := newOrder.ID
+		if _, hErr := s.repo.ChangeScheduleHold(ctx, customerID, nil, heldWindow.ID, ScheduleWindowRequest{
+			WindowID: heldWindow.WindowID,
+			Date:     heldWindow.Date,
+			OrderID:  &orderID,
+		}); hErr != nil {
+			return nil, fmt.Errorf("failed to attach schedule hold to order: %w", hErr)
+		}
 	}
 
 	// The project association is written after the order exists rather than

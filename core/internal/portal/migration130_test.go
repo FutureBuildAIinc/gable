@@ -115,7 +115,13 @@ func TestMigration130_UpDownUpWithRoleMapping(t *testing.T) {
 	legacy := []struct {
 		id   uuid.UUID
 		role string
-	}{{uuid.New(), "Admin"}, {uuid.New(), "Buyer"}, {uuid.New(), "View-Only"}}
+	}{
+		{uuid.New(), "Admin"},
+		{uuid.New(), "Buyer"},
+		{uuid.New(), "View-Only"},
+		{uuid.New(), "owner"},
+		{uuid.New(), "mystery_role"},
+	}
 	for _, u := range legacy {
 		if _, err := conn.Exec(ctx, `
 			INSERT INTO customers (id, name, account_number, primary_branch_id)
@@ -123,8 +129,6 @@ func TestMigration130_UpDownUpWithRoleMapping(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The users reference the customers created above; redo cleanly with a map.
-	// (Simpler: insert users for one customer.)
 	var cust string
 	if err := conn.QueryRow(ctx, `SELECT id FROM customers LIMIT 1`).Scan(&cust); err != nil {
 		t.Fatal(err)
@@ -136,24 +140,48 @@ func TestMigration130_UpDownUpWithRoleMapping(t *testing.T) {
 			u.id, cust, "m130-"+u.role+"@example.test", u.role, u.role); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := conn.Exec(ctx, `
+			INSERT INTO portal_invites (id, customer_id, email, role, token, expires_at)
+			VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days')`,
+			uuid.New(), cust, "m130-inv-"+u.role+"@example.test", u.role, "tok-"+u.role); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// UP: the mapping lands.
 	apply130(t, conn, up130)
-	for _, u := range []struct {
-		email, want string
-	}{} {
-		_ = u
-	}
 	want := map[string]string{
-		"m130-Admin@example.test":     "owner",
-		"m130-Buyer@example.test":     "project_manager",
-		"m130-View-Only@example.test": "estimator",
+		"m130-Admin@example.test":        "owner",
+		"m130-Buyer@example.test":        "project_manager",
+		"m130-View-Only@example.test":    "estimator",
+		"m130-owner@example.test":        "owner",
+		"m130-mystery_role@example.test": "estimator",
 	}
 	for email, role := range want {
 		if got := scalar130(t, conn, `SELECT role FROM customer_users WHERE email = $1`, email); got != role {
 			t.Errorf("%s mapped to %s, want %s", email, got, role)
 		}
+	}
+	wantInv := map[string]string{
+		"m130-inv-Admin@example.test":        "owner",
+		"m130-inv-Buyer@example.test":        "project_manager",
+		"m130-inv-View-Only@example.test":    "estimator",
+		"m130-inv-owner@example.test":        "owner",
+		"m130-inv-mystery_role@example.test": "estimator",
+	}
+	for email, role := range wantInv {
+		if got := scalar130(t, conn, `SELECT role FROM portal_invites WHERE email = $1`, email); got != role {
+			t.Errorf("invite %s mapped to %s, want %s", email, got, role)
+		}
+	}
+	// Default role is estimator.
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO customer_users (customer_id, email, password_hash, name, status)
+		 VALUES ($1, 'm130-default@example.test', 'x', 'Default', 'Active')`, cust); err != nil {
+		t.Fatalf("insert with default role: %v", err)
+	}
+	if got := scalar130(t, conn, `SELECT role FROM customer_users WHERE email = 'm130-default@example.test'`); got != "estimator" {
+		t.Errorf("default role = %s, want estimator", got)
 	}
 	// The constraint refuses the legacy spelling.
 	if _, err := conn.Exec(ctx,

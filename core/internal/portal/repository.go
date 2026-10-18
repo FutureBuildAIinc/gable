@@ -263,7 +263,7 @@ func (r *PostgresRepository) getOrderLines(ctx context.Context, orderID uuid.UUI
 func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error) {
 	query := `
 		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
-		       o.project_id, p.name
+		       o.project_id, p.name, NULLIF(o.site_delivery_instructions, '')
 		FROM orders o
 		LEFT JOIN projects p ON p.id = o.project_id
 		WHERE o.id = $1 AND o.customer_id = $2
@@ -271,7 +271,7 @@ func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderI
 	var o PortalOrderDTO
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, orderID, customerID).Scan(
 		&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
-		&o.ProjectID, &o.ProjectName,
+		&o.ProjectID, &o.ProjectName, &o.SiteDeliveryInstructions,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -285,6 +285,9 @@ func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderI
 		return nil, err
 	}
 	o.Lines = lines
+	if hold, err := r.activeHoldForOrder(ctx, customerID, orderID); err == nil {
+		o.ScheduleHold = hold
+	}
 	return &o, nil
 }
 
@@ -363,7 +366,8 @@ func (r *PostgresRepository) GetDeliveryByIDAndCustomer(ctx context.Context, del
 		       rt.scheduled_date, d.estimated_arrival,
 		       c.address,
 		       d.stop_sequence, d.delivery_instructions,
-		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id)
+		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id),
+		       d.scheduled_start, d.scheduled_end
 		FROM deliveries d
 		JOIN orders o ON d.order_id = o.id
 		JOIN customers c ON o.customer_id = c.id
@@ -382,6 +386,7 @@ func (r *PostgresRepository) GetDeliveryByIDAndCustomer(ctx context.Context, del
 		&d.DeliveryAddress,
 		&d.StopSequence, &d.DeliveryInstructions,
 		&d.TotalStops,
+		&d.ScheduledStart, &d.ScheduledEnd,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

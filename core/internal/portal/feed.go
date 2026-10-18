@@ -173,7 +173,7 @@ func (r *PostgresRepository) ListDeliveriesByCustomerFiltered(ctx context.Contex
 		       c.address,
 		       d.stop_sequence, d.delivery_instructions,
 		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id),
-		       d.updated_at
+		       d.updated_at, d.scheduled_start, d.scheduled_end
 		FROM deliveries d
 		JOIN orders o ON d.order_id = o.id
 		JOIN customers c ON o.customer_id = c.id
@@ -209,6 +209,7 @@ func (r *PostgresRepository) ListDeliveriesByCustomerFiltered(ctx context.Contex
 			&d.DeliveryAddress,
 			&d.StopSequence, &d.DeliveryInstructions,
 			&d.TotalStops, &d.UpdatedAt,
+			&d.ScheduledStart, &d.ScheduledEnd,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan delivery: %w", err)
 		}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,6 +22,26 @@ type Repository struct {
 // NewRepository creates the repository.
 func NewRepository(db *database.DB) *Repository {
 	return &Repository{db: db}
+}
+
+func wallArgs(ctx context.Context) (any, any) {
+	var branch, sub any
+	if b := middleware.BranchIDForQuery(ctx); b != nil {
+		branch = *b
+	}
+	if g := middleware.GrantsSubForQuery(ctx); g != nil {
+		sub = *g
+	}
+	return branch, sub
+}
+
+func windowVisible(branchArg, subArg int) string {
+	return fmt.Sprintf(`(
+		($%d::uuid IS NOT NULL AND (w.yard_id = $%d OR l.branch_id = $%d))
+		OR ($%d::uuid IS NULL AND $%d::text IS NOT NULL AND COALESCE(l.branch_id, w.yard_id) IN
+			(SELECT branch_id FROM user_locations WHERE user_sub = $%d))
+		OR ($%d::uuid IS NULL AND $%d::text IS NULL)
+	)`, branchArg, branchArg, branchArg, branchArg, subArg, subArg, branchArg, subArg)
 }
 
 const windowSelect = `
@@ -42,11 +63,13 @@ func scanWindow(scanner interface{ Scan(dest ...any) error }) (*Window, error) {
 	return &w, nil
 }
 
-// List lists windows, optionally narrowed to a yard and a kind. Inactive
-// windows are included: the yard manager edits what was switched off.
+// List lists windows, optionally narrowed to a yard and a kind, filtered by
+// the caller's branch wall. Inactive windows are included: the yard manager
+// edits what was switched off.
 func (r *Repository) List(ctx context.Context, yardID *uuid.UUID, kind string) ([]Window, error) {
-	q := windowSelect + ` WHERE 1=1`
-	args := []any{}
+	branch, sub := wallArgs(ctx)
+	q := windowSelect + ` WHERE ` + windowVisible(1, 2)
+	args := []any{branch, sub}
 	if yardID != nil {
 		args = append(args, *yardID)
 		q += ` AND w.yard_id = $` + strconv.Itoa(len(args))
@@ -72,9 +95,11 @@ func (r *Repository) List(ctx context.Context, yardID *uuid.UUID, kind string) (
 	return out, rows.Err()
 }
 
-// Get reads one window.
+// Get reads one window behind the caller's branch wall.
 func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Window, error) {
-	w, err := scanWindow(r.db.GetExecutor(ctx).QueryRow(ctx, windowSelect+` WHERE w.id = $1`, id))
+	branch, sub := wallArgs(ctx)
+	w, err := scanWindow(r.db.GetExecutor(ctx).QueryRow(ctx,
+		windowSelect+` WHERE w.id = $1 AND `+windowVisible(2, 3), id, branch, sub))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrWindowNotFound
@@ -119,8 +144,12 @@ func (r *Repository) Update(ctx context.Context, w *Window) error {
 // Deactivate switches a window off without deleting it, so its holds keep
 // their reference and its history stays auditable.
 func (r *Repository) Deactivate(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
-		`UPDATE yard_schedule_windows SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, id)
+	branch, sub := wallArgs(ctx)
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE yard_schedule_windows w SET is_active = FALSE, updated_at = NOW()
+		FROM locations l
+		WHERE w.id = $1 AND l.id = w.yard_id AND `+windowVisible(2, 3),
+		id, branch, sub)
 	if err != nil {
 		return err
 	}

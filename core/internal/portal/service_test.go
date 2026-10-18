@@ -652,6 +652,15 @@ func TestRegisterRoutes_OnlyThreeRoutesArePublic(t *testing.T) {
 		{http.MethodPost, "/api/portal/v1/invites"},
 		{http.MethodPut, "/api/portal/v1/users/" + id + "/role"},
 		{http.MethodPut, "/api/portal/v1/users/" + id + "/status"},
+		{http.MethodGet, "/api/portal/v1/me"},
+		{http.MethodGet, "/api/portal/v1/today"},
+		{http.MethodGet, "/api/portal/v1/orders/" + id + "/timeline"},
+		{http.MethodPut, "/api/portal/v1/orders/" + id + "/delivery-instructions"},
+		{http.MethodGet, "/api/portal/v1/schedule/windows"},
+		{http.MethodPost, "/api/portal/v1/schedule/holds"},
+		{http.MethodGet, "/api/portal/v1/schedule/holds/" + id},
+		{http.MethodPut, "/api/portal/v1/schedule/holds/" + id},
+		{http.MethodDelete, "/api/portal/v1/schedule/holds/" + id},
 	}
 
 	for _, r := range protected {

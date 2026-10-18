@@ -9677,6 +9677,8 @@ paths:
                 $ref: "#/components/schemas/PortalDashboard"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/orders:
@@ -9786,6 +9788,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -9828,6 +9832,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -9851,7 +9857,7 @@ paths:
       tags: [portal]
       summary: Attach or detach an order's project
       description: >-
-        A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
+        Behind the order capability. A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
       security:
         - PortalSession: []
       parameters:
@@ -9879,6 +9885,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -9924,8 +9932,14 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PortalInvoice"
+        "304":
+          description: If-None-Match matched the ETag; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/invoices/{id}:
@@ -9954,6 +9968,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
   /api/portal/v1/deliveries:
@@ -9991,6 +10007,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PortalDelivery"
+        "304":
+          description: If-None-Match matched the ETag; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "500":
@@ -10089,6 +10109,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -10267,6 +10289,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PortalQuote"
+        "304":
+          description: If-None-Match matched the ETag; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "500":
@@ -10298,6 +10324,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -10340,7 +10368,7 @@ paths:
       tags: [portal]
       summary: Accept a priced quote
       description: >-
-        Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
+        Behind the approve_quotes capability (a session without it is a 403). Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
       security:
         - PortalSession: []
       parameters:
@@ -10362,6 +10390,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -10384,7 +10414,7 @@ paths:
       operationId: portalDeclineQuote
       tags: [portal]
       summary: Decline a priced quote
-      description: Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
+      description: Behind the approve_quotes capability (a session without it is a 403). Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
       security:
         - PortalSession: []
       parameters:
@@ -10406,6 +10436,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -10470,6 +10502,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -10483,7 +10517,7 @@ paths:
       operationId: portalUpdateCartItem
       tags: [portal]
       summary: Change a cart item's quantity
-      description: A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
+      description: Behind the order capability. A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
       security:
         - PortalSession: []
       parameters:
@@ -10511,6 +10545,8 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -10523,7 +10559,7 @@ paths:
       operationId: portalRemoveCartItem
       tags: [portal]
       summary: Remove an item from the cart
-      description: Every repository failure is a 500 today; the cart is returned after the removal.
+      description: Behind the order capability. Every repository failure is a 500 today; the cart is returned after the removal.
       security:
         - PortalSession: []
       parameters:
@@ -10544,6 +10580,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/portal/v1/checkout:
@@ -10552,7 +10590,7 @@ paths:
       tags: [portal]
       summary: Place an order from the cart
       description: >-
-        Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
+        Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). When schedule_hold_id is set, it binds the held slot to the new order and stamps the order's scheduled delivery date.
       security:
         - PortalSession: []
       parameters:
@@ -10574,6 +10612,10 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -10798,6 +10840,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalToday"
+        "304":
+          description: If-None-Match matched the ETag; no body.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -24419,6 +24463,11 @@ components:
           type: string
           format: date-time
           description: The change-feed cursor; moves on every ERP status write.
+        site_delivery_instructions:
+          type: [string, "null"]
+          description: The contractor's site instruction on this order; omitted when empty.
+        schedule_hold:
+          $ref: "#/components/schemas/PortalScheduleHold"
     PortalOrderLine:
       type: object
       required: [product_id, product_sku, product_name, quantity, price_each]
@@ -24536,6 +24585,14 @@ components:
           type: string
           format: date-time
           description: The delivery change feed's cursor; moves on every stop or route write.
+        scheduled_start:
+          type: [string, "null"]
+          format: date-time
+          description: The UTC start of the held delivery window or pickup slot; omitted when unset.
+        scheduled_end:
+          type: [string, "null"]
+          format: date-time
+          description: The UTC end of the held delivery window or pickup slot; omitted when unset.
     PortalReorderRequest:
       type: object
       required: [order_id]
@@ -24807,11 +24864,11 @@ components:
     PortalCheckoutRequest:
       type: object
       description: >-
-        Only project_id is read today; delivery_method, delivery_address, payment_method and notes decode but influence nothing, and an unknown project_id is a 500 (the handler's status is fixed).
+        Places the cart as an order; project_id attaches a job and schedule_hold_id binds a held delivery window or pickup slot.
       properties:
         delivery_method:
           type: string
-          description: DELIVERY or PICKUP; not read today.
+          description: DELIVERY or PICKUP.
         delivery_address:
           type: string
           description: Not read today.
@@ -24825,6 +24882,10 @@ components:
           type: [string, "null"]
           format: uuid
           description: Optional; when set it must be the caller's own project.
+        schedule_hold_id:
+          type: [string, "null"]
+          format: uuid
+          description: Optional; when set it must be an unattached held slot owned by the caller.
     PortalCheckoutResponse:
       type: object
       required: [order_id, message]

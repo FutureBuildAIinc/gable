@@ -71,12 +71,12 @@ type orderDeliveryState struct {
 func (r *PostgresRepository) ReadOrderDeliveryState(ctx context.Context, orderID, customerID uuid.UUID) (*orderDeliveryState, error) {
 	var st orderDeliveryState
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT o.delivery_type, d.status, rt.status, rt.scheduled_date,
+		SELECT o.delivery_type, d.status, rt.status, COALESCE(d.scheduled_start, rt.scheduled_date),
 		       d.pod_signed_by, d.pod_proof_url, d.pod_timestamp, c.address
 		FROM orders o
 		JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN LATERAL (
-			SELECT d.status, d.route_id, d.pod_signed_by, d.pod_proof_url, d.pod_timestamp
+			SELECT d.status, d.route_id, d.scheduled_start, d.pod_signed_by, d.pod_proof_url, d.pod_timestamp
 			FROM deliveries d WHERE d.order_id = o.id
 			ORDER BY d.created_at DESC LIMIT 1
 		) d ON TRUE
@@ -202,6 +202,7 @@ func deliveryFlow(isPickup bool) []flowStep {
 		return []flowStep{
 			{"confirmed", "Confirmed"},
 			{"preparing", "Preparing"},
+			{"loaded", "Loaded"},
 			{"ready_for_pickup", "Ready for pickup"},
 			{"picked_up", "Picked up"},
 		}
@@ -235,9 +236,11 @@ func (s *Service) SetOrderSiteInstructions(ctx context.Context, orderID, custome
 	return s.repo.GetOrderByIDAndCustomer(ctx, orderID, customerID)
 }
 
-// SetOrderSiteInstructions writes the instructions on an unfulfilled order.
+// SetOrderSiteInstructions writes the instructions on an unfulfilled order and
+// mirrors them onto any open delivery stop so Dispatch sees the update.
 func (r *PostgresRepository) SetOrderSiteInstructions(ctx context.Context, orderID, customerID uuid.UUID, instructions string) error {
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+	ex := r.db.GetExecutor(ctx)
+	tag, err := ex.Exec(ctx, `
 		UPDATE orders SET site_delivery_instructions = $1, updated_at = NOW()
 		WHERE id = $2 AND customer_id = $3 AND status NOT IN ('FULFILLED', 'CANCELLED')
 	`, instructions, orderID, customerID)
@@ -248,12 +251,16 @@ func (r *PostgresRepository) SetOrderSiteInstructions(ctx context.Context, order
 		// Either not the caller's order (a 404 either way) or one the gate
 		// refuses; the order's own state decides which, read it back.
 		var status string
-		err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		err := ex.QueryRow(ctx,
 			`SELECT status FROM orders WHERE id = $1 AND customer_id = $2`, orderID, customerID).Scan(&status)
 		if err != nil {
 			return ErrOrderNotFound
 		}
 		return fmt.Errorf("%w: a %s order's site instructions are read only", ErrInvalidRequest, status)
 	}
+	_, _ = ex.Exec(ctx, `
+		UPDATE deliveries SET delivery_instructions = $1, updated_at = NOW()
+		WHERE order_id = $2 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
+	`, instructions, orderID)
 	return nil
 }

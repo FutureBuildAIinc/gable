@@ -4244,7 +4244,7 @@ export interface paths {
         get?: never;
         /**
          * Attach or detach an order's project
-         * @description A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
+         * @description Behind the order capability. A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
          */
         put: operations["portalSetOrderProject"];
         post?: never;
@@ -4493,7 +4493,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a priced quote
-         * @description Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
          */
         post: operations["portalAcceptQuote"];
         delete?: never;
@@ -4513,7 +4513,7 @@ export interface paths {
         put?: never;
         /**
          * Decline a priced quote
-         * @description Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
          */
         post: operations["portalDeclineQuote"];
         delete?: never;
@@ -4572,13 +4572,13 @@ export interface paths {
         get?: never;
         /**
          * Change a cart item's quantity
-         * @description A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
+         * @description Behind the order capability. A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
          */
         put: operations["portalUpdateCartItem"];
         post?: never;
         /**
          * Remove an item from the cart
-         * @description Every repository failure is a 500 today; the cart is returned after the removal.
+         * @description Behind the order capability. Every repository failure is a 500 today; the cart is returned after the removal.
          */
         delete: operations["portalRemoveCartItem"];
         options?: never;
@@ -4597,7 +4597,7 @@ export interface paths {
         put?: never;
         /**
          * Place an order from the cart
-         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
+         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). When schedule_hold_id is set, it binds the held slot to the new order and stamps the order's scheduled delivery date.
          */
         post: operations["portalCheckout"];
         delete?: never;
@@ -11934,6 +11934,9 @@ export interface components {
              * @description The change-feed cursor; moves on every ERP status write.
              */
             updated_at: string;
+            /** @description The contractor's site instruction on this order; omitted when empty. */
+            site_delivery_instructions?: string | null;
+            schedule_hold?: components["schemas"]["PortalScheduleHold"];
         };
         PortalOrderLine: {
             /** Format: uuid */
@@ -12008,6 +12011,16 @@ export interface components {
              * @description The delivery change feed's cursor; moves on every stop or route write.
              */
             updated_at: string;
+            /**
+             * Format: date-time
+             * @description The UTC start of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_start?: string | null;
+            /**
+             * Format: date-time
+             * @description The UTC end of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_end?: string | null;
         };
         PortalReorderRequest: {
             /** Format: uuid */
@@ -12160,9 +12173,9 @@ export interface components {
         PortalUpdateCartItemRequest: {
             quantity: number;
         };
-        /** @description Only project_id is read today; delivery_method, delivery_address, payment_method and notes decode but influence nothing, and an unknown project_id is a 500 (the handler's status is fixed). */
+        /** @description Places the cart as an order; project_id attaches a job and schedule_hold_id binds a held delivery window or pickup slot. */
         PortalCheckoutRequest: {
-            /** @description DELIVERY or PICKUP; not read today. */
+            /** @description DELIVERY or PICKUP. */
             delivery_method?: string;
             /** @description Not read today. */
             delivery_address?: string;
@@ -12175,6 +12188,11 @@ export interface components {
              * @description Optional; when set it must be the caller's own project.
              */
             project_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Optional; when set it must be an unattached held slot owned by the caller.
+             */
+            schedule_hold_id?: string | null;
         };
         PortalCheckoutResponse: {
             /** Format: uuid */
@@ -24446,6 +24464,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -24541,6 +24560,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -24576,6 +24596,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -24620,6 +24641,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -24652,7 +24674,16 @@ export interface operations {
                     "application/json": components["schemas"]["PortalInvoice"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -24678,6 +24709,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -24706,6 +24738,14 @@ export interface operations {
                     "application/json": components["schemas"]["PortalDelivery"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -24797,6 +24837,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
@@ -24940,6 +24981,14 @@ export interface operations {
                     "application/json": components["schemas"]["PortalQuote"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -24971,6 +25020,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -25027,6 +25077,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -25067,6 +25118,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -25131,6 +25183,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25166,6 +25219,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25194,6 +25248,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -25224,6 +25279,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25424,6 +25481,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PortalToday"];
                 };
+            };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];

@@ -244,9 +244,10 @@ func (r *PostgresRepository) CreateScheduleHold(ctx context.Context, customerID 
 }
 
 // ChangeScheduleHold moves an existing held hold to a new window and date.
-// The hold keeps its row and its order link; the retarget and the release of
-// the old place are one transaction, so a refused change leaves the original
-// hold exactly as it was.
+// The hold keeps its row and its order link (or binds a checkout hold to an
+// order when req.OrderID is supplied); the retarget and the release of the
+// old place are one transaction, so a refused change leaves the original hold
+// exactly as it was.
 func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, holdID uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error) {
 	var out *ScheduleHoldDTO
 	err := r.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -263,6 +264,9 @@ func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID 
 		orderID := uuid.Nil
 		if orderLink != nil {
 			orderID = *orderLink
+		}
+		if req.OrderID != nil {
+			orderID = *req.OrderID
 		}
 		// Free the old place before taking the new one (same transaction, so
 		// a refused change rolls the release back).
@@ -285,17 +289,28 @@ func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID 
 	return out, nil
 }
 
-// ReleaseScheduleHold gives a held hold back.
+// ReleaseScheduleHold gives a held hold back and clears the window from its
+// order and any open delivery stop.
 func (r *PostgresRepository) ReleaseScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) error {
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+	ex := r.db.GetExecutor(ctx)
+	var orderID *uuid.UUID
+	err := ex.QueryRow(ctx, `
 		UPDATE portal_schedule_holds SET status = 'released', updated_at = NOW()
 		WHERE id = $1 AND customer_id = $2 AND status = 'held'
-	`, holdID, customerID)
+		RETURNING order_id
+	`, holdID, customerID).Scan(&orderID)
 	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
 		return ErrHoldNotFound
+	}
+	if orderID != nil {
+		_, _ = ex.Exec(ctx, `
+			UPDATE orders SET scheduled_delivery_date = NULL, updated_at = NOW()
+			WHERE id = $1 AND customer_id = $2
+		`, *orderID, customerID)
+		_, _ = ex.Exec(ctx, `
+			UPDATE deliveries SET scheduled_start = NULL, scheduled_end = NULL, updated_at = NOW()
+			WHERE order_id = $1 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
+		`, *orderID)
 	}
 	return nil
 }
@@ -319,6 +334,35 @@ func (r *PostgresRepository) GetScheduleHold(ctx context.Context, customerID, ho
 	if err != nil {
 		return nil, ErrHoldNotFound
 	}
+	h.Date = date
+	day, _ := parseLocalDay(date)
+	w := windowRow{yardTZ: tz, startMinutes: int(startMin), endMinutes: int(endMin)}
+	h.StartUTC, h.EndUTC, _, _, _ = windowBoundsInZone(w, day)
+	return &h, nil
+}
+
+// activeHoldForOrder reads the active held window hold for an order, or nil
+// when the order carries none.
+func (r *PostgresRepository) activeHoldForOrder(ctx context.Context, customerID, orderID uuid.UUID) (*ScheduleHoldDTO, error) {
+	var h ScheduleHoldDTO
+	var startMin, endMin float64
+	var date, tz string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT h.id, h.window_id, w.yard_id, w.kind, h.hold_date::text,
+		       EXTRACT(EPOCH FROM w.start_time) / 60, EXTRACT(EPOCH FROM w.end_time) / 60,
+		       h.order_id, h.status, h.created_at, h.updated_at,
+		       COALESCE(l.timezone, 'UTC')
+		FROM portal_schedule_holds h
+		JOIN yard_schedule_windows w ON w.id = h.window_id
+		JOIN locations l ON l.id = w.yard_id
+		WHERE h.order_id = $1 AND h.customer_id = $2 AND h.status = 'held'
+		ORDER BY h.updated_at DESC LIMIT 1
+	`, orderID, customerID).Scan(&h.ID, &h.WindowID, &h.YardID, &h.Kind, &date,
+		&startMin, &endMin, &h.OrderID, &h.Status, &h.CreatedAt, &h.UpdatedAt, &tz)
+	if err != nil {
+		return nil, nil
+	}
+	h.Date = date
 	day, _ := parseLocalDay(date)
 	w := windowRow{yardTZ: tz, startMinutes: int(startMin), endMinutes: int(endMin)}
 	h.StartUTC, h.EndUTC, _, _, _ = windowBoundsInZone(w, day)
@@ -417,6 +461,21 @@ func (r *PostgresRepository) holdLocked(ctx context.Context, customerID uuid.UUI
 				status = 'held', updated_at = NOW()
 		`, id, w.id, date, customerID, nilIfNil(orderID), userID); err != nil {
 			return nil, fmt.Errorf("failed to change hold: %w", err)
+		}
+	}
+
+	if orderID != uuid.Nil {
+		if _, err := ex.Exec(ctx, `
+			UPDATE orders SET scheduled_delivery_date = $1::date, updated_at = NOW()
+			WHERE id = $2 AND customer_id = $3
+		`, date, orderID, customerID); err != nil {
+			return nil, fmt.Errorf("failed to stamp order schedule date: %w", err)
+		}
+		if _, err := ex.Exec(ctx, `
+			UPDATE deliveries SET scheduled_start = $1, scheduled_end = $2, updated_at = NOW()
+			WHERE order_id = $3 AND status NOT IN ('DELIVERED', 'PARTIAL', 'FAILED')
+		`, start, end, orderID); err != nil {
+			return nil, fmt.Errorf("failed to stamp delivery schedule window: %w", err)
 		}
 	}
 
