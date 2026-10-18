@@ -310,8 +310,38 @@ func TestStatementsByBranchAndConsolidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bsAll.RetainedEarnings != bsA.RetainedEarnings+bsB.RetainedEarnings {
-		t.Errorf("consolidated retained earnings %d, want the sum of the branches %d", bsAll.RetainedEarnings, bsA.RetainedEarnings+bsB.RetainedEarnings)
+	// Retained earnings are inception to date, so the consolidated figure is
+	// the sum over every branch that holds a line (a shared database holds
+	// other tests' branches too), a and b among them.
+	rows, err := db.Pool.Query(ctx, `SELECT DISTINCT branch_id FROM gl_journal_lines`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var branches []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		branches = append(branches, id)
+	}
+	rows.Close()
+	var sumRetained, sumAssets int64
+	for _, id := range branches {
+		id := id
+		bs, err := svc.GetBalanceSheet(ctx, "2031-12-31", "USD", &id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sumRetained += bs.RetainedEarnings
+		sumAssets += bs.TotalAssets
+	}
+	if bsAll.RetainedEarnings != sumRetained || bsAll.TotalAssets != sumAssets {
+		t.Errorf("consolidated retained earnings %d and assets %d, want the sum of the branches %d and %d",
+			bsAll.RetainedEarnings, bsAll.TotalAssets, sumRetained, sumAssets)
+	}
+	if bsA.RetainedEarnings == bsB.RetainedEarnings {
+		t.Errorf("the two branches' retained earnings are both %d, want them to differ", bsA.RetainedEarnings)
 	}
 
 	tb, err := svc.GetTrialBalanceFor(ctx, time.Date(2031, 12, 31, 0, 0, 0, 0, time.UTC), "USD", &b)
