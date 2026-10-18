@@ -15,6 +15,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +36,18 @@ func seedBranchZone() string {
 		return z
 	}
 	return "America/Vancouver"
+}
+
+// sortedNames returns a map's keys in sorted order. The seed draws from one
+// seeded random stream; a loop that draws inside a map range gives each run's
+// draws to a different entry, so a loop that draws walks the names this way.
+func sortedNames(m map[string]uuid.UUID) []string {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // recentDate returns a timestamp drawn from the last `daysBack` days.
@@ -826,7 +839,8 @@ func Run() {
 	orderIDs := make([]uuid.UUID, 0)
 	orderCustMap := make(map[uuid.UUID]uuid.UUID)
 
-	for custName, custID := range customerIDs {
+	for _, custName := range sortedNames(customerIDs) {
+		custID := customerIDs[custName]
 		numOrders := 3 + rand.Intn(6)
 		branchID := custToBranch[custID]
 		if branchID == uuid.Nil {
