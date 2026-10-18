@@ -52,6 +52,7 @@ GET	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Get
 PUT	/api/portal/v1/customer-quotes/{id}	internal/customerquote	h.Update
 GET	/api/portal/v1/customer-quotes/{id}/approvals	internal/customerquote	h.Approvals
 POST	/api/portal/v1/customer-quotes/{id}/confirm	internal/customerquote	h.Confirm
+GET	/api/portal/v1/customer-quotes/{id}/confirm-preview	internal/customerquote	h.ConfirmPreview
 POST	/api/portal/v1/customer-quotes/{id}/link/revoke	internal/customerquote	h.Revoke
 POST	/api/portal/v1/customer-quotes/{id}/link/rotate	internal/customerquote	h.Rotate
 GET	/api/portal/v1/customer-quotes/{id}/pdf	internal/customerquote	h.PDF
