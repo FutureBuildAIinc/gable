@@ -113,9 +113,13 @@ func (s *Service) ListCatalog(ctx context.Context, customerID uuid.UUID, filter 
 			dto.PriceSource = "retail"
 		}
 
-		// Inventory availability
+		// Inventory availability and per-yard breakdown
 		dto.Available = s.getAvailableQty(ctx, row.ID)
 		dto.InStock = dto.Available > 0
+		if yards, lt := s.getYardAvailability(ctx, row.ID, row.LeadTimeDays); len(yards) > 0 {
+			dto.Availability = yards
+			dto.LeadTimeDays = lt
+		}
 
 		products = append(products, dto)
 	}
@@ -158,9 +162,13 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 			"product_id", row.ID, "customer_id", customerID, "error", bErr)
 	}
 
-	// Inventory
+	// Inventory and per-yard availability
 	dto.Available = s.getAvailableQty(ctx, row.ID)
 	dto.InStock = dto.Available > 0
+	if yards, lt := s.getYardAvailability(ctx, row.ID, row.LeadTimeDays); len(yards) > 0 {
+		dto.Availability = yards
+		dto.LeadTimeDays = lt
+	}
 
 	return dto, nil
 }

@@ -198,19 +198,25 @@ func TestMigration130_UpDownUpWithRoleMapping(t *testing.T) {
 	if got := scalar130(t, conn, `SELECT count(*)::text FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'site_delivery_instructions'`); got != "1" {
 		t.Errorf("orders.site_delivery_instructions columns = %s, want 1", got)
 	}
+	if got := scalar130(t, conn, `SELECT count(*)::text FROM information_schema.tables WHERE table_name IN ('procurement_projects', 'procurement_project_lines', 'portal_payment_methods', 'portal_payment_intents')`); got != "4" {
+		t.Errorf("phase 2 portal tables = %s, want 4", got)
+	}
 
 	// DOWN: the inverse mapping and the gone tables.
 	apply130(t, conn, down130)
 	if got := scalar130(t, conn, `SELECT role FROM customer_users WHERE email = $1`, "m130-Admin@example.test"); got != "Admin" {
 		t.Errorf("down mapped owner to %s, want Admin", got)
 	}
-	if got := scalar130(t, conn, `SELECT count(*)::text FROM information_schema.tables WHERE table_name IN ('yard_schedule_windows', 'portal_schedule_holds')`); got != "0" {
-		t.Errorf("scheduling tables still present after down: %s", got)
+	if got := scalar130(t, conn, `SELECT count(*)::text FROM information_schema.tables WHERE table_name IN ('yard_schedule_windows', 'portal_schedule_holds', 'procurement_projects', 'procurement_project_lines', 'portal_payment_methods', 'portal_payment_intents')`); got != "0" {
+		t.Errorf("portal tables still present after down: %s", got)
 	}
 
 	// UP again: the mapping is idempotent on the already mapped rows.
 	apply130(t, conn, up130)
 	if got := scalar130(t, conn, `SELECT role FROM customer_users WHERE email = $1`, "m130-Admin@example.test"); got != "owner" {
 		t.Errorf("second up left the role %s, want owner", got)
+	}
+	if got := scalar130(t, conn, `SELECT count(*)::text FROM information_schema.tables WHERE table_name IN ('procurement_projects', 'procurement_project_lines', 'portal_payment_methods', 'portal_payment_intents')`); got != "4" {
+		t.Errorf("phase 2 portal tables after second up = %s, want 4", got)
 	}
 }

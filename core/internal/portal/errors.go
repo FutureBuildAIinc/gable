@@ -68,6 +68,20 @@ var (
 	ErrHoldNotFound   = errors.New("schedule hold not found")
 	ErrSlotFull       = errors.New("this window is fully booked for that day")
 	ErrCutoffPassed   = errors.New("the booking cutoff for this window has passed")
+
+	// Phase 2 sentinels (Parts 2, 3, 5, and 6).
+	ErrQuoteNotConvertible         = errors.New("quote cannot be converted to an order in its current state")
+	ErrSyntheticIntakeNotConfirmed = errors.New("synthetic AI intake requires explicit confirmation before creating a quote")
+	ErrProcurementNotFound         = errors.New("material list not found")
+	ErrProcurementLocked           = errors.New("material list can no longer be edited in its current state")
+	ErrInvoiceNotFound             = errors.New("invoice not found")
+	ErrStatementNotFound           = errors.New("statement not found")
+	ErrPaymentMethodNotFound       = errors.New("payment method not found")
+	ErrRawCardOrBankRefused        = errors.New("raw card or bank account numbers are not accepted; submit a gateway token")
+	ErrInvoiceNotPayable           = errors.New("invoice is not open for payment")
+	ErrPaymentInFlight             = errors.New("a payment for these invoices is already in progress")
+	ErrPaymentDeclined             = errors.New("payment was declined by the gateway")
+	ErrPaymentGatewayUnavailable   = errors.New("payment gateway outcome unknown; manual reconciliation required before retry")
 )
 
 // refusalReasons maps a sentinel onto a short, customer-safe explanation.
@@ -87,6 +101,16 @@ var refusalReasons = map[error]struct {
 }{
 	ErrQuoteNotDecidable: {"QUOTE_NOT_PRICED",
 		"This quote has not been priced and sent by the dealer yet, or it has already been closed."},
+	ErrQuoteNotConvertible: {"QUOTE_NOT_CONVERTIBLE",
+		"Only a priced or accepted quote that has not expired can be converted into an order."},
+	ErrSyntheticIntakeNotConfirmed: {"SYNTHETIC_INTAKE_CONFIRM_REQUIRED",
+		"This photo intake used demo extraction and must be reviewed and confirmed before submitting a quote request."},
+	ErrProcurementLocked: {"MATERIAL_LIST_LOCKED",
+		"This material list has already been submitted for quoting or ordering and can no longer be edited."},
+	ErrInvoiceNotPayable: {"INVOICE_NOT_OPEN",
+		"One or more selected invoices are already paid or void and cannot take a payment."},
+	ErrPaymentInFlight: {"PAYMENT_IN_FLIGHT",
+		"A payment for these invoices is already in flight or awaiting reconciliation; do not submit a duplicate charge."},
 	ErrRescheduleRefused: {"DELIVERY_COMMITTED",
 		"This delivery can no longer be rescheduled from the portal — the load is already on a truck or the stop is complete. Call the dealer."},
 	ErrCancelRefused: {"ORDER_IN_MOTION",
@@ -159,9 +183,18 @@ func statusForPortalError(err error, fallback int) int {
 		errors.Is(err, ErrDeliveryNotFound),
 		errors.Is(err, ErrYardNotFound),
 		errors.Is(err, ErrWindowNotFound),
-		errors.Is(err, ErrHoldNotFound):
+		errors.Is(err, ErrHoldNotFound),
+		errors.Is(err, ErrProcurementNotFound),
+		errors.Is(err, ErrInvoiceNotFound),
+		errors.Is(err, ErrStatementNotFound),
+		errors.Is(err, ErrPaymentMethodNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, ErrQuoteNotDecidable),
+		errors.Is(err, ErrQuoteNotConvertible),
+		errors.Is(err, ErrSyntheticIntakeNotConfirmed),
+		errors.Is(err, ErrProcurementLocked),
+		errors.Is(err, ErrInvoiceNotPayable),
+		errors.Is(err, ErrPaymentInFlight),
 		errors.Is(err, ErrRescheduleRefused),
 		errors.Is(err, ErrCancelRefused),
 		// The ERP's own cancellation refusals. "Already cancelled" and
@@ -173,8 +206,13 @@ func statusForPortalError(err error, fallback int) int {
 		errors.Is(err, ErrSlotFull),
 		errors.Is(err, ErrCutoffPassed):
 		return http.StatusConflict
-	case errors.Is(err, ErrInvalidRequest):
+	case errors.Is(err, ErrInvalidRequest),
+		errors.Is(err, ErrRawCardOrBankRefused):
 		return http.StatusBadRequest
+	case errors.Is(err, ErrPaymentDeclined):
+		return http.StatusPaymentRequired
+	case errors.Is(err, ErrPaymentGatewayUnavailable):
+		return http.StatusBadGateway
 	default:
 		return fallback
 	}

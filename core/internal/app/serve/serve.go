@@ -964,7 +964,11 @@ func Run() {
 	// Reuse the module-level quoteSvc so a portal accept/decline runs the same
 	// state machine — and the same auto-PO and price-protection side effects —
 	// as a counter salesperson closing the quote from the ERP.
-	portalSvc.WithQuoteService(quoteSvc)
+	portalSvc.WithQuoteService(quoteSvc).
+		WithParsingService(parsingSvc).
+		WithAccountService(accountSvc).
+		WithInvoiceService(invoiceSvc).
+		WithDocumentService(docSvc)
 	portalHandler := portal.NewHandler(portalSvc)
 
 	// Portal auth middleware

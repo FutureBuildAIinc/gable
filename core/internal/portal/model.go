@@ -193,15 +193,29 @@ type PortalDeliveryDTO struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ReorderRequest tells which historical order to duplicate.
+// ReorderRequest tells which historical order to duplicate, and optionally tags
+// the new draft order with a customer project.
 type ReorderRequest struct {
-	OrderID uuid.UUID `json:"order_id"`
+	OrderID   uuid.UUID  `json:"order_id"`
+	ProjectID *uuid.UUID `json:"project_id,omitempty"`
 }
 
 // ReorderResponse confirms the new draft order.
 type ReorderResponse struct {
 	OrderID uuid.UUID `json:"order_id"`
 	Message string    `json:"message"`
+}
+
+// YardAvailabilityDTO is the contractor-safe stock and lead time projection for
+// a single yard (branch). It never carries cost, margin, or reservation details.
+type YardAvailabilityDTO struct {
+	YardID       uuid.UUID `json:"yard_id"`
+	YardCode     string    `json:"yard_code"`
+	YardName     string    `json:"yard_name"`
+	OnHand       float64   `json:"on_hand"`
+	Available    float64   `json:"available"`
+	InStock      bool      `json:"in_stock"`
+	LeadTimeDays *int      `json:"lead_time_days"`
 }
 
 // --- Catalog DTOs ---
@@ -269,6 +283,10 @@ type CatalogProductDTO struct {
 	// rather than compute against a guess, because a crew gets scheduled
 	// around that number.
 	LeadTimeDays *int `json:"lead_time_days"`
+
+	// Availability is the per-yard stock and lead time breakdown across active
+	// dealer yards.
+	Availability []YardAvailabilityDTO `json:"availability,omitempty"`
 
 	// Category tree coordinates (migration 049's product_categories). Category
 	// above stays the flat display string it has always been; these are the

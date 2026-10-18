@@ -8,6 +8,10 @@
 -- fall back to Buyer (a transacting user without team reach): the legacy
 -- vocabulary cannot express them, and Buyer is the least surprising home.
 
+DROP TABLE IF EXISTS portal_payment_intents;
+DROP TABLE IF EXISTS portal_payment_methods;
+DROP TABLE IF EXISTS procurement_project_lines;
+DROP TABLE IF EXISTS procurement_projects;
 DROP TABLE IF EXISTS portal_schedule_holds;
 DROP TABLE IF EXISTS yard_schedule_windows;
 

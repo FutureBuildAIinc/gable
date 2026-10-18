@@ -127,6 +127,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 	mux.Handle("POST /api/portal/v1/invites", authMw(http.HandlerFunc(h.HandleInviteUser)))
 	mux.Handle("PUT /api/portal/v1/users/{id}/role", authMw(http.HandlerFunc(h.HandleUpdateUserRole)))
 	mux.Handle("PUT /api/portal/v1/users/{id}/status", authMw(http.HandlerFunc(h.HandleUpdateUserStatus)))
+
+	// M35 Phase 2 (Parts 2, 3, 5, and 6)
+	h.registerPhase2Routes(mux, authMw)
 }
 
 // HandleLogin authenticates a contractor and returns JWT + config.
