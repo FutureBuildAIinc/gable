@@ -120,10 +120,14 @@ type cqStack struct {
 	nail   uuid.UUID
 }
 
-func newCQStack(t *testing.T) *cqStack {
+func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 	t.Helper()
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
+	if len(multiBranch) > 0 && multiBranch[0] {
+		setSetting(t, db, "multi_branch_enabled", "true")
+		setSetting(t, db, "default_branch_required", "false")
+	}
 	ctx := context.Background()
 	s := &cqStack{t: t, db: db, logs: &cqSyncBuf{}, mail: &cqMail{}}
 	must := func(sql string, args ...any) {
@@ -142,6 +146,7 @@ func newCQStack(t *testing.T) *cqStack {
 	}{{s.custA, "Wire Contractor A"}, {s.custB, "Wire Contractor B"}} {
 		must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`, c.id, c.name, "CQW-"+c.id.String()[:8], s.branch)
 	}
+	must(`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $3), ($2, $3)`, s.custA, s.custB, s.branch)
 	must(`INSERT INTO projects (id, customer_id, name, status) VALUES ($1, $2, 'Maple Street Deck', 'Active'), ($3, $4, 'Other Job', 'Active')`, s.projA, s.custA, s.projB, s.custB)
 	s.catLum = uuid.New()
 	must(`INSERT INTO product_categories (id, name, slug, path) VALUES ($1, 'cqw lumber', $2::text, replace($2::text, '-', '_')::ltree)`, s.catLum, "cqw_"+s.catLum.String()[:8])
@@ -174,6 +179,7 @@ func newCQStack(t *testing.T) *cqStack {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = ANY($1)`, cs)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM projects WHERE customer_id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = ANY($1)`, cs)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = ANY($1)`, []uuid.UUID{s.stud, s.ply, s.nail})
@@ -1187,5 +1193,64 @@ func TestWire_TheDesksEmailReachesNoContractorCustomerOrPdfResponse(t *testing.T
 	det := s.do("GET", "/api/v1/pro-projects/"+id, asDesk, nil)
 	if bytes.Contains(det.body, []byte(deskEmail)) || !bytes.Contains(det.body, []byte("Dana Deskwell")) {
 		t.Errorf("the desk's view: %s", truncate(det.body))
+	}
+}
+
+func TestWire_TheDealersPipelineIsHeldToTheCallersBranches(t *testing.T) {
+	s := newCQStack(t, true)
+	ctx := context.Background()
+	other := uuid.New()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'cq other branch')`, []any{other, "cqo-" + other.String()[:8]}},
+		{`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('u-cq-other', $1, TRUE, 'test'), ('u-cq-home', $2, TRUE, 'test')`, []any{other, s.branch}},
+	} {
+		if _, err := s.db.Pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub IN ('u-cq-other', 'u-cq-home')`)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, other)
+	})
+	id, token := s.createAndSend(s.quoteBody(false, false))
+	var lines []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}})
+	if r := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil); r.status != 200 {
+		t.Fatalf("confirm: %d %s", r.status, r.body)
+	}
+
+	foreign := map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "u-cq-other"}
+	home := map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "u-cq-home"}
+	list := s.do("GET", "/api/v1/pro-projects", foreign, nil)
+	if list.status != 200 || bytes.Contains(list.body, []byte(id)) || bytes.Contains(list.body, []byte("pat@homeowner.example")) {
+		t.Errorf("another branch's list: %d %s", list.status, truncate(list.body))
+	}
+	if r := s.do("GET", "/api/v1/pro-projects/"+id, foreign, nil); r.status != 404 {
+		t.Errorf("another branch's project: %d %s", r.status, truncate(r.body))
+	}
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", foreign, nil); r.status != 404 {
+		t.Errorf("another branch's acceptance: %d %s", r.status, truncate(r.body))
+	}
+	var accepted *string
+	_ = s.db.Pool.QueryRow(ctx, `SELECT dealer_accepted_at::text FROM pro_customer_quotes WHERE id = $1`, id).Scan(&accepted)
+	if accepted != nil {
+		t.Error("another branch's user recorded the dealer's acceptance")
+	}
+	// The branch that holds the contractor sees it.
+	if r := s.do("GET", "/api/v1/pro-projects", home, nil); r.status != 200 || !bytes.Contains(r.body, []byte(id)) {
+		t.Errorf("the home branch's list: %d %s", r.status, truncate(r.body))
+	}
+	if r := s.do("GET", "/api/v1/pro-projects/"+id, home, nil); r.status != 200 {
+		t.Errorf("the home branch's project: %d", r.status)
+	}
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", home, nil); r.status != 200 {
+		t.Errorf("the home branch's acceptance: %d %s", r.status, r.body)
 	}
 }

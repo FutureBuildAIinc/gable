@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -271,15 +273,45 @@ func scanQuote(row pgx.Row) (*Quote, error) {
 	return &q, nil
 }
 
+// Reach is the caller's branch reach as the branch middleware settled it: the
+// context branch, or for a user with no header the sub whose grants apply,
+// or neither for an administrator without a header (every branch).
+type Reach struct {
+	Branch *uuid.UUID
+	Grants *string
+}
+
+// ReachOf reads the reach the request's context carries.
+func ReachOf(ctx context.Context) Reach {
+	return Reach{Branch: middleware.BranchIDForQuery(ctx), Grants: middleware.GrantsSubForQuery(ctx)}
+}
+
 // GetQuote reads one quote with its children. customerID, when not nil,
 // scopes the read to the contractor account, so another account's quote is
 // not there at all. forUpdate takes the row lock.
 func (s *Store) GetQuote(ctx context.Context, id uuid.UUID, customerID *uuid.UUID, forUpdate bool) (*Quote, error) {
+	return s.getQuote(ctx, id, customerID, nil, forUpdate)
+}
+
+// GetQuoteInReach reads a quote the way the dealer's desk may: only when one
+// of its contractor's branches is inside the caller's reach, the predicate the
+// customer module holds its reads to. A quote outside it is not there.
+func (s *Store) GetQuoteInReach(ctx context.Context, id uuid.UUID, forUpdate bool) (*Quote, error) {
+	r := ReachOf(ctx)
+	return s.getQuote(ctx, id, nil, &r, forUpdate)
+}
+
+func (s *Store) getQuote(ctx context.Context, id uuid.UUID, customerID *uuid.UUID, reach *Reach, forUpdate bool) (*Quote, error) {
 	sql := `SELECT ` + quoteCols + ` FROM pro_customer_quotes WHERE id = $1 AND ($2::uuid IS NULL OR customer_id = $2)`
+	args := []any{id, customerID}
+	if reach != nil {
+		sql += ` AND EXISTS (SELECT 1 FROM customers c WHERE c.id = pro_customer_quotes.customer_id AND ` + customer.Wall("c", 3, 4) + `)`
+		args = append(args, reach.Branch, reach.Grants)
+	}
 	if forUpdate {
 		sql += ` FOR UPDATE`
 	}
-	q, err := scanQuote(s.exec(ctx).QueryRow(ctx, sql, id, customerID))
+	q, err := scanQuote(s.exec(ctx).QueryRow(ctx, sql, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -448,16 +480,18 @@ func (s *Store) ListQuotes(ctx context.Context, customerID uuid.UUID, f ListFilt
 	return out, nil
 }
 
-// ListSent lists the quotes a dealer may see (sent or later) across all
-// contractor accounts, newest first.
+// ListSent lists the quotes a dealer may see (sent or later) across the
+// contractor accounts inside the caller's branch reach, newest first.
 func (s *Store) ListSent(ctx context.Context, limit int, afterTime *time.Time, afterID uuid.UUID) ([]*Quote, error) {
 	var aid *uuid.UUID
 	if afterTime != nil {
 		aid = &afterID
 	}
+	reach := ReachOf(ctx)
 	rows, err := s.exec(ctx).Query(ctx, `SELECT `+quoteCols+` FROM pro_customer_quotes
 		WHERE status <> 'draft' AND ($1::timestamptz IS NULL OR (updated_at, id) < ($1, $2))
-		ORDER BY updated_at DESC, id DESC LIMIT $3`, afterTime, aid, limit+1)
+		  AND EXISTS (SELECT 1 FROM customers c WHERE c.id = pro_customer_quotes.customer_id AND `+customer.Wall("c", 4, 5)+`)
+		ORDER BY updated_at DESC, id DESC LIMIT $3`, afterTime, aid, limit+1, reach.Branch, reach.Grants)
 	if err != nil {
 		return nil, fmt.Errorf("list sent customer quotes: %w", err)
 	}

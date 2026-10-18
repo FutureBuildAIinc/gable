@@ -53,7 +53,7 @@ func (s *Service) DealerList(ctx context.Context, limit int, after *time.Time, a
 
 // DealerGet reads one shared project with its approval record.
 func (s *Service) DealerGet(ctx context.Context, id uuid.UUID) (*DealerProjectDetail, error) {
-	q, err := s.store.GetQuote(ctx, id, nil, false)
+	q, err := s.store.GetQuoteInReach(ctx, id, false)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (s *Service) DealerAccept(ctx context.Context, who DealerActor, id uuid.UUI
 	}
 	who.Name, who.Email = name, ""
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
-		q, err := s.store.GetQuote(ctx, id, nil, true)
+		q, err := s.store.GetQuoteInReach(ctx, id, true)
 		if err != nil {
 			return err
 		}
