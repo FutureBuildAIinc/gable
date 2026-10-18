@@ -5,7 +5,10 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import '../../components/ui/gable-date-field.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
+import '../../components/ui/gable-select.ts';
 import { posService } from '../../services/POSService.ts';
+import { listBankAccounts } from '../../services/BankReconService.ts';
+import type { BankAccount } from '../../types/bankrecon.ts';
 import { ApiError } from '../../services/apiError.ts';
 import { branchContext } from '../../services/BranchContext.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
@@ -35,6 +38,9 @@ export class GableBranchDay extends LitElement {
     /** The server refuses the end of day to this user: the card does not show. */
     @state() private forbidden = false;
     @state() private slip = '';
+    /** The bank accounts the deposit may go to, and the one chosen. */
+    @state() private banks: BankAccount[] = [];
+    @state() private bank = '';
     @state() private busy = false;
     @state() private candidates: DepositCandidate[] | null = null;
     @state() private chosen = '';
@@ -73,6 +79,18 @@ export class GableBranchDay extends LitElement {
             if (seq !== this.seq) return;
             this.day = day;
             this.date = day.business_date;
+            if (this.banks.length === 0) {
+                // the deposit goes to a bank account; a list that cannot be read leaves the choice empty
+                try {
+                    const banks = await listBankAccounts();
+                    if (seq === this.seq) {
+                        this.banks = banks.filter((b) => b.is_active !== false);
+                        if (!this.bank && this.banks.length === 1) this.bank = this.banks[0].id;
+                    }
+                } catch {
+                    this.banks = [];
+                }
+            }
         } catch (err: unknown) {
             if (seq !== this.seq) return;
             this.day = null;
@@ -89,7 +107,7 @@ export class GableBranchDay extends LitElement {
         try {
             this.busy = true;
             this.failure = '';
-            this.day = await posService.closeBranchDay(day.branch_id, day.business_date, this.slip.trim());
+            this.day = await posService.closeBranchDay(day.branch_id, day.business_date, this.slip.trim(), this.bank || undefined);
             this.slip = '';
             ToastService.show(`${formatDay(day.business_date)} closed for the branch`, 'success');
         } catch (err: unknown) {
@@ -181,6 +199,8 @@ export class GableBranchDay extends LitElement {
                 </div>`;
         }
         const blocked = day.open_session_count > 0 || day.pending_signoff_count > 0;
+        // cash and checks to deposit need a bank account to go to
+        const needsBank = day.totals.cash_to_deposit_cents + day.totals.checks_to_deposit_cents > 0;
         return html`
             <div class="mt-6 pt-6 border-t border-zinc-800 space-y-4">
                 ${blocked ? html`
@@ -194,7 +214,14 @@ export class GableBranchDay extends LitElement {
                             @input=${(e: Event) => { this.slip = (e.target as HTMLInputElement).value; }}
                             class="px-3 py-2 bg-black/20 border border-zinc-700 rounded text-white font-mono" />
                     </label>
-                    <button data-testid="day-close" @click=${() => this.closeDay()} ?disabled=${this.busy || blocked || this.slip.trim() === ''}
+                    ${needsBank ? html`
+                        <label class="block min-w-[14rem]">
+                            <span class="block text-zinc-400 text-sm uppercase font-bold mb-1">Deposit to</span>
+                            <gable-select data-testid="day-bank" label="Deposit to" placeholder="Choose the bank account"
+                                .value=${this.bank} .options=${this.banks.map((b) => ({ value: b.id, label: b.name }))}
+                                @change=${(e: Event) => { this.bank = (e.target as HTMLSelectElement).value; }}></gable-select>
+                        </label>` : nothing}
+                    <button data-testid="day-close" @click=${() => this.closeDay()} ?disabled=${this.busy || blocked || this.slip.trim() === '' || (needsBank && this.bank === '')}
                         class="px-4 py-2 rounded bg-emerald-500 text-black text-sm font-bold disabled:opacity-40">Close the day</button>
                 </div>
             </div>`;

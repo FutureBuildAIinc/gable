@@ -599,9 +599,10 @@ type dayCloseRequest struct {
 	BranchID       *string `json:"branch_id"`
 	Date           *string `json:"date"`
 	DepositSlipRef *string `json:"deposit_slip_ref"`
+	BankAccountID  *string `json:"bank_account_id"`
 }
 
-func (r *dayCloseRequest) parse() (branch uuid.UUID, date, slip string, err error) {
+func (r *dayCloseRequest) parse() (branch uuid.UUID, date, slip string, bank *uuid.UUID, err error) {
 	v := &httpx.Validator{}
 	branch, _ = v.UUID("branch_id", r.BranchID, true)
 	if r.Date != nil {
@@ -615,7 +616,12 @@ func (r *dayCloseRequest) parse() (branch uuid.UUID, date, slip string, err erro
 	}
 	v.Check(slip != "", "deposit_slip_ref", "is required: the reference printed on the deposit slip")
 	v.Check(len(slip) <= 64, "deposit_slip_ref", "must be at most 64 characters")
-	return branch, date, slip, v.Err()
+	if r.BankAccountID != nil {
+		if id, ok := v.UUID("bank_account_id", r.BankAccountID, false); ok {
+			bank = &id
+		}
+	}
+	return branch, date, slip, bank, v.Err()
 }
 
 // depositMatchRequest is POST /pos/end-of-day/{id}/deposit-match.

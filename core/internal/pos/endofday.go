@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -34,7 +35,8 @@ const (
 // day, and the claim that takes one for a day.
 type BankLines interface {
 	Line(ctx context.Context, id uuid.UUID) (*bankrecon.BankTransaction, error)
-	Claim(ctx context.Context, id uuid.UUID) (*bankrecon.BankTransaction, error)
+	Claim(ctx context.Context, id uuid.UUID, entry *uuid.UUID) (*bankrecon.BankTransaction, error)
+	AccountGL(ctx context.Context, id uuid.UUID) (string, error)
 	Candidates(ctx context.Context, from, to time.Time, amount int64, limit int) ([]bankrecon.BankTransaction, error)
 }
 
@@ -108,7 +110,11 @@ type DayClose struct {
 	ChecksToDepositCents httpx.Cents     `json:"checks_to_deposit_cents"`
 	CardTotalCents       httpx.Cents     `json:"card_total_cents"`
 	Totals               json.RawMessage `json:"totals"`
-	DepositMatch         *DepositMatch   `json:"deposit_match"`
+	// BankAccountID is the bank account the deposit goes to and GLEntryID the
+	// journal entry that posted it; both null for a day with nothing to bank.
+	BankAccountID *uuid.UUID    `json:"bank_account_id"`
+	GLEntryID     *uuid.UUID    `json:"gl_entry_id"`
+	DepositMatch  *DepositMatch `json:"deposit_match"`
 }
 
 // BranchDay is the end of day by branch (CP-09): each register's sessions and
@@ -302,7 +308,7 @@ func (s *Service) branchDay(ctx context.Context, branch uuid.UUID, date string) 
 // per branch per date, and never a date the branch has not reached. It writes
 // who, when, the deposit slip reference and the frozen totals in one
 // transaction with its audit row and event.
-func (s *Service) CloseBranchDay(ctx context.Context, branch uuid.UUID, date, slipRef, actor string) (*BranchDay, error) {
+func (s *Service) CloseBranchDay(ctx context.Context, branch uuid.UUID, date, slipRef string, bankAccount *uuid.UUID, actor string) (*BranchDay, error) {
 	slipRef = strings.TrimSpace(slipRef)
 	if slipRef == "" {
 		return nil, invalid("deposit_slip_ref", "is required: the reference printed on the deposit slip")
@@ -349,7 +355,10 @@ func (s *Service) CloseBranchDay(ctx context.Context, branch uuid.UUID, date, sl
 		}
 		c := &DayClose{ID: uuid.New(), BranchID: branch, BusinessDate: date, DepositSlipRef: slipRef, ClosedBy: actor,
 			CashToDepositCents: day.Totals.CashToDepositCents, ChecksToDepositCents: day.Totals.ChecksToDepositCents,
-			CardTotalCents: day.Totals.CardTotalCents, Totals: totals}
+			CardTotalCents: day.Totals.CardTotalCents, Totals: totals, BankAccountID: bankAccount}
+		if err := s.postDeposit(ctx, c, day, actor); err != nil {
+			return err
+		}
 		if err := s.repo.CreateDayClose(ctx, c); err != nil {
 			return err
 		}
@@ -357,7 +366,8 @@ func (s *Service) CloseBranchDay(ctx context.Context, branch uuid.UUID, date, sl
 			if err := s.auditLog.Log(ctx, audit.Entry{Action: "pos.day.closed", EntityType: "till_day_close", EntityID: c.ID, UserID: actor,
 				Changes: map[string]any{"branch_id": branch, "business_date": date, "deposit_slip_ref": slipRef,
 					"cash_to_deposit_cents": int64(c.CashToDepositCents), "checks_to_deposit_cents": int64(c.ChecksToDepositCents),
-					"card_total_cents": int64(c.CardTotalCents), "over_short_cents": int64(day.Totals.OverShortCents)}}); err != nil {
+					"card_total_cents": int64(c.CardTotalCents), "over_short_cents": int64(day.Totals.OverShortCents),
+					"bank_account_id": c.BankAccountID, "gl_entry_id": c.GLEntryID}}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
@@ -438,7 +448,13 @@ func (s *Service) MatchDeposit(ctx context.Context, closeID, bankLineID uuid.UUI
 		if c.DepositMatch != nil {
 			return conflict("deposit_already_matched", "this day's deposit is already matched to a bank statement line")
 		}
-		line, err := s.bank.Claim(ctx, bankLineID)
+		if c.BankAccountID != nil {
+			// the deposit went to one bank account: its line is on that account's statement
+			if probe, err := s.bank.Line(ctx, bankLineID); err == nil && probe.BankAccountID != *c.BankAccountID {
+				return conflict("bank_account_mismatch", "the bank statement line is on another bank account than the one this day's deposit went to")
+			}
+		}
+		line, err := s.bank.Claim(ctx, bankLineID, c.GLEntryID)
 		switch {
 		case errors.Is(err, bankrecon.ErrDepositLineNotFound):
 			return httpx.NotFound("bank statement line not found")
@@ -475,4 +491,67 @@ func (s *Service) MatchDeposit(ctx context.Context, closeID, bankLineID uuid.UUI
 		return nil, err
 	}
 	return out, nil
+}
+
+// postDeposit posts the deposit a day close records, in the close's own
+// transaction: debit the GL account of the bank account it goes to for the
+// cash and checks deposited, credit 1015 Undeposited Funds for what the day's
+// drops and pickups put there, and credit 1010 Cash for the rest (the counted
+// drawer cash and checks beyond the floats kept; a debit when the drawers held
+// less than the safe's share). Cards are not part of the deposit. A day with
+// nothing to bank and nothing in 1015 posts nothing. The entry and the bank
+// account are set on the close.
+func (s *Service) postDeposit(ctx context.Context, c *DayClose, day *BranchDay, actor string) error {
+	deposit := int64(c.CashToDepositCents + c.ChecksToDepositCents)
+	undeposited := day.Totals.MovementTotalsByKind[string(MovementSafeDrop)] + day.Totals.MovementTotalsByKind[string(MovementPickup)]
+	if deposit > 0 && c.BankAccountID == nil {
+		return invalid("bank_account_id", "is required: the bank account the deposit goes to")
+	}
+	var bankCode string
+	if c.BankAccountID != nil {
+		if s.bank == nil {
+			return httpx.Unavailable("the bank statement is not wired on this service")
+		}
+		code, err := s.bank.AccountGL(ctx, *c.BankAccountID)
+		switch {
+		case errors.Is(err, bankrecon.ErrBankAccountNotFound):
+			return httpx.NotFound("bank account not found")
+		case errors.Is(err, bankrecon.ErrBankAccountInactive):
+			return conflict("bank_account_inactive", "the bank account is not active")
+		case err != nil:
+			return err
+		}
+		bankCode = code
+	}
+	if s.ledger == nil || (deposit <= 0 && undeposited == 0) {
+		return nil
+	}
+	bankDebit := deposit
+	if bankDebit < 0 {
+		bankDebit = 0
+	}
+	legs := []gl.Leg{{AccountCode: "1015", Description: "Undeposited funds banked", Credit: undeposited}}
+	if bankDebit > 0 {
+		legs = append(legs, gl.Leg{AccountCode: bankCode, Description: "Branch deposit " + c.DepositSlipRef, Debit: bankDebit})
+	}
+	// what the bank takes beyond the safe's share came out of the drawers' cash
+	if rest := bankDebit - undeposited; rest > 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeCash, Description: "Cash deposited from the drawers", Credit: rest})
+	} else if rest < 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeCash, Description: "Safe cash not banked", Debit: -rest})
+	}
+	date, err := parseBusinessDate(c.BusinessDate)
+	if err != nil {
+		return err
+	}
+	entry, err := s.ledger.PostEntry(ctx, gl.PostingInput{EntryDate: date,
+		Memo:   fmt.Sprintf("Branch deposit %s for %s", c.DepositSlipRef, c.BusinessDate),
+		Source: gl.SourceAdjustment, SourceRefID: &c.ID, PostedBy: actorOrSystem(actor), Legs: legs})
+	if err != nil {
+		return ledgerRefusal(err, "failed to post the branch deposit")
+	}
+	if entry != nil {
+		c.GLEntryID = &entry.ID
+	}
+	return nil
 }

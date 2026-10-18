@@ -8,7 +8,7 @@ import type { GableBranchDay } from './BranchDay';
 import type { GableTillSignoffQueue } from './TillSignoffQueue';
 import { branchContext } from '../../services/BranchContext';
 import { addDays, todayDay } from '../../lib/dates';
-import { flush, jsonResponse, mountAsync, q, text, update } from '../../test/dom';
+import { chooseOption, flush, jsonResponse, mountAsync, q, text, update } from '../../test/dom';
 import type { BranchDay, DayFigures } from '../../types/pos';
 
 // days are relative to today: the screens read the dates they are given, none is fixed
@@ -31,11 +31,16 @@ const day = (patch: Partial<BranchDay> = {}): BranchDay => ({
 
 const closed = {
   id: 'c-1', branch_id: 'b-1', business_date: DAY, deposit_slip_ref: 'SLIP-9', closed_by: 'mgr-1',
-  closed_at: `${DAY}T22:00:00Z`, cash_to_deposit_cents: 1148, checks_to_deposit_cents: 0, card_total_cents: 0, deposit_match: null,
+  closed_at: `${DAY}T22:00:00Z`, cash_to_deposit_cents: 1148, checks_to_deposit_cents: 0, card_total_cents: 0, bank_account_id: 'ba-2', gl_entry_id: 'e-1', deposit_match: null,
 };
 
 let requests: { method: string; url: string; body?: Record<string, unknown> }[] = [];
 let handler: (method: string, url: string) => Response;
+
+const banks = [
+  { id: 'ba-1', name: 'Operating account', account_number: '1', routing_number: '', gl_account_id: 'g', is_active: true, created_at: '' },
+  { id: 'ba-2', name: 'Payroll account', account_number: '2', routing_number: '', gl_account_id: 'g', is_active: true, created_at: '' },
+];
 
 beforeEach(() => {
   requests = [];
@@ -44,6 +49,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     requests.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url.includes('/bankrecon/accounts')) return jsonResponse(banks);
     return handler(method, url);
   }));
 });
@@ -75,13 +81,17 @@ describe('the branch end of day', () => {
     input.value = 'SLIP-9';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await update(el, {});
+    // cash is to be deposited: the bank account it goes to is chosen first
+    expect(q<HTMLButtonElement>(el, '[data-testid="day-close"]').disabled).toBe(true);
+    await chooseOption(q<HTMLSelectElement & { value: string }>(el, '[data-testid="day-bank"]'), 'ba-2');
+    await update(el, {});
     expect(q<HTMLButtonElement>(el, '[data-testid="day-close"]').disabled).toBe(false);
     q<HTMLButtonElement>(el, '[data-testid="day-close"]').click();
     await flush();
     await update(el, {});
     const post = requests.find((r) => r.method === 'POST');
     expect(post?.url).toContain('/api/v1/pos/end-of-day/close');
-    expect(post?.body).toEqual({ branch_id: 'b-1', date: DAY, deposit_slip_ref: 'SLIP-9' });
+    expect(post?.body).toEqual({ branch_id: 'b-1', date: DAY, deposit_slip_ref: 'SLIP-9', bank_account_id: 'ba-2' });
     expect(text(q(el, '[data-testid="day-closed"]'))).toContain('Closed by mgr-1');
     expect(text(q(el, '[data-testid="day-slip"]'))).toBe('SLIP-9');
     expect(el.querySelector('[data-testid="day-close"]')).toBeNull();
@@ -108,6 +118,7 @@ describe('the branch end of day', () => {
     const input = q<HTMLInputElement>(el, '[data-testid="day-slip-input"]');
     input.value = 'SLIP-9';
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    await chooseOption(q<HTMLSelectElement & { value: string }>(el, '[data-testid="day-bank"]'), 'ba-1');
     await update(el, {});
     q<HTMLButtonElement>(el, '[data-testid="day-close"]').click();
     await flush();

@@ -258,12 +258,12 @@ func (h *Handler) CloseBranchDay(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	branch, date, slip, err := req.parse()
+	branch, date, slip, bank, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	day, err := h.service.CloseBranchDay(r.Context(), branch, date, slip, actorFrom(r))
+	day, err := h.service.CloseBranchDay(r.Context(), branch, date, slip, bank, actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

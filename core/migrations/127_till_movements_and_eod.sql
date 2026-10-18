@@ -14,8 +14,10 @@
 -- 3. till_variance_policy: the threshold per branch, over the database wide
 --    default in system_settings (till.variance_threshold_cents).
 -- 4. till_day_closes: one close per branch per business date, with the
---    deposit slip reference, a frozen totals snapshot and the bank statement
---    line the deposit was matched to.
+--    deposit slip reference, a frozen totals snapshot, the bank account the
+--    deposit goes to with the journal entry that posts it (debit the bank
+--    account's GL account; credit 1015 for the day's drops and pickups and
+--    1010 for the rest) and the bank statement line it was matched to.
 -- 5. Two accounts the chart lacks: 1015 Undeposited Funds (cash taken out of a
 --    drawer and not yet banked) and 4090 Other Income (cash received at the
 --    counter outside a sale). Paid out and the fee and refund paid ins use
@@ -88,6 +90,8 @@ CREATE TABLE IF NOT EXISTS till_day_closes (
     checks_to_deposit_cents  BIGINT NOT NULL,
     card_total_cents         BIGINT NOT NULL,
     totals                   JSONB NOT NULL,
+    bank_account_id          UUID REFERENCES bank_accounts(id),
+    gl_entry_id              UUID REFERENCES gl_journal_entries(id),
     bank_transaction_id      UUID REFERENCES bank_transactions(id),
     deposit_difference_cents BIGINT,
     deposit_matched_by       TEXT,

@@ -294,6 +294,8 @@ export interface DayClose {
     cash_to_deposit_cents: number;
     checks_to_deposit_cents: number;
     card_total_cents: number;
+    bank_account_id: string | null;
+    gl_entry_id: string | null;
     deposit_match: DepositMatch | null;
 }
 

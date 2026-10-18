@@ -5217,7 +5217,7 @@ export interface paths {
         put?: never;
         /**
          * Close the branch's business date
-         * @description Closes the date for the branch: who, when, the deposit slip reference and a frozen totals snapshot, with the audit row and till.day_closed in one transaction. Refused 409 till_open while a drawer of the branch dated that day or before is open, 409 signoff_pending while one waits for a manager (both blockers when both), 409 day_already_closed for a second close of a branch date, 409 date_not_reached for a date after the branch's today. The close takes the branch's day lock a drawer opening also takes, so a closed day never holds an open drawer and a branch whose date is closed takes no new drawer (409 day_closed on POST /pos/till/open). Finance and owner only, never a machine key; a branch the caller may not target is 403.
+         * @description Closes the date for the branch: who, when, the deposit slip reference and a frozen totals snapshot, with the audit row and till.day_closed in one transaction. Refused 409 till_open while a drawer of the branch dated that day or before is open, 409 signoff_pending while one waits for a manager (both blockers when both), 409 day_already_closed for a second close of a branch date, 409 date_not_reached for a date after the branch's today. The close posts the deposit it records in the same transaction: debit the GL account of the bank account named by bank_account_id (required, 400, when cash and checks are to be deposited; 404 for an unknown bank account, 409 bank_account_inactive for a retired one) for the cash and checks to deposit, credit 1015 Undeposited Funds for the day's drops and pickups, credit 1010 Cash for the rest (a debit when the drawers held less than the safe's share). Cards are not part of the deposit. The entry is named on the close (gl_entry_id); a closed fiscal period is 409 period_closed. A day with nothing to deposit and nothing in 1015 needs no bank account and posts nothing. The close takes the branch's day lock a drawer opening also takes, so a closed day never holds an open drawer and a branch whose date is closed takes no new drawer (409 day_closed on POST /pos/till/open). Finance and owner only, never a machine key; a branch the caller may not target is 403.
          */
         post: operations["posEndOfDayClose"];
         delete?: never;
@@ -5257,7 +5257,7 @@ export interface paths {
         put?: never;
         /**
          * Match the day's deposit to a bank statement line
-         * @description Claims an unmatched deposit line of the bank statement through bank reconciliation (status matched) and records on the day's close the line, the difference in cents (the bank's amount less the cash and checks to deposit) and who matched it. A day matches once (409 deposit_already_matched); a line that is not an unmatched deposit, or that another day holds, is 409 bank_line_unavailable; an unknown line is 404. The audit row and till.deposit_matched are written in the same transaction. Finance and owner only, never a machine key.
+         * @description Claims an unmatched deposit line of the bank statement through bank reconciliation (status matched) and records on the day's close the line, the difference in cents (the bank's amount less the cash and checks to deposit) and who matched it. A day matches once (409 deposit_already_matched); a line that is not an unmatched deposit, or that another day holds, is 409 bank_line_unavailable; a line of another bank account than the day's is 409 bank_account_mismatch; an unknown line is 404. The claimed line is linked to the close's deposit entry (bank_transactions.matched_journal_entry_id). The audit row and till.deposit_matched are written in the same transaction. Finance and owner only, never a machine key.
          */
         post: operations["posEndOfDayDepositMatch"];
         delete?: never;
@@ -12918,6 +12918,11 @@ export interface components {
             /** Format: date */
             date: string;
             deposit_slip_ref: string;
+            /**
+             * Format: uuid
+             * @description The bank account the deposit goes to; required when cash and checks are to be deposited.
+             */
+            bank_account_id?: string | null;
         };
         PosDepositMatchRequest: {
             /** Format: uuid */
@@ -13021,6 +13026,16 @@ export interface components {
             card_total_cents: number;
             /** @description The frozen branch day summary at the close, a JSON object (the PosBranchDay shape with close null). */
             totals: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The bank account the deposit goes to.
+             */
+            bank_account_id: string | null;
+            /**
+             * Format: uuid
+             * @description The journal entry that posted the deposit; null for a day with nothing to bank.
+             */
+            gl_entry_id: string | null;
             deposit_match: components["schemas"]["PosDepositMatch"] | null;
         };
         PosBranchDay: {

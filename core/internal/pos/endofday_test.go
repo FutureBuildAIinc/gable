@@ -127,10 +127,15 @@ func (d *dayFixture) summary(b *dayBranch, date string) resp {
 		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(d.t))
 }
 
-func (d *dayFixture) closeDay(b *dayBranch, date, slip string) resp {
+// closeDay closes the branch's day; the bank account the deposit goes to is
+// named when one is given.
+func (d *dayFixture) closeDay(b *dayBranch, date, slip string, bank ...uuid.UUID) resp {
 	d.t.Helper()
-	return d.do("POST", "/api/v1/pos/end-of-day/close", map[string]any{"branch_id": b.id.String(), "date": date, "deposit_slip_ref": slip},
-		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(d.t))
+	body := map[string]any{"branch_id": b.id.String(), "date": date, "deposit_slip_ref": slip}
+	if len(bank) > 0 {
+		body["bank_account_id"] = bank[0].String()
+	}
+	return d.do("POST", "/api/v1/pos/end-of-day/close", body, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(d.t))
 }
 
 func obj(t *testing.T, m map[string]any, key string) map[string]any {
@@ -380,16 +385,34 @@ func TestTheDayCloseIsRefusedWithATillOpenAndAcceptedAfter(t *testing.T) {
 	}
 }
 
-// bankLine adds a statement line to a bank account of the test and answers its id.
+// bankAccountOn makes a bank account whose GL account has the code, and
+// removes it when the test ends.
+func (d *dayFixture) bankAccountOn(glCode string) uuid.UUID {
+	d.t.Helper()
+	id := uuid.New()
+	mustExec(d.t, d.db, `INSERT INTO bank_accounts (id, name, gl_account_id) VALUES ($1, 'deposit test', (SELECT id FROM gl_accounts WHERE code = $2))`, id, glCode)
+	d.accounts = append(d.accounts, id)
+	return id
+}
+
+// defaultBank is the test's first bank account, on the cash account 1010.
+func (d *dayFixture) defaultBank() uuid.UUID {
+	d.t.Helper()
+	if len(d.accounts) == 0 {
+		return d.bankAccountOn("1010")
+	}
+	return d.accounts[0]
+}
+
+// bankLine adds a statement line to the test's default bank account.
 func (d *dayFixture) bankLine(amount int64, date string) uuid.UUID {
 	d.t.Helper()
-	var account uuid.UUID
-	if len(d.accounts) == 0 {
-		account = uuid.New()
-		mustExec(d.t, d.db, `INSERT INTO bank_accounts (id, name, gl_account_id) VALUES ($1, 'deposit test', (SELECT id FROM gl_accounts WHERE code = '1010'))`, account)
-		d.accounts = append(d.accounts, account)
-	}
-	account = d.accounts[0]
+	return d.bankLineOn(d.defaultBank(), amount, date)
+}
+
+// bankLineOn adds a statement line to a bank account and answers its id.
+func (d *dayFixture) bankLineOn(account uuid.UUID, amount int64, date string) uuid.UUID {
+	d.t.Helper()
 	id := uuid.New()
 	mustExec(d.t, d.db, `INSERT INTO bank_transactions (id, bank_account_id, transaction_date, amount, description, status)
 		VALUES ($1, $2, $3::date, $4, 'BRANCH DEPOSIT', 'UNMATCHED')`, id, account, date, amount)
@@ -406,7 +429,7 @@ func (d *dayFixture) closedDay(b *dayBranch) (closeID string, deposit int64) {
 	if r := d.count(s, map[string]any{"cash": 1599}); r.status != http.StatusOK {
 		d.t.Fatalf("close = %d: %s", r.status, r.raw)
 	}
-	r := d.closeDay(b, d.today(b), "SLIP-"+b.id.String()[:6])
+	r := d.closeDay(b, d.today(b), "SLIP-"+b.id.String()[:6], d.defaultBank())
 	if r.status != http.StatusCreated {
 		d.t.Fatalf("day close = %d: %s", r.status, r.raw)
 	}
@@ -593,5 +616,161 @@ func TestRacingDepositMatchesTakeOneLine(t *testing.T) {
 	}
 	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND bank_transaction_id = ANY($2)`, closeID, lines); got != 1 {
 		t.Errorf("the day does not hold one of the three lines")
+	}
+}
+
+// saleAtPrice rings a one line sale priced at the dollars and cents given
+// before tax (an override of the line's price) and pays it in cash, exactly.
+func (d *dayFixture) saleAtPrice(register string, unitTenThousandths int64, cashCents int64) {
+	d.t.Helper()
+	saleID := d.startSaleOn(register)
+	line := d.productLine("1")
+	line["unit_price_ten_thousandths"] = unitTenThousandths
+	line["override_reason"] = "deposit test"
+	if r := d.addLine(saleID, line); r.status != http.StatusOK {
+		d.t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := d.completeSaleOn(register, saleID, tender("cash", cashCents)); r.status != http.StatusOK {
+		d.t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+}
+
+// netOn is an account's net debit, in cents, over the entries sourced by the
+// ids.
+func (d *dayFixture) netOn(code string, ids ...string) int64 {
+	d.t.Helper()
+	var net int64
+	if err := d.db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE(ROUND(SUM(l.debit - l.credit) * 100), 0)::bigint
+		FROM gl_journal_lines l JOIN gl_journal_entries e ON e.id = l.journal_entry_id JOIN gl_accounts a ON a.id = l.account_id
+		WHERE a.code = $1 AND e.source_ref_id::text = ANY($2)`, code, ids).Scan(&net); err != nil {
+		d.t.Fatal(err)
+	}
+	return net
+}
+
+// RULE (P2-1): the day close posts the deposit it records, in its own
+// transaction. A float of 10000, a cash sale of 2000, a drop of 500 and a
+// count of 11500 deposit 2000: debit the bank account's GL account 2000,
+// credit 1015 for the 500 the drop put there and 1010 for the 1500 beyond the
+// float; the entry is named on the close and the bank account is kept.
+func TestTheDayClosePostsTheDeposit(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	d := newDayFixture(t, testutil.RequireDB(t))
+	glCode := "T" + uuid.NewString()[:7]
+	mustExec(t, d.db, `INSERT INTO gl_accounts (code, name, type, subtype, normal_balance) VALUES ($1, 'test operating bank', 'ASSET', 'Current Asset', 'DEBIT')`, glCode)
+	t.Cleanup(func() {
+		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM bank_transactions WHERE bank_account_id IN (SELECT id FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1))`, glCode)
+		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM bank_accounts WHERE gl_account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, glCode)
+		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM gl_journal_lines WHERE account_id = (SELECT id FROM gl_accounts WHERE code = $1)`, glCode)
+		_, _ = d.db.Pool.Exec(context.Background(), `DELETE FROM gl_accounts WHERE code = $1`, glCode)
+	})
+	bank := d.bankAccountOn(glCode)
+	a := d.makeBranch()
+	reg := a.registers[0]
+	s := d.openTillOn(reg, 10000)
+	d.saleAtPrice(reg, 183700, 2000) // 18.37 and its tax is 20.00
+	drop := d.mustMovement(s, map[string]any{"kind": "safe_drop", "amount_cents": 500}, mustUUID(t))
+	if r := d.count(s, map[string]any{"cash": 11500}); r.status != http.StatusOK || sessionOf(t, r)["status"] != "closed" {
+		t.Fatalf("count = %d: %s", r.status, r.raw)
+	}
+	day := d.today(a)
+
+	// the deposit needs a bank account to go to
+	if r := d.closeDay(a, day, "DEP-1"); r.status != http.StatusBadRequest {
+		t.Fatalf("a close of a day with a deposit and no bank account = %d, want 400: %s", r.status, r.raw)
+	}
+	if r := d.closeDay(a, day, "DEP-1", uuid.New()); r.status != http.StatusNotFound {
+		t.Fatalf("a close naming an unknown bank account = %d, want 404: %s", r.status, r.raw)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE branch_id = $1`, a.id); got != 0 {
+		t.Fatalf("%d closes written by refused requests", got)
+	}
+	r := d.closeDay(a, day, "DEP-1", bank)
+	if r.status != http.StatusCreated {
+		t.Fatalf("close = %d: %s", r.status, r.raw)
+	}
+	c := obj(t, r.body, "close")
+	closeID := str(t, c, "id")
+	if num(t, c, "cash_to_deposit_cents") != 2000 || c["bank_account_id"] != bank.String() || c["gl_entry_id"] == nil {
+		t.Fatalf("the close = %v, want a 2000 deposit to the bank account with its entry", c)
+	}
+	entries, legs := d.legsFor(closeID)
+	if entries != 1 {
+		t.Fatalf("%d entries sourced by the close, want 1", entries)
+	}
+	want := map[string]leg{glCode: {debit: 2000}, "1015": {credit: 500}, "1010": {credit: 1500}}
+	for code, w := range want {
+		if legs[code] != w {
+			t.Errorf("account %s = %+v, want %+v", code, legs[code], w)
+		}
+	}
+	if len(legs) != len(want) {
+		t.Errorf("legs = %v, want exactly %v", legs, want)
+	}
+	var linked string
+	if err := d.db.Pool.QueryRow(context.Background(), `SELECT gl_entry_id::text FROM till_day_closes WHERE id = $1`, closeID).Scan(&linked); err != nil || linked != str(t, c, "gl_entry_id") {
+		t.Errorf("the stored entry = %q (%v), want %v", linked, err, c["gl_entry_id"])
+	}
+	// undeposited funds net to zero for a day whose drops are all deposited
+	if got := d.netOn("1015", drop, closeID); got != 0 {
+		t.Errorf("1015 nets %d over the drop and the deposit, want 0", got)
+	}
+}
+
+// RULE (P2-1): the deposit match reconciles the bank line against the close's
+// deposit entry, and a line of another bank account is refused.
+func TestTheDepositMatchLinksTheDepositEntry(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	d := newDayFixture(t, testutil.RequireDB(t))
+	a := d.makeBranch()
+	closeID, deposit := d.closedDay(a)
+	day := d.today(a)
+	other := d.bankAccountOn("1010")
+	elsewhere := d.bankLineOn(other, deposit, day)
+	line := d.bankLine(deposit, day)
+	match := func(l uuid.UUID) resp {
+		return d.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/deposit-match", map[string]any{"bank_transaction_id": l.String()},
+			"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	}
+	r := match(elsewhere)
+	if r.status != http.StatusConflict {
+		t.Fatalf("a line of another bank account = %d, want 409: %s", r.status, r.raw)
+	}
+	if _, bl, _ := errorOf(t, r); len(bl) != 1 || bl[0] != "bank_account_mismatch" {
+		t.Errorf("blockers = %v, want bank_account_mismatch", bl)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM bank_transactions WHERE id = $1 AND status = 'UNMATCHED'`, elsewhere); got != 1 {
+		t.Errorf("the refused match claimed the other account's line")
+	}
+	if r := match(line); r.status != http.StatusOK {
+		t.Fatalf("match = %d: %s", r.status, r.raw)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM bank_transactions b JOIN till_day_closes c ON c.gl_entry_id = b.matched_journal_entry_id
+		WHERE b.id = $1 AND c.id = $2::uuid AND c.gl_entry_id IS NOT NULL`, line, closeID); got != 1 {
+		t.Errorf("the bank line is not matched to the close's deposit entry")
+	}
+}
+
+// RULE (P2-1): a day with nothing to deposit needs no bank account and posts
+// no entry.
+func TestADayWithNothingToDepositPostsNoEntry(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	d := newDayFixture(t, testutil.RequireDB(t))
+	a := d.makeBranch()
+	s := d.openTillOn(a.registers[0], 1000)
+	if r := d.count(s, map[string]any{"cash": 1000}); r.status != http.StatusOK {
+		t.Fatalf("count = %d: %s", r.status, r.raw)
+	}
+	r := d.closeDay(a, d.today(a), "NONE-1")
+	if r.status != http.StatusCreated {
+		t.Fatalf("close = %d: %s", r.status, r.raw)
+	}
+	c := obj(t, r.body, "close")
+	if c["gl_entry_id"] != nil || c["bank_account_id"] != nil {
+		t.Errorf("the close = %v, want no entry and no bank account", c)
+	}
+	if entries, _ := d.legsFor(str(t, c, "id")); entries != 0 {
+		t.Errorf("%d entries posted for a day with nothing to deposit", entries)
 	}
 }

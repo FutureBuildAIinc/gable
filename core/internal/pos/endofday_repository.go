@@ -109,7 +109,7 @@ func (r *PostgresRepository) BranchCollectionsNet(ctx context.Context, branch uu
 
 const dayCloseCols = `c.id, c.branch_id, c.business_date::text, c.deposit_slip_ref, c.closed_by, c.closed_at,
 	c.cash_to_deposit_cents, c.checks_to_deposit_cents, c.card_total_cents, c.totals,
-	c.bank_transaction_id, b.amount, b.transaction_date::text, COALESCE(b.description, ''),
+	c.bank_account_id, c.gl_entry_id, c.bank_transaction_id, b.amount, b.transaction_date::text, COALESCE(b.description, ''),
 	c.deposit_difference_cents, c.deposit_matched_by, c.deposit_matched_at`
 
 func scanDayClose(row pgx.Row) (*DayClose, error) {
@@ -121,7 +121,7 @@ func scanDayClose(row pgx.Row) (*DayClose, error) {
 	var matchedAt *time.Time
 	if err := row.Scan(&c.ID, &c.BranchID, &c.BusinessDate, &c.DepositSlipRef, &c.ClosedBy, &closedAt,
 		&c.CashToDepositCents, &c.ChecksToDepositCents, &c.CardTotalCents, &c.Totals,
-		&bankID, &bankAmount, &bankDate, &bankDesc, &diff, &matchedBy, &matchedAt); err != nil {
+		&c.BankAccountID, &c.GLEntryID, &bankID, &bankAmount, &bankDate, &bankDesc, &diff, &matchedBy, &matchedAt); err != nil {
 		return nil, err
 	}
 	c.ClosedAt = httpx.TimestampOf(closedAt)
@@ -182,10 +182,10 @@ func (r *PostgresRepository) GetDayCloseByID(ctx context.Context, id uuid.UUID, 
 func (r *PostgresRepository) CreateDayClose(ctx context.Context, c *DayClose) error {
 	var closed time.Time
 	err := r.ex(ctx).QueryRow(ctx, `INSERT INTO till_day_closes (id, branch_id, business_date, deposit_slip_ref, closed_by, cash_to_deposit_cents,
-		checks_to_deposit_cents, card_total_cents, totals)
-		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9) RETURNING closed_at`,
+		checks_to_deposit_cents, card_total_cents, totals, bank_account_id, gl_entry_id)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING closed_at`,
 		c.ID, c.BranchID, c.BusinessDate, c.DepositSlipRef, c.ClosedBy, int64(c.CashToDepositCents), int64(c.ChecksToDepositCents),
-		int64(c.CardTotalCents), []byte(c.Totals)).Scan(&closed)
+		int64(c.CardTotalCents), []byte(c.Totals), c.BankAccountID, c.GLEntryID).Scan(&closed)
 	if err != nil {
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "till_day_closes_one_per_day" {

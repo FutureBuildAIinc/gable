@@ -320,18 +320,27 @@ it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET 
    checks and card to deposit. The cash to deposit is the counted cash less the float, plus the drop and the pickup.
    Switch the yard in the header to Lake Country Outpost: its own card, with `REG-LK` only. Nothing of one yard shows in
    the other.
-8. **Closing the day.** At Kelowna Main Yard open a second drawer (Open Till at `REG-01`) and return to the End of Day
-   card: "Close the day" is off and the card says a drawer is still open. Close that drawer too, type a deposit slip
-   reference (`SLIP-0001`) and Close the day: the card names who closed it, when and the slip. A second close of the
-   same day answers 409 `day_already_closed` through the API
-   (`POST /api/v1/pos/end-of-day/close` with the yard, the date and a slip), and Open Till at `REG-01` now answers 409
-   `day_closed`. Lake Country Outpost's day is still open.
-9. **Matching the deposit to the bank.** Make a bank account and import a statement line for the deposit (`POST
-   /api/v1/bankrecon/accounts` with the cash account `1010`'s id, then `POST /api/v1/bankrecon/import` with
+8. **Closing the day.** First make the bank account the deposit goes to: `POST /api/v1/bankrecon/accounts` with a name and
+   the id of the cash account `1010` (or a bank account of its own in the chart). At Kelowna Main Yard open a second
+   drawer (Open Till at `REG-01`) and return to the End of Day card: "Close the day" is off and the card says a drawer
+   is still open. Close that drawer too, type a deposit slip reference (`SLIP-0001`), choose the bank account under
+   "Deposit to" and Close the day: the card names who closed it, when and the slip. The close posted the deposit
+   (`select e.memo, a.code, l.debit, l.credit from gl_journal_lines l join gl_journal_entries e on e.id = l.journal_entry_id
+   join gl_accounts a on a.id = l.account_id where e.memo like 'Branch deposit%';`): the bank account's GL account is
+   debited the cash and checks deposited, `1015` is credited what the day's drop and pickup put there and `1010` the
+   rest, so `1015` nets to nothing for the day. A second close of the same day answers 409 `day_already_closed`
+   through the API (`POST /api/v1/pos/end-of-day/close` with the yard, the date, a slip and the bank account), and Open
+   Till at `REG-01` now answers 409 `day_closed`. Lake Country Outpost's day is still open.
+9. **Reopening the day (Robin Diaz).** A late drawer or a correction before the deposit is matched: on the End of Day
+   card press Reopen the day, type why and confirm. The deposit entry is reversed (the same legs the other way, naming
+   the entry it reverses), the card is open again and Open Till at `REG-01` works. Close the day again with a slip
+   reference: a new deposit is posted. Once the deposit is matched to a bank line (step 10) the reopen answers 409
+   `deposit_already_matched`.
+10. **Matching the deposit to the bank.** Import a statement line for the deposit (`POST /api/v1/bankrecon/import` with
    `{"bank_account_id":"<id>","csv_content":"Date,Amount,Description,Reference\n<the day>,<the deposit>,BRANCH DEPOSIT,SLIP-0001"}`;
    the day is the business date the card shows). On the End of Day card press "Match the deposit to the bank": the line is
-   offered, the nearest amount first. Match it: the card shows the bank line, who matched it and the difference in cents
-   between the bank and the slip (nothing when they agree). The line is now matched in bank reconciliation, so no other
-   day can take it.
+   offered, the nearest amount first, and only a line of the day's bank account can be taken. Match it: the card shows the
+   bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
+   line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
 
 None of the other walks of the plan are written yet; they land with their items.

@@ -374,12 +374,17 @@ export const posService = {
         return response.json();
     },
 
-    async closeBranchDay(branchID: string, date: string, depositSlipRef: string): Promise<BranchDay> {
+    async closeBranchDay(branchID: string, date: string, depositSlipRef: string, bankAccountID?: string): Promise<BranchDay> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/end-of-day/close`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ branch_id: branchID, date, deposit_slip_ref: depositSlipRef }),
+                body: JSON.stringify({
+                    branch_id: branchID,
+                    date,
+                    deposit_slip_ref: depositSlipRef,
+                    ...(bankAccountID ? { bank_account_id: bankAccountID } : {}),
+                }),
             }),
             'Failed to close the branch day',
         );

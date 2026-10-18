@@ -236,6 +236,8 @@ func (f *fixture) cleanup() {
 		OR e.source_ref_id::text IN (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM till_movements)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_day_closes)
+		OR e.reverses_entry_id IN (SELECT gl_entry_id FROM till_day_closes WHERE gl_entry_id IS NOT NULL)
 		OR e.source_ref_id::text IN (SELECT id::text FROM till_sessions)
 		OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN
 			((SELECT id::text FROM invoices WHERE id IN `+invs+`)
@@ -279,6 +281,8 @@ func (f *fixture) cleanup() {
 	// the entries the drawer's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
 	exec(`DELETE FROM till_movements`)
+	exec(`DELETE FROM till_day_closes`)
+	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
 	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE gl_entry_id IS NOT NULL`)
 	if len(entryIDs) > 0 {
 		exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id = ANY($1::uuid[])`, entryIDs)
@@ -286,7 +290,6 @@ func (f *fixture) cleanup() {
 	}
 
 	exec(`DELETE FROM pos_sync_log`)
-	exec(`DELETE FROM till_day_closes`)
 	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
 	exec(`DELETE FROM till_sessions`)

@@ -19,6 +19,8 @@ import (
 var (
 	ErrDepositLineNotFound = errors.New("bankrecon: no such bank statement line")
 	ErrDepositLineNotFree  = errors.New("bankrecon: the bank statement line is not an unmatched deposit")
+	ErrBankAccountNotFound = errors.New("bankrecon: no such bank account")
+	ErrBankAccountInactive = errors.New("bankrecon: the bank account is not active")
 	depositLineColumns     = `id, bank_account_id, reconciliation_id, transaction_date, amount, COALESCE(description, ''), COALESCE(reference, ''), matched_journal_entry_id, status, created_at`
 )
 
@@ -54,14 +56,35 @@ func (d *DepositLines) Line(ctx context.Context, id uuid.UUID) (*BankTransaction
 	return txn, nil
 }
 
+// AccountGL answers the code of the GL account a bank account is kept in, the
+// account a deposit into it debits. ErrBankAccountNotFound for an id with no
+// bank account, ErrBankAccountInactive for a retired one.
+func (d *DepositLines) AccountGL(ctx context.Context, id uuid.UUID) (string, error) {
+	var code string
+	var active bool
+	err := d.db.GetExecutor(ctx).QueryRow(ctx, `SELECT a.code, b.is_active FROM bank_accounts b JOIN gl_accounts a ON a.id = b.gl_account_id
+		WHERE b.id = $1`, id).Scan(&code, &active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrBankAccountNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to read the bank account: %w", err)
+	}
+	if !active {
+		return "", ErrBankAccountInactive
+	}
+	return code, nil
+}
+
 // Claim marks an unmatched deposit line MATCHED so the auto match and a
-// second claimant leave it alone, and reports the line it claimed. A line that
+// second claimant leave it alone, links it to the journal entry that posted
+// the deposit (nil: no entry to link), and reports the line it claimed. A line that
 // is not a deposit (amount above zero), is already matched or excluded, or
 // does not exist answers ErrDepositLineNotFree or ErrDepositLineNotFound.
-func (d *DepositLines) Claim(ctx context.Context, id uuid.UUID) (*BankTransaction, error) {
-	txn, err := scanLine(d.db.GetExecutor(ctx).QueryRow(ctx, `UPDATE bank_transactions SET status = $2
+func (d *DepositLines) Claim(ctx context.Context, id uuid.UUID, entry *uuid.UUID) (*BankTransaction, error) {
+	txn, err := scanLine(d.db.GetExecutor(ctx).QueryRow(ctx, `UPDATE bank_transactions SET status = $2, matched_journal_entry_id = $4
 		WHERE id = $1 AND status = $3 AND amount > 0
-		RETURNING `+depositLineColumns, id, string(TransactionStatusMatched), string(TransactionStatusUnmatched)))
+		RETURNING `+depositLineColumns, id, string(TransactionStatusMatched), string(TransactionStatusUnmatched), entry))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, lerr := d.Line(ctx, id); lerr != nil {
 			return nil, lerr
