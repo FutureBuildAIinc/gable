@@ -197,6 +197,13 @@ func (s *Service) RequestCode(ctx context.Context, token string, c Caller, chann
 		if !q.RequireCode {
 			return httpx.BadRequest("this quote does not use a verification code")
 		}
+		ch := s.mail.Channels()
+		if s.mail == nil || !ch.Any() {
+			return ErrCodesUnavailable
+		}
+		if !ch.Has(channel) && (channel == "email" || channel == "sms") {
+			return httpx.BadRequest("that channel is not available", httpx.FieldError{Field: "channel", Message: "this server cannot send a code that way"})
+		}
 		switch channel {
 		case "email":
 			dest = q.EndCustomer.Email
@@ -360,6 +367,9 @@ func (s *Service) Accept(ctx context.Context, token string, c Caller, in AcceptI
 		now := s.now()
 		if !link.Live(now) || cur.Effective(now) != StatusSent {
 			return ErrInvalidState
+		}
+		if cur.RequireCode && !s.codesAvailable() {
+			return ErrCodesUnavailable
 		}
 		if err := decided(cur); err != nil {
 			return err

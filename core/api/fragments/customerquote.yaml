@@ -174,7 +174,11 @@ paths:
       summary: Save the contractor's defaults
       description: >-
         Display name, payment terms, deposit percent, tax treatment, the
-        default markup and whether acceptance requires a six digit code.
+        default markup and whether acceptance requires a six digit code. Turning
+        the code on is a 409 ("Verification codes need a real email or text
+        sender on this server.") while the server's only email sender is the
+        log only one and text is the stub; so is a quote or a send that asks for
+        a code, a code request and an acceptance on such a quote.
       security:
         - PortalSession: []
       requestBody:
@@ -192,6 +196,8 @@ paths:
                 $ref: "#/components/schemas/CustomerQuoteSettings"
         "400":
           $ref: "#/components/responses/BadRequestEither"
+        "409":
+          $ref: "#/components/responses/WireConflict"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
         "403":
@@ -2031,6 +2037,12 @@ components:
           type: boolean
         can_decide:
           type: boolean
+        notice:
+          type: string
+          description: >-
+            Present when the quote cannot be accepted yet: the contractor asked
+            for a verification code and the server cannot send one. It says so
+            in plain words; declining stays possible.
         approval:
           type: object
           required: [decision, signed_by, at]

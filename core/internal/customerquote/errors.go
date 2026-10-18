@@ -12,12 +12,13 @@ import (
 
 // Error codes the customer quote routes add to the platform's.
 const (
-	CodeLinkUnavailable = "link_unavailable"
-	CodeCodeRequired    = "code_required"
-	CodeCodeInvalid     = "code_invalid"
-	CodeCodeExpired     = "code_expired"
-	CodeCodeLocked      = "code_locked"
-	CodeIncomplete      = "selections_incomplete"
+	CodeLinkUnavailable  = "link_unavailable"
+	CodeCodeRequired     = "code_required"
+	CodeCodeInvalid      = "code_invalid"
+	CodeCodeExpired      = "code_expired"
+	CodeCodeLocked       = "code_locked"
+	CodeIncomplete       = "selections_incomplete"
+	CodeCodesUnavailable = "codes_unavailable"
 )
 
 // wireErr maps a domain error onto the platform's one error envelope. An
@@ -54,6 +55,9 @@ func wireErr(err error) error {
 	case errors.Is(err, ErrCodeLocked):
 		return httpx.BadRequest("too many wrong codes: request a new code",
 			httpx.FieldError{Field: "code", Code: CodeCodeLocked, Message: "request a new code"})
+	case errors.Is(err, ErrCodesUnavailable):
+		return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: CodesUnavailableMessage,
+			Details: []httpx.FieldError{{Code: CodeCodesUnavailable, Message: CodesUnavailableMessage}}}
 	case errors.Is(err, ErrDeliveryFailed):
 		return httpx.Unavailable("the code could not be delivered")
 	}

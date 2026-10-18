@@ -131,6 +131,13 @@ func (s *Service) needQuoting(a Actor) error {
 	return s.need(a, CapSeeMoney)
 }
 
+// codesAvailable says whether the server can really send a verification code
+// on some channel. While its only email sender writes message bodies to a log
+// and its text sender is the stub, it cannot.
+func (s *Service) codesAvailable() bool {
+	return s.mail != nil && s.mail.Channels().Any()
+}
+
 func badRef() error {
 	return httpx.BadRequest("a record the quote names does not exist",
 		httpx.FieldError{Message: "a product, category or project the quote names was not found"})
@@ -190,6 +197,9 @@ func (s *Service) PutSettings(ctx context.Context, a Actor, in SettingsInput) (*
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
+	if in.RequireCode && !s.codesAvailable() {
+		return nil, ErrCodesUnavailable
+	}
 	st := &Settings{CustomerID: a.CustomerID, DisplayName: in.DisplayName, PaymentTerms: in.PaymentTerms,
 		DepositBPS: in.DepositBPS, Tax: in.Tax, Markup: in.Markup, RequireCode: in.RequireCode}
 	if err := s.store.PutSettings(ctx, st); err != nil {
@@ -238,6 +248,9 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 		q.DepositBPS = *d.DepositBPS
 	}
 	if d.RequireCode != nil {
+		if *d.RequireCode && !s.codesAvailable() {
+			return nil, ErrCodesUnavailable
+		}
 		q.RequireCode = *d.RequireCode
 	}
 	if existing != nil {
@@ -505,6 +518,7 @@ func (s *Service) publicViewOf(ctx context.Context, q *Quote) (*PublicView, erro
 		return nil, err
 	}
 	in := PublicInputs{ContractorName: name, HasLogo: hasLogo, Now: s.now()}
+	in.CodesBlocked = q.RequireCode && q.Effective(in.Now) == StatusSent && !s.codesAvailable()
 	if ob, err := s.store.OrderBriefOf(ctx, q.OrderID); err != nil {
 		return nil, err
 	} else if ob != nil {
@@ -583,6 +597,9 @@ func (s *Service) Send(ctx context.Context, a Actor, id uuid.UUID, ifMatch strin
 		}
 		if err := sendable(q); err != nil {
 			return err
+		}
+		if q.RequireCode && !s.codesAvailable() {
+			return ErrCodesUnavailable
 		}
 		now := s.now()
 		valid := q.ValidUntil
@@ -807,7 +824,25 @@ func (s *Service) Approvals(ctx context.Context, a Actor, id uuid.UUID) ([]Appro
 	if _, err := s.store.GetQuote(ctx, id, &a.CustomerID, false); err != nil {
 		return nil, err
 	}
-	return s.store.ListLog(ctx, id)
+	log, err := s.store.ListLog(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// The dealer's step reads as the desk user's display name and the dealer's
+	// business name; an address never.
+	biz, err := s.store.DealerName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range log {
+		if log[i].ActorKind == ActorDealer {
+			log[i].ActorContact, log[i].ActorRef = "", ""
+			if biz != "" {
+				log[i].ActorName += ", " + biz
+			}
+		}
+	}
+	return log, nil
 }
 
 // OrderOf reads the order a quote converted into.

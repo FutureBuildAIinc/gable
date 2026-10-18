@@ -35,6 +35,7 @@ type PublicView struct {
 	Totals         PublicTotals     `json:"totals"`
 	RequiresCode   bool             `json:"requires_code"`
 	CanDecide      bool             `json:"can_decide"`
+	Notice         string           `json:"notice,omitempty"`
 	Approval       *PublicApproval  `json:"approval,omitempty"`
 	Fulfilment     *string          `json:"fulfilment,omitempty"`
 }
@@ -115,6 +116,10 @@ func FulfilmentOf(orderStatus string) string {
 	}
 }
 
+// CodesBlockedNotice is what the customer's page says when the contractor asks
+// for a verification code the server cannot send.
+const CodesBlockedNotice = "This quote cannot be accepted yet. The contractor asked for a verification code, and this server cannot send one. Ask the contractor to turn off the code requirement and send the quote again."
+
 // taxNote words the tax treatment for the customer.
 func taxNote(t Tax) string {
 	switch t.Mode {
@@ -134,6 +139,10 @@ type PublicInputs struct {
 	OrderStatus    string // the linked order's status, "" when none
 	Approval       *ApprovalEntry
 	Now            time.Time
+	// CodesBlocked: the quote asks for a verification code and the server
+	// cannot send one, so it cannot be accepted until the contractor turns the
+	// requirement off.
+	CodesBlocked bool
 }
 
 func publicStatus(q *Quote, now time.Time) string {
@@ -222,6 +231,9 @@ func BuildPublicView(q *Quote, in PublicInputs) (*PublicView, error) {
 			e.PriceCents = &amt
 		}
 		v.Extras = append(v.Extras, e)
+	}
+	if in.CodesBlocked {
+		v.Notice = CodesBlockedNotice
 	}
 	if in.Approval != nil {
 		decision := "approved"

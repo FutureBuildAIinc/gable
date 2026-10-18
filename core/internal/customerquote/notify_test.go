@@ -6,6 +6,7 @@ package customerquote_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -53,20 +54,45 @@ func TestMailNotifier_ALogOnlySenderNeverSeesTheLink(t *testing.T) {
 	}
 }
 
-func TestMailNotifier_TheSmsStubSendsNothingAndLogsNoCode(t *testing.T) {
+func TestMailNotifier_ACodeNeverReachesALogOnlySender(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	sms := customerquote.NewStubSMS(logger)
-	n := customerquote.NewMailNotifier(&realMail{}, sms, logger)
-	if err := n.SendCode(context.Background(), "sms", "555 010 2020", "Wire Builders", "482913"); err != nil {
-		t.Fatal(err)
+	n := customerquote.NewMailNotifier(notification.NewLogEmailService(logger), sms, logger)
+	if ch := n.Channels(); ch.Email || ch.SMS {
+		t.Fatalf("a log only email sender and an sms stub offer %+v", ch)
 	}
-	m, ok := sms.Last()
-	if !ok || !strings.Contains(m.Body, "482913") || m.To != "555 010 2020" {
-		t.Fatalf("the stub's last message: %+v %v", m, ok)
+	err := n.SendCode(context.Background(), "email", "pat@homeowner.example", "Wire Builders", "482913")
+	if !errors.Is(err, customerquote.ErrCodesUnavailable) {
+		t.Fatalf("a code to a log only sender: %v", err)
+	}
+	if strings.Contains(logs.String(), "482913") {
+		t.Fatalf("the code reached the log only sender:\n%s", logs.String())
+	}
+	err = n.SendCode(context.Background(), "sms", "555 010 2020", "Wire Builders", "482913")
+	if !errors.Is(err, customerquote.ErrCodesUnavailable) {
+		t.Fatalf("a code to the sms stub: %v", err)
+	}
+	if _, ok := sms.Last(); ok {
+		t.Error("the sms stub was handed a code")
 	}
 	if strings.Contains(logs.String(), "482913") || strings.Contains(logs.String(), "555 010") {
-		t.Errorf("the stub logged the code or the number:\n%s", logs.String())
+		t.Errorf("the code or the number was logged:\n%s", logs.String())
+	}
+}
+
+func TestMailNotifier_ARealEmailSenderCarriesTheCode(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	rm := &realMail{}
+	n := customerquote.NewMailNotifier(rm, customerquote.NewStubSMS(logger), logger)
+	if ch := n.Channels(); !ch.Email || ch.SMS {
+		t.Fatalf("a real email sender and an sms stub offer %+v", ch)
+	}
+	if err := n.SendCode(context.Background(), "email", "pat@homeowner.example", "Wire Builders", "482913"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rm.bodies) != 1 || !strings.Contains(rm.bodies[0], "482913") {
+		t.Fatalf("bodies %v", rm.bodies)
 	}
 	if err := n.SendCode(context.Background(), "carrier pigeon", "x", "y", "123456"); err == nil {
 		t.Error("an unknown channel was accepted")

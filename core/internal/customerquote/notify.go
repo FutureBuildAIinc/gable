@@ -5,7 +5,6 @@ package customerquote
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -50,6 +49,9 @@ func (s *StubSMS) SendSMS(_ context.Context, to, body string) error {
 	s.log.Info("sms stub: a message was not sent (no live sms)")
 	return nil
 }
+
+// IsStub marks the SMS sender as one with no carrier behind it.
+func (s *StubSMS) IsStub() bool { return true }
 
 // Last returns the most recent message the stub took.
 func (s *StubSMS) Last() (SMSMessage, bool) {
@@ -101,21 +103,37 @@ func (m *MailNotifier) SendLink(ctx context.Context, to Contact, contractor, tit
 	return true, nil
 }
 
-// SendCode delivers the verification code. The code is single use and lives
-// minutes; a log only email sender may record it, as it records every
-// message it is given.
+// Channels says where a code can really go: by email through a sender that is
+// not the log only one, by text through a sender that is not a stub.
+func (m *MailNotifier) Channels() CodeChannels {
+	var c CodeChannels
+	if m.email != nil {
+		_, isLog := m.email.(logOnly)
+		c.Email = !isLog
+	}
+	if m.sms != nil {
+		if st, ok := m.sms.(interface{ IsStub() bool }); !ok || !st.IsStub() {
+			c.SMS = true
+		}
+	}
+	return c
+}
+
+// SendCode delivers the verification code. A code is a credential like a
+// link: it is never handed to a sender that writes message bodies to a log,
+// nor to the SMS stub.
 func (m *MailNotifier) SendCode(ctx context.Context, channel, destination, contractor, code string) error {
+	if !m.Channels().Has(channel) {
+		if channel == "email" || channel == "sms" {
+			return ErrCodesUnavailable
+		}
+		return fmt.Errorf("channel %q", channel)
+	}
 	switch channel {
 	case "email":
-		if m.email == nil {
-			return errors.New("no email sender")
-		}
 		return m.email.SendDeliveryNotification(ctx, destination, contractor+": your verification code",
 			fmt.Sprintf("Your verification code is %s. It works once and expires in %d minutes.", code, int(CodeTTL.Minutes())))
 	case "sms":
-		if m.sms == nil {
-			return errors.New("no sms sender")
-		}
 		return m.sms.SendSMS(ctx, destination, fmt.Sprintf("%s verification code: %s", contractor, code))
 	}
 	return fmt.Errorf("channel %q", channel)

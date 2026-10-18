@@ -53,7 +53,13 @@ var (
 	ErrDeliveryFailed  = errors.New("the code could not be delivered")
 	ErrIncomplete      = errors.New("every selection must be decided")
 	ErrNothingChosen   = errors.New("nothing is approved")
+	// ErrCodesUnavailable refuses a verification code the server cannot send.
+	ErrCodesUnavailable = errors.New(CodesUnavailableMessage)
 )
+
+// CodesUnavailableMessage is the one sentence every refusal about
+// verification codes carries.
+const CodesUnavailableMessage = "Verification codes need a real email or text sender on this server."
 
 // Contact is a person the quote names.
 type Contact struct {
@@ -267,10 +273,19 @@ type Actor struct {
 }
 
 // DealerActor is the desk user who acts on the dealer side.
+//
+// Ref is the desk user's id (the token's subject) and Name the display name
+// the record keeps. Email is only used to find the display name on the staff
+// roster; it is never stored and never shown.
 type DealerActor struct {
-	Ref  string
-	Name string
+	Ref   string
+	Name  string
+	Email string
 }
+
+// UnknownDeskUser is the display name of a desk user the staff roster does
+// not name.
+const UnknownDeskUser = "Desk user"
 
 // Capability is something a portal role may do with customer quotes.
 type Capability string

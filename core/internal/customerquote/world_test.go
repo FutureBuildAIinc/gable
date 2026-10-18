@@ -92,6 +92,20 @@ type recMail struct {
 	codes  []string
 	fail   bool
 	linkOK bool
+	// the channels a code can really go out on
+	email, sms bool
+}
+
+func (m *recMail) Channels() customerquote.CodeChannels {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return customerquote.CodeChannels{Email: m.email, SMS: m.sms}
+}
+
+func (m *recMail) setChannels(email, sms bool) {
+	m.mu.Lock()
+	m.email, m.sms = email, sms
+	m.mu.Unlock()
 }
 
 func (m *recMail) SendLink(_ context.Context, _ customerquote.Contact, _, _, link string) (bool, error) {
@@ -209,7 +223,7 @@ func newWorldPool(t *testing.T, pool int32) *world {
 		w.costs.items[p.id] = customerquote.CatalogItem{ProductID: p.id, SKU: "CQT-" + p.id.String()[:8], Description: p.name, UOM: "EA",
 			CategoryID: &cat, UnitCostTenThousandths: p.unit}
 	}
-	w.mail = &recMail{linkOK: true}
+	w.mail = &recMail{linkOK: true, email: true, sms: true}
 	w.orders = &fakeOrders{w: w}
 	logger := slog.New(slog.NewTextHandler(w.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	w.store = customerquote.NewStore(db)

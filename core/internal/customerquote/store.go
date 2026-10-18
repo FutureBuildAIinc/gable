@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -819,4 +820,18 @@ func (s *Store) ListProjects(ctx context.Context, customerID uuid.UUID) ([]Expor
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// StaffName is the display name the dealer's staff roster holds for an email
+// address, "" when it names no one.
+func (s *Store) StaffName(ctx context.Context, email string) (string, error) {
+	if strings.TrimSpace(email) == "" {
+		return "", nil
+	}
+	var n string
+	err := s.exec(ctx).QueryRow(ctx, `SELECT full_name FROM staff WHERE lower(email) = lower($1) LIMIT 1`, email).Scan(&n)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return n, err
 }

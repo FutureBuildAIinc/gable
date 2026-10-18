@@ -77,7 +77,19 @@ func (s *Service) DealerGet(ctx context.Context, id uuid.UUID) (*DealerProjectDe
 
 // DealerAccept records the dealer's acceptance of a confirmed project, once.
 func (s *Service) DealerAccept(ctx context.Context, who DealerActor, id uuid.UUID) (*DealerProjectDetail, error) {
-	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
+	// The record keeps the desk user's id and display name, never the address.
+	name, err := s.store.StaffName(ctx, who.Email)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		name = strings.TrimSpace(who.Name)
+	}
+	if name == "" || strings.Contains(name, "@") {
+		name = UnknownDeskUser
+	}
+	who.Name, who.Email = name, ""
+	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		q, err := s.store.GetQuote(ctx, id, nil, true)
 		if err != nil {
 			return err

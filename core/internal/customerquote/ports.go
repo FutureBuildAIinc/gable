@@ -81,6 +81,28 @@ type OrderPlacer interface {
 	PlaceOrder(ctx context.Context, p OrderPlacement) (uuid.UUID, error)
 }
 
+// CodeChannels says on which channels a verification code can really go out.
+// A sender that writes message bodies to a log, and an SMS stub, are not
+// channels: a code is never handed to either.
+type CodeChannels struct {
+	Email bool
+	SMS   bool
+}
+
+// Any reports whether some channel can carry a code.
+func (c CodeChannels) Any() bool { return c.Email || c.SMS }
+
+// Has reports whether the named channel can carry a code.
+func (c CodeChannels) Has(channel string) bool {
+	switch channel {
+	case "email":
+		return c.Email
+	case "sms":
+		return c.SMS
+	}
+	return false
+}
+
 // Notifier sends the two messages the loop sends. It is told what to say and
 // to whom; whether anything really leaves the process is its business.
 type Notifier interface {
@@ -88,7 +110,10 @@ type Notifier interface {
 	// false when nothing real was sent (no address, or a log only sender):
 	// the contractor then shares the link themselves.
 	SendLink(ctx context.Context, to Contact, contractor, title, link string) (delivered bool, err error)
-	// SendCode delivers a verification code by email or sms.
+	// Channels says where a code can really be sent on this server.
+	Channels() CodeChannels
+	// SendCode delivers a verification code by email or sms. It refuses
+	// (ErrCodesUnavailable) a channel that is not real.
 	SendCode(ctx context.Context, channel, destination, contractor, code string) error
 }
 

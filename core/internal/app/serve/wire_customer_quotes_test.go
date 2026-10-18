@@ -45,6 +45,7 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -63,6 +64,7 @@ func (s *cqSyncBuf) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s
 
 // cqMail records what the notifier is asked to send.
 type cqMail struct {
+	down  bool
 	mu    sync.Mutex
 	links []string
 	codes []string
@@ -81,6 +83,15 @@ func (m *cqMail) SendCode(_ context.Context, _, _, _, code string) error {
 	m.codes = append(m.codes, code)
 	return nil
 }
+
+func (m *cqMail) Channels() customerquote.CodeChannels {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return customerquote.CodeChannels{Email: !m.down, SMS: !m.down}
+}
+
+// setDown makes the server unable to send a code, as with a log only sender.
+func (m *cqMail) setDown(v bool) { m.mu.Lock(); m.down = v; m.mu.Unlock() }
 
 func (m *cqMail) lastCode() string {
 	m.mu.Lock()
@@ -212,7 +223,7 @@ func newCQStack(t *testing.T) *cqStack {
 	wall.orders(mux, orderSvc)
 
 	h := buildChain(ChainDeps{Mux: mux, DB: db, Logger: logger, AuditLog: audit.NewLogger(db)})
-	s.srv = httptest.NewServer(asRole(h))
+	s.srv = httptest.NewServer(deskClaims(h))
 	t.Cleanup(s.srv.Close)
 	return s
 }
@@ -256,7 +267,7 @@ var (
 	asA      = map[string]string{"X-Test-Contractor": "a"}
 	asB      = map[string]string{"X-Test-Contractor": "b"}
 	asViewer = map[string]string{"X-Test-Contractor": "viewer"}
-	asDesk   = map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "desk-user-1"}
+	asDesk   = map[string]string{"X-Test-Role": "sales", "X-Test-Sub": "desk-user-1", "X-Test-Email": deskEmail}
 )
 
 func (s *cqStack) quoteBody(hide bool, requireCode bool) map[string]any {
@@ -387,7 +398,7 @@ var publicKeys = []string{
 	"reference", "title", "status", "contractor", "name", "has_logo", "customer_name", "job_site_address", "valid_until", "note",
 	"payment_terms", "hide_line_prices", "groups", "id", "label", "lines", "group_id", "description", "quantity", "uom", "price_cents",
 	"selection", "extras", "kind", "totals", "subtotal_cents", "tax_cents", "total_cents", "deposit_cents", "tax_mode", "tax_rate_bps",
-	"tax_note", "requires_code", "can_decide", "approval", "decision", "signed_by", "at", "fulfilment",
+	"tax_note", "requires_code", "can_decide", "notice", "approval", "decision", "signed_by", "at", "fulfilment",
 }
 
 var dealerKeys = []string{
@@ -1049,5 +1060,132 @@ func TestWire_DealerQuoteLink_DeclineAndReissue(t *testing.T) {
 	_ = s.db.Pool.QueryRow(context.Background(), `SELECT state::text FROM quotes WHERE id = $1`, qid).Scan(&state)
 	if state != "REJECTED" {
 		t.Errorf("the quote is %s", state)
+	}
+}
+
+// deskEmail is the desk user's work address. It must appear in no response a
+// contractor or a customer can read.
+const deskEmail = "dana.deskwell@dealer-staff.example"
+
+// deskClaims is asRole with the desk user's email on the claims.
+func deskClaims(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role := r.Header.Get("X-Test-Role")
+		claims := &middleware.UserClaims{RegisteredClaims: jwt.RegisteredClaims{Subject: r.Header.Get("X-Test-Sub")},
+			Email: r.Header.Get("X-Test-Email"), Role: role, Roles: []string{role}}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims)))
+	})
+}
+
+func TestWire_Codes_RefusedWhenTheServerCannotSendThem(t *testing.T) {
+	s := newCQStack(t)
+	const sentence = "Verification codes need a real email or text sender on this server."
+	body := s.quoteBody(false, true)
+	id, token := s.createAndSend(body) // while codes can be sent
+
+	s.mail.setDown(true)
+	r := s.do("PUT", "/api/portal/v1/customer-quotes/settings", asA, map[string]any{"tax": map[string]any{"mode": "at_checkout", "rate_bps": 0},
+		"markup": map[string]any{"kind": "markup", "bps": 0}, "require_code": true})
+	if r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Fatalf("the toggle: %d %s", r.status, r.body)
+	}
+	r = s.do("PUT", "/api/portal/v1/customer-quotes/settings", asA, map[string]any{"tax": map[string]any{"mode": "at_checkout", "rate_bps": 0},
+		"markup": map[string]any{"kind": "markup", "bps": 0}, "require_code": false})
+	if r.status != 200 {
+		t.Fatalf("turning it off: %d %s", r.status, r.body)
+	}
+	pub := s.pub(token)
+	view := s.do("GET", pub, nil, nil)
+	assertKeysWithin(t, "the blocked page", view.body, publicKeys)
+	if n, _ := jsonOf(t, view.body)["notice"].(string); !strings.Contains(n, "cannot be accepted") {
+		t.Errorf("the page's notice: %s", view.body)
+	}
+	if r := s.do("POST", pub+"/code", nil, map[string]any{"channel": "email"}); r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Errorf("a code request: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", pub+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "email": "pat@homeowner.example",
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "code": "123456"}); r.status != 409 || !strings.Contains(string(r.body), sentence) {
+		t.Errorf("an acceptance: %d %s", r.status, r.body)
+	}
+	if len(s.mail.codes) != 0 {
+		t.Errorf("a code was sent: %v", s.mail.codes)
+	}
+	_ = id
+}
+
+func TestWire_TheDesksEmailReachesNoContractorCustomerOrPdfResponse(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO staff (email, full_name) VALUES ($1, 'Dana Deskwell') ON CONFLICT (email) DO UPDATE SET full_name = 'Dana Deskwell'`, deskEmail); err != nil {
+		t.Fatal(err)
+	}
+	var oldTrading string
+	_ = s.db.Pool.QueryRow(ctx, `SELECT trading_name FROM dealer_profile WHERE id = 1`).Scan(&oldTrading)
+	if _, err := s.db.Pool.Exec(ctx, `UPDATE dealer_profile SET trading_name = 'Granite Test Yard' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM staff WHERE email = $1`, deskEmail)
+		_, _ = s.db.Pool.Exec(ctx, `UPDATE dealer_profile SET trading_name = $1 WHERE id = 1`, oldTrading)
+	})
+
+	id, token := s.createAndSend(s.quoteBody(false, false))
+	var lines []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines})
+	s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020", "signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}})
+	s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r := s.do("POST", "/api/v1/pro-projects/"+id+"/accept", asDesk, nil); r.status != 200 {
+		t.Fatalf("dealer accept: %d %s", r.status, r.body)
+	}
+	// The dealer's own quote link, issued and accepted by the same desk user.
+	dq := s.dealerQuote("SENT")
+	issue := s.do("POST", "/api/v1/quotes/"+dq.String()+"/share-link", asDesk, nil)
+	dtoken := strings.TrimPrefix(jsonOf(t, issue.body)["path"].(string), "/dq/")
+
+	// The record keeps the desk user's id and display name, not the address.
+	var ref, name string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT actor_ref, actor_name FROM pro_customer_quote_approval_log WHERE quote_id = $1 AND step = 'dealer_accepted'`, id).Scan(&ref, &name); err != nil {
+		t.Fatal(err)
+	}
+	if ref != "desk-user-1" || name != "Dana Deskwell" {
+		t.Errorf("the record holds %q and %q", ref, name)
+	}
+
+	local := strings.Split(deskEmail, "@")[0]
+	responses := map[string]cqResp{
+		"contractor quote":     s.do("GET", "/api/portal/v1/customer-quotes/"+id, asA, nil),
+		"contractor list":      s.do("GET", "/api/portal/v1/customer-quotes", asA, nil),
+		"contractor approvals": s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/approvals", asA, nil),
+		"contractor preview":   s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/preview", asA, nil),
+		"contractor pdf":       s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/pdf", asA, nil),
+		"export json":          s.do("GET", "/api/portal/v1/customer-quotes/export", asA, nil),
+		"export csv":           s.do("GET", "/api/portal/v1/customer-quotes/export?format=csv&kind=quotes", asA, nil),
+		"public view":          s.do("GET", s.pub(token), nil, nil),
+		"public pdf":           s.do("GET", s.pub(token)+"/pdf", nil, nil),
+		"dealer quote page":    s.do("GET", "/api/public/v1/dealer-quotes/"+dtoken, nil, nil),
+		"link issue answer":    issue,
+	}
+	for what, r := range responses {
+		if r.status != 200 {
+			t.Errorf("%s: %d", what, r.status)
+			continue
+		}
+		if bytes.Contains(r.body, []byte(deskEmail)) || bytes.Contains(r.body, []byte(local)) || bytes.Contains(r.body, []byte("dealer-staff")) {
+			t.Errorf("%s carries the desk user's address: %s", what, truncate(r.body))
+		}
+	}
+	// The contractor reads who accepted: the display name and the dealer's business name.
+	items := jsonOf(t, responses["contractor approvals"].body)["items"].([]any)
+	last := items[len(items)-1].(map[string]any)
+	if last["step"] != "dealer_accepted" || last["actor_name"] != "Dana Deskwell, Granite Test Yard" || last["actor_contact"] != "" {
+		t.Errorf("the contractor's view of the dealer step: %v", last)
+	}
+	// The dealer's own desk sees the display name too, not the address.
+	det := s.do("GET", "/api/v1/pro-projects/"+id, asDesk, nil)
+	if bytes.Contains(det.body, []byte(deskEmail)) || !bytes.Contains(det.body, []byte("Dana Deskwell")) {
+		t.Errorf("the desk's view: %s", truncate(det.body))
 	}
 }

@@ -1245,7 +1245,7 @@ export interface paths {
         get: operations["customerQuoteSettingsGet"];
         /**
          * Save the contractor's defaults
-         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code.
+         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code. Turning the code on is a 409 ("Verification codes need a real email or text sender on this server.") while the server's only email sender is the log only one and text is the stub; so is a quote or a send that asks for a code, a code request and an acceptance on such a quote.
          */
         put: operations["customerQuoteSettingsPut"];
         post?: never;
@@ -9522,6 +9522,8 @@ export interface components {
             };
             requires_code: boolean;
             can_decide: boolean;
+            /** @description Present when the quote cannot be accepted yet: the contractor asked for a verification code and the server cannot send one. It says so in plain words; declining stays possible. */
+            notice?: string;
             approval?: {
                 /** @enum {string} */
                 decision: "approved" | "declined";
@@ -19203,6 +19205,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
             403: components["responses"]["CustomerQuoteForbidden"];
+            409: components["responses"]["WireConflict"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

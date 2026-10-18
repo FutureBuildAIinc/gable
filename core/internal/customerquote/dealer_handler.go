@@ -95,13 +95,7 @@ func (h *DealerHandler) Accept(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	who := DealerActor{Ref: "desk", Name: "dealer"}
-	if c := middleware.ClaimsFromContext(r.Context()); c != nil {
-		who.Ref, who.Name = c.Subject, c.Email
-		if who.Name == "" {
-			who.Name = c.Subject
-		}
-	}
+	who := deskActor(r)
 	d, err := h.svc.DealerAccept(r.Context(), who, id)
 	if err != nil {
 		fail(w, r, err)
@@ -145,10 +139,7 @@ func (h *DealerHandler) ShareLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	who := DealerActor{Ref: "desk", Name: "dealer"}
-	if c := middleware.ClaimsFromContext(r.Context()); c != nil {
-		who.Ref, who.Name = c.Subject, c.Email
-	}
+	who := deskActor(r)
 	res, err := h.svc.ShareDealerQuote(r.Context(), who, id, body.SendTo)
 	if err != nil {
 		fail(w, r, err)
@@ -156,4 +147,17 @@ func (h *DealerHandler) ShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, shareLinkAnswer{Path: res.Path, URL: res.URL, ExpiresAt: httpx.TimestampOf(res.ExpiresAt), Delivered: res.Delivered})
+}
+
+// deskActor is the desk user the request names: the id is the token's
+// subject; the email is only the key to the display name.
+func deskActor(r *http.Request) DealerActor {
+	who := DealerActor{Ref: "desk"}
+	if c := middleware.ClaimsFromContext(r.Context()); c != nil {
+		if c.Subject != "" {
+			who.Ref = c.Subject
+		}
+		who.Email = c.Email
+	}
+	return who
 }
