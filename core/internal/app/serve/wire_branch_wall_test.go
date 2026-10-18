@@ -55,14 +55,24 @@ func setSetting(t *testing.T, db *database.DB, key, value string) {
 	t.Helper()
 	ctx := context.Background()
 	var old *string
-	_ = db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = $1`, key).Scan(&old)
+	switch key {
+	case "multi_branch_enabled":
+		def := "false"
+		old = &def
+	case "default_branch_required":
+		def := "true"
+		old = &def
+	default:
+		_ = db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = $1`, key).Scan(&old)
+	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO system_settings (key, value) VALUES ($1, $2)
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
 		t.Fatalf("set %s: %v", key, err)
 	}
 	t.Cleanup(func() {
 		if old != nil {
-			_, _ = db.Pool.Exec(ctx, `UPDATE system_settings SET value = $2 WHERE key = $1`, key, *old)
+			_, _ = db.Pool.Exec(ctx, `INSERT INTO system_settings (key, value) VALUES ($1, $2)
+				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, *old)
 		}
 	})
 }
@@ -886,6 +896,7 @@ func seedWallQuote(t *testing.T, db *database.DB, id, branch, customer uuid.UUID
 // grants; a bound user with no grants reads none; an administrator without a
 // header reads every branch's.
 func TestBranchWall_QuoteListGrants(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -999,6 +1010,7 @@ type invLevelPage struct {
 // every branch's. Every row carries `available` and `uom` beside the
 // quantities, in the product's stocking unit.
 func TestBranchWall_InventoryListGrants(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -1138,6 +1150,7 @@ type poRecSummary struct {
 // header reads a row per yard, yard A at 5 stock and 1 a day, yard B at 50 and
 // 10 a day, never one company row of 55 and 11.
 func TestBranchWall_PORecommendationScoping(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A, B := f.branchA.String(), f.branchB.String()
@@ -1241,6 +1254,7 @@ type quoteAnalytics struct {
 // branch's, and the other packages' quotes mean its count is at least the
 // fixture's two, never assumed exact.
 func TestBranchWall_QuoteAnalytics(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 	A := f.branchA.String()
@@ -1862,6 +1876,7 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 // driver included, though the profile read itself still refuses them (its
 // guard is unchanged); no role at all is refused.
 func TestBranchWall_DealerProfileLocale(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newWallFixture(t, db, true)
 
