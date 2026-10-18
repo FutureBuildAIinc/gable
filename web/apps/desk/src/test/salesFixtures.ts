@@ -25,6 +25,10 @@ export function invoiceLine(overrides: Partial<InvoiceLine> = {}): InvoiceLine {
     price_uom: 'PCS',
     uom_qty: '1',
     price_uom_qty: '1',
+    stock_uom: 'PCS',
+    stock_quantity: '24',
+    tally: null,
+    price_basis: null,
     unit_price_ten_thousandths: 324_000,
     priced_unit_price_ten_thousandths: 324_000,
     price_source: 'price_list',
@@ -98,7 +102,7 @@ export function invoiceSummary(overrides: Partial<InvoiceSummary> = {}): Invoice
 }
 
 export function creditLine(overrides: Partial<CreditMemoLine> = {}): CreditMemoLine {
-  const { order_line_id: _o, ...line } = invoiceLine({ quantity: '-2', line_total_cents: -6_480, cost_cents: -4_560 })
+  const { order_line_id: _o, ...line } = invoiceLine({ quantity: '-2', stock_quantity: '-2', line_total_cents: -6_480, cost_cents: -4_560 })
   void _o
   return { ...line, invoice_line_id: invoiceLine().id, restock: true, ...overrides } as CreditMemoLine
 }
