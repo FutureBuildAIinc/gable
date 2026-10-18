@@ -15450,6 +15450,9 @@ export interface components {
             period_end: string;
             currency: string;
             opening_balance_cents: number;
+            invoices_cents: number;
+            payments_cents: number;
+            finance_charges_cents: number;
             closing_balance_cents: number;
             current_cents: number;
             days_1_30_cents: number;
@@ -15469,7 +15472,7 @@ export interface components {
             customer_id: string;
             gateway: string;
             /** @enum {string} */
-            method_type: "CARD" | "ACH";
+            method_type: "CARD" | "ACH" | "BANK";
             brand?: string;
             last4: string;
             exp_month?: number;
@@ -15483,7 +15486,7 @@ export interface components {
         PortalCreatePaymentMethodRequest: {
             gateway_token: string;
             /** @enum {string} */
-            method_type: "CARD" | "ACH";
+            method_type: "CARD" | "ACH" | "BANK";
             brand?: string;
             last4: string;
             exp_month?: number;
@@ -31509,6 +31512,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay of an already settled payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"];
+                };
+            };
             /** @description The recorded payment and its invoice allocations. */
             201: {
                 headers: {
@@ -31520,6 +31532,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            /** @description Payment was declined by the payment gateway. */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
             403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description Invoice not payable, payment in flight, or unknown gateway outcome held for reconciliation. */
@@ -31534,6 +31555,15 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            /** @description Payment gateway unavailable or returned an unknown error; intent remains in flight for reconciliation. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
         };
     };
     posTransactionList: {

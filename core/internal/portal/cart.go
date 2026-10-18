@@ -64,8 +64,11 @@ func (s *Service) AddToCart(ctx context.Context, customerID uuid.UUID, req AddTo
 	units := CartItemUnits{UOM: string(prod.UOMPrimary), PriceUOM: string(prod.UOMPrimary), UOMQty: 1, PriceUOMQty: 1}
 	if s.pricingSvc != nil {
 		if res, rErr := s.pricingSvc.Resolve(ctx, pricing.Request{
-			CustomerID: customerID, ProductID: req.ProductID,
-			Quantity: httpx.Quantity(int64(req.Quantity*10000 + 0.5)), UOM: string(prod.UOMPrimary),
+			CustomerID: customerID,
+			ProductID:  req.ProductID,
+			BranchID:   s.customerBranchID(ctx, customerID),
+			Quantity:   httpx.Quantity(int64(req.Quantity*10000 + 0.5)),
+			UOM:        string(prod.UOMPrimary),
 		}); rErr == nil {
 			units = CartItemUnits{
 				UOM: res.UOM, PriceUOM: res.PriceUOM,

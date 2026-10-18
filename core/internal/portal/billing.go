@@ -117,6 +117,9 @@ type PortalStatementRunItemDTO struct {
 	PeriodEnd           string    `json:"period_end"`
 	Currency            string    `json:"currency"`
 	OpeningBalanceCents int64     `json:"opening_balance_cents"`
+	InvoicesCents       int64     `json:"invoices_cents"`
+	PaymentsCents       int64     `json:"payments_cents"`
+	FinanceChargesCents int64     `json:"finance_charges_cents"`
 	ClosingBalanceCents int64     `json:"closing_balance_cents"`
 	CurrentCents        int64     `json:"current_cents"`
 	Days1To30Cents      int64     `json:"days_1_30_cents"`
@@ -154,7 +157,11 @@ func (s *Service) computeCustomerAging(ctx context.Context, customerID uuid.UUID
 		out.Days31To60Cents = int64(t.Days31To60)
 		out.Days61To90Cents = int64(t.Days61To90)
 		out.DaysOver90Cents = int64(t.Over90)
-		out.UnappliedCents = int64(t.UnappliedCents)
+		unapplied := int64(t.UnappliedCents)
+		if unapplied < 0 {
+			unapplied = -unapplied
+		}
+		out.UnappliedCents = unapplied
 		out.TotalOpenCents = out.CurrentCents + out.Days1To30Cents + out.Days31To60Cents + out.Days61To90Cents + out.DaysOver90Cents
 		out.NetCents = int64(t.TotalCents)
 	}
@@ -173,12 +180,16 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 	tiles := PortalBalanceTilesDTO{
 		Currency:           aging.Currency,
 		PastDueCents:       aging.Days1To30Cents + aging.Days31To60Cents + aging.Days61To90Cents + aging.DaysOver90Cents,
-		UnappliedCashCents: -aging.UnappliedCents,
+		UnappliedCashCents: aging.UnappliedCents,
 		NetBalanceCents:    aging.NetCents,
 	}
 
 	if s.accountSvc != nil {
-		if sum, err := s.accountSvc.GetSummary(branchctx.WithSystem(ctx), customerID); err == nil && sum != nil {
+		sum, err := s.accountSvc.GetSummary(branchctx.WithSystem(ctx), customerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account summary: %w", err)
+		}
+		if sum != nil {
 			tiles.Currency = sum.Currency
 			tiles.CurrentBalanceCents = int64(sum.BalanceCents)
 			if sum.CreditLimitCents != nil {
@@ -190,7 +201,11 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 				tiles.AvailableCreditCents = &v
 			}
 			if sum.UnappliedCents != 0 {
-				tiles.UnappliedCashCents = -int64(sum.UnappliedCents)
+				u := int64(sum.UnappliedCents)
+				if u < 0 {
+					u = -u
+				}
+				tiles.UnappliedCashCents = u
 			}
 		}
 	}
@@ -198,13 +213,15 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 	jobs := make([]PortalJobSummaryDTO, 0)
 	if pgRepo, ok := s.pgRepo(); ok && pgRepo != nil {
 		exec := pgRepo.db.GetExecutor(ctx)
-		_ = exec.QueryRow(ctx, `
+		if err := exec.QueryRow(ctx, `
 			SELECT
 				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL')),
 				COUNT(*) FILTER (WHERE status IN ('UNPAID', 'PARTIAL') AND due_date < CURRENT_DATE)
 			FROM invoices
 			WHERE customer_id = $1
-		`, customerID).Scan(&tiles.OpenInvoiceCount, &tiles.OverdueInvoiceCount)
+		`, customerID).Scan(&tiles.OpenInvoiceCount, &tiles.OverdueInvoiceCount); err != nil {
+			return nil, fmt.Errorf("failed to count open invoices: %w", err)
+		}
 
 		rows, qErr := exec.Query(ctx, `
 			SELECT
@@ -223,25 +240,30 @@ func (s *Service) GetBillingSummary(ctx context.Context, customerID uuid.UUID) (
 			WHERE p.customer_id = $1
 			ORDER BY p.created_at DESC
 		`, customerID)
-		if qErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var j PortalJobSummaryDTO
-				if err := rows.Scan(
-					&j.ProjectID, &j.ProjectName, &j.Status,
-					&j.QuotedCents, &j.OrderedCents,
-					&j.InvoicedCents, &j.OpenBalanceCents,
-					&j.OrderCount, &j.InvoiceCount, &j.DeliveryCount, &j.DeliveredCount,
-				); err == nil {
-					j.BudgetCents = j.QuotedCents
-					j.PaidCents = j.InvoicedCents - j.OpenBalanceCents
-					if j.PaidCents < 0 {
-						j.PaidCents = 0
-					}
-					j.QuoteVarianceCents = j.OrderedCents - j.QuotedCents
-					jobs = append(jobs, j)
-				}
+		if qErr != nil {
+			return nil, fmt.Errorf("failed to query job summaries: %w", qErr)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var j PortalJobSummaryDTO
+			if err := rows.Scan(
+				&j.ProjectID, &j.ProjectName, &j.Status,
+				&j.QuotedCents, &j.OrderedCents,
+				&j.InvoicedCents, &j.OpenBalanceCents,
+				&j.OrderCount, &j.InvoiceCount, &j.DeliveryCount, &j.DeliveredCount,
+			); err != nil {
+				return nil, fmt.Errorf("failed to scan job summary: %w", err)
 			}
+			j.BudgetCents = j.QuotedCents
+			j.PaidCents = j.InvoicedCents - j.OpenBalanceCents
+			if j.PaidCents < 0 {
+				j.PaidCents = 0
+			}
+			j.QuoteVarianceCents = j.OrderedCents - j.QuotedCents
+			jobs = append(jobs, j)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to iterate job summaries: %w", err)
 		}
 	}
 
@@ -330,14 +352,26 @@ func (s *Service) ListStatementRuns(ctx context.Context, customerID uuid.UUID) (
 			r.period_end::text,
 			i.currency,
 			i.opening_balance_cents,
+			i.invoices_cents,
+			i.payments_cents,
+			i.finance_charges_cents,
 			i.closing_balance_cents,
 			COALESCE((i.aging_buckets->>'current_cents')::bigint, 0),
 			COALESCE((i.aging_buckets->>'days_1_30_cents')::bigint, 0),
 			COALESCE((i.aging_buckets->>'days_31_60_cents')::bigint, 0),
 			COALESCE((i.aging_buckets->>'days_61_90_cents')::bigint, 0),
 			COALESCE((i.aging_buckets->>'over_90_cents')::bigint, 0),
-			COALESCE((i.aging_buckets->>'unapplied_cents')::bigint, 0),
-			i.closing_balance_cents,
+			ABS(COALESCE(
+				(i.aging_buckets->>'unapplied_cents')::bigint,
+				(
+					SELECT COALESCE(SUM(ROUND(p.amount_unapplied * 100)::bigint), 0)
+					FROM payments p
+					WHERE p.customer_id = i.customer_id
+					  AND p.currency = i.currency
+					  AND p.status IN ('POSTED', 'PARTIALLY_APPLIED')
+					  AND p.received_on <= COALESCE(r.as_of_date, r.period_end)
+				)
+			))::bigint,
 			r.created_at
 		FROM ar_statement_run_items i
 		JOIN ar_statement_runs r ON r.id = i.run_id
@@ -354,13 +388,15 @@ func (s *Service) ListStatementRuns(ctx context.Context, customerID uuid.UUID) (
 		var it PortalStatementRunItemDTO
 		if err := rows.Scan(
 			&it.ID, &it.RunID, &it.PeriodStart, &it.PeriodEnd, &it.Currency,
-			&it.OpeningBalanceCents, &it.ClosingBalanceCents,
+			&it.OpeningBalanceCents, &it.InvoicesCents, &it.PaymentsCents, &it.FinanceChargesCents,
+			&it.ClosingBalanceCents,
 			&it.CurrentCents, &it.Days1To30Cents, &it.Days31To60Cents,
 			&it.Days61To90Cents, &it.DaysOver90Cents,
-			&it.UnappliedCents, &it.NetBalanceCents, &it.CreatedAt,
+			&it.UnappliedCents, &it.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
+		it.NetBalanceCents = it.ClosingBalanceCents - it.UnappliedCents
 		out = append(out, it)
 	}
 	return out, rows.Err()

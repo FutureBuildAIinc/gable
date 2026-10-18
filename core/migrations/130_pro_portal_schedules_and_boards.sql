@@ -147,21 +147,21 @@ CREATE TABLE IF NOT EXISTS portal_payment_methods (
     created_by UUID REFERENCES customer_users(id) ON DELETE SET NULL,
     gateway TEXT NOT NULL DEFAULT 'stub',
     gateway_token TEXT NOT NULL,
-    method_type TEXT NOT NULL DEFAULT 'CARD' CHECK (method_type IN ('CARD', 'BANK')),
+    method_type TEXT NOT NULL DEFAULT 'CARD' CHECK (method_type IN ('CARD', 'BANK', 'ACH')),
     brand TEXT,
     last4 TEXT NOT NULL CHECK (char_length(last4) BETWEEN 1 AND 4),
     exp_month INT,
     exp_year INT,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'removed')),
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'REVOKED', 'active', 'removed')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_portal_payment_methods_customer
-    ON portal_payment_methods(customer_id) WHERE status = 'active';
+    ON portal_payment_methods(customer_id) WHERE status IN ('ACTIVE', 'active');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_payment_methods_one_default
-    ON portal_payment_methods(customer_id) WHERE is_default AND status = 'active';
+    ON portal_payment_methods(customer_id) WHERE is_default AND status IN ('ACTIVE', 'active');
 
 -- 6. Single-flight portal payment intents -------------------------------------
 

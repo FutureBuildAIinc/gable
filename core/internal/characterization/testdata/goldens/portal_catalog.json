@@ -172,6 +172,44 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "availability": [
+          {
+            "available": 243,
+            "in_stock": true,
+            "lead_time_days": null,
+            "on_hand": 255,
+            "yard_code": "KEL-MAIN",
+            "yard_id": "<id-16>",
+            "yard_name": "Kelowna Main Yard"
+          },
+          {
+            "available": 107,
+            "in_stock": true,
+            "lead_time_days": null,
+            "on_hand": 107,
+            "yard_code": "WK",
+            "yard_id": "<id-17>",
+            "yard_name": "West Kelowna Satellite"
+          },
+          {
+            "available": 17,
+            "in_stock": true,
+            "lead_time_days": null,
+            "on_hand": 17,
+            "yard_code": "LK",
+            "yard_id": "<id-18>",
+            "yard_name": "Lake Country Outpost"
+          },
+          {
+            "available": 0,
+            "in_stock": false,
+            "lead_time_days": null,
+            "on_hand": 0,
+            "yard_code": "GOLD",
+            "yard_id": "<id-19>",
+            "yard_name": "Golden Branch Renamed"
+          }
+        ],
         "available": 367,
         "base_price": 5.5,
         "category": "Lumber",
@@ -211,7 +249,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -220,7 +258,7 @@
     "name": "portal_catalog.product.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/catalog/<id-17>"
+      "path": "/api/portal/v1/catalog/<id-21>"
     },
     "response": {
       "status": 404,
@@ -231,7 +269,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -263,7 +301,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -272,7 +310,7 @@
     "name": "portal_catalog.volume_breaks.unknown",
     "request": {
       "method": "GET",
-      "path": "/api/portal/v1/catalog/<id-17>/volume-breaks"
+      "path": "/api/portal/v1/catalog/<id-21>/volume-breaks"
     },
     "response": {
       "status": 404,
@@ -283,7 +321,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-24>"
         }
       }
     }

@@ -53,14 +53,6 @@ func (s *Service) getYardAvailability(ctx context.Context, productID uuid.UUID, 
 		return nil, productLeadTime
 	}
 
-	if productLeadTime == nil {
-		var hasWindows bool
-		_ = pgRepo.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM yard_schedule_windows WHERE is_active = TRUE)`).Scan(&hasWindows)
-		if !hasWindows {
-			return nil, nil
-		}
-	}
-
 	rows, err := pgRepo.db.GetExecutor(ctx).Query(ctx, `
 		SELECT
 			l.id,
@@ -127,15 +119,21 @@ func (s *Service) PreviewReorder(ctx context.Context, customerID, sourceOrderID 
 	}
 	exec := pgRepo.db.GetExecutor(ctx)
 
-	var projectID *uuid.UUID
+	var (
+		projectID *uuid.UUID
+		branchID  *uuid.UUID
+	)
 	err := exec.QueryRow(ctx, `
-		SELECT project_id FROM orders WHERE id = $1 AND customer_id = $2
-	`, sourceOrderID, customerID).Scan(&projectID)
+		SELECT project_id, branch_id FROM orders WHERE id = $1 AND customer_id = $2
+	`, sourceOrderID, customerID).Scan(&projectID, &branchID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrOrderNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify source order: %w", err)
+	}
+	if branchID == nil {
+		branchID = s.customerBranchID(ctx, customerID)
 	}
 
 	rows, err := exec.Query(ctx, `
@@ -199,21 +197,6 @@ func (s *Service) PreviewReorder(ctx context.Context, customerID, sourceOrderID 
 	}
 
 	for _, rl := range rawLines {
-		curUnit := rl.basePrice
-		priceSource := "retail"
-		var avail float64
-
-		if rl.productID != nil {
-			if p, src, ok := s.resolveCustomerPrice(ctx, customerID, *rl.productID, rl.priceUOM, rl.qty); ok {
-				curUnit = p
-				priceSource = src
-			}
-			avail = s.getAvailableQty(ctx, *rl.productID)
-		} else {
-			curUnit = rl.origUnit
-			priceSource = "historical"
-		}
-
 		uq := rl.uomQty
 		pq := rl.priceUOMQty
 		if uq <= 0 {
@@ -221,6 +204,25 @@ func (s *Service) PreviewReorder(ctx context.Context, customerID, sourceOrderID 
 		}
 		if pq <= 0 {
 			pq = 1
+		}
+
+		curUnit := rl.basePrice
+		priceSource := "retail"
+		var avail float64
+
+		if rl.productID != nil {
+			saleUOM := rl.uom
+			if saleUOM == "" {
+				saleUOM = rl.priceUOM
+			}
+			if pricePerSaleUOM, src, ok := s.resolveCustomerPriceAtBranch(ctx, customerID, branchID, *rl.productID, saleUOM, rl.qty); ok {
+				curUnit = pricePerSaleUOM * (uq / pq)
+				priceSource = src
+			}
+			avail = s.getAvailableQty(ctx, *rl.productID)
+		} else {
+			curUnit = rl.origUnit
+			priceSource = "historical"
 		}
 
 		origUnitCents := int64(math.Round(rl.origUnit * 100))
@@ -266,8 +268,15 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 	}
 	exec := pgRepo.db.GetExecutor(ctx)
 
+	var branchID *uuid.UUID
+	_ = exec.QueryRow(ctx, `SELECT branch_id FROM orders WHERE id = $1 AND customer_id = $2`, orderID, customerID).Scan(&branchID)
+	if branchID == nil {
+		branchID = s.customerBranchID(ctx, customerID)
+	}
+
 	rows, err := exec.Query(ctx, `
 		SELECT id, product_id, quantity::float8,
+		       COALESCE(uom::text, price_uom, 'EA'),
 		       COALESCE(price_uom, uom::text, 'EA'),
 		       COALESCE(uom_qty, 1)::float8,
 		       COALESCE(price_uom_qty, 1)::float8
@@ -281,6 +290,7 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 		id          uuid.UUID
 		productID   uuid.UUID
 		qty         float64
+		uom         string
 		priceUOM    string
 		uomQty      float64
 		priceUOMQty float64
@@ -288,18 +298,25 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 	var lines []lineToPrice
 	for rows.Next() {
 		var l lineToPrice
-		if err := rows.Scan(&l.id, &l.productID, &l.qty, &l.priceUOM, &l.uomQty, &l.priceUOMQty); err != nil {
+		if err := rows.Scan(&l.id, &l.productID, &l.qty, &l.uom, &l.priceUOM, &l.uomQty, &l.priceUOMQty); err != nil {
 			rows.Close()
 			return err
 		}
 		lines = append(lines, l)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	updatedAny := false
 	for _, l := range lines {
-		price, _, ok := s.resolveCustomerPrice(ctx, customerID, l.productID, l.priceUOM, l.qty)
-		if !ok || price <= 0 {
+		saleUOM := l.uom
+		if saleUOM == "" {
+			saleUOM = l.priceUOM
+		}
+		pricePerSaleUOM, _, ok := s.resolveCustomerPriceAtBranch(ctx, customerID, branchID, l.productID, saleUOM, l.qty)
+		if !ok || pricePerSaleUOM <= 0 {
 			continue
 		}
 		uq := l.uomQty
@@ -310,7 +327,8 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 		if pq <= 0 {
 			pq = 1
 		}
-		lineTotal := math.Round((l.qty*price*pq/uq)*100) / 100
+		unitPrice := pricePerSaleUOM * (uq / pq)
+		lineTotal := math.Round((l.qty*pricePerSaleUOM)*100) / 100
 		if _, err := exec.Exec(ctx, `
 			UPDATE order_lines
 			SET unit_price = $2,
@@ -318,7 +336,7 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 			    price_source = 'PRICE_LIST',
 			    line_total = $3
 			WHERE id = $1
-		`, l.id, price, lineTotal); err != nil {
+		`, l.id, unitPrice, lineTotal); err != nil {
 			return err
 		}
 		updatedAny = true
@@ -336,3 +354,4 @@ func (s *Service) repriceReorderedDraft(ctx context.Context, customerID, orderID
 	}
 	return nil
 }
+
