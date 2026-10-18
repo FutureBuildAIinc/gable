@@ -3,8 +3,9 @@
 
 import '../index.css'
 import { initTheme } from '@gable/design-system'
+import './public-page.ts'
 
 initTheme(null)
 
 const root = document.getElementById('root')
-if (root) root.innerHTML = '<main class="pro-main"><p class="pro-page-kicker">Customer quote</p></main>'
+if (root) root.innerHTML = '<gable-customer-quote-page></gable-customer-quote-page>'

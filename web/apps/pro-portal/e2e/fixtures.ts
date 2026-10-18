@@ -4,6 +4,8 @@
 import type { Page, Route } from '@playwright/test'
 import type { PortalConfig, PortalMe } from '../src/types.ts'
 import { holdFixture, orderFixture, slotsFixture, testIds, timelineFixture, todayFixture } from '../src/test/fixtures.ts'
+import { catalogFixtures, customerQuoteFixture, customerQuoteSummaryFixture, quoteIds } from '../src/test/customer-quote-fixtures.ts'
+import { publicQuoteFixture, publicToken, signedPublicQuoteFixture } from '../src/test/public-fixtures.ts'
 
 export const ids = {
   user: '11111111-1111-4111-8111-111111111111',
@@ -73,10 +75,15 @@ export function json(route: Route, body: unknown, status = 200, headers: Record<
 
 export interface MockOptions {
   signedIn?: boolean
+  publicState?: 'open' | 'signed'
 }
 
 export async function installPortalMocks(page: Page, options: MockOptions = {}): Promise<void> {
   let signedIn = options.signedIn ?? true
+  const customerQuote = structuredClone(customerQuoteFixture)
+  const publicView = structuredClone(options.publicState === 'signed' ? signedPublicQuoteFixture : publicQuoteFixture)
+  await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+  await page.route('https://fonts.gstatic.com/**', (route) => route.fulfill({ status: 200, contentType: 'font/woff2', body: '' }))
   await page.route('**/api/portal/v1/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -112,6 +119,62 @@ export async function installPortalMocks(page: Page, options: MockOptions = {}):
       if (request.method() === 'DELETE') return route.fulfill({ status: 204 })
       return json(route, holdFixture)
     }
+    if (path === '/api/portal/v1/customer-quotes') {
+      if (request.method() === 'POST') return json(route, customerQuote, 201)
+      return json(route, { items: [{ ...customerQuoteSummaryFixture, status: customerQuote.status, effective_status: customerQuote.effective_status }], next_cursor: null, limit: 30 })
+    }
+    if (path === '/api/portal/v1/customer-quotes/export') {
+      return url.searchParams.get('format') === 'csv'
+        ? route.fulfill({ status: 200, contentType: 'text/csv', body: 'reference,title\nCQ-1001,Deck' })
+        : json(route, { customers: [], projects: [], quotes: [customerQuote] })
+    }
+    if (path === '/api/portal/v1/catalog') return json(route, catalogFixtures)
+    if (path === '/api/portal/v1/projects') return json(route, { items: [], next_cursor: null, limit: 50 })
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/preview`) return json(route, publicQuoteFixture)
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/send`) {
+      customerQuote.status = 'sent'
+      customerQuote.effective_status = 'sent'
+      customerQuote.link = { expires_at: customerQuote.valid_until }
+      return json(route, { quote: customerQuote, link: { path: `/q/${publicToken}`, expires_at: customerQuote.valid_until, delivered: false } })
+    }
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/link/rotate`) {
+      return json(route, { quote: customerQuote, link: { path: `/q/${publicToken}`, expires_at: customerQuote.valid_until, delivered: false } })
+    }
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/link/revoke`) {
+      customerQuote.link = null
+      return route.fulfill({ status: 204 })
+    }
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}/confirm`) {
+      customerQuote.status = 'confirmed'
+      customerQuote.effective_status = 'confirmed'
+      customerQuote.order = { id: testIds.order, number: 'SO-1001', status: 'CONFIRMED', fulfilment: 'ordered', total_cents: 1000 }
+      return json(route, customerQuote)
+    }
+    if (path === `/api/portal/v1/customer-quotes/${quoteIds.quote}`) return json(route, customerQuote)
+    return json(route, { error: 'not mocked' }, 404)
+  })
+  await page.route('**/api/public/v1/customer-quotes/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === `/api/public/v1/customer-quotes/${publicToken}`) return json(route, publicView)
+    if (path === `/api/public/v1/customer-quotes/${publicToken}/selections`) {
+      const body = request.postDataJSON() as { choices: { line_id: string, state: 'approved' | 'declined' }[] }
+      publicView.lines = publicView.lines.map((line) => {
+        const choice = body.choices.find((item) => item.line_id === line.id)
+        if (choice !== undefined) return { ...line, selection: choice.state }
+        const approvedSibling = body.choices.find((item) => item.state === 'approved' && publicView.lines.find((candidate) => candidate.id === item.line_id)?.group_id === line.group_id)
+        return line.group_id !== undefined && approvedSibling !== undefined ? { ...line, selection: 'declined' as const } : line
+      })
+      publicView.selections_version = (publicView.selections_version ?? 1) + 1
+      return json(route, publicView)
+    }
+    if (path === `/api/public/v1/customer-quotes/${publicToken}/code`) return route.fulfill({ status: 202 })
+    if (path === `/api/public/v1/customer-quotes/${publicToken}/accept`) {
+      customerQuote.status = 'approved'
+      customerQuote.effective_status = 'approved'
+      return json(route, signedPublicQuoteFixture)
+    }
+    if (path === `/api/public/v1/customer-quotes/${publicToken}/decline`) return json(route, { ...signedPublicQuoteFixture, status: 'declined' })
     return json(route, { error: 'not mocked' }, 404)
   })
 }

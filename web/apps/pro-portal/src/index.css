@@ -110,7 +110,7 @@
   }
 
   .pro-card-link {
-    @apply block w-full text-left no-underline transition-colors hover:border-zinc-500;
+    @apply block w-full text-left no-underline transition-colors hover:border-zinc-400;
   }
 
   .pro-card-title {
@@ -154,7 +154,7 @@
   }
 
   .pro-btn-secondary {
-    @apply border-zinc-500 bg-surface-3 text-white hover:border-gable-green;
+    @apply border-zinc-400 bg-surface-3 text-white hover:border-gable-green;
   }
 
   .pro-btn-ghost {
@@ -174,17 +174,17 @@
   }
 
   .pro-icon-btn {
-    @apply grid size-11 shrink-0 place-items-center rounded-xl border border-zinc-500 bg-surface-2 text-zinc-300;
+    @apply grid size-11 shrink-0 place-items-center rounded-xl border border-zinc-400 bg-surface-2 text-zinc-300;
   }
 
-  .pro-shell gable-theme-toggle button {
-    @apply border-zinc-500;
+  gable-theme-toggle button[data-testid="theme-toggle"] {
+    @apply border-zinc-400;
   }
 
   .pro-input,
   .pro-select,
   .pro-textarea {
-    @apply min-h-11 w-full rounded-xl border border-zinc-500 bg-surface-2 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-gable-green;
+    @apply min-h-11 w-full min-w-0 rounded-xl border border-zinc-400 bg-surface-2 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-gable-green;
   }
 
   .pro-textarea {
@@ -228,7 +228,7 @@
   }
 
   .pro-tab {
-    @apply min-h-10 shrink-0 rounded-full border border-zinc-500 bg-transparent px-4 text-sm font-medium text-zinc-300;
+    @apply min-h-10 shrink-0 rounded-full border border-zinc-400 bg-transparent px-4 text-sm font-medium text-zinc-300;
   }
 
   .pro-tab-active {
@@ -245,7 +245,7 @@
 
   button.pro-stat,
   a.pro-stat {
-    @apply border-zinc-500;
+    @apply border-zinc-400;
   }
 
   .pro-stat[aria-pressed="true"] {
@@ -253,7 +253,15 @@
   }
 
   .pro-stat-value {
-    @apply block truncate font-mono text-xl font-medium tabular-nums text-white;
+    @apply block break-words font-mono text-lg font-medium tabular-nums text-white;
+  }
+
+  .pro-summary-grid {
+    @apply mt-3 grid grid-cols-1 gap-2;
+  }
+
+  .pro-summary-grid .pro-stat-value {
+    @apply whitespace-nowrap text-xl;
   }
 
   .pro-stat-label {
@@ -305,7 +313,7 @@
   }
 
   .pro-empty {
-    @apply rounded-2xl border border-dashed border-zinc-500 bg-slate-steel p-6 text-center;
+    @apply rounded-2xl border border-dashed border-zinc-400 bg-slate-steel p-6 text-center;
   }
 
   .pro-notice {
@@ -329,7 +337,7 @@
   }
 
   .pro-sheet {
-    @apply fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-3xl border-x border-t border-zinc-500 bg-surface-3 p-5 shadow-elevation-3 lg:left-1/2 lg:top-1/2 lg:w-full lg:max-w-2xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:border lg:pb-5;
+    @apply fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-3xl border-x border-t border-zinc-400 bg-surface-3 p-5 shadow-elevation-3 lg:left-1/2 lg:top-1/2 lg:w-full lg:max-w-2xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:border lg:pb-5;
   }
 
   .pro-two-col {
@@ -353,7 +361,7 @@
   }
 
   .pro-timeline-dot {
-    @apply z-10 grid size-8 shrink-0 place-items-center rounded-full border border-zinc-500 bg-surface-2 font-mono text-xs text-zinc-300;
+    @apply z-10 grid size-8 shrink-0 place-items-center rounded-full border border-zinc-400 bg-surface-2 font-mono text-xs text-zinc-300;
   }
 
   .pro-timeline-dot-done {
@@ -373,7 +381,7 @@
   }
 
   .pro-schedule-slot {
-    @apply w-full rounded-2xl border border-zinc-500 bg-slate-steel p-4 text-left hover:border-gable-green;
+    @apply w-full rounded-2xl border border-zinc-400 bg-slate-steel p-4 text-left hover:border-gable-green;
   }
 
   .pro-schedule-slot-selected {
@@ -393,7 +401,7 @@
   }
 
   .pro-option {
-    @apply flex w-full items-center gap-3 rounded-2xl border border-zinc-500 bg-slate-steel p-3 text-left;
+    @apply flex w-full items-center gap-3 rounded-2xl border border-zinc-400 bg-slate-steel p-3 text-left;
   }
 
   .pro-option-selected {
@@ -401,7 +409,7 @@
   }
 
   .pro-signature {
-    @apply h-40 w-full touch-none rounded-2xl border border-zinc-500 bg-surface-2;
+    @apply h-40 w-full touch-none rounded-2xl border border-zinc-400 bg-surface-2;
   }
 
   .pro-sr-only {
