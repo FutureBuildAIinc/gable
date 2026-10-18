@@ -20510,7 +20510,7 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
                 limit?: components["parameters"]["Limit"];
-                /** @description One branch's entries. Absent reads consolidated, which needs every branch reach. */
+                /** @description One branch's entries. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;
@@ -20700,7 +20700,7 @@ export interface operations {
                 as_of?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone. */
                 currency?: string;
-                /** @description One branch's rows. Absent reads consolidated, which needs every branch reach. */
+                /** @description One branch's rows. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;
@@ -20737,7 +20737,7 @@ export interface operations {
                 compare_end?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency. */
                 currency?: string;
-                /** @description One branch's statement. Absent reads consolidated, which needs every branch reach. */
+                /** @description One branch's statement. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;
@@ -20768,7 +20768,7 @@ export interface operations {
                 as_of?: string;
                 /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency. */
                 currency?: string;
-                /** @description One branch's sheet. Absent reads consolidated, which needs every branch reach. */
+                /** @description One branch's sheet. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;
@@ -20801,7 +20801,7 @@ export interface operations {
                 from: string;
                 /** @description Last day, YYYY-MM-DD. */
                 to: string;
-                /** @description One branch's lines. Absent reads every branch, which needs every branch reach. */
+                /** @description One branch's lines. Absent reads the X-Branch-Id branch when the header is sent, else every branch, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;
@@ -20832,7 +20832,7 @@ export interface operations {
                 as_of?: string;
                 /** @description ISO 4217 code, three capital letters; defaults to the dealer's default currency. */
                 currency?: string;
-                /** @description One branch's tie out. Absent ties consolidated, which needs every branch reach. */
+                /** @description One branch's tie out. Absent ties the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach. */
                 branch_id?: string;
             };
             header?: never;

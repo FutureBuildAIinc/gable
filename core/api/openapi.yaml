@@ -5802,7 +5802,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's entries. Absent reads consolidated, which needs every branch reach.
+          description: One branch's entries. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -6023,7 +6023,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's rows. Absent reads consolidated, which needs every branch reach.
+          description: One branch's rows. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -6089,7 +6089,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's statement. Absent reads consolidated, which needs every branch reach.
+          description: One branch's statement. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -6134,7 +6134,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's sheet. Absent reads consolidated, which needs every branch reach.
+          description: One branch's sheet. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -6185,7 +6185,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's lines. Absent reads every branch, which needs every branch reach.
+          description: One branch's lines. Absent reads the X-Branch-Id branch when the header is sent, else every branch, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -6229,7 +6229,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's tie out. Absent ties consolidated, which needs every branch reach.
+          description: One branch's tie out. Absent ties the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid

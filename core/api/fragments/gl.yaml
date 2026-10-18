@@ -6,8 +6,9 @@
 # behave today. The routes sit behind RequireRole("admin","owner") composed
 # with the branch middleware, and the branch wall is on every read and write
 # that names or returns a branch: a named branch is held to the caller's
-# reach (403 when it is not), and a consolidated read (no branch_id) needs
-# every branch reach. Money is int64 cents everywhere, the lists are cursor
+# reach (403 when it is not), a read that names no branch reads the
+# X-Branch-Id branch when the header is sent, and the consolidated read (no
+# branch_id and no header) needs every branch reach. Money is int64 cents everywhere, the lists are cursor
 # paginated, and the account and period updates take If-Match on a revision.
 paths:
   /api/v1/gl/accounts:
@@ -140,7 +141,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's entries. Absent reads consolidated, which needs every branch reach.
+          description: One branch's entries. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -393,7 +394,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's rows. Absent reads consolidated, which needs every branch reach.
+          description: One branch's rows. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -466,7 +467,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's statement. Absent reads consolidated, which needs every branch reach.
+          description: One branch's statement. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -516,7 +517,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's sheet. Absent reads consolidated, which needs every branch reach.
+          description: One branch's sheet. Absent reads the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -571,7 +572,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's lines. Absent reads every branch, which needs every branch reach.
+          description: One branch's lines. Absent reads the X-Branch-Id branch when the header is sent, else every branch, which needs every branch reach.
           schema:
             type: string
             format: uuid
@@ -622,7 +623,7 @@ paths:
         - name: branch_id
           in: query
           required: false
-          description: One branch's tie out. Absent ties consolidated, which needs every branch reach.
+          description: One branch's tie out. Absent ties the X-Branch-Id branch when the header is sent, else consolidated, which needs every branch reach.
           schema:
             type: string
             format: uuid
