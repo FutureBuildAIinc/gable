@@ -57,7 +57,8 @@ func contactFrom(d *ContactDraft, id, customerID uuid.UUID, now httpx.Timestamp)
 		ID: id, CustomerID: customerID, FirstName: d.FirstName, LastName: d.LastName,
 		Title: d.Title, Email: d.Email, Phone: d.Phone, Role: d.Role,
 		IsPrimary: d.IsPrimary, IsActive: d.IsActive, CanPlaceOrders: d.CanPlaceOrders,
-		OrderLimitCents: d.OrderLimitCents, UpdatedAt: now,
+		OrderLimitCents: d.OrderLimitCents, BuyerSaleCapCents: d.BuyerSaleCapCents, UpdatedAt: now,
+		AuthorizedBuyer: d.AuthorizedBuyer != nil && *d.AuthorizedBuyer,
 	}
 }
 
@@ -108,6 +109,13 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 			return err
 		}
 		next := contactFrom(d, id, cur.CustomerID, httpx.TimestampOf(s.now().UTC()))
+		// the counter's roster flag and cap keep their value when left out
+		if d.AuthorizedBuyer == nil {
+			next.AuthorizedBuyer = cur.AuthorizedBuyer
+		}
+		if !d.BuyerCapSet {
+			next.BuyerSaleCapCents = cur.BuyerSaleCapCents
+		}
 		if err := s.repo.UpdateContact(ctx, next); err != nil {
 			return err
 		}
@@ -392,7 +400,10 @@ func (s *Service) auditAuthority(ctx context.Context, cust *Customer, before, af
 	}
 	limitChanged := (before.OrderLimitCents == nil) != (after.OrderLimitCents == nil) ||
 		(before.OrderLimitCents != nil && *before.OrderLimitCents != *after.OrderLimitCents)
-	if before.CanPlaceOrders == after.CanPlaceOrders && !limitChanged {
+	capChanged := (before.BuyerSaleCapCents == nil) != (after.BuyerSaleCapCents == nil) ||
+		(before.BuyerSaleCapCents != nil && *before.BuyerSaleCapCents != *after.BuyerSaleCapCents)
+	if before.CanPlaceOrders == after.CanPlaceOrders && !limitChanged &&
+		before.AuthorizedBuyer == after.AuthorizedBuyer && !capChanged {
 		return nil
 	}
 	changes := map[string]any{
@@ -400,6 +411,9 @@ func (s *Service) auditAuthority(ctx context.Context, cust *Customer, before, af
 		"account_number":    cust.AccountNumber,
 		"can_place_orders":  map[string]any{"from": before.CanPlaceOrders, "to": after.CanPlaceOrders},
 		"order_limit_cents": map[string]any{"from": centsPtrValue(before.OrderLimitCents), "to": centsPtrValue(after.OrderLimitCents)},
+		"authorized_buyer":  map[string]any{"from": before.AuthorizedBuyer, "to": after.AuthorizedBuyer},
+		"buyer_sale_cap_cents": map[string]any{"from": centsPtrValue(before.BuyerSaleCapCents),
+			"to": centsPtrValue(after.BuyerSaleCapCents)},
 	}
 	if err := s.audit.LogChange(ctx, "contact.authority_changed", cust.ID, changes); err != nil {
 		return fmt.Errorf("failed to write audit log: %w", err)

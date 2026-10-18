@@ -195,7 +195,9 @@ const customerColumns = `
 	ROUND(c.balance_due * 100)::bigint,
 	c.currency,
 	COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-	c.payment_terms_id, pt.code, pt.name, c.po_required, c.revision, c.created_at, COALESCE(c.updated_at, c.created_at),
+	c.payment_terms_id, pt.code, pt.name, c.po_required, c.named_buyer_required,
+	CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
+	c.revision, c.created_at, COALESCE(c.updated_at, c.created_at),
 	ARRAY(SELECT cb.branch_id FROM customer_branches cb WHERE cb.customer_id = c.id UNION SELECT c.primary_branch_id ORDER BY 1)`
 
 const customerFrom = `
@@ -211,6 +213,7 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		plMult               *float64
 		plCreated, plUpdated *time.Time
 		credit               *int64
+		checkLimit           *int64
 		balance              int64
 		created, updated     time.Time
 	)
@@ -220,6 +223,7 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		&c.SalespersonID, &c.SalespersonName,
 		&credit, &balance, &c.Currency, &c.EffectiveCurrency,
 		&c.PaymentTermsID, &c.PaymentTerms.Code, &c.PaymentTerms.Name, &c.POrequired,
+		&c.NamedBuyerRequired, &checkLimit,
 		&c.Revision, &created, &updated, &c.BranchIDs); err != nil {
 		return err
 	}
@@ -244,6 +248,10 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		cc := httpx.Cents(*credit)
 		c.CreditLimitCents = &cc
 	}
+	if checkLimit != nil {
+		cl := httpx.Cents(*checkLimit)
+		c.CheckLimitCents = &cl
+	}
 	c.BalanceCents = httpx.Cents(balance)
 	c.PaymentTerms.ID = c.PaymentTermsID
 	c.CreatedAt, c.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
@@ -263,16 +271,18 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 		INSERT INTO customers (
 			id, account_number, name, email, phone, address, tier, is_active,
 			price_level_id, salesperson_id, credit_limit, currency, payment_terms_id, po_required,
+			named_buyer_required, check_limit,
 			created_at, updated_at, revision, primary_branch_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7::customer_tier, $8,
 			$9, $10, $11::numeric / 100, $12, COALESCE($13::uuid, payment_terms_default_id()), $14,
+			$17, $18::numeric / 100,
 			$15, $15, 1,
 			COALESCE($16::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 		RETURNING primary_branch_id`,
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
 		string(c.Tier), c.IsActive,
 		c.PriceLevelID, c.SalespersonID, centsArg(c.CreditLimitCents), nullableText(c.Currency), nilIfZero(c.PaymentTermsID), c.POrequired,
-		c.CreatedAt.Time, branchArg,
+		c.CreatedAt.Time, branchArg, c.NamedBuyerRequired, centsArg(c.CheckLimitCents),
 	).Scan(&branch)
 	if err != nil {
 		return mapWriteError(err, "failed to insert customer")
@@ -341,11 +351,13 @@ func (r *PostgresRepository) UpdateCustomer(ctx context.Context, c *Customer) er
 			account_number = $2, name = $3, email = $4, phone = $5, address = $6,
 			tier = $7::customer_tier, is_active = $8, price_level_id = $9, salesperson_id = $10,
 			credit_limit = $11::numeric / 100, currency = $12, payment_terms_id = $13, po_required = $14,
+			named_buyer_required = $16, check_limit = $17::numeric / 100,
 			revision = revision + 1, updated_at = $15
 		WHERE id = $1`,
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
 		string(c.Tier), c.IsActive, c.PriceLevelID, c.SalespersonID, centsArg(c.CreditLimitCents),
-		nullableText(c.Currency), c.PaymentTermsID, c.POrequired, c.UpdatedAt.Time)
+		nullableText(c.Currency), c.PaymentTermsID, c.POrequired, c.UpdatedAt.Time,
+		c.NamedBuyerRequired, centsArg(c.CheckLimitCents))
 	if err != nil {
 		return mapWriteError(err, "failed to update customer")
 	}

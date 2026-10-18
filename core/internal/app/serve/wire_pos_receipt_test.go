@@ -210,6 +210,41 @@ func TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice(t *testing.T) {
 			}
 		}
 	})
+	t.Run("each print is counted, and the 80mm layout is honest about what this server holds", func(t *testing.T) {
+		var before int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		for _, layout := range []string{"", "?layout=invoice"} {
+			status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+sale.String()+"/receipt"+layout, "", hdr)
+			if status != http.StatusOK || !strings.HasPrefix(string(buf), "%PDF") {
+				t.Fatalf("print %q: %d %.40q, want the invoice document", layout, status, buf)
+			}
+		}
+		var after int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before+2 {
+			t.Errorf("print_count %d then %d, want two more prints counted", before, after)
+		}
+		// no 80mm renderer is wired on this server: the layout says so and
+		// counts nothing
+		status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+sale.String()+"/receipt?layout=thermal80", "", hdr)
+		if status != http.StatusConflict || receiptCode(t, buf) != "layout_unavailable" {
+			t.Errorf("thermal80 with no renderer: %d %s, want 409 layout_unavailable", status, buf)
+		}
+		if status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+sale.String()+"/receipt?layout=wide", "", hdr); status != http.StatusBadRequest {
+			t.Errorf("an unknown layout: %d %s, want 400", status, buf)
+		}
+		var final int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&final); err != nil {
+			t.Fatal(err)
+		}
+		if final != after {
+			t.Errorf("print_count %d then %d: a refused layout must count nothing", after, final)
+		}
+	})
 	t.Run("the cashier emails it to the account's contact once", func(t *testing.T) {
 		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+sale.String()+"/receipt/email", "", hdr)
 		if status != http.StatusAccepted || !strings.Contains(string(buf), `"status":"queued"`) {

@@ -325,6 +325,8 @@ const contactColumns = `cc.id, cc.customer_id, cc.first_name, cc.last_name, NULL
 	NULLIF(cc.phone, ''), NULLIF(cc.role, ''), COALESCE(cc.is_primary, FALSE), COALESCE(cc.is_active, TRUE),
 	cc.can_place_orders,
 	CASE WHEN cc.order_limit IS NULL THEN NULL ELSE ROUND(cc.order_limit * 100)::bigint END,
+	cc.authorized_buyer,
+	CASE WHEN cc.buyer_sale_cap IS NULL THEN NULL ELSE ROUND(cc.buyer_sale_cap * 100)::bigint END,
 	cc.revision, cc.created_at, COALESCE(cc.updated_at, cc.created_at)`
 
 const contactJoin = ` FROM customer_contacts cc JOIN customers c ON c.id = cc.customer_id`
@@ -333,10 +335,12 @@ func scanContact(row pgx.Row, c *Contact) error {
 	var (
 		role             *string
 		limit            *int64
+		buyerCap         *int64
 		created, updated time.Time
 	)
 	if err := row.Scan(&c.ID, &c.CustomerID, &c.FirstName, &c.LastName, &c.Title, &c.Email, &c.Phone, &role,
-		&c.IsPrimary, &c.IsActive, &c.CanPlaceOrders, &limit, &c.Revision, &created, &updated); err != nil {
+		&c.IsPrimary, &c.IsActive, &c.CanPlaceOrders, &limit, &c.AuthorizedBuyer, &buyerCap,
+		&c.Revision, &created, &updated); err != nil {
 		return err
 	}
 	if role != nil {
@@ -346,6 +350,10 @@ func scanContact(row pgx.Row, c *Contact) error {
 	if limit != nil {
 		l := httpx.Cents(*limit)
 		c.OrderLimitCents = &l
+	}
+	if buyerCap != nil {
+		b := httpx.Cents(*buyerCap)
+		c.BuyerSaleCapCents = &b
 	}
 	c.CreatedAt, c.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
@@ -361,10 +369,12 @@ func roleArg(r *ContactRole) any {
 func (r *PostgresRepository) InsertContact(ctx context.Context, c *Contact) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		INSERT INTO customer_contacts (id, customer_id, first_name, last_name, title, email, phone, role,
-			is_primary, is_active, can_place_orders, order_limit, revision, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric / 100, 1, $13, $13)`,
+			is_primary, is_active, can_place_orders, order_limit, authorized_buyer, buyer_sale_cap,
+			revision, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric / 100, $14, $15::numeric / 100, 1, $13, $13)`,
 		c.ID, c.CustomerID, c.FirstName, c.LastName, nullableText(c.Title), nullableText(c.Email), nullableText(c.Phone),
-		roleArg(c.Role), c.IsPrimary, c.IsActive, c.CanPlaceOrders, centsArg(c.OrderLimitCents), c.CreatedAt.Time)
+		roleArg(c.Role), c.IsPrimary, c.IsActive, c.CanPlaceOrders, centsArg(c.OrderLimitCents), c.CreatedAt.Time,
+		c.AuthorizedBuyer, centsArg(c.BuyerSaleCapCents))
 	if err != nil {
 		return fmt.Errorf("failed to insert contact: %w", err)
 	}
@@ -401,10 +411,12 @@ func (r *PostgresRepository) UpdateContact(ctx context.Context, c *Contact) erro
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		UPDATE customer_contacts SET first_name = $2, last_name = $3, title = $4, email = $5, phone = $6, role = $7,
 			is_primary = $8, is_active = $9, can_place_orders = $10, order_limit = $11::numeric / 100,
+			authorized_buyer = $13, buyer_sale_cap = $14::numeric / 100,
 			revision = revision + 1, updated_at = $12
 		WHERE id = $1`,
 		c.ID, c.FirstName, c.LastName, nullableText(c.Title), nullableText(c.Email), nullableText(c.Phone),
-		roleArg(c.Role), c.IsPrimary, c.IsActive, c.CanPlaceOrders, centsArg(c.OrderLimitCents), c.UpdatedAt.Time)
+		roleArg(c.Role), c.IsPrimary, c.IsActive, c.CanPlaceOrders, centsArg(c.OrderLimitCents), c.UpdatedAt.Time,
+		c.AuthorizedBuyer, centsArg(c.BuyerSaleCapCents))
 	if err != nil {
 		return fmt.Errorf("failed to update contact: %w", err)
 	}

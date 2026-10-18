@@ -476,6 +476,7 @@
         "branch_ids": [
           "<id-13>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -484,6 +485,7 @@
         "id": "<id-1>",
         "is_active": true,
         "name": "Golden Contacts Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "GOLDEN-NET15",
           "id": "<id-12>",
@@ -519,6 +521,7 @@
         "branch_ids": [
           "<id-13>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -527,6 +530,7 @@
         "id": "<id-1>",
         "is_active": true,
         "name": "Golden Contacts Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "GOLDEN-NET15",
           "id": "<id-12>",

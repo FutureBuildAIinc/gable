@@ -83,11 +83,23 @@ func TestOnlyAManagerWhoIsNotTheCashierApprovesAnOverride(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	cashier := uuid.NewString()
 	sale := f.startSaleBy(cashier, &f.customerID)
-	for _, role := range []string{"cashier", "sales", "finance", "driver", ""} {
+	for _, role := range []string{"cashier", "sales", "finance", "driver"} {
 		if r := f.override(sale, "account", "reason", 100, role, uuid.NewString()); r.status != http.StatusForbidden {
 			t.Errorf("role %q approving an override = %d, want 403: %s", role, r.status, r.raw)
 		}
 	}
+	// a signed in admin with no subject is no one
+	if r := f.override(sale, "account", "reason", 100, "admin", ""); r.status != http.StatusForbidden {
+		t.Errorf("an admin with no subject approving an override = %d, want 403: %s", r.status, r.raw)
+	}
+	// no claims at all is the dev mode bypass every role guard lets through:
+	// it approves as dev-mode, a name, never an empty one
+	r := f.do("POST", "/api/v1/pos/transactions/"+sale+"/overrides",
+		map[string]any{"kind": "account", "reason": "dev walk", "cap_cents": 100})
+	if r.status != http.StatusCreated || r.body["approved_by"] != "dev-mode" {
+		t.Errorf("a dev mode approval = %d: %s, want 201 approved by dev-mode", r.status, r.raw)
+	}
+	mustExec(t, f.db, `DELETE FROM pos_account_overrides WHERE sale_id = $1`, sale)
 	for _, role := range []string{"admin", "owner"} {
 		if r := f.override(sale, "account", "reason", 100, role, uuid.NewString()); r.status != http.StatusCreated {
 			t.Errorf("role %q approving an override = %d, want 201: %s", role, r.status, r.raw)

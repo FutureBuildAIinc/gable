@@ -22,6 +22,11 @@ const (
 	OverrideCheck   = "check"   // a check over the customer's check limit
 )
 
+// devApprover names the approver of a request that carries no claims at all
+// (AUTH_MODE=dev, the local development bypass), so the audit and the row
+// never hold an empty name.
+const devApprover = "dev-mode"
+
 // overrideRoles may approve an override. The approver must also be a
 // different person than the sale's cashier.
 var overrideRoles = []string{"admin", "owner"}
@@ -185,10 +190,17 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 	if refuseMachineKey(w, r, "an override is approved by a person, never a machine key") {
 		return
 	}
-	claims := middleware.ClaimsFromContext(r.Context())
-	if claims == nil || claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
-		httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
-		return
+	// A configured deployment always carries claims (the auth layer sets them
+	// or answers 401); no claims and no machine key is the dev mode bypass,
+	// which every role guard of the module lets through, so it approves as
+	// "dev-mode": a person other than any cashier, never an empty name.
+	approver := devApprover
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
+			httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
+			return
+		}
+		approver = claims.Subject
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -205,7 +217,7 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, r, err)
 		return
 	}
-	o, err := h.service.ApproveOverride(r.Context(), id, in, claims.Subject)
+	o, err := h.service.ApproveOverride(r.Context(), id, in, approver)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

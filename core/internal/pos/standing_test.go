@@ -313,7 +313,7 @@ func TestAManagerOverrideIsOneActForOneSaleConsumedOnce(t *testing.T) {
 		t.Errorf("the sale's own cashier as manager = %d, want 403: %s", r.status, r.raw)
 	}
 	if r := f.override(sale, "account", "agreed on the phone", total, "admin", ""); r.status != http.StatusForbidden {
-		t.Errorf("a manager with no identity = %d, want 403: %s", r.status, r.raw)
+		t.Errorf("a manager with no subject = %d, want 403: %s", r.status, r.raw)
 	}
 	for _, bad := range []map[string]any{
 		{"kind": "account", "reason": "", "cap_cents": total},
