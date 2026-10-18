@@ -27,6 +27,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -165,6 +166,15 @@ func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
 // contract, listed in CONTRACT-CHANGES.md.
 func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...string) {
 	h.RegisterRoutes(mux, w.scoped(roles...))
+}
+
+// scheduling mounts the dealer side of the pro portal's delivery windows and
+// pickup slots: the yard a write names is held to the caller's branch wall
+// (the same hold the location module's writes carry), behind the yard and
+// desk roles. The contractor side of the same tables lives in the portal
+// module, scoped to the customer.
+func (w *branchWall) scheduling(mux *http.ServeMux, h *scheduling.Handler) {
+	h.WithBranchWall(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "warehouse"))
 }
 
 // quotes mounts the quote routes: the create and the update take customer_id

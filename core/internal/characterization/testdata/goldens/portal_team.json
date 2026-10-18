@@ -30,7 +30,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
@@ -53,7 +53,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
@@ -79,7 +79,7 @@
       "path": "/api/portal/v1/invites",
       "body": {
         "email": "golden.buyer@example.com",
-        "role": "Buyer"
+        "role": "project_manager"
       }
     },
     "response": {
@@ -91,7 +91,7 @@
         "email": "golden.buyer@example.com",
         "expires_at": "<ts+7d>",
         "id": "<id-4>",
-        "role": "Buyer"
+        "role": "project_manager"
       }
     }
   },
@@ -156,7 +156,7 @@
           "email": "golden.buyer@example.com",
           "expires_at": "<ts+7d>",
           "id": "<id-4>",
-          "role": "Buyer"
+          "role": "project_manager"
         }
       ]
     }
@@ -167,7 +167,7 @@
       "method": "PUT",
       "path": "/api/portal/v1/users/<id-3>/role",
       "body": {
-        "role": "Admin"
+        "role": "owner"
       }
     },
     "response": {
@@ -207,7 +207,7 @@
       "method": "PUT",
       "path": "/api/portal/v1/users/not-a-uuid/role",
       "body": {
-        "role": "Admin"
+        "role": "owner"
       }
     },
     "response": {
@@ -251,7 +251,7 @@
       "method": "PUT",
       "path": "/api/portal/v1/users/<id-10>/role",
       "body": {
-        "role": "Admin"
+        "role": "owner"
       }
     },
     "response": {

@@ -4938,7 +4938,7 @@ export interface paths {
         };
         /**
          * The contractor dashboard
-         * @description AR summary plus the five most recent orders.
+         * @description AR summary plus the five most recent orders. The dashboard is made of money, so it sits behind the see_money capability; a session without it is a 403.
          */
         get: operations["portalDashboard"];
         put?: never;
@@ -5000,7 +5000,7 @@ export interface paths {
         put?: never;
         /**
          * Duplicate a historical order as a new draft
-         * @description Creates a new DRAFT order from the source order's lines. Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
+         * @description Creates a new DRAFT order from the source order's lines, behind the order capability (a session without it is a 403). Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
          */
         post: operations["portalReorder"];
         delete?: never;
@@ -5020,7 +5020,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel an order
-         * @description The body is optional (an empty body is a cancellation without a reason). Ownership first (someone else's order is a 404), then the goods-in-motion gate (a stop already delivered or on a dispatched route is a 409), then the ERP state machine (already cancelled and fulfilled are 409s). A 409 carries the refusal envelope with a customer-safe reason string.
+         * @description Behind the order capability. The body is optional (an empty body is a cancellation without a reason). Ownership first (someone else's order is a 404), then the goods-in-motion gate (a stop already delivered or on a dispatched route is a 409), then the ERP state machine (already cancelled and fulfilled are 409s). A 409 carries the refusal envelope with a customer-safe reason string.
          */
         post: operations["portalCancelOrder"];
         delete?: never;
@@ -5039,7 +5039,7 @@ export interface paths {
         get?: never;
         /**
          * Attach or detach an order's project
-         * @description A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
+         * @description Behind the order capability. A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
          */
         put: operations["portalSetOrderProject"];
         post?: never;
@@ -5058,7 +5058,7 @@ export interface paths {
         };
         /**
          * The customer's invoices
-         * @description A bare array with no page envelope; every money field is float dollars.
+         * @description A bare array with no page envelope; every money field is float dollars. Behind the see_money capability (a session without it is a 403). Carries the change feed pair: since narrows to invoices whose updated_at is strictly newer (a since page is ordered updated_at ascending and tie-completed, so the cursor cannot lose a row), and ETag plus X-Portal-Latest-Change make a poll cheap.
          */
         get: operations["portalListInvoices"];
         put?: never;
@@ -5078,7 +5078,7 @@ export interface paths {
         };
         /**
          * One invoice
-         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         * @description Scoped to the caller; any failure is the handler's fixed 404. Behind the see_money capability.
          */
         get: operations["portalGetInvoice"];
         put?: never;
@@ -5098,7 +5098,7 @@ export interface paths {
         };
         /**
          * The customer's deliveries
-         * @description A bare array of stops with POD, driver and route fields; no page envelope.
+         * @description A bare array of stops with POD, driver and route fields; no page envelope. Carries the change feed pair: since narrows to stops whose updated_at is strictly newer (the same ordering and tie completion as the order feed).
          */
         get: operations["portalListDeliveries"];
         put?: never;
@@ -5118,7 +5118,7 @@ export interface paths {
         };
         /**
          * One delivery
-         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         * @description Scoped to the caller; any failure is the handler's fixed 404. Carries updated_at, the delivery feed's cursor.
          */
         get: operations["portalGetDelivery"];
         put?: never;
@@ -5144,7 +5144,7 @@ export interface paths {
         put?: never;
         /**
          * Ask for a different delivery day
-         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
+         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, behind the schedule capability, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
          */
         post: operations["portalRequestReschedule"];
         delete?: never;
@@ -5242,13 +5242,13 @@ export interface paths {
         };
         /**
          * The customer's quotes
-         * @description A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state.
+         * @description A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state. Carries the change feed pair: since narrows to quotes whose updated_at is strictly newer (the same ordering and tie completion as the order feed).
          */
         get: operations["portalListQuotes"];
         put?: never;
         /**
          * Send a scope for the dealer to price
-         * @description A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
+         * @description Behind the request_quotes capability (a session without it is a 403); accept and decline sit behind approve_quotes. A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
          */
         post: operations["portalCreateQuote"];
         delete?: never;
@@ -5288,7 +5288,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a priced quote
-         * @description Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
          */
         post: operations["portalAcceptQuote"];
         delete?: never;
@@ -5308,7 +5308,7 @@ export interface paths {
         put?: never;
         /**
          * Decline a priced quote
-         * @description Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
          */
         post: operations["portalDeclineQuote"];
         delete?: never;
@@ -5348,7 +5348,7 @@ export interface paths {
         put?: never;
         /**
          * Add an item to the cart
-         * @description Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
+         * @description Prices the line through the customer's pricing waterfall before it is stored, behind the order capability (the cart's writes and the checkout share it). A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
          */
         post: operations["portalAddToCart"];
         delete?: never;
@@ -5367,13 +5367,13 @@ export interface paths {
         get?: never;
         /**
          * Change a cart item's quantity
-         * @description A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
+         * @description Behind the order capability. A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
          */
         put: operations["portalUpdateCartItem"];
         post?: never;
         /**
          * Remove an item from the cart
-         * @description Every repository failure is a 500 today; the cart is returned after the removal.
+         * @description Behind the order capability. Every repository failure is a 500 today; the cart is returned after the removal.
          */
         delete: operations["portalRemoveCartItem"];
         options?: never;
@@ -5392,7 +5392,7 @@ export interface paths {
         put?: never;
         /**
          * Place an order from the cart
-         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
+         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). When schedule_hold_id is set, it binds the held slot to the new order and stamps the order's scheduled delivery date.
          */
         post: operations["portalCheckout"];
         delete?: never;
@@ -5410,7 +5410,7 @@ export interface paths {
         };
         /**
          * The customer's portal users
-         * @description Admin only; a non-admin session is a 403 before anything is read.
+         * @description The manage_team capability (the owner role today); a session without it is a 403 before anything is read. The guard resolves the role server side, never a role string on the wire.
          */
         get: operations["portalListUsers"];
         put?: never;
@@ -5430,13 +5430,13 @@ export interface paths {
         };
         /**
          * The customer's outstanding invites
-         * @description Admin only; a non-admin session is a 403. The invite token is never serialized.
+         * @description The manage_team capability; a session without it is a 403. The invite token is never serialized.
          */
         get: operations["portalListInvites"];
         put?: never;
         /**
          * Invite a team member
-         * @description Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed).
+         * @description The manage_team capability. Records an invite expiring in seven days; the email is logged, not sent. A role outside the five contractor roles is a 500 today (the handler's status is fixed).
          */
         post: operations["portalInviteUser"];
         delete?: never;
@@ -5455,7 +5455,7 @@ export interface paths {
         get?: never;
         /**
          * Change a portal user's role
-         * @description Admin only. A role outside the three known ones is a 500 today (the handler's status is fixed). Success is a bodiless 200.
+         * @description The manage_team capability. A role outside the five contractor roles is a 500 today (the handler's status is fixed). Success is a bodiless 200.
          */
         put: operations["portalUpdateUserRole"];
         post?: never;
@@ -5479,6 +5479,538 @@ export interface paths {
          */
         put: operations["portalUpdateUserStatus"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed in user, the account, the yards and the capabilities
+         * @description The frame's first read. The capabilities are the server's own resolution of the role (the same value every route guard consults), so a client that renders from them can never enable an action the server refuses. The yards are the branches the account holds (customer_branches), the primary first, each with its own IANA zone.
+         */
+        get: operations["portalMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Today board
+         * @description Everything a contractor opens the portal to act on: quotes awaiting their decision, today's deliveries and the next ones out, invoices due and overdue, and open orders, each section a count with its first rows. Money is integer cents on this surface. The invoice section is zeroed for a role without the see_money capability (the board itself is still that role's to read). Carries the change feed pair: ETag (If-None-Match answers 304) and X-Portal-Latest-Change; since narrows every section's rows to what changed after it.
+         */
+        get: operations["portalToday"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The order and delivery timeline
+         * @description The journey in five steps (Confirmed, Preparing, Loaded, Out for delivery or Ready for pickup, Delivered or Picked up), derived from Gable's own order and delivery states, each step done, current or upcoming, with the proof of delivery (signer, photo, place) where it exists. The flow follows the order's delivery type; a cancelled order promises nothing. Scoped to the caller like every order read.
+         */
+        get: operations["portalOrderTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/delivery-instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Edit the site delivery instructions
+         * @description The contractor's own instruction for the site, on an unfulfilled order, behind the edit_delivery_instructions capability (a session without it is a 403). A fulfilled or cancelled order's instructions are read only (a 400); someone else's order is the same 404 as always. Returns the updated order; the write moves updated_at, so the order change feed carries it.
+         */
+        put: operations["portalSetDeliveryInstructions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open delivery windows and pickup slots at a yard
+         * @description The yard's active windows expanded over a date range into concrete slots with the places left (capacity minus the holds already placed). yard_id is required and must be one of the account's own yards (any other yard is a 404, never a 403); kind, from and to are optional (from defaults to today, to fourteen days out; the range is capped at 62 days). Every instant is UTC and each slot carries its local hh:mm spellings in the yard's own zone.
+         */
+        get: operations["portalListScheduleWindows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hold a delivery window or pickup slot
+         * @description One hold on one window and date, behind the schedule capability (a session without it is a 403). Capacity is enforced inside a transaction that locks the window row: a full window is a 409 (SCHEDULE_WINDOW_FULL), past the cutoff is a 409 (SCHEDULE_CUTOFF_PASSED), a window the yard does not run on that weekday is a 400, and any yard or window that is not the caller's own is a 404. An optional order_id rides the hold (it must be the caller's own unfulfilled order; its earlier held hold is released in the same transaction).
+         */
+        post: operations["portalCreateScheduleHold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/holds/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One hold
+         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         */
+        get: operations["portalGetScheduleHold"];
+        /**
+         * Move a held hold to another window or date
+         * @description Behind the schedule capability. The release of the old place and the take of the new one are one transaction: a refused change (full, past the cutoff, wrong weekday) leaves the original hold exactly as it was, and the refusal codes are the create's.
+         */
+        put: operations["portalChangeScheduleHold"];
+        post?: never;
+        /**
+         * Release a held hold
+         * @description Behind the schedule capability. Gives the place back; success is a bodiless 204, and a hold that is not the caller's (or is no longer held) is the handler's fixed 404.
+         */
+        delete: operations["portalReleaseScheduleHold"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/quotes/intake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse a material list or photo and optionally create a quote request
+         * @description Behind the request_quotes capability. Reads a pasted material list without AI or a photo/file with AI through Gable's parsing and product matching service. When create_quote is true, it creates an unpriced portal quote request in the same step unless the AI result is synthetic and allow_synthetic is false (409 SYNTHETIC_INTAKE_REFUSED).
+         */
+        post: operations["portalQuoteIntake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/quotes/{id}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert a priced or accepted quote into an order
+         * @description Behind the order capability (a session without it is a 403). Only a priced (SENT) or ACCEPTED quote owned by the calling account may be converted; an unpriced (DRAFT), declined, or expired quote is a 409 (QUOTE_NOT_PRICED or QUOTE_NOT_CONVERTIBLE). Runs the ERP quote service's ConvertInProcess.
+         */
+        post: operations["portalConvertQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/reorder-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Price difference preview for reordering a historical order
+         * @description Behind the order capability. Resolves each product line on the historical order through pricing.Resolve at the customer's current pricing and compares original vs current prices in integer cents.
+         */
+        get: operations["portalReorderPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List named material lists on the procurement board
+         * @description Scoped to the calling customer account.
+         */
+        get: operations["portalListProcurementProjects"];
+        put?: never;
+        /**
+         * Create a named material list on the procurement board
+         * @description Behind the order or request_quotes capability.
+         */
+        post: operations["portalCreateProcurementProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One named material list with its lines
+         * @description Scoped to the calling customer account; another customer's list is a 404.
+         */
+        get: operations["portalGetProcurementProject"];
+        /**
+         * Rename or advance a named material list
+         * @description Behind the order or request_quotes capability. Validates the lifecycle transition.
+         */
+        put: operations["portalUpdateProcurementProject"];
+        post?: never;
+        /**
+         * Delete a named material list
+         * @description Behind the order or request_quotes capability.
+         */
+        delete: operations["portalDeleteProcurementProject"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a line to a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        post: operations["portalAddProcurementLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/lines/{lineId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a line on a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        put: operations["portalUpdateProcurementLine"];
+        post?: never;
+        /**
+         * Delete a line from a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        delete: operations["portalDeleteProcurementLine"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/submit-rfq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a named material list as a quote request
+         * @description Behind the request_quotes capability. Creates a portal quote request from the list's lines, links the quote_id onto the list, and advances its status from PLANNING to QUOTING.
+         */
+        post: operations["portalSubmitProcurementRFQ"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/billing/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Balance tiles, aging buckets, and per-job financial summaries
+         * @description Behind the see_money capability (a session without it is a 403). All money figures are integer cents.
+         */
+        get: operations["portalBillingSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live customer statement and aging
+         * @description Behind the see_money capability. Built through the AR core's account.Service.Statement over an optional [from, to] date range (defaults to the last 30 days). All money figures are integer cents.
+         */
+        get: operations["portalGetStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Historical statement run snapshots for the customer
+         * @description Behind the see_money capability. Lists statement run items scoped to the calling customer.
+         */
+        get: operations["portalListStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/invoices/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download an invoice PDF
+         * @description Behind the see_money capability. Verifies the invoice belongs to the calling customer account (another customer's invoice is a 404) and renders the PDF through Gable's document formatter.
+         */
+        get: operations["portalInvoicePDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statement/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a live customer statement PDF
+         * @description Behind the see_money capability. Renders the calling customer's statement PDF through Gable's document formatter over an optional [from, to] date range.
+         */
+        get: operations["portalStatementPDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statements/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a historical statement run snapshot PDF
+         * @description Behind the see_money capability. Verifies the statement run item belongs to the calling customer account (another customer's item is a 404) and renders the PDF for that run's period through Gable's document formatter.
+         */
+        get: operations["portalStatementRunItemPDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved payment methods on the account
+         * @description Behind the pay capability. Returns only tokenized display metadata (gateway, method_type, brand, last4, exp_month, exp_year, is_default); the vault token is never serialized.
+         */
+        get: operations["portalListPaymentMethods"];
+        put?: never;
+        /**
+         * Save a tokenized payment method on the account
+         * @description Behind the pay capability. Accepts only a gateway vault token and display metadata; any payload carrying raw card PANs, CVVs, or bank account/routing numbers is refused with 400.
+         */
+        post: operations["portalCreatePaymentMethod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a saved payment method
+         * @description Behind the pay capability. Scoped to the calling customer account.
+         */
+        delete: operations["portalDeletePaymentMethod"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods/{id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a saved payment method as the account default
+         * @description Behind the pay capability. Scoped to the calling customer account.
+         */
+        put: operations["portalSetDefaultPaymentMethod"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List payments and their invoice allocations for the account
+         * @description Behind the see_money capability. Lists posted payments with their invoice allocations in integer cents and omits internal staff attribution.
+         */
+        get: operations["portalListPayments"];
+        put?: never;
+        /**
+         * Pay one or many open invoices through the payment gateway
+         * @description Behind the pay capability. Charges the open balance of the named invoices through Gable's PaymentGateway using a saved payment_method_id or one-time token (raw card or bank account digits are refused with 400), records the payment and applications in the AR core, and guards against duplicate or unknown-outcome charges with a durable portal_payment_intents single-flight record.
+         */
+        post: operations["portalCreatePayment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8082,6 +8614,58 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scheduling/windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List delivery windows and pickup slots
+         * @description The dealer's window definitions, newest definitions of each yard and kind first by yard code. Optional yard_id and kind filters; inactive windows are included (the yard manager edits what was switched off). Behind the admin, owner and warehouse roles and the branch middleware.
+         */
+        get: operations["schedulingListWindows"];
+        put?: never;
+        /**
+         * Define a delivery window or pickup slot
+         * @description Creates one recurring weekly rule for a yard. The yard is held to the caller's branch wall (a caller held to branch A cannot define branch B's windows); an unknown yard and every validation failure (kind, weekday 0 to 6, hh:mm times with end after start, positive capacity, non negative cutoff) are 400s.
+         */
+        post: operations["schedulingCreateWindow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scheduling/windows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One window
+         * @description The definition with its yard facts. A missing window is a 404.
+         */
+        get: operations["schedulingGetWindow"];
+        /**
+         * Change a window
+         * @description A partial update: a null field keeps its current value. The yard never moves (a window at another yard is a new window, so a contractor's hold can never silently change yards under an order).
+         */
+        put: operations["schedulingUpdateWindow"];
+        post?: never;
+        /**
+         * Switch a window off
+         * @description Deactivation, never a delete: the row and the contractor holds that reference it stay auditable. A missing window is a 404; success is a bodiless 204.
+         */
+        delete: operations["schedulingDeactivateWindow"];
         options?: never;
         head?: never;
         patch?: never;
@@ -13957,8 +14541,11 @@ export interface components {
             customer_id: string;
             email: string;
             name: string;
-            /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            /**
+             * @description One of the five contractor roles (migration 130); the server resolves each to a capability set served by GET /me.
+             * @enum {string}
+             */
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
             /** @enum {string} */
             status: "Active" | "Inactive";
             /** Format: date-time */
@@ -14014,6 +14601,9 @@ export interface components {
              * @description The change-feed cursor; moves on every ERP status write.
              */
             updated_at: string;
+            /** @description The contractor's site instruction on this order; omitted when empty. */
+            site_delivery_instructions?: string | null;
+            schedule_hold?: components["schemas"]["PortalScheduleHold"];
         };
         PortalOrderLine: {
             /** Format: uuid */
@@ -14048,6 +14638,11 @@ export interface components {
             paid_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description The invoice change feed's cursor; moves on every ERP status write.
+             */
+            updated_at: string;
             /** @description Never null. */
             lines: components["schemas"]["PortalOrderLine"][];
         };
@@ -14078,10 +14673,30 @@ export interface components {
             stop_sequence: number | null;
             total_stops: number | null;
             delivery_instructions: string | null;
+            /**
+             * Format: date-time
+             * @description The delivery change feed's cursor; moves on every stop or route write.
+             */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description The UTC start of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_start?: string | null;
+            /**
+             * Format: date-time
+             * @description The UTC end of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_end?: string | null;
         };
         PortalReorderRequest: {
             /** Format: uuid */
             order_id: string;
+            /**
+             * Format: uuid
+             * @description Optional project owned by the calling customer account to attach to the new draft order.
+             */
+            project_id?: string | null;
         };
         PortalReorderResponse: {
             /** Format: uuid */
@@ -14164,6 +14779,8 @@ export interface components {
             in_stock: boolean;
             /** @description The dealer's published lead time; null means none was published and must not be read as zero. */
             lead_time_days: number | null;
+            /** @description Per-yard stock and lead time breakdown across active dealer yards. */
+            availability?: components["schemas"]["PortalYardAvailability"][];
             /** Format: uuid */
             category_id: string | null;
             category_slug: string;
@@ -14188,6 +14805,8 @@ export interface components {
             available: number;
             in_stock: boolean;
             lead_time_days: number | null;
+            /** @description Per-yard stock and lead time breakdown across active dealer yards. */
+            availability?: components["schemas"]["PortalYardAvailability"][];
             /** Format: uuid */
             category_id: string | null;
             category_slug: string;
@@ -14234,9 +14853,9 @@ export interface components {
         PortalUpdateCartItemRequest: {
             quantity: number;
         };
-        /** @description Only project_id is read today; delivery_method, delivery_address, payment_method and notes decode but influence nothing, and an unknown project_id is a 500 (the handler's status is fixed). */
+        /** @description Places the cart as an order; project_id attaches a job and schedule_hold_id binds a held delivery window or pickup slot. */
         PortalCheckoutRequest: {
-            /** @description DELIVERY or PICKUP; not read today. */
+            /** @description DELIVERY or PICKUP. */
             delivery_method?: string;
             /** @description Not read today. */
             delivery_address?: string;
@@ -14249,6 +14868,11 @@ export interface components {
              * @description Optional; when set it must be the caller's own project.
              */
             project_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Optional; when set it must be an unattached held slot owned by the caller.
+             */
+            schedule_hold_id?: string | null;
         };
         PortalCheckoutResponse: {
             /** Format: uuid */
@@ -14374,7 +14998,7 @@ export interface components {
             customer_id: string;
             email: string;
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
             /** Format: date-time */
             expires_at: string;
             /** Format: date-time */
@@ -14383,15 +15007,528 @@ export interface components {
         PortalInviteUserRequest: {
             email: string;
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
         };
         PortalUpdateUserRoleRequest: {
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
         };
         PortalUpdateUserStatusRequest: {
             /** @enum {string} */
             status: "Active" | "Inactive";
+        };
+        /** @description The server resolved answer to what this user may do. A route NEVER checks a role string: it names one of these capabilities and the guard resolves the role server side, so this object is the same authority the enforcement uses. */
+        PortalCapabilities: {
+            manage_team: boolean;
+            see_money: boolean;
+            pay: boolean;
+            order: boolean;
+            request_quotes: boolean;
+            approve_quotes: boolean;
+            schedule: boolean;
+            edit_delivery_instructions: boolean;
+        };
+        PortalAccount: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            account_number: string;
+            /** Format: uuid */
+            primary_branch_id: string;
+        };
+        /** @description One yard the account holds (customer_branches), the primary first. */
+        PortalYard: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @description The yard's IANA zone; scheduling's local spellings are in it. */
+            timezone: string;
+            is_primary: boolean;
+        };
+        PortalMe: {
+            user: components["schemas"]["PortalCustomerUser"];
+            account: components["schemas"]["PortalAccount"];
+            /** @description Never null; an account linked to no yard carries an empty array. */
+            yards: components["schemas"]["PortalYard"][];
+            capabilities: components["schemas"]["PortalCapabilities"];
+        };
+        PortalTodayQuoteRow: {
+            /** Format: uuid */
+            id: string;
+            /** @description Integer cents; the Today board never speaks float. */
+            total_cents: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayDeliveryRow: {
+            /** Format: uuid */
+            delivery_id: string;
+            /** Format: uuid */
+            order_id: string;
+            status: string;
+            /** Format: date-time */
+            scheduled_for: string | null;
+            yard_code: string;
+            is_pickup: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayInvoiceRow: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            total_cents: number;
+            /** Format: date-time */
+            due_date: string | null;
+            is_overdue: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayOrderRow: {
+            /** Format: uuid */
+            id: string;
+            status: string;
+            total_cents: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalToday: {
+            /** @description SENT quotes awaiting the contractor's accept or decline; count is every one, first its newest rows. */
+            quotes_awaiting_pro: {
+                count: number;
+                first: components["schemas"]["PortalTodayQuoteRow"][];
+            };
+            deliveries_today: {
+                count: number;
+                first: components["schemas"]["PortalTodayDeliveryRow"][];
+            };
+            /** @description The stops after today, soonest first. */
+            next_deliveries: {
+                count: number;
+                first: components["schemas"]["PortalTodayDeliveryRow"][];
+            };
+            /** @description Open invoices due today or already overdue; zeroed for a role without see_money. */
+            invoices_due: {
+                count: number;
+                first: components["schemas"]["PortalTodayInvoiceRow"][];
+            };
+            open_orders: {
+                count: number;
+                first: components["schemas"]["PortalTodayOrderRow"][];
+            };
+        };
+        PortalTimelineStep: {
+            /**
+             * @description The flow is the delivery type's: steps 4 and 5 are out_for_delivery and delivered, or ready_for_pickup and picked up.
+             * @enum {string}
+             */
+            key: "confirmed" | "preparing" | "loaded" | "out_for_delivery" | "ready_for_pickup" | "delivered" | "picked_up";
+            label: string;
+            /** @enum {string} */
+            state: "done" | "current" | "upcoming";
+            /**
+             * Format: date-time
+             * @description When the step happened, where Gable records one; null when it has not.
+             */
+            at: string | null;
+        };
+        /** @description The proof of delivery where it exists; null when the journey is not finished. */
+        PortalTimelinePOD: {
+            signed_by: string | null;
+            photo_url: string | null;
+            /** @description The delivery address the stop records. */
+            place: string | null;
+            /** Format: date-time */
+            timestamp: string | null;
+        };
+        PortalOrderTimeline: {
+            /** Format: uuid */
+            order_id: string;
+            status: string;
+            /** @enum {string} */
+            delivery_type: "DELIVERY" | "PICKUP";
+            is_cancelled: boolean;
+            /** @description Never null; a cancelled order carries every step upcoming. */
+            steps: components["schemas"]["PortalTimelineStep"][];
+            pod: Record<string, never> | null;
+        };
+        PortalSetDeliveryInstructionsRequest: {
+            /** @description The contractor's site instruction, capped at 2000 characters. */
+            instructions: string;
+        };
+        /** @description One concrete date of one window with the places left. */
+        PortalScheduleSlot: {
+            /** Format: uuid */
+            window_id: string;
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description YYYY-MM-DD, the yard's own calendar day. */
+            date: string;
+            /** Format: date-time */
+            start_utc: string;
+            /** Format: date-time */
+            end_utc: string;
+            /** @description hh:mm in the yard's zone, for display. */
+            start_local: string;
+            end_local: string;
+            capacity: number;
+            remaining: number;
+            cutoff_minutes: number;
+        };
+        PortalScheduleHold: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            window_id: string;
+            /** Format: uuid */
+            yard_id: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description YYYY-MM-DD, the yard's own calendar day. */
+            date: string;
+            /** Format: date-time */
+            start_utc: string;
+            /** Format: date-time */
+            end_utc: string;
+            /**
+             * Format: uuid
+             * @description The open order the hold rides on, or null at checkout.
+             */
+            order_id: string | null;
+            /** @enum {string} */
+            status: "held" | "released" | "used" | "expired";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalScheduleHoldRequest: {
+            /** Format: uuid */
+            window_id: string;
+            /** @description YYYY-MM-DD, the yard's own calendar day; today or later. */
+            date: string;
+            /**
+             * Format: uuid
+             * @description Optional; the caller's own unfulfilled order the hold rides on.
+             */
+            order_id?: string | null;
+        };
+        /** @description Submits a pasted material list (text) or a photo/file (file_base64) for parsing and catalog matching. */
+        PortalQuoteIntakeRequest: {
+            text?: string;
+            file_base64?: string;
+            content_type?: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            notes?: string;
+            /** @enum {string} */
+            delivery_type?: "PICKUP" | "DELIVERY";
+            create_quote?: boolean;
+            allow_synthetic?: boolean;
+        };
+        PortalQuoteIntakeItem: {
+            raw_text: string;
+            parsed_qty: number;
+            parsed_unit: string;
+            parsed_description: string;
+            /** Format: uuid */
+            matched_product_id?: string | null;
+            matched_product_name?: string;
+            matched_sku?: string;
+            confidence: number;
+        };
+        PortalQuoteIntakeResponse: {
+            /** @enum {string} */
+            source: "text" | "photo";
+            synthetic: boolean;
+            items: components["schemas"]["PortalQuoteIntakeItem"][];
+            quote?: components["schemas"]["PortalQuote"];
+        };
+        PortalConvertQuoteResponse: {
+            /** Format: uuid */
+            quote_id: string;
+            /** Format: uuid */
+            order_id: string;
+            order_number: string;
+            status: string;
+        };
+        /** @description Contractor-safe stock and lead time projection for a single yard. Never carries dealer cost, margin, or reservation details. */
+        PortalYardAvailability: {
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            yard_name: string;
+            on_hand: number;
+            available: number;
+            in_stock: boolean;
+            lead_time_days: number | null;
+        };
+        PortalReorderPreviewLine: {
+            /** Format: uuid */
+            line_id: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            sku: string;
+            description: string;
+            quantity: number;
+            uom: string;
+            original_unit_price_cents: number;
+            current_unit_price_cents: number;
+            price_diff_cents: number;
+            original_line_total_cents: number;
+            current_line_total_cents: number;
+            line_diff_cents: number;
+            price_source: string;
+            available_qty: number;
+            in_stock: boolean;
+        };
+        PortalReorderPreview: {
+            /** Format: uuid */
+            source_order_id: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            lines: components["schemas"]["PortalReorderPreviewLine"][];
+            original_total_cents: number;
+            current_total_cents: number;
+            total_diff_cents: number;
+        };
+        PortalProcurementLine: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            line_no: number;
+            /** Format: uuid */
+            product_id?: string | null;
+            description: string;
+            qty_entered: number;
+            uom: string;
+            notes: string;
+            indicative_unit_price_cents: number | null;
+            indicative_line_total_cents: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalProcurementProject: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "PLANNING" | "QUOTING" | "ORDERED" | "FULFILLED" | "CANCELLED";
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: uuid */
+            quote_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            lines: components["schemas"]["PortalProcurementLine"][];
+        };
+        PortalCreateProcurementProjectRequest: {
+            name: string;
+        };
+        PortalUpdateProcurementProjectRequest: {
+            name?: string;
+            /** @enum {string} */
+            status?: "PLANNING" | "QUOTING" | "ORDERED" | "FULFILLED" | "CANCELLED";
+        };
+        PortalUpsertProcurementLineRequest: {
+            /** Format: uuid */
+            product_id?: string | null;
+            description?: string;
+            qty_entered: number;
+            uom?: string;
+            notes?: string;
+        };
+        PortalSubmitProcurementRFQRequest: {
+            /** Format: uuid */
+            project_id?: string | null;
+            notes?: string;
+            /** @enum {string} */
+            delivery_type?: "PICKUP" | "DELIVERY";
+        };
+        PortalBalanceTiles: {
+            currency: string;
+            current_balance_cents: number;
+            credit_limit_cents: number | null;
+            available_credit_cents: number | null;
+            past_due_cents: number;
+            unapplied_cash_cents: number;
+            net_balance_cents: number;
+            open_invoice_count: number;
+            overdue_invoice_count: number;
+        };
+        PortalAgingBuckets: {
+            as_of: string;
+            currency: string;
+            current_cents: number;
+            days_1_30_cents: number;
+            days_31_60_cents: number;
+            days_61_90_cents: number;
+            days_over_90_cents: number;
+            unapplied_cents: number;
+            total_open_cents: number;
+            net_cents: number;
+        };
+        PortalJobSummary: {
+            /** Format: uuid */
+            project_id: string;
+            project_name: string;
+            status: string;
+            budget_cents: number;
+            quoted_cents: number;
+            ordered_cents: number;
+            invoiced_cents: number;
+            paid_cents: number;
+            open_balance_cents: number;
+            quote_variance_cents: number;
+            order_count: number;
+            invoice_count: number;
+            delivery_count: number;
+            delivered_count: number;
+        };
+        PortalBillingSummary: {
+            balance_tiles: components["schemas"]["PortalBalanceTiles"];
+            aging: components["schemas"]["PortalAgingBuckets"];
+            job_summaries: components["schemas"]["PortalJobSummary"][];
+        };
+        PortalStatementLine: {
+            /** Format: uuid */
+            id: string;
+            date: string;
+            type: string;
+            description: string;
+            amount_cents: number;
+            balance_after_cents: number;
+            /** Format: uuid */
+            reference_id?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
+        };
+        PortalStatementOpenDoc: {
+            kind: string;
+            /** Format: uuid */
+            id: string;
+            number: string;
+            date: string;
+            due_date?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
+            total_cents: number;
+            open_cents: number;
+        };
+        PortalStatement: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            from: string;
+            to: string;
+            currency: string;
+            opening_balance_cents: number;
+            closing_balance_cents: number;
+            unapplied_cents: number;
+            net_balance_cents: number;
+            aging: components["schemas"]["PortalAgingBuckets"];
+            lines: components["schemas"]["PortalStatementLine"][];
+            open_invoices: components["schemas"]["PortalStatementOpenDoc"][];
+        };
+        PortalStatementRunItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            period_start: string;
+            period_end: string;
+            currency: string;
+            opening_balance_cents: number;
+            invoices_cents: number;
+            payments_cents: number;
+            finance_charges_cents: number;
+            closing_balance_cents: number;
+            current_cents: number;
+            days_1_30_cents: number;
+            days_31_60_cents: number;
+            days_61_90_cents: number;
+            days_over_90_cents: number;
+            unapplied_cents: number;
+            net_balance_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description Saved payment method on a contractor account. The vault token is never serialized. */
+        PortalPaymentMethod: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            gateway: string;
+            /** @enum {string} */
+            method_type: "CARD" | "ACH" | "BANK";
+            brand?: string;
+            last4: string;
+            exp_month?: number;
+            exp_year?: number;
+            is_default: boolean;
+            /** @enum {string} */
+            status: "ACTIVE" | "REVOKED";
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalCreatePaymentMethodRequest: {
+            gateway_token: string;
+            /** @enum {string} */
+            method_type: "CARD" | "ACH" | "BANK";
+            brand?: string;
+            last4: string;
+            exp_month?: number;
+            exp_year?: number;
+            is_default?: boolean;
+        };
+        PortalCreatePaymentRequest: {
+            invoice_ids: string[];
+            /** Format: uuid */
+            payment_method_id?: string | null;
+            token?: string;
+            idempotency_key?: string;
+        };
+        PortalPaymentAllocation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            invoice_id: string;
+            invoice_number: string;
+            amount_cents: number;
+            applied_on: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalPayment: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            currency: string;
+            method: string;
+            status: string;
+            amount_cents: number;
+            unapplied_cents: number;
+            reference?: string;
+            card_brand?: string;
+            card_last4?: string;
+            received_on: string;
+            /** Format: date-time */
+            created_at: string;
+            allocations: components["schemas"]["PortalPaymentAllocation"][];
         };
         /** @enum {string} */
         PosStatus: "open" | "held" | "completed" | "voided";
@@ -17246,6 +18383,45 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description One recurring weekly rule at one yard. */
+        SchedulingWindow: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            /** @description The yard's IANA zone; start_time and end_time are local to it. */
+            yard_timezone: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description 0 Sunday to 6 Saturday. */
+            weekday: number;
+            /** @description hh:mm, the yard's local time of day. */
+            start_time: string;
+            /** @description hh:mm, the yard's local time of day. */
+            end_time: string;
+            capacity: number;
+            /** @description Holds stop this many minutes before the window starts. */
+            cutoff_minutes: number;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description On create every field but cutoff_minutes and is_active is required; on update a null field keeps its current value and the yard is read only. */
+        SchedulingWindowRequest: {
+            /** Format: uuid */
+            yard_id?: string | null;
+            /** @enum {string|null} */
+            kind?: "delivery" | "pickup" | null;
+            weekday?: number | null;
+            start_time?: string | null;
+            end_time?: string | null;
+            capacity?: number | null;
+            cutoff_minutes?: number | null;
+            is_active?: boolean | null;
         };
         /** @description One allowed sign in method. The nullable fields are always present, null when the method does not use them. */
         AuthConfigMethod: {
@@ -28363,6 +29539,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -28458,6 +29635,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -28493,6 +29671,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -28537,6 +29716,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -28546,7 +29726,10 @@ export interface operations {
     };
     portalListInvoices: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only invoices with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28556,13 +29739,26 @@ export interface operations {
             /** @description The invoices, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalInvoice"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -28588,12 +29784,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     portalListDeliveries: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only deliveries with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28603,12 +29803,24 @@ export interface operations {
             /** @description The deliveries, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalDelivery"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -28700,6 +29912,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
@@ -28820,7 +30033,10 @@ export interface operations {
     };
     portalListQuotes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only quotes with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28830,12 +30046,24 @@ export interface operations {
             /** @description The quotes, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalQuote"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -28867,6 +30095,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -28923,6 +30152,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -28963,6 +30193,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -29027,6 +30258,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -29062,6 +30294,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -29090,6 +30323,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -29120,6 +30354,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -29272,6 +30508,1062 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    portalMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user, account, yards and capabilities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalMe"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalToday: {
+        parameters: {
+            query?: {
+                /** @description Only rows with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The board. */
+            200: {
+                headers: {
+                    /** @description A strong validator over (customer, section counts, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at across the board's rows; send it back as since next time. Absent when nothing is on the board. */
+                    "X-Portal-Latest-Change"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalToday"];
+                };
+            };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalOrderTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The timeline. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalOrderTimeline"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSetDeliveryInstructions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalSetDeliveryInstructionsRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalOrder"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListScheduleWindows: {
+        parameters: {
+            query: {
+                yard_id: string;
+                kind?: "delivery" | "pickup";
+                /** @description YYYY-MM-DD, inclusive; defaults to today. */
+                from?: string;
+                /** @description YYYY-MM-DD, inclusive; defaults to fourteen days after from. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The concrete slots, a bare array, never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleSlot"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreateScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalScheduleHoldRequest"];
+            };
+        };
+        responses: {
+            /** @description The placed hold. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The window is fully booked, the cutoff has passed, or an idempotency claim is in progress; the refusal envelope. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hold. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    portalChangeScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalScheduleHoldRequest"];
+            };
+        };
+        responses: {
+            /** @description The moved hold. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The refusal envelope (full window, cutoff passed, idempotency claim). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalReleaseScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Released; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    portalQuoteIntake: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalQuoteIntakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Parsed and matched items without creating a quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalQuoteIntakeResponse"];
+                };
+            };
+            /** @description Parsed items and the created quote request. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalQuoteIntakeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Synthetic AI output refused without allow_synthetic, or idempotency claim in progress. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalConvertQuote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The created order reference. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalConvertQuoteResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Quote is not convertible, or idempotency claim in progress. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalReorderPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The line-by-line price difference preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalReorderPreview"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListProcurementProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's named material lists, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreateProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreateProcurementProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description The created material list. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The material list with its lines and indicative integer-cent prices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalUpdateProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpdateProcurementProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeleteProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalAddProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpsertProcurementLineRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalUpdateProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpsertProcurementLineRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeleteProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSubmitProcurementRFQ: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PortalSubmitProcurementRFQRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list in QUOTING status with quote_id set. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalBillingSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's balance tiles, aging buckets, and job summaries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalBillingSummary"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The live statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListStatements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's statement run snapshots, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalStatementRunItem"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalInvoicePDF: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalStatementPDF: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalStatementRunItemPDF: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListPaymentMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's active saved payment methods. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreatePaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreatePaymentMethodRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved payment method (without the vault token). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeletePaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSetDefaultPaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The updated default payment method. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListPayments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's payments and allocations, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreatePayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreatePaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of an already settled payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"];
+                };
+            };
+            /** @description The recorded payment and its invoice allocations. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            /** @description Payment was declined by the payment gateway. */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Invoice not payable, payment in flight, or unknown gateway outcome held for reconciliation. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+            /** @description Payment gateway unavailable or returned an unknown error; intent remains in flight for reconciliation. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
         };
     };
     posTransactionList: {
@@ -34629,6 +36921,145 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingListWindows: {
+        parameters: {
+            query?: {
+                /** @description Only this yard's windows. */
+                yard_id?: string;
+                /** @description delivery or pickup. */
+                kind?: "delivery" | "pickup";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The windows, a bare array, never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingCreateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulingWindowRequest"];
+            };
+        };
+        responses: {
+            /** @description The created window. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingGetWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    schedulingUpdateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulingWindowRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingDeactivateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deactivated; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };

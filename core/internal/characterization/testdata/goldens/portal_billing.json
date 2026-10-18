@@ -30,7 +30,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
@@ -335,7 +335,8 @@
         "status": "UNPAID",
         "subtotal": 9.5,
         "tax_amount": 1.14,
-        "total_amount": 10.64
+        "total_amount": 10.64,
+        "updated_at": "<ts-106751d>"
       }
     }
   },
@@ -477,6 +478,7 @@
         "status": "PENDING",
         "stop_sequence": 1,
         "total_stops": 1,
+        "updated_at": "<ts-106751d>",
         "vehicle_name": "Truck 1 - Flatbed",
         "vehicle_photo_url": null
       }

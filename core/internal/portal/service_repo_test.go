@@ -76,6 +76,16 @@ type fakePortalRepo struct {
 	newCartID     uuid.UUID
 	newOrderID    uuid.UUID
 
+	// the pro portal's core (M35): /me, /today, the timeline, the feeds
+	meUser        *CustomerUser
+	meRole        string
+	todayQuotes   []TodayQuoteRow
+	todayDeliveries []TodayDeliveryRow
+	todayInvoices []TodayInvoiceRow
+	todayOrders   []TodayOrderRow
+	deliveryState *orderDeliveryState
+	quotes        []PortalQuoteDTO
+
 	// failures
 	getCartErr    error
 	createCartErr error
@@ -1490,7 +1500,7 @@ func TestInviteUser_WritesTheSessionCustomerAndAFreshToken(t *testing.T) {
 
 	before := time.Now()
 	invite, err := rig.svc.InviteUser(context.Background(), me,
-		InviteUserRequest{Email: "buyer@acme.example", Role: "Buyer"})
+		InviteUserRequest{Email: "buyer@acme.example", Role: RoleProjectManager})
 	if err != nil {
 		t.Fatalf("InviteUser: %v", err)
 	}
@@ -1503,7 +1513,7 @@ func TestInviteUser_WritesTheSessionCustomerAndAFreshToken(t *testing.T) {
 	if stored.CustomerID != me {
 		t.Errorf("invite customer = %s, want the session customer %s", stored.CustomerID, me)
 	}
-	if stored.Email != "buyer@acme.example" || stored.Role != "Buyer" {
+	if stored.Email != "buyer@acme.example" || stored.Role != RoleProjectManager {
 		t.Errorf("invite = %+v, want the submitted email and role", stored)
 	}
 	if stored.Token == "" || stored.Token == stored.Email || stored.Token == stored.ID.String() {
@@ -1531,7 +1541,7 @@ func TestInviteUser_TokensAreUniquePerInvite(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 5; i++ {
 		inv, err := rig.svc.InviteUser(context.Background(), me,
-			InviteUserRequest{Email: "buyer@acme.example", Role: "Buyer"})
+			InviteUserRequest{Email: "buyer@acme.example", Role: RoleProjectManager})
 		if err != nil {
 			t.Fatalf("InviteUser: %v", err)
 		}
@@ -1565,7 +1575,7 @@ func TestInviteUser_PersistenceFailureIsReturned(t *testing.T) {
 	rig.repo.inviteErr = errors.New("failed to create invite")
 
 	inv, err := rig.svc.InviteUser(context.Background(), uuid.New(),
-		InviteUserRequest{Email: "x@acme.example", Role: "Buyer"})
+		InviteUserRequest{Email: "x@acme.example", Role: RoleEstimator})
 	if err == nil {
 		t.Fatalf("a failed invite was reported as sent: %+v", inv)
 	}
@@ -1581,7 +1591,7 @@ func TestUpdateUserRole_ScopesTheWriteToTheSessionCustomer(t *testing.T) {
 	rig := newPortalRig(t)
 	me, target := uuid.New(), uuid.New()
 
-	if err := rig.svc.UpdateUserRole(context.Background(), me, target, "Admin"); err != nil {
+	if err := rig.svc.UpdateUserRole(context.Background(), me, target, RoleOwner); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
 	if len(rig.repo.roleWrites) != 1 {
@@ -1594,7 +1604,7 @@ func TestUpdateUserRole_ScopesTheWriteToTheSessionCustomer(t *testing.T) {
 	if got.customer != me {
 		t.Errorf("scope = %s, want the session customer %s", got.customer, me)
 	}
-	if got.value != "Admin" {
+	if got.value != RoleOwner {
 		t.Errorf("role = %q, want Admin", got.value)
 	}
 }
@@ -1615,7 +1625,7 @@ func TestUpdateUserRole_InvalidRoleNeverReachesTheWrite(t *testing.T) {
 
 // CORRECTNESS: all three valid roles are accepted and written verbatim.
 func TestUpdateUserRole_AcceptsExactlyThreeRoles(t *testing.T) {
-	for _, role := range []string{"Admin", "Buyer", "View-Only"} {
+	for _, role := range PortalRoles() {
 		rig := newPortalRig(t)
 		if err := rig.svc.UpdateUserRole(context.Background(), uuid.New(), uuid.New(), role); err != nil {
 			t.Fatalf("role %q was rejected: %v", role, err)
