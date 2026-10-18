@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The dealer side of the pro portal's scheduling (PE-08): the per yard
+# delivery windows and pickup slots a yard manager defines. The contractor
+# reads and holds them through the portal fragment's /api/portal/v1/schedule
+# routes. Times of day are HH:MM strings in the yard's own zone
+# (locations.timezone); instants are UTC.
+paths:
+  /api/v1/scheduling/windows:
+    get:
+      operationId: schedulingListWindows
+      tags: [scheduling]
+      summary: List delivery windows and pickup slots
+      description: >-
+        The dealer's window definitions, newest definitions of each yard and
+        kind first by yard code. Optional yard_id and kind filters; inactive
+        windows are included (the yard manager edits what was switched off).
+        Behind the admin, owner and warehouse roles and the branch middleware.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: yard_id
+          in: query
+          description: Only this yard's windows.
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          description: delivery or pickup.
+          schema:
+            type: string
+            enum: [delivery, pickup]
+      responses:
+        "200":
+          description: The windows, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SchedulingWindow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: schedulingCreateWindow
+      tags: [scheduling]
+      summary: Define a delivery window or pickup slot
+      description: >-
+        Creates one recurring weekly rule for a yard. The yard is held to the
+        caller's branch wall (a caller held to branch A cannot define branch
+        B's windows); an unknown yard and every validation failure (kind,
+        weekday 0 to 6, HH:MM times with end after start, positive capacity,
+        non negative cutoff) are 400s.
+      security:
+        - BearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulingWindowRequest"
+      responses:
+        "201":
+          description: The created window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulingWindow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/scheduling/windows/{id}:
+    get:
+      operationId: schedulingGetWindow
+      tags: [scheduling]
+      summary: One window
+      description: The definition with its yard facts. A missing window is a 404.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulingWindow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: schedulingUpdateWindow
+      tags: [scheduling]
+      summary: Change a window
+      description: >-
+        A partial update: a null field keeps its current value. The yard never
+        moves (a window at another yard is a new window, so a contractor's
+        hold can never silently change yards under an order).
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SchedulingWindowRequest"
+      responses:
+        "200":
+          description: The updated window.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulingWindow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: schedulingDeactivateWindow
+      tags: [scheduling]
+      summary: Switch a window off
+      description: >-
+        Deactivation, never a delete: the row and the contractor holds that
+        reference it stay auditable. A missing window is a 404; success is a
+        bodiless 204.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deactivated; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  schemas:
+    SchedulingWindow:
+      type: object
+      required: [id, yard_id, yard_code, yard_timezone, kind, weekday, start_time, end_time, capacity, cutoff_minutes, is_active, created_at, updated_at]
+      description: One recurring weekly rule at one yard.
+      properties:
+        id:
+          type: string
+          format: uuid
+        yard_id:
+          type: string
+          format: uuid
+        yard_code:
+          type: string
+        yard_timezone:
+          type: string
+          description: The yard's IANA zone; start_time and end_time are local to it.
+        kind:
+          type: string
+          enum: [delivery, pickup]
+        weekday:
+          type: integer
+          description: 0 Sunday to 6 Saturday.
+        start_time:
+          type: string
+          description: HH:MM, the yard's local time of day.
+        end_time:
+          type: string
+          description: HH:MM, the yard's local time of day.
+        capacity:
+          type: integer
+        cutoff_minutes:
+          type: integer
+          description: Holds stop this many minutes before the window starts.
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SchedulingWindowRequest:
+      type: object
+      description: >-
+        On create every field but cutoff_minutes and is_active is required; on
+        update a null field keeps its current value and the yard is read only.
+      properties:
+        yard_id:
+          type: [string, "null"]
+          format: uuid
+        kind:
+          type: [string, "null"]
+          enum: [delivery, pickup]
+        weekday:
+          type: [integer, "null"]
+        start_time:
+          type: [string, "null"]
+        end_time:
+          type: [string, "null"]
+        capacity:
+          type: [integer, "null"]
+        cutoff_minutes:
+          type: [integer, "null"]
+        is_active:
+          type: [boolean, "null"]

@@ -86,7 +86,10 @@ paths:
       operationId: portalDashboard
       tags: [portal]
       summary: The contractor dashboard
-      description: AR summary plus the five most recent orders.
+      description: >-
+        AR summary plus the five most recent orders. The dashboard is made of
+        money, so it sits behind the see_money capability; a session without
+        it is a 403.
       security:
         - PortalSession: []
       responses:
@@ -191,9 +194,10 @@ paths:
       tags: [portal]
       summary: Duplicate a historical order as a new draft
       description: >-
-        Creates a new DRAFT order from the source order's lines. Every
-        service failure, including a source order the caller does not own,
-        is the handler's fixed 500 today.
+        Creates a new DRAFT order from the source order's lines, behind the
+        order capability (a session without it is a 403). Every service
+        failure, including a source order the caller does not own, is the
+        handler's fixed 500 today.
       security:
         - PortalSession: []
       parameters:
@@ -230,8 +234,8 @@ paths:
       tags: [portal]
       summary: Cancel an order
       description: >-
-        The body is optional (an empty body is a cancellation without a
-        reason). Ownership first (someone else's order is a 404), then the
+        Behind the order capability. The body is optional (an empty body is a
+        cancellation without a reason). Ownership first (someone else's order is a 404), then the
         goods-in-motion gate (a stop already delivered or on a dispatched
         route is a 409), then the ERP state machine (already cancelled and
         fulfilled are 409s). A 409 carries the refusal envelope with a
@@ -333,12 +337,35 @@ paths:
       operationId: portalListInvoices
       tags: [portal]
       summary: The customer's invoices
-      description: A bare array with no page envelope; every money field is float dollars.
+      description: >-
+        A bare array with no page envelope; every money field is float
+        dollars. Behind the see_money capability (a session without it is a
+        403). Carries the change feed pair: since narrows to invoices whose
+        updated_at is strictly newer (a since page is ordered updated_at
+        ascending and tie-completed, so the cursor cannot lose a row), and
+        ETag plus X-Portal-Latest-Change make a poll cheap.
       security:
         - PortalSession: []
+      parameters:
+        - name: since
+          in: query
+          description: Only invoices with updated_at strictly newer; RFC3339. An unparseable value is a 400.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: The invoices, a bare array, never null.
+          headers:
+            ETag:
+              description: A strong validator over (customer, since, count, newest updated_at).
+              schema:
+                type: string
+            X-Portal-Latest-Change:
+              description: The newest updated_at in this result; send it back as since next time. Absent when the list is empty.
+              schema:
+                type: string
+                format: date-time
           content:
             application/json:
               schema:
@@ -354,7 +381,7 @@ paths:
       operationId: portalGetInvoice
       tags: [portal]
       summary: One invoice
-      description: Scoped to the caller; any failure is the handler's fixed 404.
+      description: Scoped to the caller; any failure is the handler's fixed 404. Behind the see_money capability.
       security:
         - PortalSession: []
       parameters:
@@ -382,12 +409,33 @@ paths:
       operationId: portalListDeliveries
       tags: [portal]
       summary: The customer's deliveries
-      description: A bare array of stops with POD, driver and route fields; no page envelope.
+      description: >-
+        A bare array of stops with POD, driver and route fields; no page
+        envelope. Carries the change feed pair: since narrows to stops whose
+        updated_at is strictly newer (the same ordering and tie completion as
+        the order feed).
       security:
         - PortalSession: []
+      parameters:
+        - name: since
+          in: query
+          description: Only deliveries with updated_at strictly newer; RFC3339. An unparseable value is a 400.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: The deliveries, a bare array, never null.
+          headers:
+            ETag:
+              description: A strong validator over (customer, since, count, newest updated_at).
+              schema:
+                type: string
+            X-Portal-Latest-Change:
+              description: The newest updated_at in this result; send it back as since next time. Absent when the list is empty.
+              schema:
+                type: string
+                format: date-time
           content:
             application/json:
               schema:
@@ -403,7 +451,7 @@ paths:
       operationId: portalGetDelivery
       tags: [portal]
       summary: One delivery
-      description: Scoped to the caller; any failure is the handler's fixed 404.
+      description: Scoped to the caller; any failure is the handler's fixed 404. Carries updated_at, the delivery feed's cursor.
       security:
         - PortalSession: []
       parameters:
@@ -465,8 +513,8 @@ paths:
       tags: [portal]
       summary: Ask for a different delivery day
       description: >-
-        202 Accepted, not 200 or 201: the ask is recorded as PENDING, the
-        schedule is NOT changed, and the dispatcher decides (applied stays
+        202 Accepted, not 200 or 201: the ask is recorded as PENDING, behind
+        the schedule capability, the schedule is NOT changed, and the dispatcher decides (applied stays
         false). A repeated ask supersedes the caller's earlier pending one.
         requested_date must be YYYY-MM-DD, not in the past and at most 365
         days out (violations are 400). A delivered stop or a route already
@@ -651,12 +699,34 @@ paths:
       operationId: portalListQuotes
       tags: [portal]
       summary: The customer's quotes
-      description: A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state.
+      description: >-
+        A bare array, newest first, capped at 100, no page envelope. Status
+        is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw
+        ERP state. Carries the change feed pair: since narrows to quotes
+        whose updated_at is strictly newer (the same ordering and tie
+        completion as the order feed).
       security:
         - PortalSession: []
+      parameters:
+        - name: since
+          in: query
+          description: Only quotes with updated_at strictly newer; RFC3339. An unparseable value is a 400.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: The quotes, a bare array, never null.
+          headers:
+            ETag:
+              description: A strong validator over (customer, since, count, newest updated_at).
+              schema:
+                type: string
+            X-Portal-Latest-Change:
+              description: The newest updated_at in this result; send it back as since next time. Absent when the list is empty.
+              schema:
+                type: string
+                format: date-time
           content:
             application/json:
               schema:
@@ -672,7 +742,8 @@ paths:
       tags: [portal]
       summary: Send a scope for the dealer to price
       description: >-
-        A scope, never a price: the request has no money field and every
+        Behind the request_quotes capability (a session without it is a 403);
+        accept and decline sit behind approve_quotes. A scope, never a price: the request has no money field and every
         money column is written 0.00 (priced stays false until the dealer
         answers). A line needs either a product_id or a description plus a
         uom; quantity must be positive; at most 200 lines; violations are
@@ -856,9 +927,10 @@ paths:
       tags: [portal]
       summary: Add an item to the cart
       description: >-
-        Prices the line through the customer's pricing waterfall before it
-        is stored. A non-positive quantity or an unknown product is a 500
-        today (the handler's status is fixed).
+        Prices the line through the customer's pricing waterfall before it is
+        stored, behind the order capability (the cart's writes and the
+        checkout share it). A non-positive quantity or an unknown product is
+        a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
       parameters:
@@ -965,7 +1037,8 @@ paths:
       summary: Place an order from the cart
       description: >-
         Converts the cart to an order (each line's float unit price is
-        rounded to cents for the order module) and clears the cart. An empty
+        rounded to cents for the order module) and clears the cart, behind
+        the order capability (a session without it is a 403). An empty
         cart, an unknown project and every order-service failure are 500s
         today (the handler's status is fixed).
       security:
@@ -1003,7 +1076,7 @@ paths:
       operationId: portalListUsers
       tags: [portal]
       summary: The customer's portal users
-      description: Admin only; a non-admin session is a 403 before anything is read.
+      description: The manage_team capability (the owner role today); a session without it is a 403 before anything is read. The guard resolves the role server side, never a role string on the wire.
       security:
         - PortalSession: []
       responses:
@@ -1026,7 +1099,7 @@ paths:
       operationId: portalListInvites
       tags: [portal]
       summary: The customer's outstanding invites
-      description: Admin only; a non-admin session is a 403. The invite token is never serialized.
+      description: The manage_team capability; a session without it is a 403. The invite token is never serialized.
       security:
         - PortalSession: []
       responses:
@@ -1049,9 +1122,9 @@ paths:
       tags: [portal]
       summary: Invite a team member
       description: >-
-        Admin only. Records an invite expiring in seven days; the email is
-        logged, not sent. A role outside the three known ones is a 500 today
-        (the handler's status is fixed).
+        The manage_team capability. Records an invite expiring in seven days;
+        the email is logged, not sent. A role outside the five contractor
+        roles is a 500 today (the handler's status is fixed).
       security:
         - PortalSession: []
       parameters:
@@ -1090,8 +1163,9 @@ paths:
       tags: [portal]
       summary: Change a portal user's role
       description: >-
-        Admin only. A role outside the three known ones is a 500 today (the
-        handler's status is fixed). Success is a bodiless 200.
+        The manage_team capability. A role outside the five contractor roles
+        is a 500 today (the handler's status is fixed). Success is a bodiless
+        200.
       security:
         - PortalSession: []
       parameters:
@@ -1168,6 +1242,383 @@ paths:
           $ref: "#/components/responses/LegacyForbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/portal/v1/me:
+    get:
+      operationId: portalMe
+      tags: [portal]
+      summary: The signed in user, the account, the yards and the capabilities
+      description: >-
+        The frame's first read. The capabilities are the server's own
+        resolution of the role (the same value every route guard consults),
+        so a client that renders from them can never enable an action the
+        server refuses. The yards are the branches the account holds
+        (customer_branches), the primary first, each with its own IANA zone.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The user, account, yards and capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalMe"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/today:
+    get:
+      operationId: portalToday
+      tags: [portal]
+      summary: The Today board
+      description: >-
+        Everything a contractor opens the portal to act on: quotes awaiting
+        their decision, today's deliveries and the next ones out, invoices
+        due and overdue, and open orders, each section a count with its first
+        rows. Money is integer cents on this surface. The invoice section is
+        zeroed for a role without the see_money capability (the board itself
+        is still that role's to read). Carries the change feed pair: ETag
+        (If-None-Match answers 304) and X-Portal-Latest-Change; since narrows
+        every section's rows to what changed after it.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: since
+          in: query
+          description: Only rows with updated_at strictly newer; RFC3339. An unparseable value is a 400.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The board.
+          headers:
+            ETag:
+              description: A strong validator over (customer, section counts, newest updated_at).
+              schema:
+                type: string
+            X-Portal-Latest-Change:
+              description: The newest updated_at across the board's rows; send it back as since next time. Absent when nothing is on the board.
+              schema:
+                type: string
+                format: date-time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalToday"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}/timeline:
+    get:
+      operationId: portalOrderTimeline
+      tags: [portal]
+      summary: The order and delivery timeline
+      description: >-
+        The journey in five steps (Confirmed, Preparing, Loaded, Out for
+        delivery or Ready for pickup, Delivered or Picked up), derived from
+        Gable's own order and delivery states, each step done, current or
+        upcoming, with the proof of delivery (signer, photo, place) where it
+        exists. The flow follows the order's delivery type; a cancelled order
+        promises nothing. Scoped to the caller like every order read.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The timeline.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrderTimeline"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}/delivery-instructions:
+    put:
+      operationId: portalSetDeliveryInstructions
+      tags: [portal]
+      summary: Edit the site delivery instructions
+      description: >-
+        The contractor's own instruction for the site, on an unfulfilled
+        order, behind the edit_delivery_instructions capability (a session
+        without it is a 403). A fulfilled or cancelled order's instructions
+        are read only (a 400); someone else's order is the same 404 as always.
+        Returns the updated order; the write moves updated_at, so the order
+        change feed carries it.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalSetDeliveryInstructionsRequest"
+      responses:
+        "200":
+          description: The updated order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrder"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/schedule/windows:
+    get:
+      operationId: portalListScheduleWindows
+      tags: [portal]
+      summary: Open delivery windows and pickup slots at a yard
+      description: >-
+        The yard's active windows expanded over a date range into concrete
+        slots with the places left (capacity minus the holds already placed).
+        yard_id is required and must be one of the account's own yards (any
+        other yard is a 404, never a 403); kind, from and to are optional
+        (from defaults to today, to fourteen days out; the range is capped at
+        62 days). Every instant is UTC and each slot carries its local HH:MM
+        spellings in the yard's own zone.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: yard_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [delivery, pickup]
+        - name: from
+          in: query
+          description: YYYY-MM-DD, inclusive; defaults to today.
+          schema:
+            type: string
+        - name: to
+          in: query
+          description: YYYY-MM-DD, inclusive; defaults to fourteen days after from.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The concrete slots, a bare array, never null.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalScheduleSlot"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/schedule/holds:
+    post:
+      operationId: portalCreateScheduleHold
+      tags: [portal]
+      summary: Hold a delivery window or pickup slot
+      description: >-
+        One hold on one window and date, behind the schedule capability (a
+        session without it is a 403). Capacity is enforced inside a
+        transaction that locks the window row: a full window is a 409
+        (SCHEDULE_WINDOW_FULL), past the cutoff is a 409
+        (SCHEDULE_CUTOFF_PASSED), a window the yard does not run on that
+        weekday is a 400, and any yard or window that is not the caller's own
+        is a 404. An optional order_id rides the hold (it must be the
+        caller's own unfulfilled order; its earlier held hold is released in
+        the same transaction).
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalScheduleHoldRequest"
+      responses:
+        "201":
+          description: The placed hold.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalScheduleHold"
+        "409":
+          description: >-
+            The window is fully booked, the cutoff has passed, or an
+            idempotency claim is in progress; the refusal envelope.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/schedule/holds/{id}:
+    get:
+      operationId: portalGetScheduleHold
+      tags: [portal]
+      summary: One hold
+      description: Scoped to the caller; any failure is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The hold.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalScheduleHold"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: portalChangeScheduleHold
+      tags: [portal]
+      summary: Move a held hold to another window or date
+      description: >-
+        Behind the schedule capability. The release of the old place and the
+        take of the new one are one transaction: a refused change (full,
+        past the cutoff, wrong weekday) leaves the original hold exactly as
+        it was, and the refusal codes are the create's.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalScheduleHoldRequest"
+      responses:
+        "200":
+          description: The moved hold.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalScheduleHold"
+        "409":
+          description: The refusal envelope (full window, cutoff passed, idempotency claim).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: portalReleaseScheduleHold
+      tags: [portal]
+      summary: Release a held hold
+      description: >-
+        Behind the schedule capability. Gives the place back; success is a
+        bodiless 204, and a hold that is not the caller's (or is no longer
+        held) is the handler's fixed 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Released; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     PortalSession:
@@ -1215,7 +1666,8 @@ components:
           type: string
         role:
           type: string
-          enum: [Admin, Buyer, View-Only]
+          enum: [owner, estimator, project_manager, site_super, ap_clerk]
+          description: One of the five contractor roles (migration 130); the server resolves each to a capability set served by GET /me.
         status:
           type: string
           enum: [Active, Inactive]
@@ -1322,7 +1774,7 @@ components:
           description: Float dollars.
     PortalInvoice:
       type: object
-      required: [id, number, is_overdue, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
+      required: [id, number, is_overdue, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, updated_at, lines]
       properties:
         id:
           type: string
@@ -1359,6 +1811,10 @@ components:
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: The invoice change feed's cursor; moves on every ERP status write.
         lines:
           type: array
           description: Never null.
@@ -1366,7 +1822,7 @@ components:
             $ref: "#/components/schemas/PortalOrderLine"
     PortalDelivery:
       type: object
-      required: [id, order_id, status, pod_proof_url, pod_signed_by, pod_timestamp, created_at, order_number, driver_name, driver_phone, driver_photo_url, vehicle_name, vehicle_photo_url, scheduled_date, estimated_arrival, delivery_address, stop_sequence, total_stops, delivery_instructions]
+      required: [id, order_id, status, pod_proof_url, pod_signed_by, pod_timestamp, created_at, order_number, driver_name, driver_phone, driver_photo_url, vehicle_name, vehicle_photo_url, scheduled_date, estimated_arrival, delivery_address, stop_sequence, total_stops, delivery_instructions, updated_at]
       description: A customer-facing delivery stop; the optional fields are null rather than absent.
       properties:
         id:
@@ -1413,6 +1869,10 @@ components:
           type: [integer, "null"]
         delivery_instructions:
           type: [string, "null"]
+        updated_at:
+          type: string
+          format: date-time
+          description: The delivery change feed's cursor; moves on every stop or route write.
     PortalReorderRequest:
       type: object
       required: [order_id]
@@ -1908,7 +2368,7 @@ components:
           type: string
         role:
           type: string
-          enum: [Admin, Buyer, View-Only]
+          enum: [owner, estimator, project_manager, site_super, ap_clerk]
         expires_at:
           type: string
           format: date-time
@@ -1923,14 +2383,14 @@ components:
           type: string
         role:
           type: string
-          enum: [Admin, Buyer, View-Only]
+          enum: [owner, estimator, project_manager, site_super, ap_clerk]
     PortalUpdateUserRoleRequest:
       type: object
       required: [role]
       properties:
         role:
           type: string
-          enum: [Admin, Buyer, View-Only]
+          enum: [owner, estimator, project_manager, site_super, ap_clerk]
     PortalUpdateUserStatusRequest:
       type: object
       required: [status]
@@ -1938,3 +2398,353 @@ components:
         status:
           type: string
           enum: [Active, Inactive]
+    PortalCapabilities:
+      type: object
+      required: [manage_team, see_money, pay, order, request_quotes, approve_quotes, schedule, edit_delivery_instructions]
+      description: >-
+        The server resolved answer to what this user may do. A route NEVER
+        checks a role string: it names one of these capabilities and the
+        guard resolves the role server side, so this object is the same
+        authority the enforcement uses.
+      properties:
+        manage_team:
+          type: boolean
+        see_money:
+          type: boolean
+        pay:
+          type: boolean
+        order:
+          type: boolean
+        request_quotes:
+          type: boolean
+        approve_quotes:
+          type: boolean
+        schedule:
+          type: boolean
+        edit_delivery_instructions:
+          type: boolean
+    PortalAccount:
+      type: object
+      required: [id, name, account_number, primary_branch_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        account_number:
+          type: string
+        primary_branch_id:
+          type: string
+          format: uuid
+    PortalYard:
+      type: object
+      required: [id, code, name, timezone, is_primary]
+      description: One yard the account holds (customer_branches), the primary first.
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        timezone:
+          type: string
+          description: The yard's IANA zone; scheduling's local spellings are in it.
+        is_primary:
+          type: boolean
+    PortalMe:
+      type: object
+      required: [user, account, yards, capabilities]
+      properties:
+        user:
+          $ref: "#/components/schemas/PortalCustomerUser"
+        account:
+          $ref: "#/components/schemas/PortalAccount"
+        yards:
+          type: array
+          description: Never null; an account linked to no yard carries an empty array.
+          items:
+            $ref: "#/components/schemas/PortalYard"
+        capabilities:
+          $ref: "#/components/schemas/PortalCapabilities"
+    PortalTodayQuoteRow:
+      type: object
+      required: [id, total_cents, sent_at, expires_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        total_cents:
+          type: integer
+          description: Integer cents; the Today board never speaks float.
+        sent_at:
+          type: [string, "null"]
+          format: date-time
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PortalTodayDeliveryRow:
+      type: object
+      required: [delivery_id, order_id, status, scheduled_for, yard_code, is_pickup, updated_at]
+      properties:
+        delivery_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        scheduled_for:
+          type: [string, "null"]
+          format: date-time
+        yard_code:
+          type: string
+        is_pickup:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    PortalTodayInvoiceRow:
+      type: object
+      required: [id, number, total_cents, due_date, is_overdue, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        total_cents:
+          type: integer
+        due_date:
+          type: [string, "null"]
+          format: date-time
+        is_overdue:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    PortalTodayOrderRow:
+      type: object
+      required: [id, status, total_cents, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        total_cents:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+    PortalToday:
+      type: object
+      required: [quotes_awaiting_pro, deliveries_today, next_deliveries, invoices_due, open_orders]
+      properties:
+        quotes_awaiting_pro:
+          type: object
+          required: [count, first]
+          description: SENT quotes awaiting the contractor's accept or decline; count is every one, first its newest rows.
+          properties:
+            count:
+              type: integer
+            first:
+              type: array
+              items:
+                $ref: "#/components/schemas/PortalTodayQuoteRow"
+        deliveries_today:
+          type: object
+          required: [count, first]
+          properties:
+            count:
+              type: integer
+            first:
+              type: array
+              items:
+                $ref: "#/components/schemas/PortalTodayDeliveryRow"
+        next_deliveries:
+          type: object
+          required: [count, first]
+          description: The stops after today, soonest first.
+          properties:
+            count:
+              type: integer
+            first:
+              type: array
+              items:
+                $ref: "#/components/schemas/PortalTodayDeliveryRow"
+        invoices_due:
+          type: object
+          required: [count, first]
+          description: Open invoices due today or already overdue; zeroed for a role without see_money.
+          properties:
+            count:
+              type: integer
+            first:
+              type: array
+              items:
+                $ref: "#/components/schemas/PortalTodayInvoiceRow"
+        open_orders:
+          type: object
+          required: [count, first]
+          properties:
+            count:
+              type: integer
+            first:
+              type: array
+              items:
+                $ref: "#/components/schemas/PortalTodayOrderRow"
+    PortalTimelineStep:
+      type: object
+      required: [key, label, state, at]
+      properties:
+        key:
+          type: string
+          enum: [confirmed, preparing, loaded, out_for_delivery, ready_for_pickup, delivered, picked_up]
+          description: "The flow is the delivery type's: steps 4 and 5 are out_for_delivery and delivered, or ready_for_pickup and picked up."
+        label:
+          type: string
+        state:
+          type: string
+          enum: [done, current, upcoming]
+        at:
+          type: [string, "null"]
+          format: date-time
+          description: When the step happened, where Gable records one; null when it has not.
+    PortalTimelinePOD:
+      type: object
+      required: [signed_by, photo_url, place, timestamp]
+      description: The proof of delivery where it exists; null when the journey is not finished.
+      properties:
+        signed_by:
+          type: [string, "null"]
+        photo_url:
+          type: [string, "null"]
+        place:
+          type: [string, "null"]
+          description: The delivery address the stop records.
+        timestamp:
+          type: [string, "null"]
+          format: date-time
+    PortalOrderTimeline:
+      type: object
+      required: [order_id, status, delivery_type, is_cancelled, steps, pod]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        delivery_type:
+          type: string
+          enum: [DELIVERY, PICKUP]
+        is_cancelled:
+          type: boolean
+        steps:
+          type: array
+          description: Never null; a cancelled order carries every step upcoming.
+          items:
+            $ref: "#/components/schemas/PortalTimelineStep"
+        pod:
+          type: [object, "null"]
+    PortalSetDeliveryInstructionsRequest:
+      type: object
+      required: [instructions]
+      properties:
+        instructions:
+          type: string
+          description: The contractor's site instruction, capped at 2000 characters.
+    PortalScheduleSlot:
+      type: object
+      required: [window_id, yard_id, yard_code, kind, date, start_utc, end_utc, start_local, end_local, capacity, remaining, cutoff_minutes]
+      description: One concrete date of one window with the places left.
+      properties:
+        window_id:
+          type: string
+          format: uuid
+        yard_id:
+          type: string
+          format: uuid
+        yard_code:
+          type: string
+        kind:
+          type: string
+          enum: [delivery, pickup]
+        date:
+          type: string
+          description: YYYY-MM-DD, the yard's own calendar day.
+        start_utc:
+          type: string
+          format: date-time
+        end_utc:
+          type: string
+          format: date-time
+        start_local:
+          type: string
+          description: HH:MM in the yard's zone, for display.
+        end_local:
+          type: string
+        capacity:
+          type: integer
+        remaining:
+          type: integer
+        cutoff_minutes:
+          type: integer
+    PortalScheduleHold:
+      type: object
+      required: [id, window_id, yard_id, kind, date, start_utc, end_utc, order_id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        window_id:
+          type: string
+          format: uuid
+        yard_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [delivery, pickup]
+        date:
+          type: string
+          description: YYYY-MM-DD, the yard's own calendar day.
+        start_utc:
+          type: string
+          format: date-time
+        end_utc:
+          type: string
+          format: date-time
+        order_id:
+          type: [string, "null"]
+          format: uuid
+          description: The open order the hold rides on, or null at checkout.
+        status:
+          type: string
+          enum: [held, released, used, expired]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PortalScheduleHoldRequest:
+      type: object
+      required: [window_id, date]
+      properties:
+        window_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          description: YYYY-MM-DD, the yard's own calendar day; today or later.
+        order_id:
+          type: [string, "null"]
+          format: uuid
+          description: Optional; the caller's own unfulfilled order the hold rides on.
