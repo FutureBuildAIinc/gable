@@ -10,6 +10,7 @@ package pos_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -105,5 +106,40 @@ func TestOnlyAManagerWhoIsNotTheCashierApprovesAnOverride(t *testing.T) {
 			t.Errorf("role %q approving an override = %d, want 201: %s", role, r.status, r.raw)
 		}
 		mustExec(t, f.db, `DELETE FROM pos_account_overrides WHERE sale_id = $1`, sale)
+	}
+}
+
+// Three managers approve one sale at once (pool size 4, three contenders): the
+// one live override per sale and kind holds, exactly one approval is written
+// and the others are told it exists.
+func TestRacingApprovalsOfOneSaleKeepOneLiveOverride(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
+	statuses := make([]int, 3)
+	var wg sync.WaitGroup
+	for i := range statuses {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			statuses[i] = f.override(sale, "account", "agreed", 100, "admin", uuid.NewString()).status
+		}(i)
+	}
+	wg.Wait()
+	created := 0
+	for _, st := range statuses {
+		switch st {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+		default:
+			t.Errorf("statuses = %v, want only 201 and 409", statuses)
+		}
+	}
+	if created != 1 {
+		t.Errorf("statuses = %v, want exactly one approval", statuses)
+	}
+	if n := f.scalar(`SELECT count(*) FROM pos_account_overrides WHERE sale_id = $1 AND consumed_at IS NULL`, uuid.MustParse(sale)); n.(int64) != 1 {
+		t.Errorf("live overrides = %v, want 1", n)
 	}
 }

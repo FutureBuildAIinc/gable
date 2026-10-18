@@ -282,7 +282,7 @@ of a yard (Jordan Pike at Kelowna Main Yard, Drew Patel at Lake Country Outpost)
 runs with sign in off, so a manager's approval in step 3 is recorded as "dev-mode"; a real deployment needs a
 signed in admin or owner other than the cashier. The setup calls are the same ones the customer screens make, shown
 as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
-`curl '.../api/v1/customers?q=Tarnwick'`, `$REV` its current revision.
+`curl ".../api/v1/customers?q=Tarnwick"`, `$REV` its current revision.
 
 1. **Set up the account.** Give Tarnwick Construction a small credit limit, a named buyer requirement and a check
    limit: `curl -X PUT .../api/v1/customers/$TARNWICK -H 'If-Match: "'$REV'"'` with the customer's own fields and
