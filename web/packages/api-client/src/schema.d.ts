@@ -5211,7 +5211,7 @@ export interface paths {
         };
         /**
          * Read one card terminal intent (the desk's waiting state)
-         * @description The card leg's own record at the counter (CP-05): where the leg stands, claimed at the terminal, waiting at the device, answered authorized or declined, or lost to the sweep. The desk's waiting state reads this route while the terminal has the card. The intent's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404).
+         * @description The card leg's own record at the counter (CP-05): where the leg stands, claimed at the terminal, waiting at the device, answered authorized or declined, or lost to the sweep. The desk's waiting state reads this route while the terminal has the card. The intent's branch is held to the caller's reach: a caller whose branch header names another branch finds a missing row (404), and a caller with no header and no grant to the branch is 403.
          */
         get: operations["posTerminalIntentGet"];
         put?: never;
@@ -5233,7 +5233,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel a card terminal intent, honest about the device
-         * @description The desk's cancel of a waiting card leg. It is honest about the device: a claim the terminal never reached closes lost with no manager item (nothing moved), while a leg at the device is refused (409 terminal_at_device), because the device may still move the money and only the sweep and a manager settle that. An intent already answered or lost is 409 terminal_intent_settled. The cancel never claims money back. A machine key is refused in the route itself, bound or not.
+         * @description The desk's cancel of a waiting card leg. It is honest about the device: a claim the terminal never reached closes lost with no manager item (nothing moved), while a leg at the device is refused (409 terminal_at_device), because the device may still move the money and only the sweep and a manager settle that. An intent already answered or lost is 409 terminal_intent_settled, and a leg the device authorized that the sale has not used is 409 terminal_authorized. The cancel never claims money back. A machine key is refused in the route itself, bound or not. The intent's branch is held to the caller's reach as the read is.
          */
         post: operations["posTerminalIntentCancel"];
         delete?: never;
@@ -5253,7 +5253,7 @@ export interface paths {
         put?: never;
         /**
          * Sweep the card terminal intents past their lease
-         * @description The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The scheduler runs this act on its own; the route is the manager's own trigger. Admin, owner and finance roles only; a machine key is refused in the route itself.
+         * @description The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The scheduler runs this act on its own over every branch; the route is the manager's own trigger and sweeps only the caller's reach (a branch in context, else the granted branches). Admin, owner and finance roles only; a machine key is refused in the route itself.
          */
         post: operations["posTerminalIntentsSweep"];
         delete?: never;
@@ -5271,7 +5271,7 @@ export interface paths {
         };
         /**
          * List the open lost terminal answers (the manager's queue)
-         * @description The manager's queue of card legs the sweep turned lost because the device may have moved money: who must resolve it (the register), what amount, the device reference, and the transaction it belongs to. A manager reads the terminal's own record and settles each at the resolve route. Admin, owner and finance roles only. Items whose sale the caller's branch context hides are not the caller's to see.
+         * @description The manager's queue of card legs the sweep turned lost because the device may have moved money: who must resolve it (the register), what amount, the device reference, and the transaction it belongs to, with the device's own late verdict and reference when its answer came after the sweep. A manager reads the terminal's own record and settles each at the resolve route. Admin, owner and finance roles only. The list is held to the caller's branch wall in the query itself: with a branch in context only that branch's items, with none and a user only the branches the user is granted.
          */
         get: operations["posTerminalLostItemsList"];
         put?: never;
@@ -5293,7 +5293,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve one lost terminal answer
-         * @description The manager's settlement of one lost card leg, the terminal's own record the authority (CP-05). Outcome authorized applies the tender to the sale it belongs to, or refunds it through the gateway when the sale is gone (the same day void first, the refund when the void is refused; a reversal that fails answers 502 charge_not_reversed and the item stays open). Outcome declined closes the item and moves nothing. Both write one audit row naming the person, the item, the outcome and the reference. Admin, owner and finance roles only; a machine key is refused in the route itself, bound or not. The item's branch is held to the caller's grants before either leg, so a caller outside the branch finds a missing row (404). An item already resolved is 409 lost_item_settled.
+         * @description The manager's settlement of one lost card leg, the terminal's own record the authority (CP-05). The item is claimed first by one guarded statement, so a second or racing resolve is 409 lost_item_settled and calls nothing. Outcome authorized on a sale leg: a sale still open keeps the authorized leg for its completion (never charged again); a completed sale applies the money up to its invoice's open amount and the rest goes back to the card; a sale paid in full or voided has the whole charge reversed (the same day void first, the refund when the void is refused, under the intent's idempotency key; a reversal that fails answers 502 charge_not_reversed and the item is open again). On a refund or void leg the refund claim the leg names settles through the claim's own resolution. Outcome declined closes the item and moves nothing. Both write one audit row naming the person, the item, the outcome and the reference. Admin, owner and finance roles only; a machine key is refused in the route itself, bound or not. The item's branch is held to the caller's reach before either outcome: a caller whose branch header names another branch finds a missing row (404), and a caller with no header and no grant to the branch is 403.
          */
         post: operations["posTerminalLostItemResolve"];
         delete?: never;
@@ -12904,7 +12904,14 @@ export interface components {
             device_id: string;
             provider_ref: string;
             /** @enum {string} */
-            state: "open" | "resolved_authorized" | "resolved_declined";
+            state: "open" | "resolving" | "resolved_authorized" | "resolved_declined";
+            /**
+             * @description The device's own late verdict when its answer arrived after the sweep or against a recorded verdict; empty when none did.
+             * @enum {string}
+             */
+            late_verdict: "" | "authorized" | "declined";
+            /** @description The reference the late answer carried; empty when none did. */
+            late_provider_ref: string;
         };
         PosTerminalLostItemList: {
             items: components["schemas"]["PosTerminalLostItem"][];

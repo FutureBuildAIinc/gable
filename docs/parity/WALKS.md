@@ -299,10 +299,16 @@ so a production configuration runs none of this).
 6. Read the terminal's own record, then `POST /api/v1/pos/terminal-lost-items/<id>/resolve` with `outcome declined`
    (the terminal said no): the item closes `resolved_declined`, nothing moved, and the drawer now closes. A second
    resolve is 409 `lost_item_settled`.
-7. For an `authorized` resolution of a sale that completed without the leg, the same resolve with
-   `outcome authorized` records the money against the sale's invoice (the part still open) and the rest as unapplied
-   credit; for a sale that never completed, the money goes back through the gateway (the same day void first) before
-   the item closes. Only the manager roles resolve; every route runs behind the branch wall, so yard two's cashier
-   and manager find yard one's intents and items as missing rows.
+7. For an `authorized` resolution, the money follows the sale. A sale still open keeps the authorized leg: complete
+   it with the same card tender and the sale uses that leg (the device is not called again, and a completion that
+   would leave the leg behind is refused `authorized_leg_unused`). A sale that completed another way has the leg
+   applied up to its invoice's open amount and the rest put back to the card; a sale paid in full, or voided, has the
+   whole charge put back (the same day void first, the refund when the void is refused; a failed reversal is 502
+   `charge_not_reversed` and the item is open again). A stranded card void or card return settles through its refund
+   claim's own resolution, so the drawer closes after it. A second resolve of any item is 409 `lost_item_settled` and
+   calls nothing.
+8. Only the manager roles resolve, and every route runs behind the branch wall: sign in as yard two's manager and
+   yard one's intents and items read as missing rows (a branch header) or are refused 403 (no header and no grant),
+   its queue lists none of yard one's items, and its sweep takes only yard two's expired legs.
 
 None of the other walks of the plan are written yet; they land with their items.
