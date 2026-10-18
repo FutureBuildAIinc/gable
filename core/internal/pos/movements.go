@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -188,7 +189,7 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 				Source: gl.SourceAdjustment, SourceRefID: &m.ID, PostedBy: actorOrSystem(actor), Legs: movementLegs(m),
 			})
 			if err != nil {
-				return fmt.Errorf("failed to post the movement: %w", err)
+				return ledgerRefusal(err, "failed to post the movement")
 			}
 			if entry != nil {
 				m.GLEntryID = &entry.ID
@@ -244,4 +245,18 @@ func (s *Service) ListMovements(ctx context.Context, sessionID uuid.UUID, after 
 		return nil, false, err
 	}
 	return s.repo.ListTillMovementsPage(ctx, sessionID, after, afterID, limit)
+}
+
+// ledgerRefusal maps the ledger's refusals of a posting to the 409 that tells
+// the operator what to mend: a closed fiscal period (the 077 trigger's
+// message, however the poster wrapped it) and a code the chart lacks. Any
+// other error is the act's own failure.
+func ledgerRefusal(err error, what string) error {
+	switch {
+	case errors.Is(err, gl.ErrPeriodClosed) || strings.Contains(err.Error(), "closed fiscal period"):
+		return conflict("period_closed", "the entry would be dated into a closed fiscal period")
+	case errors.Is(err, gl.ErrAccountMissing):
+		return conflict("account_missing", "the chart of accounts lacks an account this entry posts to: "+err.Error())
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }

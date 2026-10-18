@@ -251,7 +251,7 @@ func TestTheVarianceThresholdIsPerBranchOverADefault(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	read := func() map[string]any {
-		r := f.do("GET", "/api/v1/pos/till/policy?branch_id="+f.branchID.String(), nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+		r := f.do("GET", "/api/v1/pos/till/policy?branch_id="+f.branchID.String(), nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 		if r.status != http.StatusOK {
 			t.Fatalf("policy = %d: %s", r.status, r.raw)
 		}
@@ -353,5 +353,76 @@ func TestASignOffIsOneTransaction(t *testing.T) {
 	f.events.fail = ""
 	if r := f.signOff(sessionID, "retry", "finance", mustUUID(t)); r.status != http.StatusOK {
 		t.Errorf("the retry = %d: %s", r.status, r.raw)
+	}
+}
+
+// RULE: a variance signed off into a closed fiscal period is the 409
+// period_closed, and the drawer stays waiting.
+func TestASignOffIntoAClosedPeriodIsTheBlocker(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.setThreshold(100)
+	sessionID := f.openTill(10000)
+	f.closeAs(sessionID, 9000, mustUUID(t))
+	f.closeFiscalPeriod()
+	r := f.signOff(sessionID, "into a closed period", "finance", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("sign off into a closed period = %d, want 409: %s", r.status, r.raw)
+	}
+	if _, blockers, _ := errorOf(t, r); len(blockers) != 1 || blockers[0] != "period_closed" {
+		t.Errorf("blockers = %v, want period_closed", blockers)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM till_sessions WHERE id = $1 AND status = 'PENDING_SIGNOFF'`, sessionID); got != 1 {
+		t.Errorf("the session left pending_signoff on a refused sign off")
+	}
+}
+
+// RULE: the policy of a branch that does not exist is a 404, read or written.
+func TestThePolicyOfAnUnknownBranchIsAMissingRecord(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	ghost := mustUUID(t)
+	if r := f.do("GET", "/api/v1/pos/till/policy?branch_id="+ghost, nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusNotFound {
+		t.Errorf("policy read of an unknown branch = %d, want 404: %s", r.status, r.raw)
+	}
+	if r := f.do("PUT", "/api/v1/pos/till/policy", map[string]any{"branch_id": ghost, "variance_threshold_cents": 100},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusNotFound {
+		t.Errorf("policy write of an unknown branch = %d, want 404: %s", r.status, r.raw)
+	}
+}
+
+// RULE (concurrency, pool size 4, three contenders): three writers of one
+// branch's threshold all answer, and the row ends as exactly one of theirs.
+func TestRacingPolicyWritesEndOnOneValue(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	auditRows := func() int64 {
+		return countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.till.variance_policy' AND entity_id = $1::uuid`, f.branchID.String())
+	}
+	before := auditRows()
+	var wg sync.WaitGroup
+	statuses := make([]int, 3)
+	for i := range statuses {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			statuses[i] = f.setThreshold(100 * (i + 1)).status
+		}(i)
+	}
+	wg.Wait()
+	for i, st := range statuses {
+		if st != http.StatusOK {
+			t.Errorf("writer %d answered %d, want 200", i, st)
+		}
+	}
+	var n, v int
+	if err := f.db.Pool.QueryRow(contextB(), `SELECT count(*), COALESCE(max(threshold_cents), 0) FROM till_variance_policy WHERE branch_id = $1`, f.branchID).Scan(&n, &v); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || (v != 100 && v != 200 && v != 300) {
+		t.Errorf("%d rows with threshold %d, want one row holding 100, 200 or 300", n, v)
+	}
+	if got := auditRows() - before; got != 3 {
+		t.Errorf("%d audit rows for three writes, want 3", got)
 	}
 }

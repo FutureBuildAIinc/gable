@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import '../../components/ui/gable-date-field.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { posService } from '../../services/POSService.ts';
+import { ApiError } from '../../services/apiError.ts';
 import { branchContext } from '../../services/BranchContext.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -31,6 +32,8 @@ export class GableBranchDay extends LitElement {
     @state() private date = '';
     @state() private loading = true;
     @state() private failure = '';
+    /** The server refuses the end of day to this user: the card does not show. */
+    @state() private forbidden = false;
     @state() private slip = '';
     @state() private busy = false;
     @state() private candidates: DepositCandidate[] | null = null;
@@ -56,6 +59,7 @@ export class GableBranchDay extends LitElement {
         const id = branchContext.currentId;
         const seq = ++this.seq;
         this.failure = '';
+        this.forbidden = false;
         this.candidates = null;
         this.chosen = '';
         if (!id) {
@@ -72,6 +76,7 @@ export class GableBranchDay extends LitElement {
         } catch (err: unknown) {
             if (seq !== this.seq) return;
             this.day = null;
+            this.forbidden = err instanceof ApiError && err.status === 403;
             this.failure = err instanceof Error ? err.message : 'Failed to load the branch day';
         } finally {
             if (seq === this.seq) this.loading = false;
@@ -196,6 +201,7 @@ export class GableBranchDay extends LitElement {
     }
 
     render() {
+        if (this.forbidden) return nothing;
         if (!branchContext.currentId && !this.loading) {
             return html`<div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-zinc-500" data-testid="branch-day-none">Choose a yard to see its end of day.</div>`;
         }

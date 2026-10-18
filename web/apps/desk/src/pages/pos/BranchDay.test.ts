@@ -138,6 +138,12 @@ describe('the branch end of day', () => {
     expect(text(q(el, '[data-testid="deposit-difference"]'))).toContain('Difference +$0.02');
   });
 
+  it('does not show to a user the server refuses it to', async () => {
+    handler = () => jsonResponse({ error: { code: 'forbidden', message: 'insufficient role' }, meta: { request_id: 'r' } }, 403);
+    const el = await mountAsync<GableBranchDay>('gable-branch-day');
+    expect(text(el)).toBe('');
+  });
+
   it('says so when the yard has no drawer that day', async () => {
     handler = () => jsonResponse(day({ registers: [], totals: figures({ session_count: 0, sale_count: 0, sales_total_cents: 0, expected_by_method: {}, counted_by_method: {}, over_short_cents: 0, cash_to_deposit_cents: 0 }) }));
     const el = await mountAsync<GableBranchDay>('gable-branch-day');

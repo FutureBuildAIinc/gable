@@ -90,7 +90,7 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 		if s.ledger != nil && overShort != 0 {
 			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
 			if err != nil {
-				return fmt.Errorf("failed to post the drawer variance: %w", err)
+				return ledgerRefusal(err, "failed to post the drawer variance")
 			}
 			if glID != uuid.Nil {
 				session.GLEntryID = &glID
@@ -157,6 +157,11 @@ func (s *Service) GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*Var
 	if err := s.grants.CheckPayloadBranch(ctx, branch); err != nil {
 		return nil, branchRefusal(err, "branch_id")
 	}
+	if _, ok, err := s.repo.BranchZone(ctx, branch); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, httpx.NotFound("branch not found")
+	}
 	return s.repo.GetVariancePolicy(ctx, branch)
 }
 
@@ -168,6 +173,11 @@ func (s *Service) SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents
 	}
 	var out *VariancePolicy
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if _, ok, err := s.repo.BranchZone(ctx, branch); err != nil {
+			return err
+		} else if !ok {
+			return httpx.NotFound("branch not found")
+		}
 		if err := s.repo.SetVariancePolicy(ctx, branch, cents, actor); err != nil {
 			return err
 		}

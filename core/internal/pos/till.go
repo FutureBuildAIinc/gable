@@ -220,7 +220,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		if s.ledger != nil && overShort != 0 && !hold {
 			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
 			if err != nil {
-				return fmt.Errorf("failed to post the drawer variance: %w", err)
+				return ledgerRefusal(err, "failed to post the drawer variance")
 			}
 			if glID != uuid.Nil {
 				session.GLEntryID = &glID

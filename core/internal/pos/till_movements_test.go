@@ -385,3 +385,60 @@ func TestTwoMovementsAndACloseRacingEndConsistent(t *testing.T) {
 		_ = sessionID
 	}
 }
+
+// RULE: a movement dated into a closed fiscal period is the 409 period_closed,
+// never an internal error, and nothing is written. The same refusal stops the
+// sign off's variance.
+func TestAMovementIntoAClosedPeriodIsTheBlocker(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	sessionID := f.openTill(5000)
+	f.closeFiscalPeriod()
+
+	r := f.movement(sessionID, map[string]any{"kind": "safe_drop", "amount_cents": 1000}, mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("movement into a closed period = %d, want 409: %s", r.status, r.raw)
+	}
+	if _, blockers, _ := errorOf(t, r); len(blockers) != 1 || blockers[0] != "period_closed" {
+		t.Errorf("blockers = %v, want period_closed", blockers)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM till_movements WHERE till_session_id = $1`, sessionID); got != 0 {
+		t.Errorf("%d movements written into a closed period", got)
+	}
+}
+
+// closeFiscalPeriod closes the fiscal period that holds today (adding a closed
+// one when none does) and reopens it when the test ends: an entry dated today
+// is then refused by the period trigger.
+func (f *fixture) closeFiscalPeriod() {
+	f.t.Helper()
+	ctx := contextB()
+	rows, err := f.db.Pool.Query(ctx, `UPDATE gl_fiscal_periods SET status = 'CLOSED'
+		WHERE CURRENT_DATE BETWEEN start_date AND end_date AND status = 'OPEN' RETURNING id::text`)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var reopened []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			f.t.Fatal(err)
+		}
+		reopened = append(reopened, id)
+	}
+	rows.Close()
+	var added string
+	if len(reopened) == 0 && countOf(f.t, f.db, `SELECT count(*) FROM gl_fiscal_periods WHERE CURRENT_DATE BETWEEN start_date AND end_date`) == 0 {
+		added = mustUUID(f.t)
+		mustExec(f.t, f.db, `INSERT INTO gl_fiscal_periods (id, name, start_date, end_date, status)
+			VALUES ($1, 'closed for a test', CURRENT_DATE - 1, CURRENT_DATE + 1, 'CLOSED')`, added)
+	}
+	f.t.Cleanup(func() {
+		for _, id := range reopened {
+			_, _ = f.db.Pool.Exec(ctx, `UPDATE gl_fiscal_periods SET status = 'OPEN' WHERE id = $1::uuid`, id)
+		}
+		if added != "" {
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM gl_fiscal_periods WHERE id = $1::uuid`, added)
+		}
+	})
+}

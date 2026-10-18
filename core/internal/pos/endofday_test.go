@@ -114,7 +114,7 @@ func (d *dayFixture) count(sessionID string, counted map[string]any) resp {
 func (d *dayFixture) summary(b *dayBranch, date string) resp {
 	d.t.Helper()
 	return d.do("GET", fmt.Sprintf("/api/v1/pos/end-of-day?branch_id=%s&date=%s", b.id, date), nil,
-		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(d.t))
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(d.t))
 }
 
 func (d *dayFixture) closeDay(b *dayBranch, date, slip string) resp {
@@ -247,17 +247,21 @@ func TestTheBranchSummaryAddsUpToTheCent(t *testing.T) {
 	if got := len(ys.body["registers"].([]any)); got != 1 || num(t, obj(t, ys.body, "totals"), "sales_total_cents") != 2*599 {
 		t.Errorf("yesterday's summary = %s, want register 1's two sales", ys.raw)
 	}
+	// the end of day is the managers': a cashier reads none
+	if r := d.do("GET", "/api/v1/pos/end-of-day?branch_id="+a.id.String(), nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusForbidden {
+		t.Errorf("a cashier reading the summary = %d, want 403", r.status)
+	}
 	// reads validate their names
 	for name, path := range map[string]string{
 		"no branch":  "/api/v1/pos/end-of-day",
 		"a bad date": "/api/v1/pos/end-of-day?branch_id=" + a.id.String() + "&date=17-10-2026",
 		"an unknown": "/api/v1/pos/end-of-day?branch_id=" + a.id.String() + "&x=1",
 	} {
-		if r := d.do("GET", path, nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusBadRequest {
+		if r := d.do("GET", path, nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusBadRequest {
 			t.Errorf("%s = %d, want 400: %s", name, r.status, r.raw)
 		}
 	}
-	if r := d.do("GET", "/api/v1/pos/end-of-day?branch_id="+uuid.NewString(), nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusNotFound {
+	if r := d.do("GET", "/api/v1/pos/end-of-day?branch_id="+uuid.NewString(), nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusNotFound {
 		t.Errorf("an unknown branch = %d, want 404", r.status)
 	}
 }
@@ -538,5 +542,46 @@ func TestRacingDayClosesEndWithOne(t *testing.T) {
 		if statuses[2] != http.StatusCreated && statuses[2] != http.StatusConflict {
 			t.Errorf("round %d: the open answered %d, want 201 or 409", round, statuses[2])
 		}
+	}
+}
+
+// RULE (concurrency, pool size 4, three contenders): three matches of one
+// closed day to three different statement lines end with exactly one match,
+// and the two lines that lost are still free: their claims rolled back.
+func TestRacingDepositMatchesTakeOneLine(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	d := newDayFixture(t, testutil.RequireDBMaxConns(t, 4))
+	a := d.makeBranch()
+	closeID, _ := d.closedDay(a)
+	day := d.today(a)
+	lines := []uuid.UUID{d.bankLine(599, day), d.bankLine(600, day), d.bankLine(601, day)}
+	var wg sync.WaitGroup
+	statuses := make([]int, len(lines))
+	for i, line := range lines {
+		wg.Add(1)
+		go func(i int, line uuid.UUID) {
+			defer wg.Done()
+			statuses[i] = d.do("POST", "/api/v1/pos/end-of-day/"+closeID+"/deposit-match", map[string]any{"bank_transaction_id": line.String()},
+				"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)).status
+		}(i, line)
+	}
+	wg.Wait()
+	wins, conflicts := 0, 0
+	for _, st := range statuses {
+		switch st {
+		case http.StatusOK:
+			wins++
+		case http.StatusConflict:
+			conflicts++
+		}
+	}
+	if wins != 1 || conflicts != 2 {
+		t.Errorf("statuses = %v, want one 200 and two 409", statuses)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM bank_transactions WHERE id = ANY($1) AND status = 'MATCHED'`, lines); got != 1 {
+		t.Errorf("%d of the three lines are claimed, want exactly the winner's", got)
+	}
+	if got := countOf(t, d.db, `SELECT count(*) FROM till_day_closes WHERE id = $1::uuid AND bank_transaction_id = ANY($2)`, closeID, lines); got != 1 {
+		t.Errorf("the day does not hold one of the three lines")
 	}
 }
