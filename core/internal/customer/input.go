@@ -86,10 +86,9 @@ type Request struct {
 	Email            *string         `json:"email"`
 	Phone            *string         `json:"phone"`
 	Address          *string         `json:"address"`
-	Tier             *string         `json:"tier"`
 	IsActive         *bool           `json:"is_active"`
 	PrimaryBranchID  *string         `json:"primary_branch_id"`
-	PriceLevelID     *string         `json:"price_level_id"`
+	PriceProfileID   *string         `json:"price_profile_id"`
 	SalespersonID    *string         `json:"salesperson_id"`
 	CreditLimitCents json.RawMessage `json:"credit_limit_cents"`
 	Currency         *string         `json:"currency"`
@@ -110,10 +109,9 @@ type Draft struct {
 	Email            *string
 	Phone            *string
 	Address          *string
-	Tier             CustomerTier
 	IsActive         bool
 	PrimaryBranchID  *uuid.UUID
-	PriceLevelID     *uuid.UUID
+	PriceProfileID   *uuid.UUID
 	SalespersonID    *uuid.UUID
 	CreditLimitCents *httpx.Cents
 	Currency         *string
@@ -133,7 +131,7 @@ func (req *Request) ParseUpdate() (*Draft, error) { return req.parse(true) }
 
 func (req *Request) parse(update bool) (*Draft, error) {
 	v := &httpx.Validator{}
-	d := &Draft{Tier: TierRetail, IsActive: true}
+	d := &Draft{IsActive: true}
 
 	d.AccountNumber = reqText(v, "account_number", req.AccountNumber, 40)
 	d.Name = reqText(v, "name", req.Name, 200)
@@ -141,13 +139,6 @@ func (req *Request) parse(update bool) (*Draft, error) {
 	d.Phone = optText(v, "phone", req.Phone, 40)
 	d.Address = optText(v, "address", req.Address, 500)
 
-	if req.Tier != nil {
-		if t, ok := ParseTier(*req.Tier); ok {
-			d.Tier = t
-		} else {
-			v.Check(false, "tier", "must be one of: "+strings.Join(tierNames, ", "))
-		}
-	}
 	if req.IsActive != nil {
 		d.IsActive = *req.IsActive
 	}
@@ -176,8 +167,8 @@ func (req *Request) parse(update bool) (*Draft, error) {
 			d.PrimaryBranchID = &id
 		}
 	}
-	if id, ok := v.UUID("price_level_id", req.PriceLevelID, false); ok {
-		d.PriceLevelID = &id
+	if id, ok := v.UUID("price_profile_id", req.PriceProfileID, false); ok {
+		d.PriceProfileID = &id
 	}
 	if id, ok := v.UUID("salesperson_id", req.SalespersonID, false); ok {
 		d.SalespersonID = &id

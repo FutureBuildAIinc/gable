@@ -282,6 +282,15 @@ func TestQuantityChangeEqualsRemoveAndAddForEveryLineKind(t *testing.T) {
 			return l
 		}
 	}
+	ratioProdID := uuid.New()
+	mustExec(t, f.db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost)
+		VALUES ($1, $2, '10d Nail', 'PCS', 5.5, 3.25)`, ratioProdID, "POS-RAT-"+uuid.NewString()[:8])
+	mustExec(t, f.db, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
+		VALUES ($1, 'M', 1, 1000, TRUE, TRUE, TRUE)`, ratioProdID)
+	mustExec(t, f.db, `UPDATE products SET price_uom = 'M' WHERE id = $1`, ratioProdID)
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM products WHERE id = $1`, ratioProdID)
+	})
 	cases := []struct {
 		name     string
 		line     func(qty string) map[string]any
@@ -295,7 +304,9 @@ func TestQuantityChangeEqualsRemoveAndAddForEveryLineKind(t *testing.T) {
 		{"override price", product(map[string]any{"unit_price_ten_thousandths": 70000, "override_reason": "matched a quote"}), "2", "5"},
 		{"percent discount", product(map[string]any{"discount_percent": "10", "discount_reason": "contractor"}), "2", "5"},
 		{"cents discount", product(map[string]any{"discount_cents": 150, "discount_reason": "damaged edge"}), "2", "5"},
-		{"unit ratio", product(map[string]any{"price_uom": "M", "uom_qty": "1000", "price_uom_qty": "1"}), "500", "1500"},
+		{"unit ratio", func(qty string) map[string]any {
+			return map[string]any{"product_id": ratioProdID.String(), "quantity": qty, "price_uom": "M", "uom_qty": "1000", "price_uom_qty": "1"}
+		}, "500", "1500"},
 		{"non stock untaxed", func(qty string) map[string]any {
 			return map[string]any{"description": "cut to length", "uom": "EA", "quantity": qty,
 				"unit_price_ten_thousandths": 100000, "taxable": false}

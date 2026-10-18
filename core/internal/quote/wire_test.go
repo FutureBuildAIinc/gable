@@ -1097,16 +1097,12 @@ func TestWire_Convert(t *testing.T) {
 	}
 }
 
-// RULE (ADR 0005 5.8 and section 1): a stocked line sold in another unit
-// than its product's stocking unit is refused with unit_not_stock_unit until
-// cycle 3's conversions land, and the refusal leaves the quote exactly as it
-// was with no order.
+// RULE (ADR 0006 sections 3.4 and 4.2): a quote line sold in another unit than
+// its product's stocking unit, or a tallied random-length line, converts to an
+// order carrying the line's pair, stocking unit and quantity, and tally rows.
 func TestWire_ConvertRefusesANonStockUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	// Owns its branch: the convert reads the quote's branch's tax rate, so
-	// a NULL rate on the default branch cannot break this test even on a
-	// fresh database.
 	branchID := f.ownBranch("0.088750")
 	body := f.createBody(f.line("8"))
 	body["branch_id"] = branchID.String()
@@ -1118,22 +1114,19 @@ func TestWire_ConvertRefusesANonStockUnit(t *testing.T) {
 	id := str(t, created.body, "id")
 
 	c := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil, "If-Match", `"1"`)
-	if c.status != 409 {
-		t.Fatalf("convert = %d, want 409: %s", c.status, c.raw)
+	if c.status != http.StatusCreated {
+		t.Fatalf("convert = %d, want 201: %s", c.status, c.raw)
 	}
-	code, _, details := errorOf(t, c)
-	if code != "conflict" || len(details) != 1 || details[0]["code"] != "unit_not_stock_unit" {
-		t.Errorf("code=%q details=%v, want conflict with unit_not_stock_unit", code, details)
+	lines, _ := c.body["lines"].([]any)
+	if len(lines) != 1 {
+		t.Fatalf("order lines = %d, want 1", len(lines))
 	}
-	g := f.do("GET", "/api/v1/quotes/"+id, nil)
-	if str(t, g.body, "status") != "draft" || num(t, g.body, "revision") != 1 || g.body["accepted_at"] != nil {
-		t.Errorf("a refused convert changed the quote: %s", g.raw)
+	ol := lines[0].(map[string]any)
+	if ol["uom"] != "LF" || ol["price_uom"] != "PCS" || ol["uom_qty"] != "8" || ol["price_uom_qty"] != "1" {
+		t.Errorf("order line pair = %v/%v (%v:%v), want LF/PCS (8:1)", ol["uom"], ol["price_uom"], ol["uom_qty"], ol["price_uom_qty"])
 	}
-	if n := countOrders(t, f.db, id); n != 0 {
-		t.Errorf("%d orders exist for the refused quote", n)
-	}
-	if got := eventsFor(t, f.db, id); fmt.Sprint(got) != "[quote.created]" {
-		t.Errorf("events = %v, want only quote.created", got)
+	if ol["stock_uom"] != "PCS" || ol["stock_quantity"] != "1" {
+		t.Errorf("order line stock = %v %v, want 1 PCS", ol["stock_quantity"], ol["stock_uom"])
 	}
 }
 

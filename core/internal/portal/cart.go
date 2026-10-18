@@ -12,10 +12,15 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
+
+// priceFloatOfQty renders a scale 4 quantity as the float the cart's stored
+// pair carries.
+func priceFloatOfQty(q httpx.Quantity) float64 { return float64(q) / 10000 }
 
 // GetCart returns the current cart for a customer, creating one if it doesn't exist.
 func (s *Service) GetCart(ctx context.Context, customerID uuid.UUID) (*CartDTO, error) {
@@ -47,22 +52,33 @@ func (s *Service) AddToCart(ctx context.Context, customerID uuid.UUID, req AddTo
 	}
 
 	// Get customer-specific price
-	unitPrice := 0.0
 	prod, pErr := s.productSvc.GetProduct(ctx, req.ProductID)
 	if pErr != nil {
 		return nil, fmt.Errorf("product not found: %w", pErr)
 	}
-	unitPrice = prod.BasePrice
-
-	cust, cErr := s.customerSvc.GetCustomer(ctx, customerID)
-	if cErr == nil && s.pricingSvc != nil {
-		cp, prErr := s.pricingSvc.CalculatePrice(ctx, cust, req.ProductID, prod.BasePrice)
-		if prErr == nil {
-			unitPrice = cp.FinalPrice
+	unitPrice := prod.BasePrice
+	// The line shape's unit fields (ADR 0006 section 7.6): the quantity is
+	// in the product's sale unit, the price per the engine's own unit, the
+	// pair resolved here and stored on the item. The engine did not answer:
+	// the base price stands per the product's own unit, pair 1 and 1.
+	units := CartItemUnits{UOM: string(prod.UOMPrimary), PriceUOM: string(prod.UOMPrimary), UOMQty: 1, PriceUOMQty: 1}
+	if s.pricingSvc != nil {
+		if res, rErr := s.pricingSvc.Resolve(ctx, pricing.Request{
+			CustomerID: customerID,
+			ProductID:  req.ProductID,
+			BranchID:   s.customerBranchID(ctx, customerID),
+			Quantity:   httpx.Quantity(int64(req.Quantity*10000 + 0.5)),
+			UOM:        string(prod.UOMPrimary),
+		}); rErr == nil {
+			units = CartItemUnits{
+				UOM: res.UOM, PriceUOM: res.PriceUOM,
+				UOMQty: priceFloatOfQty(res.UOMQty), PriceUOMQty: priceFloatOfQty(res.PriceUOMQty),
+			}
+			unitPrice = float64(res.UnitPrice) / 10000
 		}
 	}
 
-	err = s.repo.AddCartItem(ctx, cart.ID, req.ProductID, req.Quantity, unitPrice)
+	err = s.repo.AddCartItem(ctx, cart.ID, req.ProductID, req.Quantity, unitPrice, units)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add to cart: %w", err)
 	}
@@ -118,6 +134,18 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		}
 	}
 
+	var heldWindow *ScheduleHoldDTO
+	if req.ScheduleHoldID != nil {
+		h, hErr := s.repo.GetScheduleHold(ctx, customerID, *req.ScheduleHoldID)
+		if hErr != nil {
+			return nil, hErr
+		}
+		if h.Status != "held" || h.OrderID != nil {
+			return nil, fmt.Errorf("%w: schedule hold is not available", ErrInvalidRequest)
+		}
+		heldWindow = h
+	}
+
 	// Build the order draft from the cart. The lines carry no price: the
 	// order prices them through the same engine the catalog priced the cart
 	// with (price_source PRICE_LIST), so the money never crosses the portal
@@ -130,11 +158,25 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 	for _, item := range cart.Items {
 		productID := item.ProductID
 		qty := httpx.Quantity(int64(math.Round(item.Quantity * 10000)))
-		lines = append(lines, salesdoc.ParsedLine{
+		line := salesdoc.ParsedLine{
 			LineType:  salesdoc.LineProduct,
 			ProductID: &productID,
 			Quantity:  qty,
-		})
+		}
+		// The units the item was added in (ADR 0006 section 7.6): the order
+		// prices the line in the cart's own unit and pair, so the money the
+		// customer saw is the money the order resolves.
+		if item.UOM != "" {
+			line.UOM = item.UOM
+		}
+		if item.PriceUOM != "" {
+			line.PriceUOM = item.PriceUOM
+		}
+		if item.UOMQty > 0 && item.PriceUOMQty > 0 && (item.UOMQty != 1 || item.PriceUOMQty != 1) {
+			line.UOMQty = httpx.Quantity(int64(math.Round(item.UOMQty * 10000)))
+			line.PriceUOMQty = httpx.Quantity(int64(math.Round(item.PriceUOMQty * 10000)))
+		}
+		lines = append(lines, line)
 	}
 	draft := &order.Draft{
 		CustomerID:   customerID,
@@ -147,14 +189,35 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		branch := cust.PrimaryBranchID
 		draft.BranchID = &branch
 	}
+	if heldWindow != nil {
+		yardID := heldWindow.YardID
+		date := heldWindow.Date
+		draft.BranchID = &yardID
+		draft.ScheduledDeliveryDate = &date
+	}
 
 	// The portal is a trusted in process caller naming the customer's own
 	// branch; it carries no branch context of its own, so the payload branch
 	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
-	// portal's own wall.
-	newOrder, err := s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
+	// portal's own wall. When checkout carries a schedule hold, creating the
+	// order and attaching the hold run inside one transaction so a failure
+	// leaves neither.
+	var newOrder *order.Order
+	err = s.repo.InTx(ctx, func(txCtx context.Context) error {
+		ord, cErr := s.orderSvc.Create(branchctx.WithSystem(txCtx), draft, "portal:customer:"+customerID.String())
+		if cErr != nil {
+			return fmt.Errorf("failed to create order: %w", cErr)
+		}
+		if heldWindow != nil {
+			if hErr := s.repo.AttachScheduleHoldToOrder(txCtx, customerID, heldWindow.ID, ord.ID); hErr != nil {
+				return hErr
+			}
+		}
+		newOrder = ord
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create order: %w", err)
+		return nil, err
 	}
 
 	// The project association is written after the order exists rather than
@@ -187,6 +250,55 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		OrderID: newOrder.ID,
 		Message: "Order placed successfully",
 	}, nil
+}
+
+// createPortalOrder writes a draft order for the customer through the order
+// service, the one call checkout and the customer quote confirmation share.
+func (s *Service) createPortalOrder(ctx context.Context, customerID uuid.UUID, draft *order.Draft) (*order.Order, error) {
+	// The order is written at the customer's branch: the portal calls the
+	// order service in process, with no branch context of its own to inherit.
+	if cust, cErr := s.customerSvc.GetCustomer(ctx, customerID); cErr == nil && cust.PrimaryBranchID != uuid.Nil {
+		branch := cust.PrimaryBranchID
+		draft.BranchID = &branch
+	}
+
+	// The portal is a trusted in process caller naming the customer's own
+	// branch; it carries no branch context of its own, so the payload branch
+	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
+	// portal's own wall.
+	return s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
+}
+
+// PlaceOrderFromLines places the dealer's order for product lines the
+// contractor has already agreed, on the contractor's project, priced by the
+// order service at the account's own prices (the lines carry no price). It is
+// the order half of confirming a customer quote, and it joins the transaction
+// the context carries. customerPO is the contractor's reference.
+func (s *Service) PlaceOrderFromLines(ctx context.Context, customerID, projectID uuid.UUID, customerPO string, lines []salesdoc.ParsedLine) (uuid.UUID, error) {
+	if len(lines) == 0 {
+		return uuid.Nil, fmt.Errorf("an order needs at least one line")
+	}
+	ok, err := s.repo.ProjectBelongsToCustomer(ctx, projectID, customerID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to verify project: %w", err)
+	}
+	if !ok {
+		return uuid.Nil, ErrProjectNotFound
+	}
+	draft := &order.Draft{
+		CustomerID:   customerID,
+		JobID:        &projectID,
+		DeliveryType: order.DeliveryDelivery,
+		Lines:        lines,
+	}
+	if customerPO != "" {
+		draft.CustomerPO = &customerPO
+	}
+	o, err := s.createPortalOrder(ctx, customerID, draft)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to create order: %w", err)
+	}
+	return o.ID, nil
 }
 
 // Ensure imported packages are used.

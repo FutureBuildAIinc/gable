@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -77,6 +78,8 @@ type Repository interface {
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
 	LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[string][]salesdoc.KitComponent, error)
 	LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error)
+	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error)
+	LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
 	CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error)
 	ContactAuthority(ctx context.Context, contactID uuid.UUID) (ContactAuthority, error)
 	DefaultShipToID(ctx context.Context, customerID uuid.UUID) (*uuid.UUID, error)
@@ -179,7 +182,7 @@ const summaryColumns = `
 	ROUND(o.total_amount * 100)::bigint,
 	ROUND(COALESCE((
 		SELECT SUM(cost_sum) FROM (
-			SELECT ROUND(l.quantity * COALESCE(p.average_unit_cost, 0), 2) AS cost_sum
+			SELECT ROUND(COALESCE(l.stock_quantity, l.quantity) * COALESCE(p.average_unit_cost, 0), 2) AS cost_sum
 			FROM order_lines l LEFT JOIN products p ON p.id = l.product_id
 			WHERE l.order_id = o.id
 			  AND l.line_type IN ('PRODUCT', 'COMPONENT') AND l.product_id IS NOT NULL
@@ -421,7 +424,10 @@ const lineColumns = `
 	l.discount_reason, l.price_adjusted_by, ROUND(l.line_total * 100)::bigint, l.taxable,
 	l.revenue_account_code, l.is_special_order, l.vendor_id, ROUND(l.special_order_cost * 10000)::bigint,
 	l.quote_line_id, ROUND(l.quantity_allocated * 10000)::bigint,
-	ROUND(l.quantity_backordered * 10000)::bigint, ROUND(l.quantity_fulfilled * 10000)::bigint, l.created_at`
+	ROUND(l.quantity_backordered * 10000)::bigint, ROUND(l.quantity_fulfilled * 10000)::bigint,
+	l.stock_uom, ROUND(l.stock_quantity * 10000)::bigint,
+	ROUND(l.board_thickness_in * 10000)::bigint, ROUND(l.board_width_in * 10000)::bigint,
+	l.price_basis, l.cost_source, ROUND(l.unit_cost * 10000)::bigint, l.created_at`
 
 func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) ([]OrderLine, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
@@ -447,6 +453,9 @@ func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) 
 			lineTotal           *int64
 			specialCost         *int64
 			source              string
+			stockQty            *int64
+			thick, width        *int64
+			unitCost            *int64
 		)
 		if err := rows.Scan(&l.ID, &l.Position, &l.LineType, &l.ParentLineID, &l.ProductID, &l.ChargeCodeID,
 			&l.ChargeCode, &l.SKU, &l.Description,
@@ -455,7 +464,9 @@ func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) 
 			&l.OverrideReason, &discountPct, &discountAmt,
 			&l.DiscountReason, &l.PriceAdjustedBy, &lineTotal, &l.Taxable,
 			&l.RevenueAccountCode, &l.IsSpecialOrder, &l.VendorID, &specialCost,
-			&l.QuoteLineID, qtyScanPtr(&l.QuantityAllocated), qtyScanPtr(&l.QuantityBackordered), qtyScanPtr(&l.QuantityFulfilled), timeScanPtr(&l.CreatedAt)); err != nil {
+			&l.QuoteLineID, qtyScanPtr(&l.QuantityAllocated), qtyScanPtr(&l.QuantityBackordered), qtyScanPtr(&l.QuantityFulfilled),
+			&l.StockUOM, &stockQty, &thick, &width,
+			&l.PriceBasis, &l.CostSource, &unitCost, timeScanPtr(&l.CreatedAt)); err != nil {
 			return nil, fmt.Errorf("failed to scan order line: %w", err)
 		}
 		l.PriceSource = salesdoc.PriceSource(source)
@@ -470,9 +481,95 @@ func (r *PostgresRepository) orderLines(ctx context.Context, orderID uuid.UUID) 
 		l.DiscountAmount = ptrCents(discountAmt)
 		l.LineTotal = ptrCents(lineTotal)
 		l.SpecialOrderCost = ptrPrice(specialCost)
+		l.StockQuantity = ptrQuantity(stockQty)
+		l.Tally = tallyOf(thick, width)
+		l.StockingUnitCost = ptrPrice(unitCost)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachTallyRows(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// tallyOf rebuilds a read line's tally cross section from the two columns
+// when either is set: the rows arrive from attachTallyRows.
+func tallyOf(thick, width *int64) *salesdoc.Tally {
+	if thick == nil && width == nil {
+		return nil
+	}
+	return &salesdoc.Tally{ThicknessIn: ptrQuantity(thick), WidthIn: ptrQuantity(width), Rows: []salesdoc.TallyRow{}}
+}
+
+// attachTallyRows reads every line's tally rows (ADR 0006 section 4.2) into
+// the lines' tallies, in position order, and completes the exact linear feet
+// and the display board feet the wire carries.
+func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []OrderLine) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	exec := r.db.GetExecutor(ctx)
+	rows, err := exec.Query(ctx, `
+		SELECT order_line_id, pieces, ROUND(length_ft * 10000)::bigint
+		FROM line_tally_rows WHERE order_line_id = ANY($1) ORDER BY order_line_id, position`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to get tally rows: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lineID uuid.UUID
+		var row salesdoc.TallyRow
+		var length int64
+		if err := rows.Scan(&lineID, &row.Pieces, &length); err != nil {
+			return fmt.Errorf("failed to scan a tally row: %w", err)
+		}
+		row.LengthFT = httpx.Quantity(length)
+		for i := range lines {
+			if lines[i].ID == lineID {
+				if lines[i].Tally == nil {
+					lines[i].Tally = &salesdoc.Tally{Rows: []salesdoc.TallyRow{}}
+				}
+				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to walk tally rows: %w", err)
+	}
+	for i := range lines {
+		t := lines[i].Tally
+		if t == nil {
+			continue
+		}
+		if len(t.Rows) == 0 {
+			lines[i].Tally = nil
+			continue
+		}
+		arrow := make([]units.TallyRow, 0, len(t.Rows))
+		for _, row := range t.Rows {
+			arrow = append(arrow, units.TallyRow{Pieces: int64(row.Pieces), LengthFT: row.LengthFT})
+		}
+		lf, err := units.LinearFeet(arrow)
+		if err != nil {
+			return fmt.Errorf("failed to sum a tally: %w", err)
+		}
+		t.LinearFeet = lf
+		if t.ThicknessIn != nil && t.WidthIn != nil {
+			if bf, err := units.BoardFeet(lf, *t.ThicknessIn, *t.WidthIn); err == nil {
+				display := units.DisplayBoardFeet(bf)
+				t.BoardFeet = &display
+			}
+		}
+	}
+	return nil
 }
 
 // qtyScanPtr and timeScanPtr adapt the order line's own quantity and
@@ -615,25 +712,52 @@ func (r *PostgresRepository) insertLines(ctx context.Context, o *Order) error {
 			INSERT INTO order_lines (
 				id, order_id, position, line_type, parent_line_id, product_id, charge_code_id,
 				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
-				unit_price, priced_unit_price, price_source, override_reason,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in,
+				unit_price, priced_unit_price, price_source, price_basis, override_reason,
 				discount_percent, discount_amount, discount_reason, price_adjusted_by,
 				line_total, taxable, revenue_account_code,
-				is_special_order, vendor_id, special_order_cost, quote_line_id, created_at
+				is_special_order, vendor_id, special_order_cost, cost_source, unit_cost,
+				quote_line_id, created_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000,
-				$15::numeric / 10000, $16::numeric / 10000, $17, $18,
-				$19::numeric / 10000, $20::numeric / 100, $21, $22,
-				$23::numeric / 100, $24, $25,
-				$26, $27, $28::numeric / 10000, $29, $30)`,
+				$15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
+				$19::numeric / 10000, $20::numeric / 10000, $21, $22, $23,
+				$24::numeric / 10000, $25::numeric / 100, $26, $27,
+				$28::numeric / 100, $29, $30,
+				$31, $32, $33::numeric / 10000, $34, $35::numeric / 10000,
+				$36, $37)`,
 			l.ID, o.ID, l.Position, string(l.LineType), l.ParentLineID, productArg(l.ProductID), l.ChargeCodeID,
 			nullIfEmpty(l.SKU), l.Description, qtyArg(l.Quantity), strArg(l.UOM), strArg(l.PriceUOM),
 			qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty),
-			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), nullIfEmpty(l.OverrideReason),
+			strArg(l.StockUOM), qtyArg(l.StockQuantity), qtyArg(l.TallyThickness()), qtyArg(l.TallyWidth()),
+			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), strArg(l.PriceBasis), nullIfEmpty(l.OverrideReason),
 			qtyArg(l.DiscountPercent), centsArg(l.DiscountAmount), nullIfEmpty(l.DiscountReason), nullIfEmpty(l.PriceAdjustedBy),
 			centsArg(l.LineTotal), l.Taxable, nullIfEmpty(l.RevenueAccountCode),
-			l.IsSpecialOrder, l.VendorID, priceArg(l.SpecialOrderCost), l.QuoteLineID, l.CreatedAt.Time)
+			l.IsSpecialOrder, l.VendorID, priceArg(l.SpecialOrderCost), strArg(l.CostSource), priceArg(l.StockingUnitCost),
+			l.QuoteLineID, l.CreatedAt.Time)
 		if err != nil {
 			return mapWriteError(err, "failed to insert order line")
+		}
+		if err := insertTallyRows(ctx, exec, l.ID, l.Tally); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertTallyRows writes one line's tally rows (ADR 0006 section 4.2): rows
+// in request order, pieces positive, one row per length (the partial unique
+// index holds the last rule; a duplicate length is a write fault).
+func insertTallyRows(ctx context.Context, exec database.Executor, lineID uuid.UUID, t *salesdoc.Tally) error {
+	if t == nil {
+		return nil
+	}
+	for j, row := range t.Rows {
+		if _, err := exec.Exec(ctx, `
+			INSERT INTO line_tally_rows (order_line_id, position, pieces, length_ft)
+			VALUES ($1, $2, $3, $4::numeric / 10000)`,
+			lineID, j, row.Pieces, int64(row.LengthFT)); err != nil {
+			return mapWriteError(err, "failed to insert a tally row")
 		}
 	}
 	return nil
@@ -826,6 +950,94 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 		}
 		p.BasePrice, p.AverageCost = httpx.Price(base), httpx.Price(cost)
 		out[p.ID.String()] = p
+	}
+	return out, rows.Err()
+}
+
+// LookupProductUnits reads the unit set of every named product (ADR 0006
+// sections 3.1 and 3.3): the stocking unit, the random length flag and the
+// nominal cross section, then the set rows a line's units resolve against.
+func (r *PostgresRepository) LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	exec := r.db.GetExecutor(ctx)
+	rows, err := exec.Query(ctx, `
+		SELECT id, uom_primary::text, sale_uom::text, price_uom::text, random_length,
+		       ROUND(COALESCE(board_thickness_in, 0) * 10000)::bigint,
+		       ROUND(COALESCE(board_width_in, 0) * 10000)::bigint,
+		       board_thickness_in IS NOT NULL
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up product unit sets: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var set salesdoc.ProductUnitSet
+		var thick, width int64
+		var hasSection bool
+		if err := rows.Scan(&id, &set.StockUOM, &set.SaleUOM, &set.PriceUOM, &set.RandomLength, &thick, &width, &hasSection); err != nil {
+			return nil, fmt.Errorf("failed to scan a product unit set: %w", err)
+		}
+		if hasSection {
+			t, w := httpx.Quantity(thick), httpx.Quantity(width)
+			set.BoardThick, set.BoardWidth = &t, &w
+		}
+		out[id] = set
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unitRows, err := exec.Query(ctx, `
+		SELECT product_id, uom, ROUND(unit_qty * 10000)::bigint, ROUND(stock_qty * 10000)::bigint,
+		       sell, purchase, price
+		FROM product_units WHERE product_id = ANY($1) ORDER BY uom`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up unit sets: %w", err)
+	}
+	defer unitRows.Close()
+	for unitRows.Next() {
+		var id uuid.UUID
+		var row salesdoc.UnitSetRow
+		var unitQty, stockQty int64
+		if err := unitRows.Scan(&id, &row.UOM, &unitQty, &stockQty, &row.Sell, &row.Purchase, &row.Price); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit set row: %w", err)
+		}
+		row.UnitQty, row.StockQty = httpx.Quantity(unitQty), httpx.Quantity(stockQty)
+		set := out[id]
+		set.Rows = append(set.Rows, row)
+		out[id] = set
+	}
+	return out, unitRows.Err()
+}
+
+// LookupCatalogue reads the unit catalogue rows for the given codes: what a
+// line's units are checked against (ADR 0006 sections 2.1 and 7.5).
+func (r *PostgresRepository) LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := make(map[string]units.CatalogueUnit, len(codes))
+	if len(codes) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT code, dimension,
+		       ROUND(COALESCE(std_unit_qty, 0) * 10000)::bigint,
+		       ROUND(COALESCE(std_ref_qty, 0) * 10000)::bigint,
+		       std_unit_qty IS NOT NULL, is_active
+		FROM units WHERE code = ANY($1)`, codes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up units: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u units.CatalogueUnit
+		var stdUnit, stdRef int64
+		if err := rows.Scan(&u.Code, &u.Dimension, &stdUnit, &stdRef, &u.HasStdSize, &u.IsActive); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit: %w", err)
+		}
+		u.StdUnitQty, u.StdRefQty = httpx.Quantity(stdUnit), httpx.Quantity(stdRef)
+		out[u.Code] = u
 	}
 	return out, rows.Err()
 }
@@ -1146,10 +1358,12 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 }
 
 // LiveBilled is what an order line's invoices not in void already carry: the
-// line totals and the discounts, in cents.
+// line totals and the discounts, in cents, and the billed tally pieces by
+// length.
 type LiveBilled struct {
 	TotalCents    httpx.Cents
 	DiscountCents httpx.Cents
+	TallyPieces   map[httpx.Quantity]int
 }
 
 // LiveBilledByLine reads it for every line of the order that has been billed.
@@ -1170,9 +1384,38 @@ func (r *PostgresRepository) LiveBilledByLine(ctx context.Context, orderID uuid.
 		if err := rows.Scan(&id, &t, &d); err != nil {
 			return nil, fmt.Errorf("failed to scan a live billed line: %w", err)
 		}
-		out[id] = LiveBilled{httpx.Cents(t), httpx.Cents(d)}
+		out[id] = LiveBilled{TotalCents: httpx.Cents(t), DiscountCents: httpx.Cents(d)}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	tallyRows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT il.order_line_id, ROUND(ltr.length_ft * 10000)::bigint, COALESCE(SUM(ltr.pieces), 0)::bigint
+		FROM line_tally_rows ltr
+		JOIN invoice_lines il ON il.id = ltr.invoice_line_id
+		JOIN invoices i ON i.id = il.invoice_id
+		WHERE i.order_id = $1 AND i.status <> 'VOID' AND il.order_line_id IS NOT NULL
+		GROUP BY il.order_line_id, ROUND(ltr.length_ft * 10000)::bigint`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the order's live invoice tallies carry: %w", err)
+	}
+	defer tallyRows.Close()
+	for tallyRows.Next() {
+		var id uuid.UUID
+		var length, pieces int64
+		if err := tallyRows.Scan(&id, &length, &pieces); err != nil {
+			return nil, fmt.Errorf("failed to scan a live billed tally row: %w", err)
+		}
+		lb := out[id]
+		if lb.TallyPieces == nil {
+			lb.TallyPieces = map[httpx.Quantity]int{}
+		}
+		lb.TallyPieces[httpx.Quantity(length)] += int(pieces)
+		out[id] = lb
+	}
+	return out, tallyRows.Err()
 }
 
 // UnbilledRemainderCents is the order's total less the totals of its invoices

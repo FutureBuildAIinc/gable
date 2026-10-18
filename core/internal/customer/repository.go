@@ -32,7 +32,6 @@ var (
 // (created_at, id) descending order.
 type ListFilter struct {
 	Query         string
-	Tier          *CustomerTier
 	IsActive      *bool
 	SalespersonID *uuid.UUID
 	AfterTime     *time.Time
@@ -67,9 +66,6 @@ type Repository interface {
 
 	GetEscalationPolicy(ctx context.Context, customerID uuid.UUID) (*EscalationPolicy, error)
 	SetEscalationPolicy(ctx context.Context, p *EscalationPolicy) error
-
-	ListPriceLevels(ctx context.Context, f ChildFilter) ([]PriceLevel, error)
-	CountPriceLevels(ctx context.Context) (int64, error)
 
 	DefaultCurrency(ctx context.Context) (string, error)
 	EnabledCurrencies(ctx context.Context) ([]string, error)
@@ -117,7 +113,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // field that named the missing record, so a bad reference is a 400 naming it
 // and not a 500 from the database.
 var referenceFields = map[string]string{
-	"customers_price_level_id_fkey":    "price_level_id",
+	"customers_price_profile_id_fkey":  "price_profile_id",
 	"customers_salesperson_id_fkey":    "salesperson_id",
 	"customers_primary_branch_id_fkey": "primary_branch_id",
 	"customers_payment_terms_id_fkey":  "payment_terms_id",
@@ -188,8 +184,8 @@ func centsArg(c *httpx.Cents) any {
 
 const customerColumns = `
 	c.id, c.account_number, c.name, NULLIF(c.email, ''), NULLIF(c.phone, ''), NULLIF(c.address, ''),
-	c.tier::text, c.is_active, c.primary_branch_id,
-	c.price_level_id, pl.name, pl.multiplier::float8, pl.created_at, pl.updated_at,
+	c.is_active, c.primary_branch_id,
+	c.price_profile_id,
 	c.salesperson_id, NULLIF(st.name, ''),
 	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END,
 	ROUND(c.balance_due * 100)::bigint,
@@ -203,46 +199,24 @@ const customerColumns = `
 const customerFrom = `
 	FROM customers c
 	JOIN payment_terms pt ON pt.id = c.payment_terms_id
-	LEFT JOIN price_levels pl ON pl.id = c.price_level_id
 	LEFT JOIN sales_team st ON st.id = c.salesperson_id`
 
 func scanCustomer(row pgx.Row, c *Customer) error {
 	var (
-		tier                 string
-		plName               *string
-		plMult               *float64
-		plCreated, plUpdated *time.Time
-		credit               *int64
-		checkLimit           *int64
-		balance              int64
-		created, updated     time.Time
+		credit           *int64
+		checkLimit       *int64
+		balance          int64
+		created, updated time.Time
 	)
 	if err := row.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.Email, &c.Phone, &c.Address,
-		&tier, &c.IsActive, &c.PrimaryBranchID,
-		&c.PriceLevelID, &plName, &plMult, &plCreated, &plUpdated,
+		&c.IsActive, &c.PrimaryBranchID,
+		&c.PriceProfileID,
 		&c.SalespersonID, &c.SalespersonName,
 		&credit, &balance, &c.Currency, &c.EffectiveCurrency,
 		&c.PaymentTermsID, &c.PaymentTerms.Code, &c.PaymentTerms.Name, &c.POrequired,
 		&c.NamedBuyerRequired, &checkLimit,
 		&c.Revision, &created, &updated, &c.BranchIDs); err != nil {
 		return err
-	}
-	c.Tier = CustomerTier(tier)
-	if c.PriceLevelID != nil {
-		pl := &PriceLevel{ID: *c.PriceLevelID}
-		if plName != nil {
-			pl.Name = *plName
-		}
-		if plMult != nil {
-			pl.Multiplier = *plMult
-		}
-		if plCreated != nil {
-			pl.CreatedAt = httpx.TimestampOf(*plCreated)
-		}
-		if plUpdated != nil {
-			pl.UpdatedAt = httpx.TimestampOf(*plUpdated)
-		}
-		c.PriceLevel = pl
 	}
 	if credit != nil {
 		cc := httpx.Cents(*credit)
@@ -269,19 +243,19 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 	var branch uuid.UUID
 	err := exec.QueryRow(ctx, `
 		INSERT INTO customers (
-			id, account_number, name, email, phone, address, tier, is_active,
-			price_level_id, salesperson_id, credit_limit, currency, payment_terms_id, po_required,
+			id, account_number, name, email, phone, address, is_active,
+			price_profile_id, salesperson_id, credit_limit, currency, payment_terms_id, po_required,
 			named_buyer_required, check_limit,
 			created_at, updated_at, revision, primary_branch_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::customer_tier, $8,
-			$9, $10, $11::numeric / 100, $12, COALESCE($13::uuid, payment_terms_default_id()), $14,
-			$17, $18::numeric / 100,
-			$15, $15, 1,
-			COALESCE($16::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+		) VALUES ($1, $2, $3, $4, $5, $6, $7,
+			COALESCE($8::uuid, price_profile_default_id()), $9, $10::numeric / 100, $11, COALESCE($12::uuid, payment_terms_default_id()), $13,
+			$16, $17::numeric / 100,
+			$14, $14, 1,
+			COALESCE($15::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 		RETURNING primary_branch_id`,
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
-		string(c.Tier), c.IsActive,
-		c.PriceLevelID, c.SalespersonID, centsArg(c.CreditLimitCents), nullableText(c.Currency), nilIfZero(c.PaymentTermsID), c.POrequired,
+		c.IsActive,
+		c.PriceProfileID, c.SalespersonID, centsArg(c.CreditLimitCents), nullableText(c.Currency), nilIfZero(c.PaymentTermsID), c.POrequired,
 		c.CreatedAt.Time, branchArg, c.NamedBuyerRequired, centsArg(c.CheckLimitCents),
 	).Scan(&branch)
 	if err != nil {
@@ -349,13 +323,13 @@ func (r *PostgresRepository) UpdateCustomer(ctx context.Context, c *Customer) er
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		UPDATE customers SET
 			account_number = $2, name = $3, email = $4, phone = $5, address = $6,
-			tier = $7::customer_tier, is_active = $8, price_level_id = $9, salesperson_id = $10,
-			credit_limit = $11::numeric / 100, currency = $12, payment_terms_id = $13, po_required = $14,
-			named_buyer_required = $16, check_limit = $17::numeric / 100,
-			revision = revision + 1, updated_at = $15
+			is_active = $7, price_profile_id = COALESCE($8::uuid, price_profile_default_id()), salesperson_id = $9,
+			credit_limit = $10::numeric / 100, currency = $11, payment_terms_id = $12, po_required = $13,
+			named_buyer_required = $15, check_limit = $16::numeric / 100,
+			revision = revision + 1, updated_at = $14
 		WHERE id = $1`,
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
-		string(c.Tier), c.IsActive, c.PriceLevelID, c.SalespersonID, centsArg(c.CreditLimitCents),
+		c.IsActive, c.PriceProfileID, c.SalespersonID, centsArg(c.CreditLimitCents),
 		nullableText(c.Currency), c.PaymentTermsID, c.POrequired, c.UpdatedAt.Time,
 		c.NamedBuyerRequired, centsArg(c.CheckLimitCents))
 	if err != nil {
@@ -390,9 +364,6 @@ func customerWhere(ctx context.Context, f ListFilter, withCursor bool) (string, 
 	}
 	if f.Query != "" {
 		add(`(c.name ILIKE ? OR c.account_number ILIKE ? OR COALESCE(c.email, '') ILIKE ?)`, likePattern(f.Query))
-	}
-	if f.Tier != nil {
-		add(`c.tier = ?::customer_tier`, string(*f.Tier))
 	}
 	if f.IsActive != nil {
 		add(`c.is_active = ?`, *f.IsActive)
@@ -480,41 +451,6 @@ func (r *PostgresRepository) SetEscalationPolicy(ctx context.Context, p *Escalat
 }
 
 // ---- price levels ----
-
-func (r *PostgresRepository) ListPriceLevels(ctx context.Context, f ChildFilter) ([]PriceLevel, error) {
-	args := []any{f.Limit}
-	cursor := ""
-	if f.AfterTime != nil {
-		args = append(args, *f.AfterTime, f.AfterID)
-		cursor = `WHERE (created_at, id) < ($2, $3)`
-	}
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT id, name, multiplier::float8, created_at, updated_at FROM price_levels `+cursor+`
-		ORDER BY created_at DESC, id DESC LIMIT $1`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list price levels: %w", err)
-	}
-	defer rows.Close()
-	out := []PriceLevel{}
-	for rows.Next() {
-		var l PriceLevel
-		var created, updated time.Time
-		if err := rows.Scan(&l.ID, &l.Name, &l.Multiplier, &created, &updated); err != nil {
-			return nil, fmt.Errorf("failed to scan price level: %w", err)
-		}
-		l.CreatedAt, l.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-func (r *PostgresRepository) CountPriceLevels(ctx context.Context) (int64, error) {
-	var n int64
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT COUNT(*) FROM price_levels`).Scan(&n); err != nil {
-		return 0, fmt.Errorf("failed to count price levels: %w", err)
-	}
-	return n, nil
-}
 
 // ---- currency ----
 

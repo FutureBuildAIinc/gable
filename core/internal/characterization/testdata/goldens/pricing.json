@@ -25,6 +25,7 @@
             "max_quantity": null,
             "min_quantity": "10",
             "name": "Insulation Bundle Deal",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -47,6 +48,7 @@
             "max_quantity": null,
             "min_quantity": "0",
             "name": "Spring Roofing Promo",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -69,6 +71,7 @@
             "max_quantity": null,
             "min_quantity": "200",
             "name": "Hardware Bulk 200+",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -91,6 +94,7 @@
             "max_quantity": null,
             "min_quantity": "50",
             "name": "Sheet Goods Qty Break 50+",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -113,6 +117,7 @@
             "max_quantity": null,
             "min_quantity": "500",
             "name": "Lumber Qty Break 500+",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -135,6 +140,7 @@
             "max_quantity": null,
             "min_quantity": "100",
             "name": "Lumber Qty Break 100+",
+            "price_uom": "",
             "priority": 0,
             "product_id": null,
             "revision": 1,
@@ -180,6 +186,7 @@
         "max_quantity": null,
         "min_quantity": "100",
         "name": "Golden quantity break",
+        "price_uom": "",
         "priority": 5,
         "product_id": "<id-7>",
         "revision": 0,
@@ -199,15 +206,18 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "branch_id": null,
         "customer_id": "<id-9>",
-        "details": "Gold Tier (15%)",
-        "line_total_cents": 4675,
-        "price_basis": "tier",
+        "details": "Retail (Level)",
+        "line_total_cents": 5500,
+        "price_basis": "level",
         "price_uom": "PCS",
         "price_uom_qty": "1",
         "product_id": "<id-7>",
         "quantity": "10",
-        "unit_price_ten_thousandths": 46750,
+        "reference_price_ten_thousandths": 55000,
+        "reference_price_uom": "PCS",
+        "unit_price_ten_thousandths": 55000,
         "uom": "PCS",
         "uom_qty": "1"
       }
@@ -302,22 +312,23 @@
       "path": "/api/v1/pricing/calculate?customer_id=<id-9>&product_id=<id-7>&uom=PCS"
     },
     "response": {
-      "status": 400,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "unsupported_query_parameter",
-          "details": [
-            {
-              "field": "uom",
-              "message": "unsupported query parameter"
-            }
-          ],
-          "message": "one or more query parameters are not supported by this route"
-        },
-        "meta": {
-          "request_id": "<id-13>"
-        }
+        "branch_id": null,
+        "customer_id": "<id-9>",
+        "details": "Retail (Level)",
+        "line_total_cents": 550,
+        "price_basis": "level",
+        "price_uom": "PCS",
+        "price_uom_qty": "1",
+        "product_id": "<id-7>",
+        "quantity": "1",
+        "reference_price_ten_thousandths": 55000,
+        "reference_price_uom": "PCS",
+        "unit_price_ten_thousandths": 55000,
+        "uom": "PCS",
+        "uom_qty": "1"
       }
     }
   },
@@ -355,7 +366,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -368,27 +379,34 @@
       "body": {
         "discount_pct": "5",
         "name": "x",
-        "rule_type": "promotional",
-        "tier": "GOLD"
+        "rule_type": "promotional"
       }
     },
     "response": {
-      "status": 400,
+      "status": 201,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "bad_request",
-          "details": [
-            {
-              "field": "tier",
-              "message": "unknown field"
-            }
-          ],
-          "message": "request body has a field this route does not accept"
-        },
-        "meta": {
-          "request_id": "<id-15>"
-        }
+        "category": "",
+        "created_at": "<ts+0d>",
+        "customer_id": null,
+        "discount_pct": "5",
+        "expires_at": null,
+        "fixed_price_ten_thousandths": null,
+        "id": "<id-14>",
+        "is_active": true,
+        "job_id": null,
+        "margin_floor_pct": null,
+        "markup_pct": null,
+        "max_quantity": null,
+        "min_quantity": "0",
+        "name": "x",
+        "price_uom": "",
+        "priority": 0,
+        "product_id": null,
+        "revision": 0,
+        "rule_type": "promotional",
+        "starts_at": null,
+        "updated_at": "<ts+0d>"
       }
     }
   },
@@ -410,6 +428,29 @@
             "discount_pct": "5",
             "expires_at": null,
             "fixed_price_ten_thousandths": null,
+            "id": "<id-14>",
+            "is_active": true,
+            "job_id": null,
+            "margin_floor_pct": null,
+            "markup_pct": null,
+            "max_quantity": null,
+            "min_quantity": "0",
+            "name": "x",
+            "price_uom": "",
+            "priority": 0,
+            "product_id": null,
+            "revision": 0,
+            "rule_type": "promotional",
+            "starts_at": null,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "category": "",
+            "created_at": "<ts+0d>",
+            "customer_id": null,
+            "discount_pct": "5",
+            "expires_at": null,
+            "fixed_price_ten_thousandths": null,
             "id": "<id-8>",
             "is_active": true,
             "job_id": null,
@@ -418,39 +459,18 @@
             "max_quantity": null,
             "min_quantity": "100",
             "name": "Golden quantity break",
+            "price_uom": "",
             "priority": 5,
             "product_id": "<id-7>",
             "revision": 0,
             "rule_type": "quantity_break",
             "starts_at": null,
             "updated_at": "<ts+0d>"
-          },
-          {
-            "category": "Insulation",
-            "created_at": "<ts+0d>",
-            "customer_id": null,
-            "discount_pct": "10",
-            "expires_at": "<ts+90d>",
-            "fixed_price_ten_thousandths": null,
-            "id": "<id-1>",
-            "is_active": true,
-            "job_id": null,
-            "margin_floor_pct": null,
-            "markup_pct": null,
-            "max_quantity": null,
-            "min_quantity": "10",
-            "name": "Insulation Bundle Deal",
-            "priority": 0,
-            "product_id": null,
-            "revision": 1,
-            "rule_type": "promotional",
-            "starts_at": "<ts-30d>",
-            "updated_at": "<ts+0d>"
           }
         ],
         "limit": 2,
         "next_cursor": "<cursor>",
-        "total": 7
+        "total": 8
       }
     }
   },
@@ -475,7 +495,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-15>"
         }
       }
     }

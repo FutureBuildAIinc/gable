@@ -51,12 +51,10 @@ const CUSTOMER: Customer = {
   email: null,
   phone: '555-0100',
   address: null,
-  tier: 'gold',
   is_active: true,
   primary_branch_id: 'b-1',
   branch_ids: ['b-1'],
-  price_level_id: null,
-  price_level: null,
+  price_profile_id: null,
   salesperson_id: 's-1',
   salesperson_name: 'Sam',
   credit_limit_cents: 500050,
@@ -88,12 +86,12 @@ describe('queries', () => {
     expect(buildChildQuery()).toBe('')
   })
 
-  it('send the declared names only: q, tier, is_active, salesperson_id, limit, cursor, include', () => {
+  it('send the declared names only: q, is_active, salesperson_id, limit, cursor, include', () => {
     const q = new URLSearchParams(
-      buildCustomerQuery({ q: ' acme ', tier: 'gold', isActive: false, salespersonId: 's-1', limit: 25, cursor: 'abc', includeTotal: true }).slice(1),
+      buildCustomerQuery({ q: ' acme ', isActive: false, salespersonId: 's-1', limit: 25, cursor: 'abc', includeTotal: true }).slice(1),
     )
     expect(Object.fromEntries(q)).toEqual({
-      q: 'acme', tier: 'gold', is_active: 'false', salesperson_id: 's-1', limit: '25', cursor: 'abc', include: 'total',
+      q: 'acme', is_active: 'false', salesperson_id: 's-1', limit: '25', cursor: 'abc', include: 'total',
     })
   })
 
@@ -107,9 +105,9 @@ describe('queries', () => {
 describe('customers', () => {
   it('lists with the query and returns the page', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [CUSTOMER], next_cursor: 'n1', limit: 50, total: 1 }))
-    const page = await CustomerService.listCustomers({ q: 'acme', tier: 'gold', limit: 50, includeTotal: true })
+    const page = await CustomerService.listCustomers({ q: 'acme', limit: 50, includeTotal: true })
     expect(lastUrl().pathname).toBe('/api/v1/customers')
-    expect(lastUrl().search).toBe('?q=acme&tier=gold&limit=50&include=total')
+    expect(lastUrl().search).toBe('?q=acme&limit=50&include=total')
     expect(page.next_cursor).toBe('n1')
     expect(page.items[0].credit_limit_cents).toBe(500050)
   })
@@ -153,8 +151,8 @@ describe('customers', () => {
     expect(lastHeader('If-Match')).toBe('"4"')
     const body = lastBody()
     expect(body).toEqual({
-      account_number: 'A-100', name: 'Acme Lumber', email: null, phone: '555-0100', address: null, tier: 'gold', is_active: true,
-      price_level_id: null, salesperson_id: 's-1', credit_limit_cents: 500050, currency: null, payment_terms_id: 't-1', po_required: true,
+      account_number: 'A-100', name: 'Acme Lumber', email: null, phone: '555-0100', address: null, is_active: true,
+      price_profile_id: null, salesperson_id: 's-1', credit_limit_cents: 500050, currency: null, payment_terms_id: 't-1', po_required: true,
     })
     // Read only and create only fields never travel on a PUT.
     for (const f of ['balance_cents', 'revision', 'primary_branch_id', 'id', 'effective_currency', 'payment_terms']) {
@@ -262,9 +260,9 @@ describe('reference lists', () => {
     expect(lastUrl().search).toBe('')
   })
 
-  it('price levels are an envelope and take no is_active', async () => {
-    await CustomerService.listPriceLevels({ isActive: true, limit: 10 })
-    expect(lastUrl().pathname).toBe('/api/v1/price_levels')
+  it('price levels read the pricing catalogue now', async () => {
+    await CustomerService.listPriceLevels(10)
+    expect(lastUrl().pathname).toBe('/api/v1/pricing/levels')
     expect(lastUrl().search).toBe('?limit=10')
   })
 })

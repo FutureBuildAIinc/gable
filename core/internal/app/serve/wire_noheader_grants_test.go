@@ -376,9 +376,9 @@ func TestNoHeader_Returns(t *testing.T) {
 	}
 }
 
-// TestNoHeader_Sync is the offline sync family: a batch naming B's
-// register. The whole batch is refused before any item runs and before the
-// log row.
+// TestNoHeader_Sync is the offline sync family: the replay is refused by
+// rule (money never queues) once past the walls, a batch naming B's register
+// and one naming A's alike, before any item runs and before the log row.
 func TestNoHeader_Sync(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
@@ -401,8 +401,8 @@ func TestNoHeader_Sync(t *testing.T) {
 	}
 
 	status, buf := f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", body(f.regB, clientB))
-	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
-		t.Errorf("no header sync on B's register: %d %s, want the 403 naming the register rule", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("no header sync on B's register: %d %s, want the rule's 409", status, buf)
 	}
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch); n != 0 {
 		t.Errorf("the refused sync wrote %d log rows, want none", n)
@@ -411,10 +411,17 @@ func TestNoHeader_Sync(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want none", n)
 	}
 
-	// The control: a batch on A's register passes.
+	// The control: a batch on A's register is refused by the same rule,
+	// nothing written.
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", body(f.regA, clientA))
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("no header sync on A's register: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("no header sync on A's register: %d %s, want the rule's 409", status, buf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch); n != 0 {
+		t.Errorf("the refused control sync wrote %d log rows, want none", n)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1`, clientA); n != 0 {
+		t.Errorf("the refused control sync wrote %d transactions, want none", n)
 	}
 }
 

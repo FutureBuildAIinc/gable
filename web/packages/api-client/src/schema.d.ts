@@ -164,6 +164,246 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ar/credit-holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credit holds
+         * @description The credit holds, newest first by (placed_at, id) in the cursor list envelope, each with the account's standing beside it (the limit, null for no limit, the balance, and the open invoice cents past due). status selects standing (the default: active and overridden), released or all. A customer named outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditHoldsList"];
+        put?: never;
+        /**
+         * Place a manual credit hold
+         * @description Roles admin, owner, finance. Places a hold of type manual (the default), over_limit or past_due with a required reason, and writes customers.credit_hold in the same transaction. Idempotent: an account that already carries a standing hold answers it with 200 and placed false; a new hold answers 201 with placed true. The standing hold carries the answer either way.
+         */
+        post: operations["arCreditHoldPlace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the credit hold sweep
+         * @description Roles admin, owner, finance. Evaluates the active credit accounts (or exactly the named customers) against the credit limit and the past due invoices, and answers what the sweep would do: the accounts it would hold and the standing holds it would lift (only the ones it placed itself, never a person's hold and never one whose manager's override window is still open). With dry_run false it also expires elapsed overrides back to active, places and lifts idempotently, and keeps customers.credit_hold true to the books: an account blocks unless a live override window stands over its hold. dry_run defaults to true and writes nothing.
+         */
+        post: operations["arCreditHoldsEvaluate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a credit hold
+         * @description Roles admin, owner, finance; a reason is required. Ends a standing hold (active or overridden) with who and why, and clears customers.credit_hold in the same transaction. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/credit-holds/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a time-bounded override on a credit hold
+         * @description Roles admin, owner, finance. Puts a manager's window on a standing hold: override_until (a future instant, required), override_reason (required) and an optional max_order_cents the window allows. The hold stays on the account and reads as overridden, and the account is open to order and POS while the window stands: it never releases, and once the window elapses the account blocks again until a sweep expires the override back to active. A released hold refuses with 409.
+         */
+        post: operations["arCreditHoldOverride"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/credit-limit-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's credit limit changes
+         * @description The credit limit history, newest first by (created_at, id) in the cursor list envelope: what the limit was, what it became, who asked, who approved, and when it was decided. A customer outside the caller's branches is 404, the subledger's wall.
+         */
+        get: operations["arCreditLimitChangesList"];
+        put?: never;
+        /**
+         * Record (and optionally apply) a credit limit change
+         * @description Roles admin, owner, finance. Records one change with the old limit, the new one, a required reason and who asked, as pending. With approve true the same act applies the new limit to the customer, stamps who approved it and when, and answers 200; a recorded request answers 201.
+         */
+        post: operations["arCreditLimitChangeRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The controller's collections and credit worklist
+         * @description The overdue and over-limit accounts, worst first, one row per customer with any past due bucket or any balance. The severity score weighs the over 90 bucket four times, the 61 to 90 bucket twice, the 31 to 60 bucket and the over-limit amount once each, and a standing hold adds a bump that outranks any plain overdue account. Every row carries the aging buckets, the credit limit (null for no limit), the utilisation percent, the hold state and the recommended action: hold for a held, over limit or 90 day account, finance_charge for 61 to 90, call for 31 to 60, send_statement for the rest. The aging carries the caller's branch wall; limit is 10 to 500 rows.
+         */
+        get: operations["arWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List batch statement runs
+         * @description The batch statement runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arStatementRunsList"];
+        put?: never;
+        /**
+         * Generate a batch statement run
+         * @description Roles admin, owner, finance. Records one run over the customers the period names: every customer with a non-zero balance, or exactly the customers customer_ids names. Each item carries the opening balance (the subledger rows before period_start), the invoices, the payments and the finance charges of the period, the closing balance and the aging buckets of period_end, taken as of that day and never re-derived. A run writes no balance, no document and no subledger row: two runs of one period answer the same numbers. With queue_email true, every item whose closing balance is positive is marked queued with the id of its statement.queued outbox event; a zero balance is skipped. period_end defaults to today and period_start to a month before it; neither may end after today. Answers 201 with the completed run and its items.
+         */
+        post: operations["arStatementRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/statements/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one batch statement run
+         * @description The run with its items, customers by name.
+         */
+        get: operations["arStatementRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the finance charge rules
+         * @description The tenant's finance charge rules: the monthly rate in basis points, the grace days, the minimum charge and the minimum overdue balance, whether the charges compound, and the income account the charge credits. Migration 124 seeds the row charges off.
+         */
+        get: operations["arFinanceChargeRulesGet"];
+        /**
+         * Write the finance charge rules
+         * @description Roles admin, owner, finance. Writes the whole policy in one act: the rate (at most 100000 basis points, 100 percent a month), the grace days (0 to 365), the two minimums, the compound flag, and an income account the chart of accounts must hold.
+         */
+        put: operations["arFinanceChargeRulesUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List finance charge runs
+         * @description The finance charge runs, newest first by (created_at, id) in the cursor list envelope.
+         */
+        get: operations["arFinanceChargeRunsList"];
+        put?: never;
+        /**
+         * Preview or execute a finance charge run
+         * @description Roles admin, owner, finance. Charges every customer (or exactly the customers customer_ids names) whose open invoices sit more than the grace days past due as of as_of_date (default today, never in the future), in exact basis-point arithmetic over integer cents with banker's rounding, under the minimum charge and the minimum overdue balance. Without compound (the default) a finance charge invoice is never itself a basis, and a customer a completed run already charged as of the date is not charged again by a second run for it. dry_run true (the default) records the preview as a DRY_RUN run with its per customer items and no documents; dry_run false writes each charged customer a FINANCE_CHARGE invoice naming its entry, moves the balance through the subledger and posts the balanced entry (Debit AR 1020, Credit the income account the rules name) when a ledger is wired.
+         */
+        post: operations["arFinanceChargeRunCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/finance-charges/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one finance charge run
+         * @description The run with its items, customers by name, each naming the invoice and the entry it generated when executed.
+         */
+        get: operations["arFinanceChargeRunGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customerId}/activities": {
         parameters: {
             query?: never;
@@ -954,13 +1194,13 @@ export interface paths {
         };
         /**
          * List customers
-         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); tier, is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a tier outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
+         * @description The cursor list envelope, newest first. q searches name, account number and email (case blind); is_active and salesperson_id filter. total appears only under include=total. A parameter the route does not declare, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["customerList"];
         put?: never;
         /**
          * Create a customer
-         * @description Creates a customer. account_number and name are required; the terms default to NET30, the tier to retail. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
+         * @description Creates a customer. account_number and name are required; the terms default to NET30, the pricing program to the default profile. The currency override, when given, must be an enabled currency. The balance is not a request field: the AR core writes it. Writes customer.created in the same transaction.
          */
         post: operations["customerCreate"];
         delete?: never;
@@ -1170,7 +1410,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/price_levels": {
+    "/api/portal/v1/customer-quotes": {
         parameters: {
             query?: never;
             header?: never;
@@ -1178,12 +1418,567 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List price levels
-         * @description The cursor list envelope, newest first.
+         * The contractor's customer quotes
+         * @description The cursor list envelope, newest first on (created_at, id), with an optional lowercase status filter. A role without the quoting and see-money capabilities is a 403.
          */
-        get: operations["customerListPriceLevels"];
+        get: operations["customerQuoteList"];
+        put?: never;
+        /**
+         * Build a customer quote
+         * @description The server prices every line from the dealer for the contractor's account and captures the cost; no cost, sell price or total is an input. The three tier markup resolves per line: the line's own override, then the quote's rule for the line's product category, then the quote default, each either a markup on cost or a target gross margin (a margin of 100 percent or more is a 400). valid_until is bounded by the source dealer quote's expiry and, for lines priced from the catalog, by the dealer's configured price protection horizon. The quote starts as a draft.
+         */
+        post: operations["customerQuoteCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One click export of the contractor's own customers, projects and quotes
+         * @description JSON carries all three tables; CSV carries the one named by kind. The contractor's own markup and margin are part of their own record. A CSV cell that starts with a formula character is prefixed with a quote.
+         */
+        get: operations["customerQuoteExport"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The contractor's defaults for new quotes */
+        get: operations["customerQuoteSettingsGet"];
+        /**
+         * Save the contractor's defaults
+         * @description Display name, payment terms, deposit percent, tax treatment, the default markup and whether acceptance requires a six digit code. Turning the code on is a 409 ("Verification codes need a real email or text sender on this server.") while the server's only email sender is the log only one and text is the stub; so is a quote or a send that asks for a code, a code request and an acceptance on such a quote.
+         */
+        put: operations["customerQuoteSettingsPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/settings/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the contractor's logo
+         * @description The image is the raw request body: PNG or JPEG, held to the dealer logo's size and pixel limits; a JPEG is stored re-encoded.
+         */
+        put: operations["customerQuoteLogoPut"];
+        post?: never;
+        /** Remove the contractor's logo */
+        delete: operations["customerQuoteLogoDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One customer quote with its costs, markups and margin
+         * @description The contractor's own view. The raw link token is never readable again; link only says when the live link ends.
+         */
+        get: operations["customerQuoteGet"];
+        /**
+         * Replace a draft
+         * @description The whole draft is replaced on the client's revision (If-Match; neither is 428, a stale one 409 stale_revision). A line that names its id keeps the cost it captured while its product and quantity are unchanged. Only a draft is editable; a sent quote is revised first.
+         */
+        put: operations["customerQuoteUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer's page, as the customer would see it now
+         * @description The strict public allowlist shape, built from the stored quote.
+         */
+        get: operations["customerQuotePreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer PDF under the contractor's mark
+         * @description Built from the public allowlist view alone (price wall 2).
+         */
+        get: operations["customerQuotePdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The approval record of a quote
+         * @description Every step, in order, with who and when: the customer's approval or decline (name, contact, signature kind, source address, user agent, link token hash, the SHA-256 of the snapshot and the total), the contractor's confirmation and the dealer's acceptance. Append only.
+         */
+        get: operations["customerQuoteApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send the quote, freezing it and issuing the capability link
+         * @description Needs a project (the dealer sees it), a job site address and an email or phone for the customer. valid_until is bounded again. Mints a 256 bit token from the secure random source, stores only its SHA-256 hash and returns the link here, once (Cache-Control: no-store); the link is emailed when a real email sender is configured, link.delivered says whether anything was sent. The link expires at valid_until, bounded by the configured maximum lifetime.
+         */
+        post: operations["customerQuoteSend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/link/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kill the live link and issue a new one
+         * @description The old link is refused from this moment. Only a sent quote has a link.
+         */
+        post: operations["customerQuoteLinkRotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/link/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kill the live link
+         * @description The quote stays sent; rotate issues a new link.
+         */
+        post: operations["customerQuoteLinkRevoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw a draft or sent quote */
+        post: operations["customerQuoteWithdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a sent or declined quote back to a draft
+         * @description The link dies and the selections reset; the earlier decisions stay in the approval record under their revision.
+         */
+        post: operations["customerQuoteRevise"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/confirm-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview current dealer material prices and resulting margin before confirming
+         * @description Only an approved quote. Compares each approved material line's captured dealer cost against the dealer's current price for the contractor's account and returns the per-line and total cost deltas and resulting margin.
+         */
+        get: operations["customerQuoteConfirmPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/customer-quotes/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the customer's approval into the dealer's order
+         * @description Only an approved quote. The approved material lines become a portal order at the dealer's own prices for the contractor's account, through the portal's order path, on the quote's project, in one transaction with the confirmation and its approval record. If the dealer's price moved since the quote was priced, confirming without accept_price_changes=true returns 409 price_changed. The markup, labour, overhead and the customer's prices never reach the order.
+         */
+        post: operations["customerQuoteConfirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer's page (capability link, no account)
+         * @description No session and no cookie. An unknown or malformed token is a bare 404; a token that existed and is expired, revoked or rotated away is 410. Rate limited per link and per source address (429). Every answer is Cache-Control: no-store with Referrer-Policy: no-referrer. The body is the strict allowlist shape (price wall 2).
+         */
+        get: operations["customerQuotePublicView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The customer PDF */
+        get: operations["customerQuotePublicPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The contractor's logo */
+        get: operations["customerQuotePublicLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/selections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Approve or decline selections
+         * @description Each material line is approved or declined. In an option group the customer chooses one: approving a line declines the group's others. Only while the quote is open (sent and not expired).
+         */
+        put: operations["customerQuotePublicSelections"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a six digit verification code
+         * @description Only when the contractor requires a code. The code goes to the email or phone the contractor put on the quote, never to an address the caller names. Hashed with a per row salt, single use, valid for ten minutes, five wrong guesses lock it; at most three requests in ten minutes. SMS has no live carrier at this base (a stub).
+         */
+        post: operations["customerQuotePublicCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign off
+         * @description Every selection must be decided and something approved. The sign off is a typed full name, an email or a phone, and a typed or drawn (PNG) signature; with the contractor's code toggle on, a valid code too. The server records the time, the source address and the user agent and an immutable SHA-256 snapshot of the chosen selections and the total, in one transaction with the status change. Two acceptances of one link at once give exactly one approval; the loser is a 409. A wrong code is a 400 code_invalid and counts against the code's attempts.
+         */
+        post: operations["customerQuotePublicAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/customer-quotes/{token}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline the quote */
+        post: operations["customerQuotePublicDecline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The contractors' shared project pipeline
+         * @description Quotes from the moment they are sent (a draft is the contractor's own work and is not shared), most recently moved first. Price wall 1: the project, job site, customer and site contact, selection status and the material pipeline at the dealer's own prices, and nothing of the contractor's markup rules, basis points, labour or overhead lines or the customer's sell prices.
+         */
+        get: operations["proProjectList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One shared project with its approval record
+         * @description The approval record shows who and when for each step and the hash of what the customer decided, never the decision's own figures.
+         */
+        get: operations["proProjectGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pro-projects/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the dealer's acceptance
+         * @description Once, for a confirmed project. Appends the dealer_accepted step to the approval record with the desk user.
+         */
+        post: operations["proProjectAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/share-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the link of a sent dealer quote
+         * @description The dealer's own quote to a contractor, accepted or declined from a link with no login (PE-05), on the same token module as the customer quote link: 256 random bits, only the SHA-256 hash stored, expiring at the quote's expiry bounded by the configured maximum lifetime. Only a sent, unexpired quote has a link; issuing again kills the earlier link. The token is returned here once (Cache-Control: no-store); send_to emails it through the email path. The quote module's role and branch wall guards the route.
+         */
+        post: operations["quoteShareLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's quote, from its link
+         * @description No session. An unknown token, including a customer quote token, is a bare 404; an expired, revoked or rotated link is 410. Every answer is Cache-Control: no-store. The body is a strict allowlist: the lines at the contractor's own account prices, never the dealer's cost or margin.
+         */
+        get: operations["dealerQuotePublicView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the dealer's quote
+         * @description A typed full name. The quote moves through the quote module's own lifecycle (only a sent quote can be accepted, once), and the audit log records who, from which address and user agent, in the same transaction.
+         */
+        post: operations["dealerQuotePublicAccept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/v1/dealer-quotes/{token}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline the dealer's quote */
+        post: operations["dealerQuotePublicDecline"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4143,7 +4938,7 @@ export interface paths {
         };
         /**
          * The contractor dashboard
-         * @description AR summary plus the five most recent orders.
+         * @description AR summary plus the five most recent orders. The dashboard is made of money, so it sits behind the see_money capability; a session without it is a 403.
          */
         get: operations["portalDashboard"];
         put?: never;
@@ -4205,7 +5000,7 @@ export interface paths {
         put?: never;
         /**
          * Duplicate a historical order as a new draft
-         * @description Creates a new DRAFT order from the source order's lines. Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
+         * @description Creates a new DRAFT order from the source order's lines, behind the order capability (a session without it is a 403). Every service failure, including a source order the caller does not own, is the handler's fixed 500 today.
          */
         post: operations["portalReorder"];
         delete?: never;
@@ -4225,7 +5020,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel an order
-         * @description The body is optional (an empty body is a cancellation without a reason). Ownership first (someone else's order is a 404), then the goods-in-motion gate (a stop already delivered or on a dispatched route is a 409), then the ERP state machine (already cancelled and fulfilled are 409s). A 409 carries the refusal envelope with a customer-safe reason string.
+         * @description Behind the order capability. The body is optional (an empty body is a cancellation without a reason). Ownership first (someone else's order is a 404), then the goods-in-motion gate (a stop already delivered or on a dispatched route is a 409), then the ERP state machine (already cancelled and fulfilled are 409s). A 409 carries the refusal envelope with a customer-safe reason string.
          */
         post: operations["portalCancelOrder"];
         delete?: never;
@@ -4244,7 +5039,7 @@ export interface paths {
         get?: never;
         /**
          * Attach or detach an order's project
-         * @description A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
+         * @description Behind the order capability. A null project_id detaches. The project must belong to the caller (a foreign project id is a 404); the order too. Returns the updated order.
          */
         put: operations["portalSetOrderProject"];
         post?: never;
@@ -4263,7 +5058,7 @@ export interface paths {
         };
         /**
          * The customer's invoices
-         * @description A bare array with no page envelope; every money field is float dollars.
+         * @description A bare array with no page envelope; every money field is float dollars. Behind the see_money capability (a session without it is a 403). Carries the change feed pair: since narrows to invoices whose updated_at is strictly newer (a since page is ordered updated_at ascending and tie-completed, so the cursor cannot lose a row), and ETag plus X-Portal-Latest-Change make a poll cheap.
          */
         get: operations["portalListInvoices"];
         put?: never;
@@ -4283,7 +5078,7 @@ export interface paths {
         };
         /**
          * One invoice
-         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         * @description Scoped to the caller; any failure is the handler's fixed 404. Behind the see_money capability.
          */
         get: operations["portalGetInvoice"];
         put?: never;
@@ -4303,7 +5098,7 @@ export interface paths {
         };
         /**
          * The customer's deliveries
-         * @description A bare array of stops with POD, driver and route fields; no page envelope.
+         * @description A bare array of stops with POD, driver and route fields; no page envelope. Carries the change feed pair: since narrows to stops whose updated_at is strictly newer (the same ordering and tie completion as the order feed).
          */
         get: operations["portalListDeliveries"];
         put?: never;
@@ -4323,7 +5118,7 @@ export interface paths {
         };
         /**
          * One delivery
-         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         * @description Scoped to the caller; any failure is the handler's fixed 404. Carries updated_at, the delivery feed's cursor.
          */
         get: operations["portalGetDelivery"];
         put?: never;
@@ -4349,7 +5144,7 @@ export interface paths {
         put?: never;
         /**
          * Ask for a different delivery day
-         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
+         * @description 202 Accepted, not 200 or 201: the ask is recorded as PENDING, behind the schedule capability, the schedule is NOT changed, and the dispatcher decides (applied stays false). A repeated ask supersedes the caller's earlier pending one. requested_date must be YYYY-MM-DD, not in the past and at most 365 days out (violations are 400). A delivered stop or a route already IN_TRANSIT or COMPLETED is a 409 with the refusal envelope.
          */
         post: operations["portalRequestReschedule"];
         delete?: never;
@@ -4447,13 +5242,13 @@ export interface paths {
         };
         /**
          * The customer's quotes
-         * @description A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state.
+         * @description A bare array, newest first, capped at 100, no page envelope. Status is the portal vocabulary (REQUESTED, PRICED, ...), erp_state the raw ERP state. Carries the change feed pair: since narrows to quotes whose updated_at is strictly newer (the same ordering and tie completion as the order feed).
          */
         get: operations["portalListQuotes"];
         put?: never;
         /**
          * Send a scope for the dealer to price
-         * @description A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
+         * @description Behind the request_quotes capability (a session without it is a 403); accept and decline sit behind approve_quotes. A scope, never a price: the request has no money field and every money column is written 0.00 (priced stays false until the dealer answers). A line needs either a product_id or a description plus a uom; quantity must be positive; at most 200 lines; violations are 400 with a message naming the line. A project the caller does not own is a 404. Database failures surface as 400 today, because the handler's fallback status for this route is 400.
          */
         post: operations["portalCreateQuote"];
         delete?: never;
@@ -4493,7 +5288,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a priced quote
-         * @description Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Only a quote the dealer has priced and SENT may be accepted; a REQUESTED or already closed quote is a 409 (QUOTE_NOT_PRICED, the refusal envelope). The transition runs the ERP's own state machine. No body is read.
          */
         post: operations["portalAcceptQuote"];
         delete?: never;
@@ -4513,7 +5308,7 @@ export interface paths {
         put?: never;
         /**
          * Decline a priced quote
-         * @description Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
+         * @description Behind the approve_quotes capability (a session without it is a 403). Same SENT-only rule and same answers as accept; the quote moves to the ERP's REJECTED. No body is read.
          */
         post: operations["portalDeclineQuote"];
         delete?: never;
@@ -4553,7 +5348,7 @@ export interface paths {
         put?: never;
         /**
          * Add an item to the cart
-         * @description Prices the line through the customer's pricing waterfall before it is stored. A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
+         * @description Prices the line through the customer's pricing waterfall before it is stored, behind the order capability (the cart's writes and the checkout share it). A non-positive quantity or an unknown product is a 500 today (the handler's status is fixed).
          */
         post: operations["portalAddToCart"];
         delete?: never;
@@ -4572,13 +5367,13 @@ export interface paths {
         get?: never;
         /**
          * Change a cart item's quantity
-         * @description A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
+         * @description Behind the order capability. A non-positive quantity and every repository failure are 500s today (the handler's status is fixed).
          */
         put: operations["portalUpdateCartItem"];
         post?: never;
         /**
          * Remove an item from the cart
-         * @description Every repository failure is a 500 today; the cart is returned after the removal.
+         * @description Behind the order capability. Every repository failure is a 500 today; the cart is returned after the removal.
          */
         delete: operations["portalRemoveCartItem"];
         options?: never;
@@ -4597,7 +5392,7 @@ export interface paths {
         put?: never;
         /**
          * Place an order from the cart
-         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart. An empty cart, an unknown project and every order-service failure are 500s today (the handler's status is fixed).
+         * @description Converts the cart to an order (each line's float unit price is rounded to cents for the order module) and clears the cart, behind the order capability (a session without it is a 403). When schedule_hold_id is set, it binds the held slot to the new order and stamps the order's scheduled delivery date.
          */
         post: operations["portalCheckout"];
         delete?: never;
@@ -4615,7 +5410,7 @@ export interface paths {
         };
         /**
          * The customer's portal users
-         * @description Admin only; a non-admin session is a 403 before anything is read.
+         * @description The manage_team capability (the owner role today); a session without it is a 403 before anything is read. The guard resolves the role server side, never a role string on the wire.
          */
         get: operations["portalListUsers"];
         put?: never;
@@ -4635,13 +5430,13 @@ export interface paths {
         };
         /**
          * The customer's outstanding invites
-         * @description Admin only; a non-admin session is a 403. The invite token is never serialized.
+         * @description The manage_team capability; a session without it is a 403. The invite token is never serialized.
          */
         get: operations["portalListInvites"];
         put?: never;
         /**
          * Invite a team member
-         * @description Admin only. Records an invite expiring in seven days; the email is logged, not sent. A role outside the three known ones is a 500 today (the handler's status is fixed).
+         * @description The manage_team capability. Records an invite expiring in seven days; the email is logged, not sent. A role outside the five contractor roles is a 500 today (the handler's status is fixed).
          */
         post: operations["portalInviteUser"];
         delete?: never;
@@ -4660,7 +5455,7 @@ export interface paths {
         get?: never;
         /**
          * Change a portal user's role
-         * @description Admin only. A role outside the three known ones is a 500 today (the handler's status is fixed). Success is a bodiless 200.
+         * @description The manage_team capability. A role outside the five contractor roles is a 500 today (the handler's status is fixed). Success is a bodiless 200.
          */
         put: operations["portalUpdateUserRole"];
         post?: never;
@@ -4684,6 +5479,538 @@ export interface paths {
          */
         put: operations["portalUpdateUserStatus"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed in user, the account, the yards and the capabilities
+         * @description The frame's first read. The capabilities are the server's own resolution of the role (the same value every route guard consults), so a client that renders from them can never enable an action the server refuses. The yards are the branches the account holds (customer_branches), the primary first, each with its own IANA zone.
+         */
+        get: operations["portalMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Today board
+         * @description Everything a contractor opens the portal to act on: quotes awaiting their decision, today's deliveries and the next ones out, invoices due and overdue, and open orders, each section a count with its first rows. Money is integer cents on this surface. The invoice section is zeroed for a role without the see_money capability (the board itself is still that role's to read). Carries the change feed pair: ETag (If-None-Match answers 304) and X-Portal-Latest-Change; since narrows every section's rows to what changed after it.
+         */
+        get: operations["portalToday"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The order and delivery timeline
+         * @description The journey in five steps (Confirmed, Preparing, Loaded, Out for delivery or Ready for pickup, Delivered or Picked up), derived from Gable's own order and delivery states, each step done, current or upcoming, with the proof of delivery (signer, photo, place) where it exists. The flow follows the order's delivery type; a cancelled order promises nothing. Scoped to the caller like every order read.
+         */
+        get: operations["portalOrderTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/delivery-instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Edit the site delivery instructions
+         * @description The contractor's own instruction for the site, on an unfulfilled order, behind the edit_delivery_instructions capability (a session without it is a 403). A fulfilled or cancelled order's instructions are read only (a 400); someone else's order is the same 404 as always. Returns the updated order; the write moves updated_at, so the order change feed carries it.
+         */
+        put: operations["portalSetDeliveryInstructions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open delivery windows and pickup slots at a yard
+         * @description The yard's active windows expanded over a date range into concrete slots with the places left (capacity minus the holds already placed). yard_id is required and must be one of the account's own yards (any other yard is a 404, never a 403); kind, from and to are optional (from defaults to today, to fourteen days out; the range is capped at 62 days). Every instant is UTC and each slot carries its local hh:mm spellings in the yard's own zone.
+         */
+        get: operations["portalListScheduleWindows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hold a delivery window or pickup slot
+         * @description One hold on one window and date, behind the schedule capability (a session without it is a 403). Capacity is enforced inside a transaction that locks the window row: a full window is a 409 (SCHEDULE_WINDOW_FULL), past the cutoff is a 409 (SCHEDULE_CUTOFF_PASSED), a window the yard does not run on that weekday is a 400, and any yard or window that is not the caller's own is a 404. An optional order_id rides the hold (it must be the caller's own unfulfilled order; its earlier held hold is released in the same transaction).
+         */
+        post: operations["portalCreateScheduleHold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/schedule/holds/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One hold
+         * @description Scoped to the caller; any failure is the handler's fixed 404.
+         */
+        get: operations["portalGetScheduleHold"];
+        /**
+         * Move a held hold to another window or date
+         * @description Behind the schedule capability. The release of the old place and the take of the new one are one transaction: a refused change (full, past the cutoff, wrong weekday) leaves the original hold exactly as it was, and the refusal codes are the create's.
+         */
+        put: operations["portalChangeScheduleHold"];
+        post?: never;
+        /**
+         * Release a held hold
+         * @description Behind the schedule capability. Gives the place back; success is a bodiless 204, and a hold that is not the caller's (or is no longer held) is the handler's fixed 404.
+         */
+        delete: operations["portalReleaseScheduleHold"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/quotes/intake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse a material list or photo and optionally create a quote request
+         * @description Behind the request_quotes capability. Reads a pasted material list without AI or a photo/file with AI through Gable's parsing and product matching service. When create_quote is true, it creates an unpriced portal quote request in the same step unless the AI result is synthetic and allow_synthetic is false (409 SYNTHETIC_INTAKE_REFUSED).
+         */
+        post: operations["portalQuoteIntake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/quotes/{id}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert a priced or accepted quote into an order
+         * @description Behind the order capability (a session without it is a 403). Only a priced (SENT) or ACCEPTED quote owned by the calling account may be converted; an unpriced (DRAFT), declined, or expired quote is a 409 (QUOTE_NOT_PRICED or QUOTE_NOT_CONVERTIBLE). Runs the ERP quote service's ConvertInProcess.
+         */
+        post: operations["portalConvertQuote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/orders/{id}/reorder-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Price difference preview for reordering a historical order
+         * @description Behind the order capability. Resolves each product line on the historical order through pricing.Resolve at the customer's current pricing and compares original vs current prices in integer cents.
+         */
+        get: operations["portalReorderPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List named material lists on the procurement board
+         * @description Scoped to the calling customer account.
+         */
+        get: operations["portalListProcurementProjects"];
+        put?: never;
+        /**
+         * Create a named material list on the procurement board
+         * @description Behind the order or request_quotes capability.
+         */
+        post: operations["portalCreateProcurementProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One named material list with its lines
+         * @description Scoped to the calling customer account; another customer's list is a 404.
+         */
+        get: operations["portalGetProcurementProject"];
+        /**
+         * Rename or advance a named material list
+         * @description Behind the order or request_quotes capability. Validates the lifecycle transition.
+         */
+        put: operations["portalUpdateProcurementProject"];
+        post?: never;
+        /**
+         * Delete a named material list
+         * @description Behind the order or request_quotes capability.
+         */
+        delete: operations["portalDeleteProcurementProject"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a line to a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        post: operations["portalAddProcurementLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/lines/{lineId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a line on a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        put: operations["portalUpdateProcurementLine"];
+        post?: never;
+        /**
+         * Delete a line from a named material list
+         * @description Behind the order or request_quotes capability. Only editable in PLANNING status.
+         */
+        delete: operations["portalDeleteProcurementLine"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/procurement/projects/{id}/submit-rfq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a named material list as a quote request
+         * @description Behind the request_quotes capability. Creates a portal quote request from the list's lines, links the quote_id onto the list, and advances its status from PLANNING to QUOTING.
+         */
+        post: operations["portalSubmitProcurementRFQ"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/billing/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Balance tiles, aging buckets, and per-job financial summaries
+         * @description Behind the see_money capability (a session without it is a 403). All money figures are integer cents.
+         */
+        get: operations["portalBillingSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live customer statement and aging
+         * @description Behind the see_money capability. Built through the AR core's account.Service.Statement over an optional [from, to] date range (defaults to the last 30 days). All money figures are integer cents.
+         */
+        get: operations["portalGetStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Historical statement run snapshots for the customer
+         * @description Behind the see_money capability. Lists statement run items scoped to the calling customer.
+         */
+        get: operations["portalListStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/invoices/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download an invoice PDF
+         * @description Behind the see_money capability. Verifies the invoice belongs to the calling customer account (another customer's invoice is a 404) and renders the PDF through Gable's document formatter.
+         */
+        get: operations["portalInvoicePDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statement/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a live customer statement PDF
+         * @description Behind the see_money capability. Renders the calling customer's statement PDF through Gable's document formatter over an optional [from, to] date range.
+         */
+        get: operations["portalStatementPDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/statements/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a historical statement run snapshot PDF
+         * @description Behind the see_money capability. Verifies the statement run item belongs to the calling customer account (another customer's item is a 404) and renders the PDF for that run's period through Gable's document formatter.
+         */
+        get: operations["portalStatementRunItemPDF"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved payment methods on the account
+         * @description Behind the pay capability. Returns only tokenized display metadata (gateway, method_type, brand, last4, exp_month, exp_year, is_default); the vault token is never serialized.
+         */
+        get: operations["portalListPaymentMethods"];
+        put?: never;
+        /**
+         * Save a tokenized payment method on the account
+         * @description Behind the pay capability. Accepts only a gateway vault token and display metadata; any payload carrying raw card PANs, CVVs, or bank account/routing numbers is refused with 400.
+         */
+        post: operations["portalCreatePaymentMethod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a saved payment method
+         * @description Behind the pay capability. Scoped to the calling customer account.
+         */
+        delete: operations["portalDeletePaymentMethod"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payment-methods/{id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a saved payment method as the account default
+         * @description Behind the pay capability. Scoped to the calling customer account.
+         */
+        put: operations["portalSetDefaultPaymentMethod"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portal/v1/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List payments and their invoice allocations for the account
+         * @description Behind the see_money capability. Lists posted payments with their invoice allocations in integer cents and omits internal staff attribution.
+         */
+        get: operations["portalListPayments"];
+        put?: never;
+        /**
+         * Pay one or many open invoices through the payment gateway
+         * @description Behind the pay capability. Charges the open balance of the named invoices through Gable's PaymentGateway using a saved payment_method_id or one-time token (raw card or bank account digits are refused with 400), records the payment and applications in the AR core, and guards against duplicate or unknown-outcome charges with a durable portal_payment_intents single-flight record.
+         */
+        post: operations["portalCreatePayment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4968,8 +6295,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Replay a batch of offline sales
-         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits. A sale replayed at a register with no open till session is an error entry (till_not_open): the counter takes no sale outside a drawer.
+         * Refuse the offline sale replay by rule (money never queues)
+         * @description Offline sale replay is refused by rule: money never queues offline, so a sale is completed online at the counter, never captured, queued and replayed later. A batch that parses answers 409 money_never_queues before anything of it is written: no sale, no invoice, no payment, no sync log row. A malformed body, a missing batch_id or an empty items array keeps its 400, and the branch and customer wall refusals run ahead of the handler as on every route.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -5928,6 +7255,273 @@ export interface paths {
          * @description Guarded admin or owner. A dry run: nothing is written. new_value must be positive. top_customers lists at most five customers by exposure and is null when no active escalator carries a base index.
          */
         post: operations["marketIndexRefreshPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price levels
+         * @description Guarded admin, owner or finance. The cursor list envelope of ADR 0001 section 1, newest first (created_at DESC, id DESC); items is never null.
+         */
+        get: operations["pricingLevelList"];
+        put?: never;
+        /**
+         * Create a price level
+         * @description Guarded admin, owner or finance. code (uppercase, at most 16 characters of A-Z, 0-9 and underscore) and name are required; basis defaults to base; adjust_percent is a decimal string, a level at -100 or above. The response is 201 with Location and the revision ETag.
+         */
+        post: operations["pricingLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price level */
+        get: operations["pricingLevelGet"];
+        /**
+         * Update a price level
+         * @description Guarded admin, owner or finance, at the level's revision (428 without, 409 stale behind it).
+         */
+        put: operations["pricingLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List price profiles
+         * @description The cursor list envelope, newest first.
+         */
+        get: operations["pricingProfileList"];
+        put?: never;
+        /**
+         * Create a price profile
+         * @description Guarded admin, owner or finance. code and name are required; price_level_id names the level the program prices from.
+         */
+        post: operations["pricingProfileCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one price profile */
+        get: operations["pricingProfileGet"];
+        /**
+         * Update a price profile
+         * @description Guarded admin, owner or finance, at the profile's revision.
+         */
+        put: operations["pricingProfileUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/products/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a product's prices
+         * @description Guarded admin, owner, finance or sales. The rows of the branch named in branch_id and the caller's context branch rows and the every branch rows; a caller with no context branch sees every row.
+         */
+        get: operations["pricingProductPriceList"];
+        /**
+         * Replace one branch slice of a product's price list
+         * @description Guarded admin, owner or finance. The PUT replaces the branch_id slice of the product's price list (its branch base and its level prices for that branch) at the product's revision, and touches no other branch's rows. Without branch_id it replaces the every branch slice, admitted only to a caller who may reach every branch. The rows carry no branch_id. While the stocking unit hold of ADR 0006 section 9.1 stands, every row's price unit is the product's stocking unit; a row naming another unit is a 400 naming price_uom. A replace at a stale product revision is a 409 stale_revision.
+         */
+        put: operations["pricingProductPriceReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List vendor price levels */
+        get: operations["pricingVendorLevelList"];
+        put?: never;
+        /**
+         * Create a vendor price level
+         * @description Guarded admin, owner or finance; vendor_id, code and name are required.
+         */
+        post: operations["pricingVendorLevelCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-levels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor price level */
+        get: operations["pricingVendorLevelGet"];
+        /** Update a vendor price level */
+        put: operations["pricingVendorLevelUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List vendor costs
+         * @description Guarded admin, owner, finance or sales, under the filters vendor_id, product_id and branch_id, and the branch wall of the caller's context.
+         */
+        get: operations["pricingVendorCostList"];
+        put?: never;
+        /**
+         * Create a vendor cost
+         * @description Guarded admin, owner or finance. vendor_id, vendor_price_level_id (of the same vendor), product_id, purchase_uom, unit_cost_ten_thousandths and effective_from are required; the purchase unit must be a row of the product's unit set, and while the stocking unit hold stands the price unit hold refuses a cost the product cannot read. The payload branch rule holds a branch_id the body names.
+         */
+        post: operations["pricingVendorCostCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/vendor-costs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one vendor cost */
+        get: operations["pricingVendorCostGet"];
+        /**
+         * Update a vendor cost
+         * @description Guarded admin, owner or finance, at the row's revision. The update checks the payload branch rule on the row's stored branch and on the new one: a move out of the caller's reach is a 403.
+         */
+        put: operations["pricingVendorCostUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customer contracts
+         * @description Under the filters customer_id, product_id and branch_id, and the branch wall.
+         */
+        get: operations["pricingContractList"];
+        put?: never;
+        /**
+         * Create a customer contract
+         * @description Guarded admin, owner or finance. customer_id, product_id and contract_price_ten_thousandths are required; the price unit is the product's stocking unit while the hold stands, and a body naming another unit is a 400 naming price_uom. The create does not upsert: a second contract for the same customer, product and branch is a 409 duplicate naming the existing row. The payload branch rule holds the branch the body names; a null branch is the every branch reach. Writes contract.created in the same transaction.
+         */
+        post: operations["pricingContractCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/contracts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one contract */
+        get: operations["pricingContractGet"];
+        /**
+         * Update a contract
+         * @description Guarded admin, owner or finance, at the row's revision. Writes contract.updated in the same transaction, with its audit row.
+         */
+        put: operations["pricingContractUpdate"];
+        post?: never;
+        /**
+         * Delete a contract
+         * @description Guarded admin, owner or finance, at the row's revision in the body. A contract is an agreement, not a document: it is deleted outright, with an audit row carrying the deleted values and contract.deleted in the same transaction.
+         */
+        delete: operations["pricingContractDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a vendor cost
+         * @description ResolveCost on the wire (ADR 0006 section 5.5): rows at the requested level, or the vendor's default level when none is named, in effect on the date, the branch's row before the all branch row, the latest effective_from first. The answer carries the cost and its purchase unit, the pair between the uom named and the purchase unit, the level's code and the row's id. No cost in effect is a 404: the purchase line takes a manual cost.
+         */
+        get: operations["pricingCost"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7145,6 +8739,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scheduling/windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List delivery windows and pickup slots
+         * @description The dealer's window definitions, newest definitions of each yard and kind first by yard code. Optional yard_id and kind filters; inactive windows are included (the yard manager edits what was switched off). Behind the admin, owner and warehouse roles and the branch middleware.
+         */
+        get: operations["schedulingListWindows"];
+        put?: never;
+        /**
+         * Define a delivery window or pickup slot
+         * @description Creates one recurring weekly rule for a yard. The yard is held to the caller's branch wall (a caller held to branch A cannot define branch B's windows); an unknown yard and every validation failure (kind, weekday 0 to 6, hh:mm times with end after start, positive capacity, non negative cutoff) are 400s.
+         */
+        post: operations["schedulingCreateWindow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scheduling/windows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One window
+         * @description The definition with its yard facts. A missing window is a 404.
+         */
+        get: operations["schedulingGetWindow"];
+        /**
+         * Change a window
+         * @description A partial update: a null field keeps its current value. The yard never moves (a window at another yard is a new window, so a contractor's hold can never silently change yards under an order).
+         */
+        put: operations["schedulingUpdateWindow"];
+        post?: never;
+        /**
+         * Switch a window off
+         * @description Deactivation, never a delete: the row and the contractor holds that reference it stay auditable. A missing window is a 404; success is a bodiless 204.
+         */
+        delete: operations["schedulingDeactivateWindow"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/config": {
         parameters: {
             query?: never;
@@ -7435,7 +9081,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "money_never_queues" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -7798,6 +9444,370 @@ export interface components {
         ArReconciliation: {
             customers: components["schemas"]["ArDriftRow"][];
             currencies: components["schemas"]["ArLedgerRow"][];
+        };
+        CreditStanding: {
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** Format: int64 */
+            current_balance_cents: number;
+            /**
+             * Format: int64
+             * @description The open invoice cents past their due date.
+             */
+            past_due_cents: number;
+        };
+        CreditHold: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            reason: string;
+            /** @enum {string} */
+            hold_type: "manual" | "over_limit" | "past_due";
+            /** @enum {string} */
+            status: "active" | "released" | "overridden";
+            /** @description null on a hold the sweep placed. */
+            placed_by: string | null;
+            /** Format: date-time */
+            placed_at: string;
+            released_by: string | null;
+            /** Format: date-time */
+            released_at: string | null;
+            release_reason: string | null;
+            /** Format: date-time */
+            override_until: string | null;
+            override_by: string | null;
+            override_reason: string | null;
+            /**
+             * Format: int64
+             * @description The order size the override window allows.
+             */
+            max_order_cents: number | null;
+            credit?: components["schemas"]["CreditStanding"];
+        };
+        CreditHoldPage: {
+            items: components["schemas"]["CreditHold"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditHoldPlaceRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            hold_type: "manual" | "over_limit" | "past_due";
+        };
+        CreditHoldReleaseRequest: {
+            reason: string;
+        };
+        CreditHoldOverrideRequest: {
+            override_reason: string;
+            /**
+             * Format: date-time
+             * @description A future instant: the window the override buys.
+             */
+            override_until: string;
+            /** Format: int64 */
+            max_order_cents?: number | null;
+        };
+        CreditHoldEvaluateRequest: {
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every active credit account; present, exactly these. */
+            customer_ids?: string[];
+        };
+        CreditHoldPlacement: {
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            hold_type: "over_limit" | "past_due";
+            reason: string;
+            /**
+             * Format: uuid
+             * @description Set on an executed sweep; empty on a dry run.
+             */
+            hold_id?: string;
+        };
+        CreditHoldReleaseRecord: {
+            /** Format: uuid */
+            hold_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            reason: string;
+        };
+        CreditHoldEvaluation: {
+            dry_run: boolean;
+            /** @description The accounts the sweep read. */
+            evaluated: number;
+            would_place: components["schemas"]["CreditHoldPlacement"][];
+            would_release: components["schemas"]["CreditHoldReleaseRecord"][];
+            /** @description Zero on a dry run. */
+            placed: number;
+            /** @description Zero on a dry run. */
+            released: number;
+        };
+        CreditLimitChange: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: int64 */
+            old_limit_cents: number;
+            /** Format: int64 */
+            new_limit_cents: number;
+            requested_by: string | null;
+            approved_by: string | null;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            decided_at: string | null;
+        };
+        CreditLimitChangePage: {
+            items: components["schemas"]["CreditLimitChange"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        CreditLimitChangeRequest: {
+            /** Format: int64 */
+            new_limit_cents: number;
+            reason: string;
+            /**
+             * @description true applies the limit in the same act.
+             * @default false
+             */
+            approve: boolean;
+        };
+        ArWorklistRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            past_due_cents: number;
+            /** Format: int64 */
+            over_limit_cents: number;
+            /**
+             * Format: int64
+             * @description null for no limit.
+             */
+            credit_limit_cents: number | null;
+            /** @description The balance over the limit, percent; null for no limit. */
+            credit_utilization_pct: number | null;
+            /** @enum {string} */
+            hold_status: "none" | "active" | "overridden";
+            /** Format: uuid */
+            hold_id?: string;
+            /** Format: date-time */
+            override_until?: string | null;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "hold" | "call" | "send_statement" | "finance_charge";
+        };
+        ArWorklist: {
+            /** Format: date */
+            as_of: string;
+            rows: components["schemas"]["ArWorklistRow"][];
+        };
+        ArStatementRunItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The subledger before period_start.
+             */
+            opening_balance_cents: number;
+            /** Format: int64 */
+            invoices_cents: number;
+            /** Format: int64 */
+            payments_cents: number;
+            /** Format: int64 */
+            finance_charges_cents: number;
+            /** Format: int64 */
+            closing_balance_cents: number;
+            /** @enum {string} */
+            delivery_status: "not_queued" | "queued" | "sent" | "failed" | "skipped";
+            /**
+             * Format: uuid
+             * @description The statement.queued event of a queued item.
+             */
+            outbox_id: string | null;
+            /** @description The aging as of period_end: current, days_1_30, days_31_60, days_61_90 and over_90, in cents. */
+            aging_buckets: {
+                [key: string]: number;
+            };
+        };
+        ArStatementRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            period_start: string;
+            /** Format: date */
+            period_end: string;
+            /** Format: date */
+            as_of_date: string;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed";
+            total_customers: number;
+            queued_count: number;
+            sent_count: number;
+            /** Format: int64 */
+            total_balance_cents: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @description On the by-id read and the create answer; the list read carries none. */
+            items?: components["schemas"]["ArStatementRunItem"][];
+        };
+        ArStatementRunPage: {
+            items: components["schemas"]["ArStatementRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        ArStatementRunRequest: {
+            /**
+             * Format: date
+             * @description Default a month before period_end.
+             */
+            period_start?: string;
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            period_end?: string;
+            /** @description Absent, every customer with a non-zero balance; present, exactly these. */
+            customer_ids?: string[];
+            /** @default false */
+            queue_email: boolean;
+        };
+        ArFinanceChargeRunRequest: {
+            /**
+             * Format: date
+             * @description Default today; never after today.
+             */
+            as_of_date?: string;
+            /** @default true */
+            dry_run: boolean;
+            /** @description Absent, every eligible customer; present, exactly these. */
+            customer_ids?: string[];
+        };
+        ArFinanceChargeRules: {
+            /**
+             * Format: int64
+             * @description 10000 basis points is 100 percent a month.
+             */
+            monthly_rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** Format: int64 */
+            min_balance_cents: number;
+            /** @description false, the default, never charges on a finance charge invoice. */
+            compound: boolean;
+            /** @description The chart account the charge credits; 4060 by default. */
+            income_account_code: string;
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ArFinanceChargeItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /**
+             * Format: int64
+             * @description The basis the charge was taken on.
+             */
+            overdue_cents: number;
+            /** Format: int64 */
+            charge_cents: number;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            invoice_id: string | null;
+            invoice_number: string | null;
+            /**
+             * Format: uuid
+             * @description null on a dry run's preview.
+             */
+            journal_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ArFinanceChargeRun: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            as_of_date: string;
+            /** Format: int64 */
+            rate_bps: number;
+            grace_days: number;
+            /** Format: int64 */
+            min_charge_cents: number;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed" | "dry_run";
+            /** Format: int64 */
+            total_charged_cents: number;
+            customer_count: number;
+            triggered_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description null on a dry run: a preview never completes.
+             */
+            completed_at: string | null;
+            /** @description On the by-id read and the run answer; the list read carries none. */
+            items?: components["schemas"]["ArFinanceChargeItem"][];
+        };
+        ArFinanceChargeRunPage: {
+            items: components["schemas"]["ArFinanceChargeRun"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
         /**
          * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
@@ -8535,33 +10545,8 @@ export interface components {
             sku: string;
             description: string;
         };
-        /**
-         * @description The price tier, lowercase on the wire (ADR 0001 section 6). The database keeps its uppercase enum.
-         * @enum {string}
-         */
-        CustomerTier: "retail" | "silver" | "gold" | "platinum";
         /** @enum {string} */
         TermsKind: "net_days" | "day_of_month" | "due_on_receipt";
-        PriceLevel: {
-            /** Format: uuid */
-            id: string;
-            name: string;
-            /** @description A price multiplier, a rate and not money. */
-            multiplier: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
-        PriceLevelPage: {
-            items: components["schemas"]["PriceLevel"][];
-            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
-            next_cursor: string | null;
-            limit: number;
-            /** Format: int64 */
-            total?: number;
-        };
         PaymentTermsRef: {
             /** Format: uuid */
             id: string;
@@ -8577,7 +10562,6 @@ export interface components {
             phone: string | null;
             /** @description The free text billing address; delivery addresses are ship-tos. */
             address: string | null;
-            tier: components["schemas"]["CustomerTier"];
             is_active: boolean;
             /**
              * Format: uuid
@@ -8586,9 +10570,11 @@ export interface components {
             primary_branch_id: string;
             /** @description The yards the customer trades at, home yard included, in id order. Customers are dealer wide accounts (ruling A): the first document at a yard the customer is not yet linked to adds the yard here. */
             branch_ids: string[];
-            /** Format: uuid */
-            price_level_id: string | null;
-            price_level: components["schemas"]["PriceLevel"] | null;
+            /**
+             * Format: uuid
+             * @description The customer's pricing program (ADR 0006 section 5.2); the create takes the default profile.
+             */
+            price_profile_id: string | null;
             /** Format: uuid */
             salesperson_id: string | null;
             salesperson_name: string | null;
@@ -8644,15 +10630,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -8688,15 +10676,17 @@ export interface components {
             email?: string | null;
             phone?: string | null;
             address?: string | null;
-            tier?: components["schemas"]["CustomerTier"];
             is_active?: boolean;
             /**
              * Format: uuid
              * @description Create only; fixed afterwards, and a PUT carrying it is a 400.
              */
             primary_branch_id?: string;
-            /** Format: uuid */
-            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The pricing program; a create that names none takes the default profile.
+             */
+            price_profile_id?: string | null;
             /** Format: uuid */
             salesperson_id?: string | null;
             /**
@@ -8969,6 +10959,599 @@ export interface components {
              * @description PUT only, beside If-Match.
              */
             revision?: number;
+        };
+        CustomerQuoteGone: {
+            error: {
+                /** @enum {string} */
+                code: "link_unavailable";
+                message: string;
+            };
+            meta: {
+                request_id: string;
+            };
+        };
+        /** @description A markup on cost (sell = cost x (10000 + bps) / 10000) or a target gross margin (sell = cost x 10000 / (10000 - bps); under 10000). */
+        CustomerQuoteMarkup: {
+            /** @enum {string} */
+            kind: "markup" | "margin";
+            /** Format: int64 */
+            bps: number;
+        };
+        CustomerQuoteContact: {
+            name: string;
+            email?: string;
+            phone?: string;
+        };
+        CustomerQuoteTax: {
+            /** @enum {string} */
+            mode: "site_rate" | "included" | "at_checkout";
+            /** Format: int64 */
+            rate_bps: number;
+        };
+        /** @description Unknown fields are a 400. markup, tax, payment_terms, deposit_bps and require_code default to the contractor's saved defaults. */
+        CustomerQuoteInput: {
+            title: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            /** Format: uuid */
+            source_quote_id?: string | null;
+            job_site_address?: string;
+            end_customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact?: components["schemas"]["CustomerQuoteContact"];
+            markup?: components["schemas"]["CustomerQuoteMarkup"] | null;
+            hide_line_prices?: boolean;
+            tax?: components["schemas"]["CustomerQuoteTax"] | null;
+            payment_terms?: string | null;
+            /** Format: int64 */
+            deposit_bps?: number | null;
+            customer_note?: string;
+            require_code?: boolean | null;
+            /** Format: date-time */
+            valid_until?: string | null;
+            groups?: {
+                key: string;
+                label: string;
+            }[];
+            lines?: {
+                /** Format: uuid */
+                id?: string | null;
+                /** Format: uuid */
+                product_id: string;
+                /** Format: uuid */
+                source_line_id?: string | null;
+                quantity: string;
+                group_key?: string | null;
+                markup?: components["schemas"]["CustomerQuoteMarkup"] | null;
+                note?: string;
+            }[];
+            category_rules?: {
+                /** Format: uuid */
+                category_id: string;
+                markup: components["schemas"]["CustomerQuoteMarkup"];
+            }[];
+            labour?: {
+                description: string;
+                /** @enum {string} */
+                rate_type: "flat" | "hourly";
+                /** Format: int64 */
+                rate_cents: number;
+                hours?: string;
+                contractor_only?: boolean;
+            }[];
+            overhead?: {
+                label: string;
+                /** @enum {string} */
+                amount_type: "flat" | "percent";
+                /**
+                 * Format: int64
+                 * @description Cents when flat, basis points when percent.
+                 */
+                value: number;
+                contractor_only?: boolean;
+            }[];
+        };
+        CustomerQuoteLine: {
+            /** Format: uuid */
+            id: string;
+            position: number;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            category_id: string | null;
+            sku: string;
+            description: string;
+            uom: string;
+            quantity: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            /** Format: int64 */
+            cost_cents: number;
+            /** @enum {string} */
+            price_basis: "catalog" | "dealer_quote";
+            /** Format: uuid */
+            group_id: string | null;
+            markup: components["schemas"]["CustomerQuoteMarkup"] | null;
+            applied: {
+                /** @enum {string} */
+                tier: "line" | "category" | "quote";
+                /** @enum {string} */
+                kind: "markup" | "margin";
+                /** Format: int64 */
+                bps: number;
+            };
+            /** Format: int64 */
+            sell_cents: number;
+            note: string;
+            /** @enum {string} */
+            selection: "pending" | "approved" | "declined";
+        };
+        /** @description Every figure is a sum of rounded lines. labour_cents and overhead_cents are the customer facing lines; contractor_cost_cents is the contractor only lines, counted against margin_cents and in no price. */
+        CustomerQuoteTotals: {
+            /** Format: int64 */
+            material_cost_cents: number;
+            /** Format: int64 */
+            material_sell_cents: number;
+            /** Format: int64 */
+            labour_cents: number;
+            /** Format: int64 */
+            overhead_cents: number;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            deposit_cents: number;
+            /** Format: int64 */
+            contractor_cost_cents: number;
+            /** Format: int64 */
+            margin_cents: number;
+            /** Format: int64 */
+            margin_bps: number;
+        };
+        /** @description The contractor's own view of a quote: cost, markup, labour, overhead and margin included. It never reaches the customer or the dealer. */
+        CustomerQuoteView: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+            /** @description status, or expired for a sent quote past valid_until. */
+            effective_status: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: uuid */
+            source_quote_id: string | null;
+            job_site_address: string;
+            end_customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact: components["schemas"]["CustomerQuoteContact"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            hide_line_prices: boolean;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            payment_terms: string;
+            /** Format: int64 */
+            deposit_bps: number;
+            customer_note: string;
+            require_code: boolean;
+            /** Format: date-time */
+            valid_until: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            declined_at: string | null;
+            /** Format: date-time */
+            confirmed_at: string | null;
+            /** Format: date-time */
+            dealer_accepted_at: string | null;
+            groups: {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                position: number;
+            }[];
+            lines: components["schemas"]["CustomerQuoteLine"][];
+            category_rules: {
+                /** Format: uuid */
+                category_id: string;
+                markup: components["schemas"]["CustomerQuoteMarkup"];
+            }[];
+            labour: {
+                /** Format: uuid */
+                id: string;
+                position: number;
+                description: string;
+                /** @enum {string} */
+                rate_type: "flat" | "hourly";
+                /** Format: int64 */
+                rate_cents: number;
+                hours?: string;
+                contractor_only: boolean;
+                /** Format: int64 */
+                total_cents: number;
+            }[];
+            overhead: {
+                /** Format: uuid */
+                id: string;
+                position: number;
+                label: string;
+                /** @enum {string} */
+                amount_type: "flat" | "percent";
+                /** Format: int64 */
+                value: number;
+                contractor_only: boolean;
+                /** Format: int64 */
+                total_cents: number;
+            }[];
+            totals: components["schemas"]["CustomerQuoteTotals"];
+            link: {
+                /** Format: date-time */
+                expires_at: string;
+            } | null;
+            order: {
+                /** Format: uuid */
+                id: string;
+                number: string;
+                status: string;
+                /** @enum {string} */
+                fulfilment: "ordered" | "being_prepared" | "fulfilled" | "cancelled";
+                /** Format: int64 */
+                total_cents: number;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuoteSummary: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            title: string;
+            status: string;
+            effective_status: string;
+            end_customer_name: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: date-time */
+            valid_until: string;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            margin_cents: number;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuotePage: {
+            items: components["schemas"]["CustomerQuoteSummary"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        CustomerQuoteLinkResult: {
+            quote: components["schemas"]["CustomerQuoteView"];
+            /** @description The raw token appears here and nowhere else, once. delivered is false when nothing real was emailed (no real sender, or no address): the contractor shares the link themselves. */
+            link: {
+                /** @description The customer page path, /q/ then the token. */
+                path: string;
+                /** @description The absolute URL, when the deployment has a public URL. */
+                url?: string;
+                /** Format: date-time */
+                expires_at: string;
+                delivered: boolean;
+            };
+        };
+        CustomerQuoteSettings: {
+            display_name: string;
+            has_logo: boolean;
+            payment_terms: string;
+            /** Format: int64 */
+            deposit_bps: number;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            require_code: boolean;
+        };
+        CustomerQuoteSettingsInput: {
+            display_name?: string;
+            payment_terms?: string;
+            /** Format: int64 */
+            deposit_bps?: number;
+            tax: components["schemas"]["CustomerQuoteTax"];
+            markup: components["schemas"]["CustomerQuoteMarkup"];
+            require_code?: boolean;
+        };
+        CustomerQuoteApprovalList: {
+            items: {
+                /** @enum {string} */
+                step: "customer_approved" | "customer_declined" | "contractor_confirmed" | "dealer_accepted";
+                /** Format: int64 */
+                quote_revision: number;
+                /** @enum {string} */
+                actor_kind: "customer" | "contractor" | "dealer";
+                actor_name: string;
+                actor_contact: string;
+                /** Format: date-time */
+                occurred_at: string;
+                token_hash?: string;
+                /** @enum {string} */
+                signature_kind?: "typed" | "drawn";
+                source_address?: string;
+                user_agent?: string;
+                code_verified: boolean;
+                snapshot_sha256?: string;
+                /** Format: int64 */
+                total_cents?: number;
+                note?: string;
+            }[];
+        };
+        CustomerQuoteExport: {
+            customers: {
+                name: string;
+                email: string;
+                phone: string;
+                quote_count: number;
+                last_quote_reference: string;
+            }[];
+            projects: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                status: string;
+                /** Format: date-time */
+                created_at: string;
+            }[];
+            quotes: components["schemas"]["CustomerQuoteView"][];
+        };
+        /** @description The strict allowlist of price wall 2. There is no field for the dealer's cost, a markup, basis points (the customer site tax rate excepted), a margin or a contractor only line. With hide_line_prices no line or extra carries a price and the totals are the lump sum. */
+        CustomerQuotePublicView: {
+            reference: string;
+            title: string;
+            /** @enum {string} */
+            status: "open" | "expired" | "approved" | "declined" | "confirmed" | "withdrawn";
+            contractor: {
+                name: string;
+                has_logo: boolean;
+            };
+            customer_name: string;
+            job_site_address: string;
+            /** Format: date-time */
+            valid_until: string;
+            note: string;
+            payment_terms: string;
+            hide_line_prices: boolean;
+            groups: {
+                /** Format: uuid */
+                id: string;
+                label: string;
+            }[];
+            lines: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                group_id?: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                note?: string;
+                /** Format: int64 */
+                price_cents?: number;
+                /** @enum {string} */
+                selection: "pending" | "approved" | "declined";
+            }[];
+            extras: {
+                /** Format: uuid */
+                id: string;
+                /** @enum {string} */
+                kind: "labour" | "overhead";
+                description: string;
+                /** Format: int64 */
+                price_cents?: number;
+            }[];
+            totals: {
+                /** Format: int64 */
+                subtotal_cents: number;
+                /** Format: int64 */
+                tax_cents: number;
+                /** Format: int64 */
+                total_cents: number;
+                /** Format: int64 */
+                deposit_cents: number;
+                /** @enum {string} */
+                tax_mode: "site_rate" | "included" | "at_checkout";
+                /** Format: int64 */
+                tax_rate_bps?: number;
+                tax_note: string;
+            };
+            requires_code: boolean;
+            can_decide: boolean;
+            /** Format: int64 */
+            selections_version: number;
+            /** @description Present when the quote cannot be accepted yet: the contractor asked for a verification code and the server cannot send one. It says so in plain words; declining stays possible. */
+            notice?: string;
+            approval?: {
+                /** @enum {string} */
+                decision: "approved" | "declined";
+                signed_by: string;
+                /** Format: date-time */
+                at: string;
+            };
+            /** @enum {string} */
+            fulfilment?: "ordered" | "being_prepared" | "fulfilled" | "cancelled";
+        };
+        CustomerQuoteChoices: {
+            choices: {
+                /** Format: uuid */
+                line_id: string;
+                /** @enum {string} */
+                state: "pending" | "approved" | "declined";
+            }[];
+        };
+        CustomerQuoteAcceptRequest: {
+            full_name: string;
+            email?: string;
+            phone?: string;
+            signature: {
+                /** @enum {string} */
+                kind: "typed" | "drawn";
+                text?: string;
+                /** @description A PNG of at most 128 KB, base64 encoded, for a drawn signature. */
+                png_base64?: string;
+            };
+            code?: string;
+            /** Format: int64 */
+            selections_version: number;
+        };
+        CustomerQuoteDeclineRequest: {
+            full_name: string;
+            reason?: string;
+            /** Format: int64 */
+            selections_version?: number;
+        };
+        /** @description The strict allowlist of price wall 1. The materials are at the dealer's own prices; there is no field for the contractor's markup, basis points, labour, overhead, margin or the customer's sell prices. */
+        CustomerQuoteDealerProject: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            contractor: {
+                /** Format: uuid */
+                customer_id: string;
+                name: string;
+            };
+            project: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            } | null;
+            job_site_address: string;
+            customer: components["schemas"]["CustomerQuoteContact"];
+            site_contact: {
+                name: string;
+                phone?: string;
+            };
+            /** @enum {string} */
+            status: "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+            selections: {
+                approved: number;
+                declined: number;
+                pending: number;
+            };
+            materials: {
+                sku: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                /** Format: int64 */
+                dealer_cost_cents: number;
+                /** @enum {string} */
+                selection: "pending" | "approved" | "declined";
+            }[];
+            /**
+             * Format: int64
+             * @description The counted material at the dealer's prices under the customer's decisions.
+             */
+            material_cents: number;
+            order: {
+                /** Format: uuid */
+                id: string;
+                number: string;
+                /** @description The order's lowercase status. */
+                status: string;
+                /** Format: int64 */
+                total_cents: number;
+            } | null;
+            /** Format: date-time */
+            dealer_accepted_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CustomerQuoteDealerProjectDetail: components["schemas"]["CustomerQuoteDealerProject"] & {
+            approvals: {
+                /** @enum {string} */
+                step: "customer_approved" | "customer_declined" | "contractor_confirmed" | "dealer_accepted";
+                /** @enum {string} */
+                actor_kind: "customer" | "contractor" | "dealer";
+                actor_name: string;
+                /** Format: date-time */
+                occurred_at: string;
+                snapshot_sha256?: string;
+            }[];
+        };
+        CustomerQuoteDealerPage: {
+            items: components["schemas"]["CustomerQuoteDealerProject"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        CustomerQuoteDealerLink: {
+            /** @description The page path, /dq/ then the token. The raw token appears here, once. */
+            path: string;
+            url?: string;
+            /** Format: date-time */
+            expires_at: string;
+            delivered: boolean;
+        };
+        CustomerQuoteDealerQuoteView: {
+            number: string;
+            /** @enum {string} */
+            status: "open" | "accepted" | "declined" | "expired" | "withdrawn";
+            dealer_name: string;
+            customer_name: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            can_decide: boolean;
+            lines: {
+                description: string;
+                quantity: string;
+                uom: string;
+                price_uom: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths: number;
+                /** Format: int64 */
+                line_total_cents: number;
+            }[];
+            /** Format: int64 */
+            freight_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
+        CustomerQuoteConfirmRequest: {
+            accept_price_changes?: boolean;
+        };
+        CustomerQuoteConfirmPreview: {
+            price_changed: boolean;
+            /** Format: int64 */
+            captured_material_cost_cents: number;
+            /** Format: int64 */
+            current_material_cost_cents: number;
+            /** Format: int64 */
+            delta_cents: number;
+            /** Format: int64 */
+            captured_margin_cents: number;
+            /** Format: int64 */
+            projected_margin_cents: number;
+            lines: {
+                /** Format: uuid */
+                line_id: string;
+                /** Format: uuid */
+                product_id: string;
+                sku: string;
+                description: string;
+                quantity: string;
+                uom: string;
+                /** Format: int64 */
+                captured_cost_cents: number;
+                /** Format: int64 */
+                current_cost_cents: number;
+                /** Format: int64 */
+                delta_cents: number;
+            }[];
         };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
@@ -10480,7 +13063,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -10488,6 +13071,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -10499,6 +13088,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -10741,7 +13332,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -10749,6 +13340,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -10760,6 +13357,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -11279,7 +13878,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11287,6 +13886,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11298,6 +13903,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -11360,7 +13967,7 @@ export interface components {
             description: string;
             /** @description The quantity as a decimal string with its unit; null only on a text line. */
             quantity: string | null;
-            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            /** @description The sale unit. On a stocked line it is a sale unit of the product's set (ADR 0006 section 3.3). */
             uom: string | null;
             /** @description The unit the price is per; equals uom unless the pair says otherwise. */
             price_uom: string | null;
@@ -11368,6 +13975,12 @@ export interface components {
             uom_qty: string | null;
             /** @description The other side of the conversion pair. */
             price_uom_qty: string | null;
+            /** @description The product's stocking unit at create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4; null on a line without a product. */
+            stock_quantity: string | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -11379,6 +13992,8 @@ export interface components {
              */
             priced_unit_price_ten_thousandths: number | null;
             price_source: components["schemas"]["SalesPriceSource"];
+            /** @description The pricing engine's own source (ADR 0006 section 5.3); null when the engine did not price the line. */
+            price_basis: string | null;
             /** @description Required when price_source is override. */
             override_reason: string | null;
             /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
@@ -12089,8 +14704,11 @@ export interface components {
             customer_id: string;
             email: string;
             name: string;
-            /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            /**
+             * @description One of the five contractor roles (migration 130); the server resolves each to a capability set served by GET /me.
+             * @enum {string}
+             */
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
             /** @enum {string} */
             status: "Active" | "Inactive";
             /** Format: date-time */
@@ -12146,6 +14764,9 @@ export interface components {
              * @description The change-feed cursor; moves on every ERP status write.
              */
             updated_at: string;
+            /** @description The contractor's site instruction on this order; omitted when empty. */
+            site_delivery_instructions?: string | null;
+            schedule_hold?: components["schemas"]["PortalScheduleHold"];
         };
         PortalOrderLine: {
             /** Format: uuid */
@@ -12180,6 +14801,11 @@ export interface components {
             paid_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description The invoice change feed's cursor; moves on every ERP status write.
+             */
+            updated_at: string;
             /** @description Never null. */
             lines: components["schemas"]["PortalOrderLine"][];
         };
@@ -12210,10 +14836,30 @@ export interface components {
             stop_sequence: number | null;
             total_stops: number | null;
             delivery_instructions: string | null;
+            /**
+             * Format: date-time
+             * @description The delivery change feed's cursor; moves on every stop or route write.
+             */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description The UTC start of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_start?: string | null;
+            /**
+             * Format: date-time
+             * @description The UTC end of the held delivery window or pickup slot; omitted when unset.
+             */
+            scheduled_end?: string | null;
         };
         PortalReorderRequest: {
             /** Format: uuid */
             order_id: string;
+            /**
+             * Format: uuid
+             * @description Optional project owned by the calling customer account to attach to the new draft order.
+             */
+            project_id?: string | null;
         };
         PortalReorderResponse: {
             /** Format: uuid */
@@ -12296,6 +14942,8 @@ export interface components {
             in_stock: boolean;
             /** @description The dealer's published lead time; null means none was published and must not be read as zero. */
             lead_time_days: number | null;
+            /** @description Per-yard stock and lead time breakdown across active dealer yards. */
+            availability?: components["schemas"]["PortalYardAvailability"][];
             /** Format: uuid */
             category_id: string | null;
             category_slug: string;
@@ -12320,6 +14968,8 @@ export interface components {
             available: number;
             in_stock: boolean;
             lead_time_days: number | null;
+            /** @description Per-yard stock and lead time breakdown across active dealer yards. */
+            availability?: components["schemas"]["PortalYardAvailability"][];
             /** Format: uuid */
             category_id: string | null;
             category_slug: string;
@@ -12353,6 +15003,10 @@ export interface components {
             /** @description Float dollars. */
             line_total: number;
             available: number;
+            uom: string;
+            price_uom: string;
+            uom_qty: number;
+            price_uom_qty: number;
         };
         PortalAddToCartRequest: {
             /** Format: uuid */
@@ -12362,9 +15016,9 @@ export interface components {
         PortalUpdateCartItemRequest: {
             quantity: number;
         };
-        /** @description Only project_id is read today; delivery_method, delivery_address, payment_method and notes decode but influence nothing, and an unknown project_id is a 500 (the handler's status is fixed). */
+        /** @description Places the cart as an order; project_id attaches a job and schedule_hold_id binds a held delivery window or pickup slot. */
         PortalCheckoutRequest: {
-            /** @description DELIVERY or PICKUP; not read today. */
+            /** @description DELIVERY or PICKUP. */
             delivery_method?: string;
             /** @description Not read today. */
             delivery_address?: string;
@@ -12377,6 +15031,11 @@ export interface components {
              * @description Optional; when set it must be the caller's own project.
              */
             project_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Optional; when set it must be an unattached held slot owned by the caller.
+             */
+            schedule_hold_id?: string | null;
         };
         PortalCheckoutResponse: {
             /** Format: uuid */
@@ -12502,7 +15161,7 @@ export interface components {
             customer_id: string;
             email: string;
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
             /** Format: date-time */
             expires_at: string;
             /** Format: date-time */
@@ -12511,15 +15170,528 @@ export interface components {
         PortalInviteUserRequest: {
             email: string;
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
         };
         PortalUpdateUserRoleRequest: {
             /** @enum {string} */
-            role: "Admin" | "Buyer" | "View-Only";
+            role: "owner" | "estimator" | "project_manager" | "site_super" | "ap_clerk";
         };
         PortalUpdateUserStatusRequest: {
             /** @enum {string} */
             status: "Active" | "Inactive";
+        };
+        /** @description The server resolved answer to what this user may do. A route NEVER checks a role string: it names one of these capabilities and the guard resolves the role server side, so this object is the same authority the enforcement uses. */
+        PortalCapabilities: {
+            manage_team: boolean;
+            see_money: boolean;
+            pay: boolean;
+            order: boolean;
+            request_quotes: boolean;
+            approve_quotes: boolean;
+            schedule: boolean;
+            edit_delivery_instructions: boolean;
+        };
+        PortalAccount: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            account_number: string;
+            /** Format: uuid */
+            primary_branch_id: string;
+        };
+        /** @description One yard the account holds (customer_branches), the primary first. */
+        PortalYard: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @description The yard's IANA zone; scheduling's local spellings are in it. */
+            timezone: string;
+            is_primary: boolean;
+        };
+        PortalMe: {
+            user: components["schemas"]["PortalCustomerUser"];
+            account: components["schemas"]["PortalAccount"];
+            /** @description Never null; an account linked to no yard carries an empty array. */
+            yards: components["schemas"]["PortalYard"][];
+            capabilities: components["schemas"]["PortalCapabilities"];
+        };
+        PortalTodayQuoteRow: {
+            /** Format: uuid */
+            id: string;
+            /** @description Integer cents; the Today board never speaks float. */
+            total_cents: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayDeliveryRow: {
+            /** Format: uuid */
+            delivery_id: string;
+            /** Format: uuid */
+            order_id: string;
+            status: string;
+            /** Format: date-time */
+            scheduled_for: string | null;
+            yard_code: string;
+            is_pickup: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayInvoiceRow: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            total_cents: number;
+            /** Format: date-time */
+            due_date: string | null;
+            is_overdue: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalTodayOrderRow: {
+            /** Format: uuid */
+            id: string;
+            status: string;
+            total_cents: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalToday: {
+            /** @description SENT quotes awaiting the contractor's accept or decline; count is every one, first its newest rows. */
+            quotes_awaiting_pro: {
+                count: number;
+                first: components["schemas"]["PortalTodayQuoteRow"][];
+            };
+            deliveries_today: {
+                count: number;
+                first: components["schemas"]["PortalTodayDeliveryRow"][];
+            };
+            /** @description The stops after today, soonest first. */
+            next_deliveries: {
+                count: number;
+                first: components["schemas"]["PortalTodayDeliveryRow"][];
+            };
+            /** @description Open invoices due today or already overdue; zeroed for a role without see_money. */
+            invoices_due: {
+                count: number;
+                first: components["schemas"]["PortalTodayInvoiceRow"][];
+            };
+            open_orders: {
+                count: number;
+                first: components["schemas"]["PortalTodayOrderRow"][];
+            };
+        };
+        PortalTimelineStep: {
+            /**
+             * @description The flow is the delivery type's: steps 4 and 5 are out_for_delivery and delivered, or ready_for_pickup and picked up.
+             * @enum {string}
+             */
+            key: "confirmed" | "preparing" | "loaded" | "out_for_delivery" | "ready_for_pickup" | "delivered" | "picked_up";
+            label: string;
+            /** @enum {string} */
+            state: "done" | "current" | "upcoming";
+            /**
+             * Format: date-time
+             * @description When the step happened, where Gable records one; null when it has not.
+             */
+            at: string | null;
+        };
+        /** @description The proof of delivery where it exists; null when the journey is not finished. */
+        PortalTimelinePOD: {
+            signed_by: string | null;
+            photo_url: string | null;
+            /** @description The delivery address the stop records. */
+            place: string | null;
+            /** Format: date-time */
+            timestamp: string | null;
+        };
+        PortalOrderTimeline: {
+            /** Format: uuid */
+            order_id: string;
+            status: string;
+            /** @enum {string} */
+            delivery_type: "DELIVERY" | "PICKUP";
+            is_cancelled: boolean;
+            /** @description Never null; a cancelled order carries every step upcoming. */
+            steps: components["schemas"]["PortalTimelineStep"][];
+            pod: Record<string, never> | null;
+        };
+        PortalSetDeliveryInstructionsRequest: {
+            /** @description The contractor's site instruction, capped at 2000 characters. */
+            instructions: string;
+        };
+        /** @description One concrete date of one window with the places left. */
+        PortalScheduleSlot: {
+            /** Format: uuid */
+            window_id: string;
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description YYYY-MM-DD, the yard's own calendar day. */
+            date: string;
+            /** Format: date-time */
+            start_utc: string;
+            /** Format: date-time */
+            end_utc: string;
+            /** @description hh:mm in the yard's zone, for display. */
+            start_local: string;
+            end_local: string;
+            capacity: number;
+            remaining: number;
+            cutoff_minutes: number;
+        };
+        PortalScheduleHold: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            window_id: string;
+            /** Format: uuid */
+            yard_id: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description YYYY-MM-DD, the yard's own calendar day. */
+            date: string;
+            /** Format: date-time */
+            start_utc: string;
+            /** Format: date-time */
+            end_utc: string;
+            /**
+             * Format: uuid
+             * @description The open order the hold rides on, or null at checkout.
+             */
+            order_id: string | null;
+            /** @enum {string} */
+            status: "held" | "released" | "used" | "expired";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortalScheduleHoldRequest: {
+            /** Format: uuid */
+            window_id: string;
+            /** @description YYYY-MM-DD, the yard's own calendar day; today or later. */
+            date: string;
+            /**
+             * Format: uuid
+             * @description Optional; the caller's own unfulfilled order the hold rides on.
+             */
+            order_id?: string | null;
+        };
+        /** @description Submits a pasted material list (text) or a photo/file (file_base64) for parsing and catalog matching. */
+        PortalQuoteIntakeRequest: {
+            text?: string;
+            file_base64?: string;
+            content_type?: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            notes?: string;
+            /** @enum {string} */
+            delivery_type?: "PICKUP" | "DELIVERY";
+            create_quote?: boolean;
+            allow_synthetic?: boolean;
+        };
+        PortalQuoteIntakeItem: {
+            raw_text: string;
+            parsed_qty: number;
+            parsed_unit: string;
+            parsed_description: string;
+            /** Format: uuid */
+            matched_product_id?: string | null;
+            matched_product_name?: string;
+            matched_sku?: string;
+            confidence: number;
+        };
+        PortalQuoteIntakeResponse: {
+            /** @enum {string} */
+            source: "text" | "photo";
+            synthetic: boolean;
+            items: components["schemas"]["PortalQuoteIntakeItem"][];
+            quote?: components["schemas"]["PortalQuote"];
+        };
+        PortalConvertQuoteResponse: {
+            /** Format: uuid */
+            quote_id: string;
+            /** Format: uuid */
+            order_id: string;
+            order_number: string;
+            status: string;
+        };
+        /** @description Contractor-safe stock and lead time projection for a single yard. Never carries dealer cost, margin, or reservation details. */
+        PortalYardAvailability: {
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            yard_name: string;
+            on_hand: number;
+            available: number;
+            in_stock: boolean;
+            lead_time_days: number | null;
+        };
+        PortalReorderPreviewLine: {
+            /** Format: uuid */
+            line_id: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            sku: string;
+            description: string;
+            quantity: number;
+            uom: string;
+            original_unit_price_cents: number;
+            current_unit_price_cents: number;
+            price_diff_cents: number;
+            original_line_total_cents: number;
+            current_line_total_cents: number;
+            line_diff_cents: number;
+            price_source: string;
+            available_qty: number;
+            in_stock: boolean;
+        };
+        PortalReorderPreview: {
+            /** Format: uuid */
+            source_order_id: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            lines: components["schemas"]["PortalReorderPreviewLine"][];
+            original_total_cents: number;
+            current_total_cents: number;
+            total_diff_cents: number;
+        };
+        PortalProcurementLine: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            line_no: number;
+            /** Format: uuid */
+            product_id?: string | null;
+            description: string;
+            qty_entered: number;
+            uom: string;
+            notes: string;
+            indicative_unit_price_cents: number | null;
+            indicative_line_total_cents: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalProcurementProject: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "PLANNING" | "QUOTING" | "ORDERED" | "FULFILLED" | "CANCELLED";
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: uuid */
+            quote_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            lines: components["schemas"]["PortalProcurementLine"][];
+        };
+        PortalCreateProcurementProjectRequest: {
+            name: string;
+        };
+        PortalUpdateProcurementProjectRequest: {
+            name?: string;
+            /** @enum {string} */
+            status?: "PLANNING" | "QUOTING" | "ORDERED" | "FULFILLED" | "CANCELLED";
+        };
+        PortalUpsertProcurementLineRequest: {
+            /** Format: uuid */
+            product_id?: string | null;
+            description?: string;
+            qty_entered: number;
+            uom?: string;
+            notes?: string;
+        };
+        PortalSubmitProcurementRFQRequest: {
+            /** Format: uuid */
+            project_id?: string | null;
+            notes?: string;
+            /** @enum {string} */
+            delivery_type?: "PICKUP" | "DELIVERY";
+        };
+        PortalBalanceTiles: {
+            currency: string;
+            current_balance_cents: number;
+            credit_limit_cents: number | null;
+            available_credit_cents: number | null;
+            past_due_cents: number;
+            unapplied_cash_cents: number;
+            net_balance_cents: number;
+            open_invoice_count: number;
+            overdue_invoice_count: number;
+        };
+        PortalAgingBuckets: {
+            as_of: string;
+            currency: string;
+            current_cents: number;
+            days_1_30_cents: number;
+            days_31_60_cents: number;
+            days_61_90_cents: number;
+            days_over_90_cents: number;
+            unapplied_cents: number;
+            total_open_cents: number;
+            net_cents: number;
+        };
+        PortalJobSummary: {
+            /** Format: uuid */
+            project_id: string;
+            project_name: string;
+            status: string;
+            budget_cents: number;
+            quoted_cents: number;
+            ordered_cents: number;
+            invoiced_cents: number;
+            paid_cents: number;
+            open_balance_cents: number;
+            quote_variance_cents: number;
+            order_count: number;
+            invoice_count: number;
+            delivery_count: number;
+            delivered_count: number;
+        };
+        PortalBillingSummary: {
+            balance_tiles: components["schemas"]["PortalBalanceTiles"];
+            aging: components["schemas"]["PortalAgingBuckets"];
+            job_summaries: components["schemas"]["PortalJobSummary"][];
+        };
+        PortalStatementLine: {
+            /** Format: uuid */
+            id: string;
+            date: string;
+            type: string;
+            description: string;
+            amount_cents: number;
+            balance_after_cents: number;
+            /** Format: uuid */
+            reference_id?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
+        };
+        PortalStatementOpenDoc: {
+            kind: string;
+            /** Format: uuid */
+            id: string;
+            number: string;
+            date: string;
+            due_date?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
+            total_cents: number;
+            open_cents: number;
+        };
+        PortalStatement: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            from: string;
+            to: string;
+            currency: string;
+            opening_balance_cents: number;
+            closing_balance_cents: number;
+            unapplied_cents: number;
+            net_balance_cents: number;
+            aging: components["schemas"]["PortalAgingBuckets"];
+            lines: components["schemas"]["PortalStatementLine"][];
+            open_invoices: components["schemas"]["PortalStatementOpenDoc"][];
+        };
+        PortalStatementRunItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            period_start: string;
+            period_end: string;
+            currency: string;
+            opening_balance_cents: number;
+            invoices_cents: number;
+            payments_cents: number;
+            finance_charges_cents: number;
+            closing_balance_cents: number;
+            current_cents: number;
+            days_1_30_cents: number;
+            days_31_60_cents: number;
+            days_61_90_cents: number;
+            days_over_90_cents: number;
+            unapplied_cents: number;
+            net_balance_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description Saved payment method on a contractor account. The vault token is never serialized. */
+        PortalPaymentMethod: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            gateway: string;
+            /** @enum {string} */
+            method_type: "CARD" | "ACH" | "BANK";
+            brand?: string;
+            last4: string;
+            exp_month?: number;
+            exp_year?: number;
+            is_default: boolean;
+            /** @enum {string} */
+            status: "ACTIVE" | "REVOKED";
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalCreatePaymentMethodRequest: {
+            gateway_token: string;
+            /** @enum {string} */
+            method_type: "CARD" | "ACH" | "BANK";
+            brand?: string;
+            last4: string;
+            exp_month?: number;
+            exp_year?: number;
+            is_default?: boolean;
+        };
+        PortalCreatePaymentRequest: {
+            invoice_ids: string[];
+            /** Format: uuid */
+            payment_method_id?: string | null;
+            token?: string;
+            idempotency_key?: string;
+        };
+        PortalPaymentAllocation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            invoice_id: string;
+            invoice_number: string;
+            amount_cents: number;
+            applied_on: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PortalPayment: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            currency: string;
+            method: string;
+            status: string;
+            amount_cents: number;
+            unapplied_cents: number;
+            reference?: string;
+            card_brand?: string;
+            card_last4?: string;
+            received_on: string;
+            /** Format: date-time */
+            created_at: string;
+            allocations: components["schemas"]["PortalPaymentAllocation"][];
         };
         /** @enum {string} */
         PosStatus: "open" | "held" | "completed" | "voided";
@@ -13134,6 +16306,9 @@ export interface components {
             /** @description The pair side in the sale unit; 1 and 1 when the units agree. */
             uom_qty: string | null;
             price_uom_qty: string | null;
+            stock_uom: string | null;
+            stock_quantity: string | null;
+            tally: components["schemas"]["Tally"] | null;
             /**
              * Format: int64
              * @description Scale 4; null on a text line.
@@ -13146,6 +16321,7 @@ export interface components {
             priced_unit_price_ten_thousandths: number | null;
             /** @enum {string} */
             price_source: "price_list" | "quote" | "override" | "manual" | "none";
+            price_basis: string | null;
             override_reason: string | null;
             /** @description A percent or a cents amount, never both. */
             discount_percent: string | null;
@@ -13654,27 +16830,11 @@ export interface components {
             /** @description A decimal string of the on hand quantity. */
             in_stock: string;
         };
-        PosSyncResponse: {
-            batch_id: string;
-            synced_count: number;
-            /** @description Sales already synced, by client_id. */
-            duplicate_count: number;
-            error_count: number;
-            /** @description Sales waiting on the tax provider; the sync retries them. */
-            pending_count: number;
-            errors: components["schemas"]["PosSyncItemResult"][];
-            pending: components["schemas"]["PosSyncItemResult"][];
-        };
-        PosSyncItemResult: {
-            /** Format: uuid */
-            client_id: string;
-            reason: string;
-        };
         /**
          * @description Where a price came from, lowercase (ADR 0006 section 7.3).
          * @enum {string}
          */
-        PricingSource: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account";
+        PricingSource: "contract" | "quantity_break" | "job_override" | "promotional" | "category_account" | "category_profile" | "category_level" | "level" | "branch" | "base";
         /** @enum {string} */
         PricingRuleType: "quantity_break" | "job_override" | "promotional";
         /** @description The price read (ADR 0006 section 7.3). unit_price_ten_thousandths is the exact scale 4 price in price_uom; uom_qty and price_uom_qty are the line's conversion pair; line_total_cents is the one rounding, by the line extension rule. */
@@ -13695,6 +16855,17 @@ export interface components {
             price_basis: components["schemas"]["PricingSource"];
             /** @description Free text such as "Gold Tier (15%)". */
             details: string;
+            /**
+             * Format: uuid
+             * @description The branch the price answers at; null when the read named none and the caller carries no branch.
+             */
+            branch_id: string | null;
+            /**
+             * Format: int64
+             * @description The reference price (the branch base when the branch has one, else the product's base), the price a percent or markup rule acts on.
+             */
+            reference_price_ten_thousandths: number;
+            reference_price_uom: string;
         };
         PricingRule: {
             /** Format: uuid */
@@ -13728,6 +16899,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The unit a fixed price is per (the product's stocking unit while the hold stands); a percent or markup rule carries none. */
+            price_uom: string | null;
         };
         PricingRulePage: {
             items: components["schemas"]["PricingRule"][];
@@ -13825,11 +16998,13 @@ export interface components {
         PricingCategoryRule: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            target_type: "account" | "tier";
+            /**
+             * @description The customer scope the rule prices: one account, one profile's customers, or one level's customers.
+             * @enum {string}
+             */
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id: string | null;
-            tier: string;
             /** Format: uuid */
             category_id: string;
             /** @enum {string} */
@@ -13857,6 +17032,20 @@ export interface components {
             category_path?: string;
             /** @description Joined on reads. */
             customer_name?: string;
+            /**
+             * Format: uuid
+             * @description A profile rule's target.
+             */
+            price_profile_id: string | null;
+            /**
+             * Format: uuid
+             * @description A level rule's target.
+             */
+            price_level_id: string | null;
+            /** @description The target level's code, on the matrix's rows. */
+            level_code?: string | null;
+            /** @description The target profile's code, when joined. */
+            profile_code?: string | null;
         };
         PricingCategoryRulePage: {
             items: components["schemas"]["PricingCategoryRule"][];
@@ -13883,10 +17072,13 @@ export interface components {
         /** @description The create body; a field not listed is a 400. */
         PricingCategoryRuleCreateRequest: components["schemas"]["PricingCategoryRuleValues"] & {
             /** @enum {string} */
-            target_type: "account" | "tier";
+            target_type: "account" | "profile" | "level";
             /** Format: uuid */
             customer_id?: string | null;
-            tier?: string | null;
+            /** Format: uuid */
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
             /** Format: uuid */
             category_id: string;
         };
@@ -13920,9 +17112,14 @@ export interface components {
             /** Format: uuid */
             category_id?: string;
             target_type?: string;
-            tier?: string;
+            /** @description A legacy rule's tier */
+            tier?: string | null;
             /** Format: uuid */
-            customer_id?: string;
+            price_profile_id?: string | null;
+            /** Format: uuid */
+            price_level_id?: string | null;
+            /** Format: uuid */
+            customer_id?: string | null;
         };
         PricingCategoryRuleAuditList: {
             items: components["schemas"]["PricingCategoryRuleAudit"][];
@@ -13940,14 +17137,15 @@ export interface components {
             category_id: string;
             category_name: string;
             category_path: string;
-            tier: string;
+            level: string | null;
             rule?: components["schemas"]["PricingCategoryRule"];
             inherited: boolean;
             source_path?: string;
         };
         PricingMatrix: {
             categories: components["schemas"]["PricingProductCategory"][] | null;
-            tiers: string[] | null;
+            /** @description The level codes the grid's columns answer, in place of tiers. */
+            levels: string[] | null;
             cells: components["schemas"]["PricingMatrixCell"][] | null;
         };
         PricingResolvedCategoryPrice: {
@@ -14106,6 +17304,237 @@ export interface components {
             affected_customer_count: number;
             estimated_exposure_dollars: number;
             top_customers: components["schemas"]["MarketIndexRefreshTopCustomer"][] | null;
+        };
+        PricingLevel: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @enum {string} */
+            basis: "base" | "average_cost" | "replacement_cost";
+            /** @description A decimal string; -10 is ten percent off the basis. */
+            adjust_percent: string;
+            position: number;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingLevelWrite: {
+            code?: string;
+            name?: string;
+            basis?: string;
+            adjust_percent?: string;
+            position?: number;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingLevelPage: {
+            items: components["schemas"]["PricingLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProfile: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** Format: uuid */
+            price_level_id: string;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingProfileWrite: {
+            code?: string;
+            name?: string;
+            /** Format: uuid */
+            price_level_id?: string;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingProfilePage: {
+            items: components["schemas"]["PricingProfile"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingProductPrice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            product_id: string;
+            /**
+             * Format: uuid
+             * @description Null on the branch's base price row.
+             */
+            price_level_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Null on an every branch row.
+             */
+            branch_id?: string | null;
+            price_uom: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            revision: number;
+        };
+        PricingProductPriceList: {
+            items: components["schemas"]["PricingProductPrice"];
+        };
+        PricingProductPriceReplace: {
+            /**
+             * Format: int64
+             * @description The product revision the list was read at.
+             */
+            revision: number;
+            /** @description The slice's rows; each carries its own revision for reads. */
+            prices: {
+                /** Format: uuid */
+                price_level_id?: string | null;
+                price_uom?: string;
+                /** Format: int64 */
+                unit_price_ten_thousandths?: number;
+            }[];
+        };
+        PricingVendorLevel: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            code: string;
+            name: string;
+            is_default: boolean;
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorLevelWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            code?: string;
+            name?: string;
+            is_default?: boolean;
+            is_active?: boolean;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorLevelPage: {
+            items: components["schemas"]["PricingVendorLevel"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingVendorCost: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            vendor_id: string;
+            /** Format: uuid */
+            vendor_price_level_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            vendor_sku?: string | null;
+            effective_from: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingVendorCostWrite: {
+            /** Format: uuid */
+            vendor_id?: string;
+            /** Format: uuid */
+            vendor_price_level_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            purchase_uom?: string;
+            /** Format: int64 */
+            unit_cost_ten_thousandths?: number;
+            vendor_sku?: string | null;
+            effective_from?: string;
+            effective_to?: string | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingVendorCostPage: {
+            items: components["schemas"]["PricingVendorCost"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingContract: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: int64 */
+            contract_price_ten_thousandths: number;
+            price_uom: string;
+            /**
+             * Format: uuid
+             * @description Null is the every branch row.
+             */
+            branch_id?: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PricingContractWrite: {
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** Format: int64 */
+            contract_price_ten_thousandths?: number;
+            price_uom?: string;
+            /** Format: int64 */
+            revision?: number;
+        };
+        PricingContractPage: {
+            items: components["schemas"]["PricingContract"];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PricingResolvedCost: {
+            /** Format: int64 */
+            unit_cost_ten_thousandths: number;
+            purchase_uom: string;
+            uom_qty: string;
+            purchase_uom_qty: string;
+            vendor_level_code: string;
+            /** Format: uuid */
+            vendor_level_id: string;
+            /** Format: uuid */
+            vendor_cost_id: string;
         };
         KitComponent: {
             /** Format: uuid */
@@ -15357,6 +18786,45 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description One recurring weekly rule at one yard. */
+        SchedulingWindow: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            yard_id: string;
+            yard_code: string;
+            /** @description The yard's IANA zone; start_time and end_time are local to it. */
+            yard_timezone: string;
+            /** @enum {string} */
+            kind: "delivery" | "pickup";
+            /** @description 0 Sunday to 6 Saturday. */
+            weekday: number;
+            /** @description hh:mm, the yard's local time of day. */
+            start_time: string;
+            /** @description hh:mm, the yard's local time of day. */
+            end_time: string;
+            capacity: number;
+            /** @description Holds stop this many minutes before the window starts. */
+            cutoff_minutes: number;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description On create every field but cutoff_minutes and is_active is required; on update a null field keeps its current value and the yard is read only. */
+        SchedulingWindowRequest: {
+            /** Format: uuid */
+            yard_id?: string | null;
+            /** @enum {string|null} */
+            kind?: "delivery" | "pickup" | null;
+            weekday?: number | null;
+            start_time?: string | null;
+            end_time?: string | null;
+            capacity?: number | null;
+            cutoff_minutes?: number | null;
+            is_active?: boolean | null;
+        };
         /** @description One allowed sign in method. The nullable fields are always present, null when the method does not use them. */
         AuthConfigMethod: {
             /** @enum {string} */
@@ -15908,6 +19376,42 @@ export interface components {
                 "application/json": components["schemas"]["AppsDisabledError"];
             };
         };
+        /** @description The portal role holds neither the quote customers nor the see money capability. */
+        CustomerQuoteForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The logo is neither image/png nor image/jpeg. */
+        CustomerQuoteUnsupported: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description Too many requests for this link or from this address (code rate_limited). */
+        CustomerQuoteRateLimited: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The link existed and is expired, revoked or rotated away (code link_unavailable). The same bare answer whichever it is. */
+        CustomerQuoteLinkGone: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteGone"];
+            };
+        };
         /** @description The body or a parameter is malformed. */
         IntegrationBadRequest: {
             headers: {
@@ -16331,6 +19835,546 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    arCreditHoldsList: {
+        parameters: {
+            query?: {
+                status?: "standing" | "released" | "all";
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditHoldPlace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldPlaceRequest"];
+            };
+        };
+        responses: {
+            /** @description The standing hold, already in place. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            /** @description The hold, placed. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldsEvaluate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldEvaluateRequest"];
+            };
+        };
+        responses: {
+            /** @description The sweep's answer, placed and lifted counts included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHoldEvaluation"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldRelease: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldReleaseRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, released. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditHoldOverride: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditHoldOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description The hold, overridden until the window ends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arCreditLimitChangesList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit limit changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChangePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arCreditLimitChangeRequest: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditLimitChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The change, approved and applied. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            /** @description The change, recorded as pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditLimitChange"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arWorklist: {
+        parameters: {
+            query?: {
+                as_of?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArWorklist"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatementRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArStatementRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, completed, with its items. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arStatementRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatementRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arFinanceChargeRulesUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRules"];
+            };
+        };
+        responses: {
+            /** @description The rules, written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRules"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunsList: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of runs, without their items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRunPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arFinanceChargeRunCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArFinanceChargeRunRequest"];
+            };
+        };
+        responses: {
+            /** @description The run, executed or previewed, with its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    arFinanceChargeRunGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run and its items. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArFinanceChargeRun"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     activityList: {
@@ -18077,8 +22121,6 @@ export interface operations {
             query?: {
                 /** @description Search term for name, account_number and email, at most 100 characters. */
                 q?: string;
-                /** @description One lowercase tier. */
-                tier?: "retail" | "silver" | "gold" | "platinum";
                 is_active?: boolean;
                 /** @description Customers assigned to this salesperson. */
                 salesperson_id?: string;
@@ -18846,37 +22888,982 @@ export interface operations {
             500: components["responses"]["InternalErrorEither"];
         };
     };
-    customerListPriceLevels: {
+    customerQuoteList: {
+        parameters: {
+            query?: {
+                status?: "draft" | "sent" | "approved" | "declined" | "confirmed" | "withdrawn";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of quotes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteInput"];
+            };
+        };
+        responses: {
+            /** @description The created draft, with its ETag and a Location header. */
+            201: {
+                headers: {
+                    /** @description The quote's revision in quotes. Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteExport: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv";
+                /** @description Which table a CSV carries. */
+                kind?: "quotes" | "customers" | "projects";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export, as an attachment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteExport"];
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSettingsGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The defaults (zero values when none were saved). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteSettings"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSettingsPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The saved defaults. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLogoPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+            };
+        };
+        responses: {
+            /** @description The logo is stored. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["CustomerQuoteUnsupported"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLogoDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote. */
+            200: {
+                headers: {
+                    /** @description The quote's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteInput"];
+            };
+        };
+        responses: {
+            /** @description The updated draft. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteApprovalList"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteSend: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sent quote and its link. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteLinkResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLinkRotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteLinkResult"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteLinkRevoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteWithdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The withdrawn quote; its link is dead. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteRevise: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteConfirmPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The confirmation price preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteConfirmPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuoteConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description The confirmed quote with its order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["CustomerQuoteForbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF, built from the public allowlist view alone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicSelections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteChoices"];
+            };
+        };
+        responses: {
+            /** @description The customer's view under the new choices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    channel: "email" | "sms";
+                };
+            };
+        };
+        responses: {
+            /** @description The code was sent. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    customerQuotePublicAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description The approved view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            413: components["responses"]["PayloadTooLarge"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerQuotePublicDecline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The capability token: 43 characters of unpadded base64url (256 bits). It is a credential; it is never logged. */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerQuoteDeclineRequest"];
+            };
+        };
+        responses: {
+            /** @description The declined view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuotePublicView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectList: {
         parameters: {
             query?: {
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
                 limit?: components["parameters"]["PageLimit"];
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
-                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
-                include?: components["parameters"]["Include"];
             };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The page of price levels. */
+            /** @description The page. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PriceLevelPage"];
+                    "application/json": components["schemas"]["CustomerQuoteDealerPage"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerProjectDetail"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    proProjectAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project with the acceptance recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerProjectDetail"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteShareLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description An email address to send the link to. */
+                    send_to?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The link, shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerLink"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            404: components["responses"]["WireNotFound"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicAccept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The accepted quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    dealerQuotePublicDecline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    full_name: string;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The declined quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerQuoteDealerQuoteView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            410: components["responses"]["CustomerQuoteLinkGone"];
+            429: components["responses"]["CustomerQuoteRateLimited"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -24954,6 +29941,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -25049,6 +30037,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25084,6 +30073,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The order exists but cannot be cancelled from the portal (on a truck, delivered, already cancelled, or fulfilled); the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -25128,6 +30118,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -25137,7 +30128,10 @@ export interface operations {
     };
     portalListInvoices: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only invoices with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25147,13 +30141,26 @@ export interface operations {
             /** @description The invoices, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalInvoice"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -25179,12 +30186,16 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
         };
     };
     portalListDeliveries: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only deliveries with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25194,12 +30205,24 @@ export interface operations {
             /** @description The deliveries, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalDelivery"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -25291,8 +30314,9 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
+            /** @description Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -25411,7 +30435,10 @@ export interface operations {
     };
     portalListQuotes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only quotes with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -25421,12 +30448,24 @@ export interface operations {
             /** @description The quotes, a bare array, never null. */
             200: {
                 headers: {
+                    /** @description A strong validator over (customer, since, count, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at in this result; send it back as since next time. Absent when the list is empty. */
+                    "X-Portal-Latest-Change"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PortalQuote"][];
                 };
             };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
             500: components["responses"]["InternalError"];
         };
@@ -25458,6 +30497,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
@@ -25514,6 +30554,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -25554,6 +30595,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             /** @description The quote is not in a decidable state; the refusal envelope, or an idempotency claim in progress (the ADR 0001 envelope). */
             409: {
@@ -25618,6 +30660,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25653,6 +30696,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25681,6 +30725,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -25711,6 +30756,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -25863,6 +30910,1062 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    portalMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user, account, yards and capabilities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalMe"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalToday: {
+        parameters: {
+            query?: {
+                /** @description Only rows with updated_at strictly newer; RFC3339. An unparseable value is a 400. */
+                since?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The board. */
+            200: {
+                headers: {
+                    /** @description A strong validator over (customer, section counts, newest updated_at). */
+                    ETag?: string;
+                    /** @description The newest updated_at across the board's rows; send it back as since next time. Absent when nothing is on the board. */
+                    "X-Portal-Latest-Change"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalToday"];
+                };
+            };
+            /** @description If-None-Match matched the ETag; no body. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalOrderTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The timeline. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalOrderTimeline"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSetDeliveryInstructions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalSetDeliveryInstructionsRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalOrder"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListScheduleWindows: {
+        parameters: {
+            query: {
+                yard_id: string;
+                kind?: "delivery" | "pickup";
+                /** @description YYYY-MM-DD, inclusive; defaults to today. */
+                from?: string;
+                /** @description YYYY-MM-DD, inclusive; defaults to fourteen days after from. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The concrete slots, a bare array, never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleSlot"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreateScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalScheduleHoldRequest"];
+            };
+        };
+        responses: {
+            /** @description The placed hold. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The window is fully booked, the cutoff has passed, or an idempotency claim is in progress; the refusal envelope. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The hold. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    portalChangeScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalScheduleHoldRequest"];
+            };
+        };
+        responses: {
+            /** @description The moved hold. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalScheduleHold"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The refusal envelope (full window, cutoff passed, idempotency claim). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalReleaseScheduleHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Released; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    portalQuoteIntake: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalQuoteIntakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Parsed and matched items without creating a quote. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalQuoteIntakeResponse"];
+                };
+            };
+            /** @description Parsed items and the created quote request. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalQuoteIntakeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Synthetic AI output refused without allow_synthetic, or idempotency claim in progress. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalConvertQuote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The created order reference. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalConvertQuoteResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Quote is not convertible, or idempotency claim in progress. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalReorderPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The line-by-line price difference preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalReorderPreview"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListProcurementProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's named material lists, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreateProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreateProcurementProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description The created material list. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The material list with its lines and indicative integer-cent prices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalUpdateProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpdateProcurementProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeleteProcurementProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalAddProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpsertProcurementLineRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalUpdateProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalUpsertProcurementLineRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeleteProcurementLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The updated material list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSubmitProcurementRFQ: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PortalSubmitProcurementRFQRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated material list in QUOTING status with quote_id set. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalProcurementProject"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalBillingSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's balance tiles, aging buckets, and job summaries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalBillingSummary"];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalGetStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The live statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListStatements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The customer's statement run snapshots, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalStatementRunItem"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalInvoicePDF: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalStatementPDF: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalStatementRunItemPDF: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListPaymentMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's active saved payment methods. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreatePaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreatePaymentMethodRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved payment method (without the vault token). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalDeletePaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalSetDefaultPaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The updated default payment method. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPaymentMethod"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalListPayments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's payments and allocations, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"][];
+                };
+            };
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    portalCreatePayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreatePaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of an already settled payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"];
+                };
+            };
+            /** @description The recorded payment and its invoice allocations. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalPayment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["LegacyUnauthorized"];
+            /** @description Payment was declined by the payment gateway. */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Invoice not payable, payment in flight, or unknown gateway outcome held for reconciliation. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+            /** @description Payment gateway unavailable or returned an unknown error; intent remains in flight for reconciliation. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalRefusal"] | components["schemas"]["WireError"];
+                };
+            };
         };
     };
     posTransactionList: {
@@ -26407,18 +32510,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The batch's outcome. */
-            200: {
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description The rule's refusal (the ADR 0001 envelope, code money_never_queues): money never queues offline; complete the sale online. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PosSyncResponse"];
+                    "application/json": components["schemas"]["WireError"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -28227,6 +34330,763 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    pricingLevelList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of price profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The created profile. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProfileUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProfileWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceList: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The product's price rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingProductPriceReplace: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingProductPriceReplace"];
+            };
+        };
+        responses: {
+            /** @description The slice as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor levels. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor level. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorLevelUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorLevelWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor level. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostList: {
+        parameters: {
+            query?: {
+                vendor_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of vendor costs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The created vendor cost. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingVendorCostUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingVendorCostWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated vendor cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractList: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                product_id?: string;
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of contracts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The created contract. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingContractWrite"];
+            };
+        };
+        responses: {
+            /** @description The updated contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingContractDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The contract is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    pricingCost: {
+        parameters: {
+            query: {
+                vendor_id: string;
+                product_id: string;
+                branch_id?: string;
+                vendor_level_id?: string;
+                /** @description A calendar date (YYYY-MM-DD); default today. */
+                on?: string;
+                /** @description The purchase line's unit, for the answer's pair. */
+                uom?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolved cost. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     productList: {
@@ -30675,6 +37535,145 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingListWindows: {
+        parameters: {
+            query?: {
+                /** @description Only this yard's windows. */
+                yard_id?: string;
+                /** @description delivery or pickup. */
+                kind?: "delivery" | "pickup";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The windows, a bare array, never null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingCreateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulingWindowRequest"];
+            };
+        };
+        responses: {
+            /** @description The created window. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingGetWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    schedulingUpdateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulingWindowRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingWindow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    schedulingDeactivateWindow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deactivated; no body. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["LegacyUnauthorized"];
+            403: components["responses"]["LegacyForbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };

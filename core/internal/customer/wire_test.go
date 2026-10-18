@@ -327,10 +327,17 @@ func TestWire_CreateShape(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 
-	r := f.create(map[string]any{"email": "buyer@example.com", "tier": "gold"})
+	r := f.create(map[string]any{"email": "buyer@example.com"})
 	c := r.body
-	if str(t, c, "tier") != "gold" {
-		t.Errorf("tier = %v, want gold (lowercase)", c["tier"])
+	// The create takes the migration's default profile when the body names
+	// none: the customer is on a program from birth.
+	var defaultProfile string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT value FROM system_settings WHERE key = 'pricing.default_price_profile_id'`).Scan(&defaultProfile); err != nil {
+		t.Fatalf("the default profile setting: %v", err)
+	}
+	if str(t, c, "price_profile_id") != defaultProfile {
+		t.Errorf("price_profile_id = %v, want the default profile %s", c["price_profile_id"], defaultProfile)
 	}
 	if num(t, c, "revision") != 1 || r.header.Get("ETag") != `"1"` {
 		t.Errorf("revision = %v, ETag = %q, want 1 and \"1\"", c["revision"], r.header.Get("ETag"))
@@ -341,7 +348,7 @@ func TestWire_CreateShape(t *testing.T) {
 	if num(t, c, "balance_cents") != 0 {
 		t.Errorf("balance_cents = %v, want 0", c["balance_cents"])
 	}
-	for _, null := range []string{"phone", "address", "price_level_id", "price_level", "salesperson_id", "salesperson_name", "credit_limit_cents", "currency"} {
+	for _, null := range []string{"phone", "address", "salesperson_id", "salesperson_name", "credit_limit_cents", "currency"} {
 		if v, ok := c[null]; !ok || v != nil {
 			t.Errorf("%s = %v (present %v), want present as null", null, v, ok)
 		}
@@ -388,8 +395,8 @@ func TestWire_CreateValidation(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 
 	r := f.do("POST", "/api/v1/customers", map[string]any{
-		"tier": "GOLD", "email": "not an email", "credit_limit_cents": -5, "currency": "usd",
-		"price_level_id": "nope", "payment_terms_id": uuid.NewString(),
+		"email": "not an email", "credit_limit_cents": -5, "currency": "usd",
+		"price_profile_id": "nope", "payment_terms_id": uuid.NewString(),
 	})
 	if r.status != 400 {
 		t.Fatalf("status = %d: %s", r.status, r.raw)
@@ -398,7 +405,7 @@ func TestWire_CreateValidation(t *testing.T) {
 	if code != "validation_failed" {
 		t.Errorf("code = %q, want validation_failed", code)
 	}
-	for _, want := range []string{"account_number", "name", "tier", "email", "credit_limit_cents", "currency", "price_level_id"} {
+	for _, want := range []string{"account_number", "name", "email", "credit_limit_cents", "currency", "price_profile_id"} {
 		if !hasField(details, want) {
 			t.Errorf("no detail names %s: %v", want, fields(details))
 		}
@@ -413,9 +420,9 @@ func TestWire_CreateValidation(t *testing.T) {
 	if _, _, d := errorOf(t, r); r.status != 400 || !hasField(d, "salesperson_id") {
 		t.Errorf("unknown salesperson_id = %d: %s", r.status, r.raw)
 	}
-	r = f.do("POST", "/api/v1/customers", f.body(map[string]any{"price_level_id": uuid.NewString()}))
-	if _, _, d := errorOf(t, r); r.status != 400 || !hasField(d, "price_level_id") {
-		t.Errorf("unknown price_level_id = %d: %s", r.status, r.raw)
+	r = f.do("POST", "/api/v1/customers", f.body(map[string]any{"price_profile_id": uuid.NewString()}))
+	if _, _, d := errorOf(t, r); r.status != 400 || !hasField(d, "price_profile_id") {
+		t.Errorf("unknown price_profile_id = %d: %s", r.status, r.raw)
 	}
 
 	for name, body := range map[string]any{
@@ -462,10 +469,7 @@ func TestWire_ListEnvelopeFiltersAndCursor(t *testing.T) {
 
 	want := map[string]bool{}
 	for i := 0; i < 5; i++ {
-		extra := map[string]any{"tier": "retail"}
-		if i%2 == 0 {
-			extra["tier"] = "silver"
-		}
+		extra := map[string]any{}
 		if i == 4 {
 			extra["is_active"] = false
 		}
@@ -524,20 +528,14 @@ func TestWire_ListEnvelopeFiltersAndCursor(t *testing.T) {
 		}
 		return len(r.body["items"].([]any))
 	}
-	if n := count("&tier=silver"); n != 3 {
-		t.Errorf("tier=silver = %d customers, want 3", n)
-	}
-	if n := count("&tier=retail"); n != 2 {
-		t.Errorf("tier=retail = %d customers, want 2", n)
+	if r := f.do("GET", "/api/v1/customers?limit=200"+q+"&tier=silver", nil); r.status != 400 {
+		t.Errorf("the retired tier filter = %d, want 400 (the customer list no longer filters by tier)", r.status)
 	}
 	if n := count("&is_active=false"); n != 1 {
 		t.Errorf("is_active=false = %d customers, want 1", n)
 	}
 	if n := count("&is_active=true"); n != 4 {
 		t.Errorf("is_active=true = %d customers, want 4", n)
-	}
-	if n := count("&tier=gold"); n != 0 {
-		t.Errorf("tier=gold = %d customers, want 0", n)
 	}
 
 	// A salesperson filter.
@@ -568,7 +566,7 @@ func TestWire_ListEnvelopeFiltersAndCursor(t *testing.T) {
 
 	// Refused: an unknown parameter, the legacy offset, an uppercase or unknown value, bad paging.
 	for _, bad := range []string{
-		"nope=1", "offset=0", "tier=GOLD", "tier=platinumm", "is_active=yes", "salesperson_id=x",
+		"nope=1", "offset=0", "tier=GOLD", "is_active=yes", "salesperson_id=x",
 		"limit=0", "limit=201", "limit=abc", "cursor=garbage", "include=nope", "q=" + strings.Repeat("x", 101),
 	} {
 		r := f.do("GET", "/api/v1/customers?"+bad, nil)
@@ -678,12 +676,12 @@ func TestWire_RevisionPreconditions(t *testing.T) {
 		t.Errorf("PUT with primary_branch_id = %d, want 400", r.status)
 	}
 	// A PUT replaces the header: what it leaves out takes its default.
-	if r := f.do("PUT", path, map[string]any{"account_number": acct, "name": "G", "tier": "gold", "po_required": true}, "If-Match", `"4"`); r.status != 200 {
+	if r := f.do("PUT", path, map[string]any{"account_number": acct, "name": "G", "po_required": true}, "If-Match", `"4"`); r.status != 200 {
 		t.Fatalf("PUT = %d: %s", r.status, r.raw)
 	}
 	r := f.do("PUT", path, edit("H"), "If-Match", `"5"`)
-	if r.body["tier"] != "retail" || r.body["po_required"] != false {
-		t.Errorf("a PUT that leaves tier and po_required out gave tier=%v po_required=%v, want their defaults", r.body["tier"], r.body["po_required"])
+	if r.body["po_required"] != false {
+		t.Errorf("a PUT that leaves po_required out gave po_required=%v, want its default", r.body["po_required"])
 	}
 }
 
@@ -1326,33 +1324,6 @@ func TestWire_EscalationPolicy(t *testing.T) {
 	}
 }
 
-// Price levels are a list on the envelope.
-func TestWire_PriceLevels(t *testing.T) {
-	f := newFixture(t, testutil.RequireDB(t))
-	r := f.do("GET", "/api/v1/price_levels", nil)
-	if r.status != 200 {
-		t.Fatalf("GET = %d: %s", r.status, r.raw)
-	}
-	if _, ok := r.body["items"].([]any); !ok {
-		t.Fatalf("not an envelope: %s", r.raw)
-	}
-	for _, bad := range []string{"offset=0", "x=1", "limit=0"} {
-		if r := f.do("GET", "/api/v1/price_levels?"+bad, nil); r.status != 400 {
-			t.Errorf("?%s = %d, want 400", bad, r.status)
-		}
-	}
-	var name string
-	if err := f.db.Pool.QueryRow(context.Background(), `SELECT name FROM price_levels ORDER BY created_at DESC, id DESC LIMIT 1`).Scan(&name); err == nil {
-		items := r.body["items"].([]any)
-		if len(items) == 0 || str(t, items[0].(map[string]any), "name") != name {
-			t.Errorf("price levels are not newest first: %s", r.raw)
-		}
-		if _, ok := items[0].(map[string]any)["multiplier"].(json.Number); !ok {
-			t.Errorf("multiplier = %v, want a number", items[0].(map[string]any)["multiplier"])
-		}
-	}
-}
-
 // The branch wall (recipe step 6): a second branch's request for the first
 // branch's customer is a 404 on every route, and its list excludes it.
 func TestWire_BranchWall(t *testing.T) {
@@ -1439,7 +1410,7 @@ func TestWire_IdempotentCreate(t *testing.T) {
 // holding ship-tos:read or payment-terms:write reaches them; the first segment
 // of every customer route is a module the vocabulary names.
 func TestMachineKeyVocabularyNamesEveryCustomerRoute(t *testing.T) {
-	for _, module := range []string{"customers", "contacts", "ship-tos", "payment-terms", "price_levels"} {
+	for _, module := range []string{"customers", "contacts", "ship-tos", "payment-terms"} {
 		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
 			t.Errorf("%s is not in the machine key scope vocabulary", module)
 		}
@@ -1473,7 +1444,6 @@ func TestRegisterRoutes_GuardsWrapEveryRoute(t *testing.T) {
 		{"PATCH", "/api/v1/customers/" + id + "/salesperson", "sales"},
 		{"GET", "/api/v1/customers/" + id + "/escalation-policy", "sales"},
 		{"PUT", "/api/v1/customers/" + id + "/escalation-policy", "sales"},
-		{"GET", "/api/v1/price_levels", "sales"},
 		{"GET", "/api/v1/customers/" + id + "/ship-tos", "sales"},
 		{"POST", "/api/v1/customers/" + id + "/ship-tos", "sales"},
 		{"GET", "/api/v1/ship-tos/" + id, "sales"},

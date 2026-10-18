@@ -30,6 +30,8 @@ const ALLOWED: Allowed[] = [
   { file: 'front-door/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'work-shell/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'field-shell/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
+  { file: 'pro-portal/index.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
+  { file: 'pro-portal/customer.html', value: '#00FFA3', reason: "the theme-color meta value cannot read a variable" },
   { file: 'desk/src/lib/theme-colors.ts', value: '#00FFA3', reason: "the Industrial Dark value read when the stylesheet is not loaded yet" },
   { file: 'desk/src/pages/pos/SignaturePad.ts', value: '#ffffff', reason: "a signature image is black ink on white paper, the same in both modes: the sealed PNG is a document, not a themed surface" },
   { file: 'desk/src/pages/pos/SignaturePad.ts', value: '#111111', reason: "a signature image is black ink on white paper, the same in both modes: the sealed PNG is a document, not a themed surface" },

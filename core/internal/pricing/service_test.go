@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
@@ -172,70 +171,65 @@ func (m *MockRepository) CountRules(ctx context.Context) (int64, error) {
 }
 
 func TestCalculatePrice(t *testing.T) {
-	repo := &MockRepository{
-		contracts: make(map[string]CustomerContract),
-	}
-	svc := NewService(repo)
-
-	custID := uuid.New()
 	prodID := uuid.New()
 	basePrice := 10.00
 
-	// Case 1: Retail (No contract, no tier)
-	t.Run("Retail Price", func(t *testing.T) {
-		cust := &customer.Customer{ID: custID}
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+	// Case 1: base (no contract, no program)
+	t.Run("Base Price", func(t *testing.T) {
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		svc := NewService(&MockRepository{}).WithRepository(fake)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != basePrice {
-			t.Errorf("expected %.2f, got %.2f", basePrice, res.FinalPrice)
+		if res.UnitPrice != priceOf(basePrice) {
+			t.Errorf("expected %v, got %v", priceOf(basePrice), res.UnitPrice)
 		}
-		if res.Source != "RETAIL" {
-			t.Errorf("expected RETAIL source, got %s", res.Source)
+		if res.PriceBasis != SourceBase {
+			t.Errorf("expected base source, got %s", res.PriceBasis)
 		}
 	})
 
-	// Case 2: Silver Tier (10% off)
-	t.Run("Silver Tier", func(t *testing.T) {
-		tier := customer.TierSilver
-		cust := &customer.Customer{ID: custID, Tier: tier}
+	// Case 2: the migrated Silver level (a BASE level at -10)
+	t.Run("Silver Level", func(t *testing.T) {
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelCode: "SILVER", LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
+		svc := NewService(&MockRepository{}).WithRepository(fake)
 
 		// Expected: 10 * 0.9 = 9.00
-		expected := 9.00
+		expected := priceOf(9.00)
 
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != expected {
-			t.Errorf("expected %.2f, got %.2f", expected, res.FinalPrice)
+		if res.UnitPrice != expected {
+			t.Errorf("expected %v, got %v", expected, res.UnitPrice)
 		}
-		if res.Source != "TIER" {
-			t.Errorf("expected TIER source, got %s", res.Source)
+		if res.PriceBasis != SourceLevel {
+			t.Errorf("expected level source, got %s", res.PriceBasis)
 		}
 	})
 
 	// Case 3: Contract Price
 	t.Run("Contract Price", func(t *testing.T) {
-		contractPrice := priceOf(5.00)
-		repo.contracts[custID.String()+":"+prodID.String()] = CustomerContract{
-			CustomerID:    custID,
-			ProductID:     prodID,
-			ContractPrice: contractPrice,
-		}
+		custID := uuid.New()
+		fake := newFakeResolveRepo().withProduct(prodID, basePrice, "EA")
+		fake.setContract(custID, prodID, nil, 5.00, "EA")
+		fake.setProgram(custID, PricingProgram{LevelID: uuid.New(), LevelBasis: "BASE", LevelAdjust: qtyOf(-10), LevelActive: true})
+		svc := NewService(&MockRepository{}).WithRepository(fake)
 
-		cust := &customer.Customer{ID: custID} // Even if tier exists, contract wins
-
-		res, err := svc.CalculatePrice(context.Background(), cust, prodID, basePrice)
+		res, err := svc.Resolve(context.Background(), resolveReq(custID, prodID, nil, 1))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.FinalPrice != float64(contractPrice)/10_000 {
-			t.Errorf("expected %.2f, got %.2f", float64(contractPrice)/10_000, res.FinalPrice)
+		if res.UnitPrice != priceOf(5.00) {
+			t.Errorf("expected 5.0000, got %v", res.UnitPrice)
 		}
-		if res.Source != "CONTRACT" {
-			t.Errorf("expected CONTRACT source, got %s", res.Source)
+		if res.PriceBasis != SourceContract {
+			t.Errorf("expected contract source, got %s", res.PriceBasis)
 		}
 	})
 }

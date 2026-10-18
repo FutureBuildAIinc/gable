@@ -42,7 +42,7 @@
             "restock": true,
             "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 125000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000001",
@@ -103,7 +103,7 @@
             "restock": false,
             "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 300000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000002",
@@ -317,7 +317,7 @@
             "restock": true,
             "restocking_fee_cents": 0,
             "unit_price_ten_thousandths": 125000,
-            "uom": "EA"
+            "uom": "PCS"
           }
         ],
         "number": "RTN-000001",

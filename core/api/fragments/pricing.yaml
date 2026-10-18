@@ -984,7 +984,7 @@ components:
     PricingSource:
       type: string
       description: Where a price came from, lowercase (ADR 0006 section 7.3).
-      enum: [contract, tier, retail, quantity_break, job_override, promotional, category_tier, category_account]
+      enum: [contract, quantity_break, job_override, promotional, category_account, category_profile, category_level, level, branch, base]
     PricingRuleType:
       type: string
       enum: [quantity_break, job_override, promotional]
@@ -995,7 +995,7 @@ components:
         exact scale 4 price in price_uom; uom_qty and price_uom_qty are the
         line's conversion pair; line_total_cents is the one rounding, by the line
         extension rule.
-      required: [customer_id, product_id, quantity, uom, unit_price_ten_thousandths, price_uom, uom_qty, price_uom_qty, line_total_cents, price_basis, details]
+      required: [customer_id, product_id, quantity, uom, unit_price_ten_thousandths, price_uom, uom_qty, price_uom_qty, line_total_cents, price_basis, details, branch_id, reference_price_ten_thousandths, reference_price_uom]
       properties:
         customer_id: {type: string, format: uuid}
         product_id: {type: string, format: uuid}
@@ -1011,9 +1011,21 @@ components:
         details:
           type: string
           description: Free text such as "Gold Tier (15%)".
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: The branch the price answers at; null when the read named none and the caller carries no branch.
+        reference_price_ten_thousandths:
+          type: integer
+          format: int64
+          description: >-
+            The reference price (the branch base when the branch has one, else
+            the product's base), the price a percent or markup rule acts on.
+        reference_price_uom:
+          type: string
     PricingRule:
       type: object
-      required: [id, name, rule_type, product_id, customer_id, job_id, category, fixed_price_ten_thousandths, discount_pct, markup_pct, min_quantity, max_quantity, margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at]
+      required: [id, name, rule_type, product_id, customer_id, job_id, category, fixed_price_ten_thousandths, discount_pct, markup_pct, min_quantity, max_quantity, margin_floor_pct, starts_at, expires_at, is_active, priority, revision, created_at, updated_at, price_uom]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -1038,6 +1050,9 @@ components:
         revision: {type: integer, format: int64}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        price_uom:
+          type: [string, "null"]
+          description: The unit a fixed price is per (the product's stocking unit while the hold stands); a percent or markup rule carries none.
     PricingRulePage:
       type: object
       required: [items, next_cursor, limit]
@@ -1147,14 +1162,16 @@ components:
         The rule's value is one number with two readings (ADR 0001 section 7):
         value_ten_thousandths on a fixed rule, value_pct otherwise, null for the
         other.
-      required: [id, target_type, customer_id, tier, category_id, rule_type, value_ten_thousandths, value_pct, margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at]
+      required: [id, target_type, customer_id, price_profile_id, price_level_id, category_id, rule_type, value_ten_thousandths, value_pct, margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, revision, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         target_type:
           type: string
-          enum: [account, tier]
+          enum: [account, profile, level]
+          description: >-
+            The customer scope the rule prices: one account, one profile's
+            customers, or one level's customers.
         customer_id: {type: [string, "null"], format: uuid}
-        tier: {type: string}
         category_id: {type: string, format: uuid}
         rule_type:
           type: string
@@ -1173,6 +1190,20 @@ components:
         category_name: {type: string, description: Joined on reads.}
         category_path: {type: string, description: Joined on reads.}
         customer_name: {type: string, description: Joined on reads.}
+        price_profile_id:
+          type: [string, "null"]
+          format: uuid
+          description: A profile rule's target.
+        price_level_id:
+          type: [string, "null"]
+          format: uuid
+          description: A level rule's target.
+        level_code:
+          type: [string, "null"]
+          description: The target level's code, on the matrix's rows.
+        profile_code:
+          type: [string, "null"]
+          description: The target profile's code, when joined.
     PricingCategoryRulePage:
       type: object
       required: [items, next_cursor, limit]
@@ -1206,9 +1237,10 @@ components:
           properties:
             target_type:
               type: string
-              enum: [account, tier]
+              enum: [account, profile, level]
             customer_id: {type: [string, "null"], format: uuid}
-            tier: {type: [string, "null"]}
+            price_profile_id: {type: [string, "null"], format: uuid}
+            price_level_id: {type: [string, "null"], format: uuid}
             category_id: {type: string, format: uuid}
     PricingCategoryRuleBulkItem:
       description: >-
@@ -1244,8 +1276,10 @@ components:
         performed_at: {type: string, format: date-time}
         category_id: {type: string, format: uuid}
         target_type: {type: string}
-        tier: {type: string}
-        customer_id: {type: string, format: uuid}
+        tier: {type: [string, "null"], description: A legacy rule's tier, read back for rows written before C3-2A-pricing.}
+        price_profile_id: {type: [string, "null"], format: uuid}
+        price_level_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
     PricingCategoryRuleAuditList:
       type: object
       required: [items, next_cursor, limit]
@@ -1271,26 +1305,27 @@ components:
           items: {type: string, format: uuid}
     PricingMatrixCell:
       type: object
-      required: [category_id, category_name, category_path, tier, inherited]
+      required: [category_id, category_name, category_path, level, inherited]
       properties:
         category_id: {type: string, format: uuid}
         category_name: {type: string}
         category_path: {type: string}
-        tier: {type: string}
+        level: {type: [string, "null"]}
         rule:
           $ref: "#/components/schemas/PricingCategoryRule"
         inherited: {type: boolean}
         source_path: {type: string}
     PricingMatrix:
       type: object
-      required: [categories, tiers, cells]
+      required: [categories, levels, cells]
       properties:
         categories:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/PricingProductCategory"
-        tiers:
+        levels:
           type: [array, "null"]
+          description: The level codes the grid's columns answer, in place of tiers.
           items: {type: string}
         cells:
           type: [array, "null"]

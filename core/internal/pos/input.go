@@ -261,6 +261,7 @@ type returnLineRequest struct {
 	LineID      *string         `json:"line_id"`
 	Description *string         `json:"description"`
 	Quantity    json.RawMessage `json:"quantity"`
+	UOM         *string         `json:"uom"`
 	UnitPrice   json.RawMessage `json:"unit_price_ten_thousandths"`
 	Restock     *bool           `json:"restock"`
 	// ReasonCode is the line's reason from the closed list (absent is other).
@@ -327,6 +328,9 @@ func (r *returnRequest) parseWith(prefix string) (*ReturnIn, error) {
 		if q, ok := v.Quantity(field("quantity"), l.Quantity, true); ok {
 			v.Check(q > 0, field("quantity"), "must be greater than zero")
 			rl.Quantity = q
+		}
+		if l.UOM != nil {
+			rl.UOM = uppercase(strings.TrimSpace(*l.UOM))
 		}
 		if !isAbsentRaw(l.UnitPrice) {
 			if n, ok := v.Int(field("unit_price_ten_thousandths"), l.UnitPrice, true); ok {

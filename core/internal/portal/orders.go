@@ -301,7 +301,7 @@ func orderListETag(customerID uuid.UUID, filter OrderListFilter, count int, late
 func (r *PostgresRepository) ListOrdersByCustomerFiltered(ctx context.Context, customerID uuid.UUID, filter OrderListFilter) ([]PortalOrderDTO, error) {
 	query := `
 		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
-		       o.project_id, p.name
+		       o.project_id, p.name, NULLIF(o.site_delivery_instructions, '')
 		FROM orders o
 		LEFT JOIN projects p ON p.id = o.project_id
 		WHERE o.customer_id = $1
@@ -364,7 +364,7 @@ func (r *PostgresRepository) ListOrdersByCustomerFiltered(ctx context.Context, c
 	for rows.Next() {
 		var o PortalOrderDTO
 		if err := rows.Scan(&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt,
-			&o.UpdatedAt, &o.ProjectID, &o.ProjectName); err != nil {
+			&o.UpdatedAt, &o.ProjectID, &o.ProjectName, &o.SiteDeliveryInstructions); err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
 		}
 		o.Lines = make([]PortalLineDTO, 0) // Initialize empty for JSON []
@@ -380,6 +380,9 @@ func (r *PostgresRepository) ListOrdersByCustomerFiltered(ctx context.Context, c
 			return nil, err
 		}
 		orders[i].Lines = lines
+		if hold, err := r.activeHoldForOrder(ctx, customerID, orders[i].ID); err == nil {
+			orders[i].ScheduleHold = hold
+		}
 	}
 
 	return orders, nil

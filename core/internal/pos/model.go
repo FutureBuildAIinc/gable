@@ -219,11 +219,13 @@ type ReturnLine struct {
 	ReasonCode         string      `json:"reason_code"`
 	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
 
-	// The pair and price unit the sale line carried, read by the memo line's
-	// insert; internal, never on the wire.
-	PriceUOM    *string         `json:"-"`
-	UOMQty      *httpx.Quantity `json:"-"`
-	PriceUOMQty *httpx.Quantity `json:"-"`
+	// The pair, price unit and stocking unit the line carries, read by the
+	// memo line's and return line's inserts; internal, never on the wire.
+	PriceUOM      *string         `json:"-"`
+	UOMQty        *httpx.Quantity `json:"-"`
+	PriceUOMQty   *httpx.Quantity `json:"-"`
+	StockUOM      *string         `json:"-"`
+	StockQuantity *httpx.Quantity `json:"-"`
 	// LineType and ChargeCodeID carry a returned charge line's own shape.
 	LineType     string     `json:"-"`
 	ChargeCodeID *uuid.UUID `json:"-"`

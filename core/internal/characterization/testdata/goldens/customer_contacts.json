@@ -11,8 +11,7 @@
         "email": "contacts@example.com",
         "name": "Golden Contacts Co",
         "phone": "250-555-0177",
-        "primary_branch_id": "<id-1>",
-        "tier": "gold"
+        "primary_branch_id": "<id-1>"
       }
     },
     "response": {
@@ -43,13 +42,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0177",
         "po_required": false,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 1,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -99,7 +96,7 @@
         "customer_id": "<id-2>",
         "email": "golden.contact@example.com",
         "first_name": "Golden",
-        "id": "<id-4>",
+        "id": "<id-5>",
         "is_active": true,
         "is_primary": true,
         "last_name": "Contact",
@@ -136,7 +133,7 @@
         "customer_id": "<id-2>",
         "email": null,
         "first_name": "Golden",
-        "id": "<id-5>",
+        "id": "<id-6>",
         "is_active": true,
         "is_primary": false,
         "last_name": "Ledger",
@@ -175,7 +172,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -196,7 +193,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -238,7 +235,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -247,7 +244,7 @@
     "name": "contact.create.unknown_customer",
     "request": {
       "method": "POST",
-      "path": "/api/v1/customers/<id-9>/contacts",
+      "path": "/api/v1/customers/<id-10>/contacts",
       "body": {
         "first_name": "Golden",
         "last_name": "Contact",
@@ -263,7 +260,7 @@
           "message": "customer not found"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -287,7 +284,7 @@
             "customer_id": "<id-2>",
             "email": null,
             "first_name": "Golden",
-            "id": "<id-5>",
+            "id": "<id-6>",
             "is_active": true,
             "is_primary": false,
             "last_name": "Ledger",
@@ -306,7 +303,7 @@
             "customer_id": "<id-2>",
             "email": "golden.contact@example.com",
             "first_name": "Golden",
-            "id": "<id-4>",
+            "id": "<id-5>",
             "is_active": true,
             "is_primary": true,
             "last_name": "Contact",
@@ -345,7 +342,7 @@
           "message": "one or more query parameters are not supported by this route"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -371,7 +368,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -380,7 +377,7 @@
     "name": "contact.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/contacts/<id-4>"
+      "path": "/api/v1/contacts/<id-5>"
     },
     "response": {
       "status": 200,
@@ -393,7 +390,7 @@
         "customer_id": "<id-2>",
         "email": "golden.contact@example.com",
         "first_name": "Golden",
-        "id": "<id-4>",
+        "id": "<id-5>",
         "is_active": true,
         "is_primary": true,
         "last_name": "Contact",
@@ -410,7 +407,7 @@
     "name": "contact.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/contacts/<id-9>"
+      "path": "/api/v1/contacts/<id-10>"
     },
     "response": {
       "status": 404,
@@ -421,7 +418,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -447,7 +444,7 @@
           "message": "invalid contact id"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -456,7 +453,7 @@
     "name": "contact.update.without_revision",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "body": {
         "can_place_orders": true,
         "first_name": "Golden",
@@ -474,7 +471,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-16>"
         }
       }
     }
@@ -483,7 +480,7 @@
     "name": "contact.update",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -510,7 +507,7 @@
         "customer_id": "<id-2>",
         "email": "golden.contact.updated@example.com",
         "first_name": "Golden",
-        "id": "<id-4>",
+        "id": "<id-5>",
         "is_active": true,
         "is_primary": true,
         "last_name": "Contact-Updated",
@@ -527,7 +524,7 @@
     "name": "contact.update.stale",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -548,7 +545,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -557,7 +554,7 @@
     "name": "contact.update.missing_controls",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -585,7 +582,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -594,7 +591,7 @@
     "name": "contact.get.after_update",
     "request": {
       "method": "GET",
-      "path": "/api/v1/contacts/<id-4>"
+      "path": "/api/v1/contacts/<id-5>"
     },
     "response": {
       "status": 200,
@@ -607,7 +604,7 @@
         "customer_id": "<id-2>",
         "email": "golden.contact.updated@example.com",
         "first_name": "Golden",
-        "id": "<id-4>",
+        "id": "<id-5>",
         "is_active": true,
         "is_primary": true,
         "last_name": "Contact-Updated",
@@ -624,7 +621,7 @@
     "name": "contact.update.bad_body",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"2\""
       },
@@ -639,7 +636,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -675,7 +672,7 @@
           "message": "invalid contact id"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -684,7 +681,7 @@
     "name": "contact.update.not_found",
     "request": {
       "method": "PUT",
-      "path": "/api/v1/contacts/<id-9>",
+      "path": "/api/v1/contacts/<id-10>",
       "headers": {
         "If-Match": "\"1\""
       },
@@ -705,7 +702,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -733,7 +730,7 @@
     "name": "escalation_policy.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/customers/<id-9>/escalation-policy"
+      "path": "/api/v1/customers/<id-10>/escalation-policy"
     },
     "response": {
       "status": 404,
@@ -744,7 +741,7 @@
           "message": "customer not found"
         },
         "meta": {
-          "request_id": "<id-21>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -770,7 +767,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -794,7 +791,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -894,7 +891,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-24>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -927,7 +924,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-25>"
+          "request_id": "<id-26>"
         }
       }
     }
@@ -960,7 +957,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-26>"
+          "request_id": "<id-27>"
         }
       }
     }
@@ -993,7 +990,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-27>"
+          "request_id": "<id-28>"
         }
       }
     }
@@ -1017,7 +1014,7 @@
           "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-28>"
+          "request_id": "<id-29>"
         }
       }
     }
@@ -1028,7 +1025,7 @@
       "method": "PATCH",
       "path": "/api/v1/customers/<id-2>/salesperson",
       "body": {
-        "salesperson_id": "<id-29>"
+        "salesperson_id": "<id-30>"
       }
     },
     "response": {
@@ -1040,7 +1037,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-30>"
+          "request_id": "<id-31>"
         }
       }
     }
@@ -1054,7 +1051,7 @@
         "If-Match": "\"3\""
       },
       "body": {
-        "salesperson_id": "<id-29>"
+        "salesperson_id": "<id-30>"
       }
     },
     "response": {
@@ -1085,13 +1082,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0177",
         "po_required": false,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 4,
-        "salesperson_id": "<id-29>",
+        "salesperson_id": "<id-30>",
         "salesperson_name": "Heather Macdonald",
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -1136,13 +1131,11 @@
         "payment_terms_id": "<id-3>",
         "phone": "250-555-0177",
         "po_required": false,
-        "price_level": null,
-        "price_level_id": null,
+        "price_profile_id": "<id-4>",
         "primary_branch_id": "<id-1>",
         "revision": 5,
         "salesperson_id": null,
         "salesperson_name": null,
-        "tier": "gold",
         "updated_at": "<ts+0d>"
       }
     }
@@ -1172,7 +1165,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-31>"
+          "request_id": "<id-32>"
         }
       }
     }
@@ -1204,7 +1197,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -1218,7 +1211,7 @@
         "If-Match": "\"5\""
       },
       "body": {
-        "salesperson_id": "<id-29>"
+        "salesperson_id": "<id-30>"
       }
     },
     "response": {
@@ -1236,7 +1229,7 @@
           "message": "invalid customer id"
         },
         "meta": {
-          "request_id": "<id-33>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -1250,7 +1243,7 @@
         "If-Match": "\"5\""
       },
       "body": {
-        "salesperson_id": "<id-9>"
+        "salesperson_id": "<id-10>"
       }
     },
     "response": {
@@ -1268,7 +1261,7 @@
           "message": "a referenced record does not exist"
         },
         "meta": {
-          "request_id": "<id-34>"
+          "request_id": "<id-35>"
         }
       }
     }
@@ -1277,7 +1270,7 @@
     "name": "contact.delete.without_revision",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/contacts/<id-4>"
+      "path": "/api/v1/contacts/<id-5>"
     },
     "response": {
       "status": 428,
@@ -1288,7 +1281,7 @@
           "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-35>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -1297,7 +1290,7 @@
     "name": "contact.delete.stale",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"1\""
       }
@@ -1311,7 +1304,7 @@
           "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-36>"
+          "request_id": "<id-37>"
         }
       }
     }
@@ -1320,7 +1313,7 @@
     "name": "contact.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"2\""
       }
@@ -1337,7 +1330,7 @@
     "name": "contact.delete.again",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/contacts/<id-4>",
+      "path": "/api/v1/contacts/<id-5>",
       "headers": {
         "If-Match": "\"2\""
       }
@@ -1351,7 +1344,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-37>"
+          "request_id": "<id-38>"
         }
       }
     }
@@ -1380,7 +1373,7 @@
           "message": "invalid contact id"
         },
         "meta": {
-          "request_id": "<id-38>"
+          "request_id": "<id-39>"
         }
       }
     }
@@ -1389,7 +1382,7 @@
     "name": "contact.get.after_delete",
     "request": {
       "method": "GET",
-      "path": "/api/v1/contacts/<id-4>"
+      "path": "/api/v1/contacts/<id-5>"
     },
     "response": {
       "status": 404,
@@ -1400,7 +1393,7 @@
           "message": "contact not found"
         },
         "meta": {
-          "request_id": "<id-39>"
+          "request_id": "<id-40>"
         }
       }
     }
@@ -1424,7 +1417,7 @@
             "customer_id": "<id-2>",
             "email": null,
             "first_name": "Golden",
-            "id": "<id-5>",
+            "id": "<id-6>",
             "is_active": true,
             "is_primary": false,
             "last_name": "Ledger",

@@ -634,22 +634,80 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "conflict",
-          "details": [
-            {
-              "code": "exceeds_open_amount",
-              "message": "invoice IN-000052 has 1142 cents open: 1143 cents were asked"
-            }
-          ],
-          "message": "invoice IN-000052 has 1142 cents open: 1143 cents were asked"
-        },
-        "meta": {
-          "request_id": "<id-22>"
-        }
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          },
+          {
+            "act_id": "<id-22>",
+            "amount_cents": 1143,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-23>",
+            "id": "<id-24>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 3,
+        "status": "posted",
+        "unapplied_cents": 1857,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
     }
   },
@@ -676,17 +734,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "conflict",
-          "details": [
-            {
-              "code": "discount_not_available",
-              "message": "the early pay discount of invoice IN-000052 is not available on this date"
-            }
-          ],
-          "message": "the early pay discount of invoice IN-000052 is not available on this date"
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-23>"
+          "request_id": "<id-25>"
         }
       }
     }
@@ -735,9 +787,30 @@
             "reversed_at": null,
             "reversed_by": null,
             "reversed_on": null
+          },
+          {
+            "act_id": "<id-22>",
+            "amount_cents": 1143,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-23>",
+            "id": "<id-24>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
           }
         ],
-        "limit": 1,
+        "limit": 2,
         "next_cursor": null
       }
     }
@@ -760,80 +833,16 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 409,
       "content_type": "application/json",
       "body": {
-        "amount_cents": 5000,
-        "applications": [
-          {
-            "act_id": "<id-18>",
-            "amount_cents": 2000,
-            "applied_by": null,
-            "applied_on": "<day+0>",
-            "created_at": "<ts+0d>",
-            "credit_memo_id": null,
-            "currency": "USD",
-            "customer_id": "<id-1>",
-            "gl_entry_id": "<id-19>",
-            "id": "<id-20>",
-            "invoice_id": "<id-15>",
-            "kind": "payment",
-            "payment_id": "<id-4>",
-            "reason": null,
-            "reversal_gl_entry_id": null,
-            "reversal_reason": null,
-            "reversed_at": null,
-            "reversed_by": null,
-            "reversed_on": null
-          },
-          {
-            "act_id": "<id-24>",
-            "amount_cents": 1142,
-            "applied_by": null,
-            "applied_on": "<day+0>",
-            "created_at": "<ts+0d>",
-            "credit_memo_id": null,
-            "currency": "USD",
-            "customer_id": "<id-1>",
-            "gl_entry_id": "<id-25>",
-            "id": "<id-26>",
-            "invoice_id": "<id-15>",
-            "kind": "payment",
-            "payment_id": "<id-4>",
-            "reason": null,
-            "reversal_gl_entry_id": null,
-            "reversal_reason": null,
-            "reversed_at": null,
-            "reversed_by": null,
-            "reversed_on": null
-          }
-        ],
-        "auth_code": null,
-        "branch_id": "<id-2>",
-        "card_brand": null,
-        "card_last4": null,
-        "created_at": "<ts+0d>",
-        "currency": "USD",
-        "customer_id": "<id-1>",
-        "customer_name": "Golden Harness Co",
-        "gateway_tx_id": null,
-        "gl_entry_id": "<id-3>",
-        "id": "<id-4>",
-        "job_id": null,
-        "method": "check",
-        "notes": "golden unapplied cash",
-        "number": "PAY-000045",
-        "order_id": null,
-        "received_on": "<day+0>",
-        "reference": "GOLD-PAY-1",
-        "refunds": [],
-        "revision": 3,
-        "status": "posted",
-        "unapplied_cents": 1858,
-        "updated_at": "<ts+0d>",
-        "void_reason": null,
-        "voided_at": null,
-        "voided_by": null
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
       }
     }
   },
@@ -868,22 +877,101 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "conflict",
-          "details": [
-            {
-              "code": "exceeds_open_amount",
-              "message": "invoice IN-000052 has 0 cents open: 1 cents were asked"
-            }
-          ],
-          "message": "invoice IN-000052 has 0 cents open: 1 cents were asked"
-        },
-        "meta": {
-          "request_id": "<id-27>"
-        }
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          },
+          {
+            "act_id": "<id-22>",
+            "amount_cents": 1143,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-23>",
+            "id": "<id-24>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          },
+          {
+            "act_id": "<id-27>",
+            "amount_cents": 1,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-28>",
+            "id": "<id-29>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 4,
+        "status": "posted",
+        "unapplied_cents": 1856,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
     }
   },
@@ -905,17 +993,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "conflict",
-          "details": [
-            {
-              "code": "exceeds_unapplied",
-              "message": "the payment has 1858 cents unapplied: 3000 cents were asked"
-            }
-          ],
-          "message": "the payment has 1858 cents unapplied: 3000 cents were asked"
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
-          "request_id": "<id-28>"
+          "request_id": "<id-30>"
         }
       }
     }
@@ -951,7 +1033,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-29>"
+          "request_id": "<id-31>"
         }
       }
     }
@@ -970,20 +1052,16 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 409,
       "content_type": "application/json",
       "body": {
-        "amount_cents": 500,
-        "created_at": "<ts+0d>",
-        "credit_memo_id": null,
-        "gateway_refund_id": null,
-        "gl_entry_id": "<id-30>",
-        "id": "<id-31>",
-        "method": "check",
-        "payment_id": "<id-4>",
-        "reason": "golden refund",
-        "refunded_on": "<day+0>",
-        "status": "COMPLETE"
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
       }
     }
   },
@@ -1014,7 +1092,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-32>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -1041,7 +1119,7 @@
           "message": "a payment is voided by a transition; posted is how it starts"
         },
         "meta": {
-          "request_id": "<id-33>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -1080,28 +1158,49 @@
             "kind": "payment",
             "payment_id": "<id-4>",
             "reason": null,
-            "reversal_gl_entry_id": "<id-34>",
+            "reversal_gl_entry_id": "<id-35>",
             "reversal_reason": "golden void",
             "reversed_at": "<ts+0d>",
             "reversed_by": null,
             "reversed_on": "<day+0>"
           },
           {
-            "act_id": "<id-24>",
-            "amount_cents": 1142,
+            "act_id": "<id-22>",
+            "amount_cents": 1143,
             "applied_by": null,
             "applied_on": "<day+0>",
             "created_at": "<ts+0d>",
             "credit_memo_id": null,
             "currency": "USD",
             "customer_id": "<id-1>",
-            "gl_entry_id": "<id-25>",
-            "id": "<id-26>",
+            "gl_entry_id": "<id-23>",
+            "id": "<id-24>",
             "invoice_id": "<id-15>",
             "kind": "payment",
             "payment_id": "<id-4>",
             "reason": null,
-            "reversal_gl_entry_id": "<id-35>",
+            "reversal_gl_entry_id": "<id-36>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          },
+          {
+            "act_id": "<id-27>",
+            "amount_cents": 1,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-28>",
+            "id": "<id-29>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-37>",
             "reversal_reason": "golden void",
             "reversed_at": "<ts+0d>",
             "reversed_by": null,
@@ -1126,21 +1225,7 @@
         "order_id": null,
         "received_on": "<day+0>",
         "reference": "GOLD-PAY-1",
-        "refunds": [
-          {
-            "amount_cents": 500,
-            "created_at": "<ts+0d>",
-            "credit_memo_id": null,
-            "gateway_refund_id": null,
-            "gl_entry_id": "<id-30>",
-            "id": "<id-31>",
-            "method": "check",
-            "payment_id": "<id-4>",
-            "reason": "golden refund",
-            "refunded_on": "<day+0>",
-            "status": "COMPLETE"
-          }
-        ],
+        "refunds": [],
         "revision": 5,
         "status": "voided",
         "unapplied_cents": 0,
@@ -1186,7 +1271,7 @@
           "message": "the payment is already voided"
         },
         "meta": {
-          "request_id": "<id-36>"
+          "request_id": "<id-38>"
         }
       }
     }
@@ -1218,28 +1303,49 @@
             "kind": "payment",
             "payment_id": "<id-4>",
             "reason": null,
-            "reversal_gl_entry_id": "<id-34>",
+            "reversal_gl_entry_id": "<id-35>",
             "reversal_reason": "golden void",
             "reversed_at": "<ts+0d>",
             "reversed_by": null,
             "reversed_on": "<day+0>"
           },
           {
-            "act_id": "<id-24>",
-            "amount_cents": 1142,
+            "act_id": "<id-22>",
+            "amount_cents": 1143,
             "applied_by": null,
             "applied_on": "<day+0>",
             "created_at": "<ts+0d>",
             "credit_memo_id": null,
             "currency": "USD",
             "customer_id": "<id-1>",
-            "gl_entry_id": "<id-25>",
-            "id": "<id-26>",
+            "gl_entry_id": "<id-23>",
+            "id": "<id-24>",
             "invoice_id": "<id-15>",
             "kind": "payment",
             "payment_id": "<id-4>",
             "reason": null,
-            "reversal_gl_entry_id": "<id-35>",
+            "reversal_gl_entry_id": "<id-36>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          },
+          {
+            "act_id": "<id-27>",
+            "amount_cents": 1,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-28>",
+            "id": "<id-29>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-37>",
             "reversal_reason": "golden void",
             "reversed_at": "<ts+0d>",
             "reversed_by": null,
@@ -1264,21 +1370,7 @@
         "order_id": null,
         "received_on": "<day+0>",
         "reference": "GOLD-PAY-1",
-        "refunds": [
-          {
-            "amount_cents": 500,
-            "created_at": "<ts+0d>",
-            "credit_memo_id": null,
-            "gateway_refund_id": null,
-            "gl_entry_id": "<id-30>",
-            "id": "<id-31>",
-            "method": "check",
-            "payment_id": "<id-4>",
-            "reason": "golden refund",
-            "refunded_on": "<day+0>",
-            "status": "COMPLETE"
-          }
-        ],
+        "refunds": [],
         "revision": 5,
         "status": "voided",
         "unapplied_cents": 0,
@@ -1307,7 +1399,7 @@
           "message": "internal error"
         },
         "meta": {
-          "request_id": "<id-37>"
+          "request_id": "<id-39>"
         }
       }
     }
@@ -1340,7 +1432,7 @@
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-38>",
+            "event_id": "<id-40>",
             "org": "default",
             "type": "payment.recorded"
           },
@@ -1363,7 +1455,7 @@
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-39>",
+            "event_id": "<id-41>",
             "org": "default",
             "type": "payment.applied"
           },
@@ -1375,16 +1467,16 @@
               "customer_id": "<id-1>",
               "from_status": "unpaid",
               "number": "IN-000052",
-              "open_cents": 1142,
+              "open_cents": 1696,
               "revision": 2,
               "status": "partial",
-              "total_cents": 3142
+              "total_cents": 3696
             },
             "entity": {
               "id": "<id-15>",
               "kind": "invoice"
             },
-            "event_id": "<id-40>",
+            "event_id": "<id-42>",
             "org": "default",
             "type": "invoice.partial"
           },
@@ -1392,7 +1484,7 @@
             "at": "<ts+0d>",
             "branch_id": "<id-2>",
             "data": {
-              "amount_cents": 1142,
+              "amount_cents": 1143,
               "currency": "USD",
               "customer_id": "<id-1>",
               "invoice_ids": [
@@ -1401,13 +1493,13 @@
               "number": "PAY-000045",
               "revision": 3,
               "status": "posted",
-              "unapplied_cents": 1858
+              "unapplied_cents": 1857
             },
             "entity": {
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-41>",
+            "event_id": "<id-43>",
             "org": "default",
             "type": "payment.applied"
           },
@@ -1419,39 +1511,62 @@
               "customer_id": "<id-1>",
               "from_status": "partial",
               "number": "IN-000052",
-              "open_cents": 0,
+              "open_cents": 553,
               "revision": 3,
-              "status": "paid",
-              "total_cents": 3142
+              "status": "partial",
+              "total_cents": 3696
             },
             "entity": {
               "id": "<id-15>",
               "kind": "invoice"
             },
-            "event_id": "<id-42>",
+            "event_id": "<id-44>",
             "org": "default",
-            "type": "invoice.paid"
+            "type": "invoice.partial"
           },
           {
             "at": "<ts+0d>",
             "branch_id": "<id-2>",
             "data": {
-              "amount_cents": 500,
+              "amount_cents": 1,
               "currency": "USD",
               "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
               "number": "PAY-000045",
-              "refund_id": "<id-31>",
               "revision": 4,
               "status": "posted",
-              "unapplied_cents": 1358
+              "unapplied_cents": 1856
             },
             "entity": {
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-43>",
+            "event_id": "<id-45>",
             "org": "default",
-            "type": "payment.refunded"
+            "type": "payment.applied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "from_status": "partial",
+              "number": "IN-000052",
+              "open_cents": 552,
+              "revision": 4,
+              "status": "partial",
+              "total_cents": 3696
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "invoice"
+            },
+            "event_id": "<id-46>",
+            "org": "default",
+            "type": "invoice.partial"
           },
           {
             "at": "<ts+0d>",
@@ -1472,7 +1587,7 @@
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-44>",
+            "event_id": "<id-47>",
             "org": "default",
             "type": "payment.unapplied"
           },
@@ -1480,7 +1595,7 @@
             "at": "<ts+0d>",
             "branch_id": "<id-2>",
             "data": {
-              "amount_cents": 1142,
+              "amount_cents": 1143,
               "currency": "USD",
               "customer_id": "<id-1>",
               "invoice_ids": [
@@ -1495,7 +1610,30 @@
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-45>",
+            "event_id": "<id-48>",
+            "org": "default",
+            "type": "payment.unapplied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 1,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
+              "number": "PAY-000045",
+              "revision": 5,
+              "status": "posted",
+              "unapplied_cents": 0
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-49>",
             "org": "default",
             "type": "payment.unapplied"
           },
@@ -1505,18 +1643,18 @@
             "data": {
               "currency": "USD",
               "customer_id": "<id-1>",
-              "from_status": "paid",
+              "from_status": "partial",
               "number": "IN-000052",
-              "open_cents": 3142,
-              "revision": 4,
+              "open_cents": 3696,
+              "revision": 5,
               "status": "unpaid",
-              "total_cents": 3142
+              "total_cents": 3696
             },
             "entity": {
               "id": "<id-15>",
               "kind": "invoice"
             },
-            "event_id": "<id-46>",
+            "event_id": "<id-50>",
             "org": "default",
             "type": "invoice.reopened"
           },
@@ -1537,7 +1675,7 @@
               "id": "<id-4>",
               "kind": "payment"
             },
-            "event_id": "<id-47>",
+            "event_id": "<id-51>",
             "org": "default",
             "type": "payment.voided"
           }
