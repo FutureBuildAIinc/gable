@@ -130,7 +130,7 @@ func TestDealerLink_OnlyASentUnexpiredQuoteGetsALinkAndAReissueKillsTheOld(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.svc.DealerQuoteView(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.DealerQuoteView(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the replaced link: %v", err)
 	}
 	if _, err := w.svc.DealerQuoteView(ctx, strings.TrimPrefix(res2.Path, "/dq/"), anon); err != nil {

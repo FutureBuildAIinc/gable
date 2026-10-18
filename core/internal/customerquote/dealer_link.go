@@ -210,18 +210,18 @@ func (s *Service) resolveDealer(ctx context.Context, token string, c Caller) (*L
 		return nil, nil, ErrLinkUnknown
 	}
 	hash := HashToken(token)
-	if !s.perLink.Allow("link:" + hash) {
-		return nil, nil, ErrRateLimited
-	}
 	link, err := s.store.LinkByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, err
 	}
-	if link == nil || !HashesEqual(link.Hash, hash) || link.DealerQuoteID == "" {
+	if link == nil || !HashesEqual(link.Hash, hash) || link.DealerQuoteID == "" || link.RevokedAt != nil {
 		if !s.misses.Allow(clientKey(c.Address)) {
 			return nil, nil, ErrRateLimited
 		}
 		return nil, nil, ErrLinkUnknown
+	}
+	if !s.perLink.Allow("link:" + hash) {
+		return nil, nil, ErrRateLimited
 	}
 	if !link.Live(s.now()) {
 		return nil, nil, ErrLinkUnavailable

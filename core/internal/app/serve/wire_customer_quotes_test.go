@@ -1055,7 +1055,7 @@ func TestWire_DealerQuoteLink_DeclineAndReissue(t *testing.T) {
 	if first == second {
 		t.Fatal("the same token was issued twice")
 	}
-	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+first, nil, nil); r.status != 410 {
+	if r := s.do("GET", "/api/public/v1/dealer-quotes/"+first, nil, nil); r.status != 404 {
 		t.Errorf("the replaced link: %d", r.status)
 	}
 	r := s.do("POST", "/api/public/v1/dealer-quotes/"+second+"/decline", nil, map[string]any{"full_name": "Pat Contractor", "reason": "too dear"})

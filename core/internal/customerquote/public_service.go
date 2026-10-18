@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -33,8 +34,8 @@ const (
 )
 
 // resolve turns a presented token into its live link and quote, after the
-// rate limits. A token that never existed answers ErrLinkUnknown; one that
-// did and is expired or revoked answers ErrLinkUnavailable. Compares are on
+// rate limits. A token that never existed, or was revoked or rotated, answers
+// ErrLinkUnknown; one that expired answers ErrLinkUnavailable. Compares are on
 // hashes, in constant time.
 func (s *Service) resolve(ctx context.Context, token string, c Caller) (*Link, *Quote, error) {
 	if !s.perAddr.Allow(clientKey(c.Address)) {
@@ -47,19 +48,21 @@ func (s *Service) resolve(ctx context.Context, token string, c Caller) (*Link, *
 		return nil, nil, ErrLinkUnknown
 	}
 	hash := HashToken(token)
-	if !s.perLink.Allow("link:" + hash) {
-		return nil, nil, ErrRateLimited
-	}
 	link, err := s.store.LinkByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, err
 	}
 	// A link to a dealer quote opens nothing here: to this route it never existed.
-	if link == nil || !HashesEqual(link.Hash, hash) || link.QuoteID == "" {
+	// An unknown, revoked or rotated token is charged to the address's miss budget
+	// alone; it creates no per link key and answers as if it never existed.
+	if link == nil || !HashesEqual(link.Hash, hash) || link.QuoteID == "" || link.RevokedAt != nil {
 		if !s.misses.Allow(clientKey(c.Address)) {
 			return nil, nil, ErrRateLimited
 		}
 		return nil, nil, ErrLinkUnknown
+	}
+	if !s.perLink.Allow("link:" + hash) {
+		return nil, nil, ErrRateLimited
 	}
 	if !link.Live(s.now()) {
 		return nil, nil, ErrLinkUnavailable
@@ -491,5 +494,17 @@ func (s *Service) Decline(ctx context.Context, token string, c Caller, in Declin
 	return s.publicViewOf(ctx, q)
 }
 
-// clientKey is the limiter key of a source address.
-func clientKey(ip string) string { return "ip:" + ip }
+// clientKey is the limiter key of a source address: an IPv4 address itself, an
+// IPv6 address by its /64 (one subscriber commonly holds a whole /64 and can
+// rotate addresses inside it at will).
+func clientKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return "ip:" + ip
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return "ip:" + a.String()
+	}
+	return "ip:" + netip.PrefixFrom(a.WithZone(""), 64).Masked().String()
+}

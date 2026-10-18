@@ -244,7 +244,7 @@ func TestDecline_RecordsTheDecisionAndTheSnapshot(t *testing.T) {
 	if err != nil || rev.Status != customerquote.StatusDraft {
 		t.Fatalf("revise: %v %v", rev, err)
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the old link after revising: %v", err)
 	}
 	log, _ = w.svc.Approvals(ctx, w.a, q.ID)
@@ -740,7 +740,7 @@ func TestWithdraw_KillsTheLinkAndTheQuoteStopsBeingShared(t *testing.T) {
 	if err != nil || out.Status != customerquote.StatusWithdrawn {
 		t.Fatalf("withdraw: %v %v", out, err)
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("a withdrawn quote's link: %v", err)
 	}
 	if _, err := w.svc.Withdraw(ctx, w.a, q.ID); !errors.Is(err, customerquote.ErrInvalidState) {

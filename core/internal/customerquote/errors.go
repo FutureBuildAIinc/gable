@@ -34,7 +34,7 @@ func wireErr(err error) error {
 	case errors.Is(err, ErrInvalidState):
 		return httpx.InvalidStateTransition("the quote is not in a state that allows this")
 	case errors.Is(err, ErrLinkUnavailable):
-		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired or been withdrawn"}
+		return &httpx.Error{Status: http.StatusGone, Code: CodeLinkUnavailable, Message: "this link has expired"}
 	case errors.Is(err, ErrRateLimited):
 		return httpx.RateLimited("too many requests: wait a minute and try again")
 	case errors.Is(err, ErrIncomplete):

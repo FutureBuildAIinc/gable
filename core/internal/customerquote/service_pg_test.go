@@ -346,7 +346,7 @@ func TestLink_ExpiredRevokedAndRotated(t *testing.T) {
 	if newToken == token {
 		t.Fatal("rotation reissued the same token")
 	}
-	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, token, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the rotated-out link answered: %v", err)
 	}
 	if _, err := w.svc.View(ctx, newToken, anon); err != nil {
@@ -362,7 +362,7 @@ func TestLink_ExpiredRevokedAndRotated(t *testing.T) {
 	if err := w.svc.Revoke(ctx, w.a, q.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.svc.View(ctx, newToken, anon); !errors.Is(err, customerquote.ErrLinkUnavailable) {
+	if _, err := w.svc.View(ctx, newToken, anon); !errors.Is(err, customerquote.ErrLinkUnknown) {
 		t.Errorf("the revoked link answered: %v", err)
 	}
 	if err := w.svc.Revoke(ctx, w.a, q.ID); err == nil {
@@ -494,3 +494,22 @@ func tsOf(t time.Time) *httpxTimestamp { v := httpxTS(t); return &v }
 var _ = sha256.Sum256
 var _ = hex.EncodeToString
 var _ = base64.StdEncoding
+
+func TestLink_UnknownTokensCreateNoPerLinkKeys(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	before := w.svc.PerLinkKeys()
+	for i := 0; i < 50; i++ {
+		tok := strings.Repeat(string(rune('A'+i%26)), 42) + string(rune('a'+i%26))
+		_, _ = w.svc.View(ctx, tok, anon)
+		_, _ = w.svc.DealerQuoteView(ctx, tok, anon)
+	}
+	if after := w.svc.PerLinkKeys(); after != before {
+		t.Errorf("unknown tokens created %d per link keys: a random token must cost the limiter nothing", after-before)
+	}
+	_, token := w.createSent(w.basicInput())
+	_, _ = w.svc.View(ctx, token, anon)
+	if w.svc.PerLinkKeys() != before+1 {
+		t.Errorf("a real link did not get its key")
+	}
+}
