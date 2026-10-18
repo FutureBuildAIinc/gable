@@ -26,6 +26,7 @@ describe('gable-shell-banner', () => {
     const strip = el.querySelector('[role="status"]');
     expect(strip?.getAttribute('data-mode')).toBe('offline');
     expect(strip?.textContent).toContain('offline');
+    expect(strip?.textContent).toContain('money never queues');
     el.remove();
   });
 

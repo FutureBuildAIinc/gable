@@ -129,6 +129,6 @@ export type ShellBannerMode = (typeof SHELL_BANNER_MODES)[number];
 /** The banner's one line for a mode. Gable's apps are online only, so the
  * words say what the screen can do, never that writes wait or send later. */
 export function bannerWords(mode: ShellBannerMode): string {
-  if (mode === 'offline') return 'You are offline; the shell and its apps need the connection.';
+  if (mode === 'offline') return 'You are offline; the shell and its apps need the connection, and money never queues.';
   return '';
 }
