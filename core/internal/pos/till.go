@@ -188,6 +188,26 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 				fmt.Sprintf("a card refund claim of one of this session's sales is still in flight (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before closing the drawer",
 					strings.Join(ids, ", ")))
 		}
+		// A card terminal intent of this register still standing (claimed, at
+		// the device, or an authorized sale leg the books have not yet taken)
+		// refuses the close the same way (CP-05): its device may still move
+		// money after the drawer was counted, or the terminal already holds an
+		// authorized charge no sale has booked.
+		if s.terminalWired() {
+			intents, err := s.terminalLedger.OpenIntentsAtRegister(ctx, report.Session.RegisterID)
+			if err != nil {
+				return err
+			}
+			if len(intents) > 0 {
+				ids := make([]string, 0, len(intents))
+				for _, id := range intents {
+					ids = append(ids, id.String())
+				}
+				return conflict("terminal_intent_in_flight",
+					fmt.Sprintf("a card terminal intent of this register is still open (intents %s): complete or void the open sale using an authorized leg, cancel a claim the terminal never reached at POST /api/v1/pos/terminal-intents/{id}/cancel, or wait for the worker's sweep (or a manager with finance or owner role at POST /api/v1/pos/terminal-intents/sweep) and have a manager (finance or owner) settle it before closing the drawer",
+						strings.Join(ids, ", ")))
+			}
+		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
 		// A count whose over or short passes the branch's variance threshold
 		// is held for a manager (CP-08): the drawer is counted and out of

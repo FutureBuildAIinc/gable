@@ -453,3 +453,40 @@ export interface CounterRegister {
     branch_code: string;
     branch_name: string;
 }
+
+// --- The card terminal's intents (CP-05) ---
+
+/** One card leg's own record at the terminal (GET /api/v1/pos/terminal-intents/{id}). */
+export interface TerminalIntent {
+    id: string;
+    transaction_id: string;
+    leg_key: string;
+    kind: 'sale' | 'refund' | 'void';
+    state: 'claimed' | 'pending_at_device' | 'authorized' | 'declined' | 'lost';
+    amount_cents: number;
+    provider_ref: string;
+    answer_verdict: '' | 'authorized' | 'declined';
+}
+
+/** One open item of the manager's lost answer queue (GET /api/v1/pos/terminal-lost-items). */
+export interface TerminalLostItem {
+    id: string;
+    intent_id: string;
+    branch_id: string;
+    register_id: string;
+    transaction_id: string;
+    kind: 'sale' | 'refund' | 'void';
+    amount_cents: number;
+    device_id: string;
+    provider_ref: string;
+    state: 'open' | 'resolving' | 'resolved_authorized' | 'resolved_declined';
+    /** The device's own late verdict, when its answer came after the sweep. */
+    late_verdict: '' | 'authorized' | 'declined';
+    late_provider_ref: string;
+}
+
+/** What one sweep pass closed and queued (POST /api/v1/pos/terminal-intents/sweep). */
+export interface TerminalSweepResult {
+    claimed_closed: number;
+    dispatched_lost: number;
+}

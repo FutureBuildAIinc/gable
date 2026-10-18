@@ -403,6 +403,11 @@ GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
+POST	/api/v1/pos/terminal-intents/sweep	internal/pos	h.SweepTerminalIntentsHandler
+GET	/api/v1/pos/terminal-intents/{id}	internal/pos	h.GetTerminalIntentHandler
+POST	/api/v1/pos/terminal-intents/{id}/cancel	internal/pos	h.CancelTerminalIntentHandler
+GET	/api/v1/pos/terminal-lost-items	internal/pos	h.ListTerminalLostItemsHandler
+POST	/api/v1/pos/terminal-lost-items/{id}/resolve	internal/pos	h.ResolveTerminalLostItemHandler
 GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill

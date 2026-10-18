@@ -352,6 +352,42 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    twice: the second says Reprint with its count (the 80mm layout needs the receipt renderer; without it the screen
    says the layout is not available).
 
+### The card terminal at the counter, from the claim to the manager's queue
+
+Needs the demo seed, two yards, a register each, and the simulated terminal selected by configuration
+(`POS_TERMINAL_SIMULATOR=approve` for the first half, `no_answer` for the second; an unset value wires no terminal,
+so a production configuration runs none of this).
+
+1. Sign in as a cashier at yard one's register, start a sale, add a stocked line, and tender the whole total to the
+   card. The desk shows the plain waiting state (the card leg is claimed and at the device); the completion answers
+   only when the terminal does. With the approve script the sale completes: the card tender is a payment applied to
+   the sale's invoice, and `GET /api/v1/pos/terminal-intents/<id>` (the id the desk held) shows `state authorized`
+   with only safe answer fields (brand, last four, auth code, the provider reference).
+2. Sign in as a cashier at yard two's register, `POS_TERMINAL_SIMULATOR=decline`, and tender a card: the completion
+   refuses `card_declined`, the sale stays open, and the intent stands `declined`.
+3. With `POS_TERMINAL_SIMULATOR=no_answer`, tender a card: the desk's waiting state holds, its cancel answers 409
+   `terminal_at_device` (honest about the device: the money may still move), and the completion answered the waiting
+   refusal naming the intent.
+4. Try to close the drawer while the intent stands: the close refuses `terminal_intent_in_flight` naming the intent.
+5. After the intent's lease runs out, `POST /api/v1/pos/terminal-intents/sweep` as a manager (a cashier is a 403):
+   the pass reports what it closed and queued. `GET /api/v1/pos/terminal-lost-items` shows the manager item: who
+   resolves it (the register), what amount, the device reference, the transaction.
+6. Read the terminal's own record, then `POST /api/v1/pos/terminal-lost-items/<id>/resolve` with `outcome declined`
+   (the terminal said no): the item closes `resolved_declined`, nothing moved, and the drawer now closes. A second
+   resolve is 409 `lost_item_settled`.
+7. For an `authorized` resolution, the money follows the sale. A sale still open keeps the authorized leg: complete
+   it with the same card tender and the sale uses that leg (the device is not called again, and a completion that
+   would leave the leg behind is refused `authorized_leg_unused`). A sale that completed another way has the leg
+   applied up to its invoice's open amount and the rest put back to the card; a sale paid in full, or voided, has the
+   whole charge put back (the same day void first, the refund when the void is refused; a failed reversal is 502
+   `charge_not_reversed` and the item is open again; these reversal branches require a payment gateway configured on
+   the stack, and with the simulator alone they answer 409 `no_reversal_gateway`). A stranded card void, card return
+   or payback settles through its refund claim's own resolution, so the drawer closes after it. A second resolve of
+   any item is 409 `lost_item_settled` and calls nothing.
+8. Only the manager roles resolve, and every route runs behind the branch wall: sign in as yard two's manager and
+   yard one's intents and items read as missing rows (a branch header) or are refused 403 (no header and no grant),
+   its queue lists none of yard one's items, and its sweep takes only yard two's expired legs.
+
 ### M26: till control and end of day by branch
 
 Proves: CP-08 (no sale without an open till, drops, pickups, paid in and paid out, the variance sign off) and CP-09 (the

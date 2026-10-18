@@ -15045,6 +15045,155 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/terminal-intents/{id}:
+    get:
+      operationId: posTerminalIntentGet
+      tags: [pos]
+      summary: Read one card terminal intent (the desk's waiting state)
+      description: >-
+        The card leg's own record at the counter (CP-05): where the leg stands, claimed at the terminal, waiting at the device, answered authorized or declined, or lost to the sweep. The desk's waiting state reads this route while the terminal has the card. The intent's branch is held to the caller's reach: a caller whose branch header names another branch finds a missing row (404), and a caller with no header and no grant to the branch is 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The intent as it stands.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTerminalIntent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/terminal-intents/{id}/cancel:
+    post:
+      operationId: posTerminalIntentCancel
+      tags: [pos]
+      summary: Cancel a card terminal intent, honest about the device
+      description: >-
+        The desk's cancel of a waiting card leg. It is honest about the device: a claim the terminal never reached closes lost with no manager item (nothing moved), while a leg at the device is refused (409 terminal_at_device), because the device may still move the money and only the sweep and a manager settle that. An intent already answered or lost is 409 terminal_intent_settled, and a leg the device authorized that the sale has not used is 409 terminal_authorized. The cancel never claims money back. A machine key is refused in the route itself, bound or not. The intent's branch is held to the caller's reach as the read is.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The intent as it stands after the cancel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTerminalIntent"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/terminal-intents/sweep:
+    post:
+      operationId: posTerminalIntentsSweep
+      tags: [pos]
+      summary: Sweep the card terminal intents past their lease
+      description: >-
+        The sweep act (CP-05): every intent past its lease becomes lost. A claimed one never reached the device and is simply closed; a leg at the device may have moved money, so it becomes one manager item of the lost answer queue carrying who resolves it, the amount, the register and the device reference. The worker runs this act on its own over every branch; the route is the manager's own trigger and sweeps only the caller's reach (a branch in context, else the granted branches). Finance and owner roles only; a machine key is refused in the route itself.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: What the pass closed and queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTerminalSweepResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/terminal-lost-items:
+    get:
+      operationId: posTerminalLostItemsList
+      tags: [pos]
+      summary: List the open lost terminal answers (the manager's queue)
+      description: >-
+        The manager's queue of card legs the sweep turned lost because the device may have moved money: who must resolve it (the register), what amount, the device reference, and the transaction it belongs to, with the device's own late verdict and reference when its answer came after the sweep. A manager reads the terminal's own record and settles each at the resolve route. Finance and owner roles only. The list is held to the caller's branch wall in the query itself: with a branch in context only that branch's items, with none and a user only the branches the user is granted.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The open items, oldest first, in the list envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTerminalLostItemList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/terminal-lost-items/{id}/resolve:
+    post:
+      operationId: posTerminalLostItemResolve
+      tags: [pos]
+      summary: Resolve one lost terminal answer
+      description: >-
+        The manager's settlement of one lost card leg, the terminal's own record the authority (CP-05). The item is claimed first by one guarded statement, so a second or racing resolve is 409 lost_item_settled and calls nothing. Outcome authorized on a sale leg: a sale still open keeps the authorized leg for its completion (never charged again); a completed sale applies the money up to its invoice's open amount and the rest goes back to the card; a sale paid in full or voided has the whole charge reversed (the same day void first, the refund when the void is refused, under the intent's idempotency key; a reversal that fails answers 502 charge_not_reversed and the item is open again). On a refund or void leg the refund claim the leg names settles through the claim's own resolution. Outcome declined closes the item and moves nothing. Both write one audit row naming the person, the item, the outcome and the reference. Finance and owner roles only; a machine key is refused in the route itself, bound or not. The item's branch is held to the caller's reach before either outcome: a caller whose branch header names another branch finds a missing row (404), and a caller with no header and no grant to the branch is 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosResolveTerminalLostItemRequest"
+      responses:
+        "200":
+          description: The settled item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTerminalLostItem"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/customers/{id}/standing:
     get:
       operationId: posCustomerStanding
@@ -32491,6 +32640,68 @@ components:
         unit_price_cents: {type: integer, format: int64}
         uom: {type: string}
         in_stock: {type: string, description: "A decimal string of the on hand quantity."}
+    PosTerminalIntent:
+      type: object
+      required: [id, transaction_id, leg_key, kind, state, amount_cents, provider_ref, answer_verdict]
+      properties:
+        id: {type: string, format: uuid}
+        transaction_id: {type: string, format: uuid}
+        leg_key: {type: string, description: "The tender leg inside the transaction this intent holds."}
+        kind: {type: string, enum: [sale, refund, void]}
+        state: {type: string, enum: [claimed, pending_at_device, authorized, declined, lost]}
+        amount_cents: {type: integer, format: int64}
+        provider_ref: {type: string, description: "The device's own reference for the leg, empty until dispatched."}
+        answer_verdict: {type: string, enum: ["", authorized, declined], description: "The landed verdict; empty while none has."}
+    PosTerminalSweepResult:
+      type: object
+      required: [claimed_closed, dispatched_lost]
+      properties:
+        claimed_closed: {type: integer, format: int64, description: "Claims past their lease that never reached the device, closed lost."}
+        dispatched_lost: {type: integer, format: int64, description: "Legs at the device past their lease, turned lost with a manager item each."}
+    PosTerminalLostItem:
+      type: object
+      required: [id, intent_id, branch_id, register_id, transaction_id, kind, amount_cents, device_id, provider_ref, state, late_verdict, late_provider_ref]
+      properties:
+        id: {type: string, format: uuid}
+        intent_id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        register_id: {type: string}
+        transaction_id: {type: string, format: uuid}
+        kind: {type: string, enum: [sale, refund, void]}
+        amount_cents: {type: integer, format: int64}
+        device_id: {type: string}
+        provider_ref: {type: string}
+        state: {type: string, enum: [open, resolving, resolved_authorized, resolved_declined]}
+        late_verdict:
+          type: string
+          enum: ["", authorized, declined]
+          description: "The device's own late verdict when its answer arrived after the sweep or against a recorded verdict; empty when none did."
+        late_provider_ref:
+          type: string
+          description: "The reference the late answer carried; empty when none did."
+    PosTerminalLostItemList:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosTerminalLostItem"
+        next_cursor: {type: [string, "null"], description: "Null: the queue's open items are one page."}
+        limit: {type: integer}
+    PosResolveTerminalLostItemRequest:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [authorized, declined]
+          description: "What the terminal's own record said."
+        reference:
+          type: string
+          description: "The terminal's own record the manager read."
+        reason:
+          type: string
     PricingSource:
       type: string
       description: Where a price came from, lowercase (ADR 0006 section 7.3).

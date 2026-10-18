@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
@@ -99,7 +100,13 @@ type Service struct {
 	tx        TxRunner
 	ar        ARCore
 	inventory CounterInventory
-	bank      BankLines
+	// terminal is the card terminal device seam and terminalLedger its
+	// intent ledger (CP-05, IX-01). Both nil keeps the plain gateway path.
+	terminal       payment.TerminalProvider
+	terminalLedger *payment.TerminalLedger
+	terminalWait   time.Duration
+	terminalCrash  func(point string) error
+	bank           BankLines
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).

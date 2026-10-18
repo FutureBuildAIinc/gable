@@ -23,6 +23,8 @@ import type { SignaturePad } from './SignaturePad';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
@@ -89,6 +91,15 @@ export class POSTerminal extends LitElement {
   @state() private _receiptBusy = false;
   /** A blob url the receipt can be downloaded from when its tab was blocked. */
   @state() private _receiptDownload: string | null = null;
+
+  // The card the terminal still holds: the intent's own record, read again
+  // while the desk shows the waiting state. Null when no card leg waits.
+  @state() private _cardIntent: TerminalIntent | null = null;
+  @state() private _cardNote: string | null = null;
+  @state() private _cardBusy = false;
+  /** Counts card reads; an answer to an older one is dropped. */
+  private _cardSeq = 0;
+  private _cardTimer: ReturnType<typeof setTimeout> | null = null;
 
   // The completed sale offered for a return or a void.
   @state() private _completed: Sale | null = null;
@@ -384,6 +395,8 @@ export class POSTerminal extends LitElement {
     if (this._standingTimer) clearTimeout(this._standingTimer);
     if (this._exchangeDebounce) clearTimeout(this._exchangeDebounce);
     if (this._exchangeSearchTimer) clearTimeout(this._exchangeSearchTimer);
+    this._cardSeq++;
+    if (this._cardTimer) clearTimeout(this._cardTimer);
   }
 
   updated(changed: Map<string, unknown>) {
@@ -751,6 +764,7 @@ export class POSTerminal extends LitElement {
       this._receiptNote = null;
       this._receiptRefused = false;
       this._dropReceiptDownload();
+      this._dismissCardWait();
       // A completed sale on screen stays offerable for a void or a return
       // until this new sale replaces it (New Sale, a product or a customer).
       const reg = this._registerId;
@@ -1282,6 +1296,8 @@ export class POSTerminal extends LitElement {
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
       const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
+      // the sale completed on the card: the waiting card has nothing left to say
+      this._dismissCardWait();
       this._sale = completed;
       this._completed = completed;
       // The Sale complete card says it (number, total, tenders, change): no band over the page.
@@ -1296,11 +1312,67 @@ export class POSTerminal extends LitElement {
       // The completed sale, its band and the change due stay until the cashier
       // moves on: New Sale, a product added or a customer named.
     } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'Failed to complete sale';
       // a check over the limit the screen could not know of (a walk-in's, or the database wide limit) says so beside Ask a manager
       if (err instanceof ApiError && err.hasBlocker('check_over_limit')) this._checkOverWords = err.message;
+      const words = err instanceof Error ? err.message : 'Failed to complete sale';
+      // The terminal's own outcomes are said by the waiting card, in words,
+      // not by the error band: a card the device still holds waits here, and
+      // a decline is the terminal's own no with the sale still open.
+      const waiting = intentIdOfRefusal(words);
+      if (waiting !== null) {
+        this._error = null;
+        void this._watchCard(waiting);
+        return;
+      }
+      if (/card was declined/i.test(words)) {
+        this._error = CARD_DECLINED_WORDS;
+        return;
+      }
+      this._error = words;
     } finally {
       this._loading = false;
+    }
+  }
+
+  /** Reads the card leg's own record until the terminal answers or the waiting is dismissed. */
+  private async _watchCard(id: string) {
+    const seq = ++this._cardSeq;
+    this._cardIntent = null;
+    this._cardNote = null;
+    try {
+      const intent = await posService.getTerminalIntent(id);
+      if (seq !== this._cardSeq) return;
+      this._cardIntent = intent;
+    } catch (err: unknown) {
+      if (seq !== this._cardSeq) return;
+      this._cardNote = err instanceof Error ? err.message : 'Failed to read the card at the terminal';
+      return;
+    }
+    if (this._cardIntent === null || !['claimed', 'pending_at_device'].includes(this._cardIntent.state)) return;
+    this._cardTimer = setTimeout(() => { void this._watchCard(id); }, 2000);
+  }
+
+  /** Drops the waiting card: the terminal may still answer, and the manager's queue holds the leg either way. */
+  private _dismissCardWait() {
+    this._cardSeq++;
+    if (this._cardTimer) clearTimeout(this._cardTimer);
+    this._cardIntent = null;
+    this._cardNote = null;
+  }
+
+  /** The desk's cancel, honest about the device: the server's refusal is said beside the card. */
+  private async _cancelCard() {
+    const intent = this._cardIntent;
+    if (!intent || this._cardBusy) return;
+    try {
+      this._cardBusy = true;
+      const fresh = await posService.cancelTerminalIntent(intent.id);
+      this._cardIntent = fresh;
+      if (fresh.state === 'lost') this._cardNote = 'The waiting stopped here. The terminal was never reached, so no money moved.';
+    } catch (err: unknown) {
+      this._cardNote = err instanceof Error ? err.message : 'Failed to cancel the card at the terminal';
+    } finally {
+      this._cardBusy = false;
     }
   }
 
@@ -1880,6 +1952,39 @@ export class POSTerminal extends LitElement {
     return parts.join(' + ');
   }
 
+/** The waiting card: the card leg the terminal still holds, its outcome in words, and the honest cancel. */
+  private _renderCardWait() {
+    const intent = this._cardIntent;
+    if (!intent) return nothing;
+    const words = cardWaitWords(intent);
+    const waiting = intent.state === 'claimed' || intent.state === 'pending_at_device';
+    return html`
+      <section class="rounded-xl border ${waiting ? 'border-amber-400' : 'border-white/10'} bg-slate-steel p-4" data-testid="pos-card-wait" aria-live="polite">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-base font-semibold ${waiting ? 'text-amber-300' : 'text-white'}" data-testid="pos-card-wait-title">${words.title}</h2>
+            <p class="mt-1 text-sm text-slate-300" data-testid="pos-card-wait-body">${words.body}</p>
+          </div>
+          <span class="shrink-0 font-mono text-sm font-semibold text-slate-200" data-testid="pos-card-wait-amount">${fmt(intent.amount_cents)}</span>
+        </div>
+        ${intent.state === 'lost' ? html`
+          <a href="/pos/lost-answers" class="mt-3 inline-block text-sm font-semibold text-gable-green underline" data-testid="pos-card-wait-lost">The lost card answers</a>` : nothing}
+        ${waiting ? html`
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button data-testid="pos-card-cancel" @click=${() => this._cancelCard()} ?disabled=${this._cardBusy}
+              title=${CARD_CANCEL_WORDS}
+              class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">Stop waiting</button>
+            <span class="text-xs text-slate-400" data-testid="pos-card-cancel-words">${CARD_CANCEL_WORDS}</span>
+          </div>` : html`
+          <div class="mt-3">
+            <button data-testid="pos-card-dismiss" @click=${() => this._dismissCardWait()}
+              class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Close</button>
+          </div>`}
+        ${this._cardNote ? html`
+          <p class="mt-2 text-xs text-amber-300" role="status" data-testid="pos-card-note">${this._cardNote}</p>` : nothing}
+      </section>`;
+  }
+
   private _renderPaymentPanel(sale: Sale | null, hasLines: boolean, state: PanelState, isOpen: boolean) {
     const open = sale?.status === 'open';
     const total = sale?.total_cents ?? 0;
@@ -2332,6 +2437,7 @@ export class POSTerminal extends LitElement {
                 ${this._renderCustomerPanel()}
               </div>
             </section>
+            ${this._renderCardWait()}
             ${this._renderPaymentPanel(sale, hasLines, progress.payment, openKey === 'payment')}
             ${this._renderSummaryPanel(sale, progress.summary, openKey === 'summary')}
             ${completed && sale ? this._renderSaleComplete(sale) : nothing}

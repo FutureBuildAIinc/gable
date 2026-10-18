@@ -174,6 +174,17 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// context, so another branch's claim is a missing row.
 	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveMount(h.ResolveRefundIntent))
 
+	// The card terminal's intent routes (CP-05, IX-01): the desk's waiting
+	// state and its honest cancel behind the counter's own guard, and the
+	// sweep and the manager's lost answer queue behind the finance and owner
+	// resolution mount (a machine key is refused in the route itself),
+	// every one behind the branch middleware like every money route here.
+	mux.HandleFunc("GET /api/v1/pos/terminal-intents/{id}", guard(h.GetTerminalIntentHandler))
+	mux.HandleFunc("POST /api/v1/pos/terminal-intents/{id}/cancel", guard(h.CancelTerminalIntentHandler))
+	mux.HandleFunc("POST /api/v1/pos/terminal-intents/sweep", resolveMount(h.SweepTerminalIntentsHandler))
+	mux.HandleFunc("GET /api/v1/pos/terminal-lost-items", resolveMount(h.ListTerminalLostItemsHandler))
+	mux.HandleFunc("POST /api/v1/pos/terminal-lost-items/{id}/resolve", resolveMount(h.ResolveTerminalLostItemHandler))
+
 	// The payback of a declined void tender's credit (FROM-PRINCIPAL 60b):
 	// the same mount, the same roles and the same wall as the resolve route,
 	// a small sibling of it keyed on the void's own released claim.
