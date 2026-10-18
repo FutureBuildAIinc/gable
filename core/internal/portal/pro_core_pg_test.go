@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -36,13 +39,17 @@ type proFixture struct {
 	users                                 map[string]uuid.UUID // role -> user id (customer A)
 	aDraft, aConfirmed, aFulfilled, bOrder uuid.UUID
 	aInvoice, aQuote, aDelivery           uuid.UUID
+	product                               uuid.UUID
 	winCap1, winCutoff, winPickup         uuid.UUID
 	winDate                               string // a date >= 2 days out the windows run on
 }
 
 // muxFor builds the handler stack over the repository for one caller.
 func muxFor(repo *PostgresRepository, customerID, userID uuid.UUID, role string) *http.ServeMux {
-	svc := NewService(repo, testSecret, testLogger(), nil, nil, nil, nil, nil)
+	customerSvc := customer.NewService(customer.NewRepository(repo.db))
+	orderSvc := order.NewService(order.NewRepository(repo.db)).WithTxRunner(repo.db)
+	productSvc := product.NewService(product.NewRepository(repo.db))
+	svc := NewService(repo, testSecret, testLogger(), nil, customerSvc, nil, orderSvc, productSvc)
 	h := NewHandler(svc)
 	mux := http.NewServeMux()
 	authMw := func(next http.Handler) http.Handler {
@@ -87,6 +94,7 @@ func setupPro(t *testing.T) *proFixture {
 		aYard:      uuid.New(), bYard: uuid.New(),
 		aDraft:     uuid.New(), aConfirmed: uuid.New(), aFulfilled: uuid.New(), bOrder: uuid.New(),
 		aInvoice:   uuid.New(), aQuote: uuid.New(), aDelivery: uuid.New(),
+		product:    uuid.New(),
 	}
 
 	exec := func(sql string, args ...any) {
@@ -102,9 +110,12 @@ func setupPro(t *testing.T) *proFixture {
 		t.Fatalf("default branch: %v", err)
 	}
 
-	exec(`INSERT INTO locations (id, type, code, name, timezone) VALUES
-		($1, 'BRANCH', 'PROA', 'Pro Yard A', 'America/Vancouver'),
-		($2, 'BRANCH', 'PROB', 'Pro Yard B', 'America/Vancouver')`, f.aYard, f.bYard)
+	exec(`INSERT INTO products (id, sku, description, uom_primary, base_price)
+		VALUES ($1, $2, 'Pro fixture board', 'EA', 25.00)`, f.product, "PRO-"+f.product.String()[:8])
+
+	exec(`INSERT INTO locations (id, type, code, name, timezone, default_tax_rate) VALUES
+		($1, 'BRANCH', 'PROA', 'Pro Yard A', 'America/Vancouver', 0.0825),
+		($2, 'BRANCH', 'PROB', 'Pro Yard B', 'America/Vancouver', 0.0825)`, f.aYard, f.bYard)
 	for _, c := range []struct {
 		id, yard uuid.UUID
 		name     string
@@ -171,11 +182,15 @@ func setupPro(t *testing.T) *proFixture {
 		for _, stmt := range []func() (string, any){
 			func() (string, any) { return `DELETE FROM portal_schedule_holds WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM yard_schedule_windows WHERE yard_id = ANY($1)`, bothYards },
-			func() (string, any) { return `DELETE FROM deliveries WHERE order_id = ANY($1)`, []uuid.UUID{f.aDraft, f.aConfirmed, f.aFulfilled, f.bOrder} },
+			func() (string, any) { return `DELETE FROM deliveries WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both },
 			func() (string, any) { return `DELETE FROM delivery_routes WHERE id = ANY($1)`, []uuid.UUID{routeDone, routeToday} },
 			func() (string, any) { return `DELETE FROM invoices WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM quotes WHERE customer_id = ANY($1)`, both },
+			func() (string, any) { return `DELETE FROM portal_cart_items WHERE cart_id IN (SELECT id FROM portal_carts WHERE customer_id = ANY($1))`, both },
+			func() (string, any) { return `DELETE FROM portal_carts WHERE customer_id = ANY($1)`, both },
+			func() (string, any) { return `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = ANY($1))`, both },
 			func() (string, any) { return `DELETE FROM orders WHERE customer_id = ANY($1)`, both },
+			func() (string, any) { return `DELETE FROM products WHERE id = $1`, f.product },
 			func() (string, any) { return `DELETE FROM customer_users WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM customer_branches WHERE customer_id = ANY($1)`, both },
 			func() (string, any) { return `DELETE FROM customers WHERE id = ANY($1)`, both },
@@ -563,6 +578,169 @@ func TestSchedule_CutoffRefusal(t *testing.T) {
 	errObj, _ := body["error"].(map[string]any)
 	if errObj == nil || errObj["code"] != "SCHEDULE_CUTOFF_PASSED" {
 		t.Errorf("refusal code = %v, want SCHEDULE_CUTOFF_PASSED", body)
+	}
+}
+
+// Checkout with a schedule hold creates the order and attaches the hold in one
+// transaction (a failure leaves neither), and ChangeScheduleHold neither
+// releases the existing hold before the new one is secured nor re-applies the
+// booking cutoff to an unchanged window.
+func TestCheckout_WithScheduleHoldAndChangeCutoff(t *testing.T) {
+	f := setupPro(t)
+	repo := NewRepository(f.db)
+	mux := muxFor(repo, f.aCustomer, f.users[RoleOwner], RoleOwner)
+	ctx := context.Background()
+
+	// 1. ChangeScheduleHold on an unchanged window after the booking cutoff
+	// has passed does not refuse the hold or release it before securing the slot.
+	rec, holdBody := call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winPickup, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("initial hold answered %d: %s", rec.Code, rec.Body.String())
+	}
+	holdID, _ := holdBody["id"].(string)
+
+	// Advance cutoff_minutes on winPickup so the booking cutoff is now in the past.
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE yard_schedule_windows SET cutoff_minutes = 1000000 WHERE id = $1`, f.winPickup); err != nil {
+		t.Fatalf("update cutoff: %v", err)
+	}
+	// Changing the hold with the same window_id and date (attaching to aDraft)
+	// must succeed without re-applying the booking cutoff.
+	rec, _ = call(mux, "PUT", "/api/portal/v1/schedule/holds/"+holdID, fmt.Sprintf(
+		`{"window_id":"%s","date":"%s","order_id":"%s"}`, f.winPickup, f.winDate, f.aDraft), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ChangeScheduleHold on unchanged window after cutoff answered %d: %s", rec.Code, rec.Body.String())
+	}
+	// Reset cutoff_minutes on winPickup for the next sub-cases.
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE yard_schedule_windows SET cutoff_minutes = 0 WHERE id = $1`, f.winPickup); err != nil {
+		t.Fatalf("reset cutoff: %v", err)
+	}
+
+	// 2. Checkout with a schedule_hold_id whose window cutoff crossed after the
+	// hold was placed still succeeds, attaches the hold, and stamps the order.
+	rec, chkHoldBody := call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winPickup, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("checkout hold answered %d: %s", rec.Code, rec.Body.String())
+	}
+	chkHoldID, _ := chkHoldBody["id"].(string)
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE yard_schedule_windows SET cutoff_minutes = 1000000 WHERE id = $1`, f.winPickup); err != nil {
+		t.Fatalf("advance cutoff for checkout: %v", err)
+	}
+	rec, _ = call(mux, "POST", "/api/portal/v1/cart/items", fmt.Sprintf(
+		`{"product_id":"%s","quantity":2}`, f.product), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add to cart answered %d: %s", rec.Code, rec.Body.String())
+	}
+	rec, chkBody := call(mux, "POST", "/api/portal/v1/checkout", fmt.Sprintf(
+		`{"delivery_method":"PICKUP","schedule_hold_id":"%s"}`, chkHoldID), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("checkout with held slot after cutoff answered %d: %s", rec.Code, rec.Body.String())
+	}
+	newOrderIDStr, _ := chkBody["order_id"].(string)
+	var attachedOrderID *uuid.UUID
+	var schedDate *string
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT order_id FROM portal_schedule_holds WHERE id = $1`, chkHoldID).Scan(&attachedOrderID); err != nil {
+		t.Fatalf("query attached hold: %v", err)
+	}
+	if attachedOrderID == nil || attachedOrderID.String() != newOrderIDStr {
+		t.Errorf("hold order_id = %v, want %s", attachedOrderID, newOrderIDStr)
+	}
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT scheduled_delivery_date::text FROM orders WHERE id = $1`, newOrderIDStr).Scan(&schedDate); err != nil {
+		t.Fatalf("query order scheduled_delivery_date: %v", err)
+	}
+	if schedDate == nil || *schedDate != f.winDate {
+		t.Errorf("order scheduled_delivery_date = %v, want %s", schedDate, f.winDate)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE yard_schedule_windows SET cutoff_minutes = 0 WHERE id = $1`, f.winPickup); err != nil {
+		t.Fatalf("reset cutoff: %v", err)
+	}
+
+	// 3. Checkout creates the order and attaches the hold in one transaction:
+	// when attaching the hold fails after order creation, neither an orphaned
+	// order nor a modified hold is left behind.
+	rec, failHoldBody := call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winPickup, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("fail hold answered %d: %s", rec.Code, rec.Body.String())
+	}
+	failHoldID, _ := failHoldBody["id"].(string)
+	rec, _ = call(mux, "POST", "/api/portal/v1/cart/items", fmt.Sprintf(
+		`{"product_id":"%s","quantity":1}`, f.product), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add to cart answered %d: %s", rec.Code, rec.Body.String())
+	}
+	var ordersBefore int
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM orders WHERE customer_id = $1`, f.aCustomer).Scan(&ordersBefore); err != nil {
+		t.Fatalf("count orders before: %v", err)
+	}
+	constraintName := "chk_test_p1_3_attach_" + strings.ReplaceAll(failHoldID[:8], "-", "")
+	if _, err := f.db.Pool.Exec(ctx, fmt.Sprintf(
+		`ALTER TABLE portal_schedule_holds ADD CONSTRAINT %s CHECK (id <> '%s' OR order_id IS NULL) NOT VALID`,
+		constraintName, failHoldID,
+	)); err != nil {
+		t.Fatalf("add attach constraint: %v", err)
+	}
+	rec, _ = call(mux, "POST", "/api/portal/v1/checkout", fmt.Sprintf(
+		`{"delivery_method":"PICKUP","schedule_hold_id":"%s"}`, failHoldID), nil)
+	_, _ = f.db.Pool.Exec(ctx, fmt.Sprintf(`ALTER TABLE portal_schedule_holds DROP CONSTRAINT IF EXISTS %s`, constraintName))
+	if rec.Code == http.StatusCreated || rec.Code == http.StatusOK {
+		t.Fatalf("checkout with failing hold attachment answered %d, want error", rec.Code)
+	}
+	var ordersAfter int
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM orders WHERE customer_id = $1`, f.aCustomer).Scan(&ordersAfter); err != nil {
+		t.Fatalf("count orders after: %v", err)
+	}
+	if ordersAfter != ordersBefore {
+		t.Errorf("orders count after failed checkout = %d, want %d (no orphaned order)", ordersAfter, ordersBefore)
+	}
+
+	// 4. Three concurrent contenders on a pool of four connections racing
+	// Checkout with the same unattached hold: exactly one wins and creates
+	// one order; the other two fail cleanly without leaving orphaned orders.
+	db4 := testutil.RequireDBMaxConns(t, 4)
+	repo4 := NewRepository(db4)
+	const chkContenders = 3
+	chkCodes := make(chan int, chkContenders)
+	chkStart := make(chan struct{})
+	var chkWG sync.WaitGroup
+	for i := 0; i < chkContenders; i++ {
+		chkWG.Add(1)
+		go func() {
+			defer chkWG.Done()
+			m := muxFor(repo4, f.aCustomer, f.users[RoleOwner], RoleOwner)
+			<-chkStart
+			r, _ := call(m, "POST", "/api/portal/v1/checkout", fmt.Sprintf(
+				`{"delivery_method":"PICKUP","schedule_hold_id":"%s"}`, failHoldID), nil)
+			chkCodes <- r.Code
+		}()
+	}
+	close(chkStart)
+	chkWG.Wait()
+	close(chkCodes)
+	chkWon := 0
+	for c := range chkCodes {
+		if c == http.StatusCreated {
+			chkWon++
+		}
+	}
+	if chkWon != 1 {
+		t.Errorf("concurrent checkout with same hold settled %d winners, want 1", chkWon)
+	}
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM orders WHERE customer_id = $1`, f.aCustomer).Scan(&ordersAfter); err != nil {
+		t.Fatalf("count orders after race: %v", err)
+	}
+	if ordersAfter != ordersBefore+1 {
+		t.Errorf("orders count after checkout race = %d, want %d (exactly 1 order created)", ordersAfter, ordersBefore+1)
 	}
 }
 

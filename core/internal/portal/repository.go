@@ -99,9 +99,11 @@ type Repository interface {
 	TodayOpenOrdersCount(ctx context.Context, customerID uuid.UUID) (int, error)
 	ReadOrderDeliveryState(ctx context.Context, orderID, customerID uuid.UUID) (*orderDeliveryState, error)
 	SetOrderSiteInstructions(ctx context.Context, orderID, customerID uuid.UUID, instructions string) error
+	InTx(ctx context.Context, fn func(context.Context) error) error
 	ListScheduleWindows(ctx context.Context, customerID, yardID uuid.UUID, kind, from, to string) ([]ScheduleWindowView, error)
 	CreateScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
 	ChangeScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, holdID uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
+	AttachScheduleHoldToOrder(ctx context.Context, customerID, holdID, orderID uuid.UUID) error
 	ReleaseScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) error
 	GetScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) (*ScheduleHoldDTO, error)
 }

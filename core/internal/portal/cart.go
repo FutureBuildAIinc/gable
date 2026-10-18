@@ -169,21 +169,25 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 	// The portal is a trusted in process caller naming the customer's own
 	// branch; it carries no branch context of its own, so the payload branch
 	// rule (ADR 0007 2.3) would refuse it. The customer scoping is the
-	// portal's own wall.
-	newOrder, err := s.orderSvc.Create(branchctx.WithSystem(ctx), draft, "portal:customer:"+customerID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create order: %w", err)
-	}
-
-	if heldWindow != nil {
-		orderID := newOrder.ID
-		if _, hErr := s.repo.ChangeScheduleHold(ctx, customerID, nil, heldWindow.ID, ScheduleWindowRequest{
-			WindowID: heldWindow.WindowID,
-			Date:     heldWindow.Date,
-			OrderID:  &orderID,
-		}); hErr != nil {
-			return nil, fmt.Errorf("failed to attach schedule hold to order: %w", hErr)
+	// portal's own wall. When checkout carries a schedule hold, creating the
+	// order and attaching the hold run inside one transaction so a failure
+	// leaves neither.
+	var newOrder *order.Order
+	err = s.repo.InTx(ctx, func(txCtx context.Context) error {
+		ord, cErr := s.orderSvc.Create(branchctx.WithSystem(txCtx), draft, "portal:customer:"+customerID.String())
+		if cErr != nil {
+			return fmt.Errorf("failed to create order: %w", cErr)
 		}
+		if heldWindow != nil {
+			if hErr := s.repo.AttachScheduleHoldToOrder(txCtx, customerID, heldWindow.ID, ord.ID); hErr != nil {
+				return hErr
+			}
+		}
+		newOrder = ord
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// The project association is written after the order exists rather than
