@@ -133,6 +133,7 @@ describe('the card the terminal still holds', () => {
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(q(el, 'pos-card-wait-title').textContent).toBe('The terminal did not answer');
+    expect(q(el, 'pos-card-wait-body').textContent).toContain('terminal was never reached');
     expect(q(el, 'pos-card-note').textContent).toContain('no money moved');
     el.remove();
   });
@@ -179,7 +180,7 @@ describe('the card the terminal still holds', () => {
     const el = await mount(sale());
     svc.completeSale.mockRejectedValue(new Error(
       `the terminal has the card leg and has not answered (intent ${INTENT_ID}): the sale is not completed`));
-    svc.getTerminalIntent.mockResolvedValue(intent('lost'));
+    svc.getTerminalIntent.mockResolvedValue({ ...intent('lost'), provider_ref: 'devref-1' });
     await payByCard(el);
 
     expect(q(el, 'pos-card-wait-title').textContent).toBe('The terminal did not answer');

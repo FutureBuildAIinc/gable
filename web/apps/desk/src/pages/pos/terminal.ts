@@ -27,12 +27,15 @@ export function cardWaitWords(intent: TerminalIntent): { title: string; body: st
         case 'claimed':
             return { title: 'Card at the terminal', body: 'The card is being read. Wait for the terminal to answer.' };
         case 'pending_at_device':
-            return { title: 'Card at the terminal', body: 'The terminal has the card and has not answered yet. The sale completes when it does.' };
+            return { title: 'Card at the terminal', body: 'The terminal has the card and has not answered yet. Pay again once the terminal answers.' };
         case 'authorized':
             return { title: 'Card approved', body: 'The terminal approved the card after the wait ran out. Pay again with the same card tender: the approved card is used and is not charged twice.' };
         case 'declined':
             return { title: 'Card declined', body: CARD_DECLINED_WORDS };
         case 'lost':
+            if (intent.provider_ref === '') {
+                return { title: 'The terminal did not answer', body: 'The terminal was never reached for this card, so no money moved. Pay again to charge the card.' };
+            }
             return { title: 'The terminal did not answer', body: 'The terminal never answered for this card. A manager settles it from the lost card answers, reading the terminal\'s own record.' };
     }
 }

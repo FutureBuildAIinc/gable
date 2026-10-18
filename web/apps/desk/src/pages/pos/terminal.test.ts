@@ -31,6 +31,7 @@ describe('the card leg\'s outcomes in words', () => {
       expect(words.title).toBe('Card at the terminal');
       expect(words.body).not.toContain('$');
     }
+    expect(cardWaitWords(intent('pending_at_device')).body).toContain('Pay again once the terminal answers');
   });
 
   it('says the approval, the decline and the no answer in words', () => {
@@ -43,7 +44,11 @@ describe('the card leg\'s outcomes in words', () => {
     expect(declined.title).toBe('Card declined');
     expect(declined.body).toBe(CARD_DECLINED_WORDS);
     expect(CARD_DECLINED_WORDS).toContain('The sale is still open');
-    const lost = cardWaitWords(intent('lost'));
+    const unreached = cardWaitWords(intent('lost'));
+    expect(unreached.title).toBe('The terminal did not answer');
+    expect(unreached.body).toContain('terminal was never reached');
+    expect(unreached.body).not.toContain('manager');
+    const lost = cardWaitWords({ ...intent('lost'), provider_ref: 'devref-1' });
     expect(lost.title).toBe('The terminal did not answer');
     expect(lost.body).toContain('manager');
   });
