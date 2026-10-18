@@ -246,6 +246,11 @@ func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
 		if strings.HasPrefix(scope, "dealer-profile:") || strings.HasPrefix(scope, "email-deliveries:") {
 			continue
 		}
+		// The scheduling module (the pro portal's windows) joined the Go
+		// grammar after migration 103 froze, same as the two above.
+		if strings.HasPrefix(scope, "scheduling:") {
+			continue
+		}
 		scopes = append(scopes, scope)
 	}
 	sort.Strings(scopes)

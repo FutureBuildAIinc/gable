@@ -95,6 +95,12 @@ type PortalOrderDTO struct {
 	// returns only what has moved since, and it advances on every ERP status
 	// write (order.UpdateStatus sets updated_at = NOW()).
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// SiteDeliveryInstructions and ScheduleHold are the contractor's site
+	// instructions and active window hold (M35 Part 4). Omitted when absent so
+	// orders without instructions or a hold keep their existing wire shape.
+	SiteDeliveryInstructions *string          `json:"site_delivery_instructions,omitempty"`
+	ScheduleHold             *ScheduleHoldDTO `json:"schedule_hold,omitempty"`
 }
 
 // OrderListFilter narrows GET /api/portal/v1/orders. Both fields are optional;
@@ -138,19 +144,24 @@ type PortalLineDTO struct {
 // PortalInvoiceDTO is a customer-facing invoice summary.
 // TODO: align with int64 cents — TotalAmount, Subtotal, TaxAmount are float64 dollars
 type PortalInvoiceDTO struct {
-	ID           uuid.UUID       `json:"id"`
-	Number       string          `json:"number"`
-	IsOverdue    bool            `json:"is_overdue"`
-	OrderID      uuid.UUID       `json:"order_id"`
-	Status       string          `json:"status"`
-	TotalAmount  float64         `json:"total_amount"`
-	Subtotal     float64         `json:"subtotal"`
-	TaxAmount    float64         `json:"tax_amount"`
-	PaymentTerms string          `json:"payment_terms"`
-	DueDate      *time.Time      `json:"due_date"`
-	PaidAt       *time.Time      `json:"paid_at"`
-	CreatedAt    time.Time       `json:"created_at"`
-	Lines        []PortalLineDTO `json:"lines"`
+	ID           uuid.UUID  `json:"id"`
+	Number       string     `json:"number"`
+	IsOverdue    bool       `json:"is_overdue"`
+	OrderID      uuid.UUID  `json:"order_id"`
+	Status       string     `json:"status"`
+	TotalAmount  float64    `json:"total_amount"`
+	Subtotal     float64    `json:"subtotal"`
+	TaxAmount    float64    `json:"tax_amount"`
+	PaymentTerms string     `json:"payment_terms"`
+	DueDate      *time.Time `json:"due_date"`
+	PaidAt       *time.Time `json:"paid_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+
+	// UpdatedAt is the invoice change feed's cursor (Part 7): the ERP stamps
+	// it on every status write, and GET /invoices?since=<it> returns what has
+	// moved since.
+	UpdatedAt time.Time       `json:"updated_at"`
+	Lines     []PortalLineDTO `json:"lines"`
 }
 
 // PortalDeliveryDTO is a customer-facing delivery with POD info and tracking.
@@ -169,11 +180,17 @@ type PortalDeliveryDTO struct {
 	VehicleName          *string    `json:"vehicle_name"`
 	VehiclePhotoURL      *string    `json:"vehicle_photo_url"`
 	ScheduledDate        *time.Time `json:"scheduled_date"`
+	ScheduledStart       *time.Time `json:"scheduled_start,omitempty"`
+	ScheduledEnd         *time.Time `json:"scheduled_end,omitempty"`
 	EstimatedArrival     *time.Time `json:"estimated_arrival"`
 	DeliveryAddress      *string    `json:"delivery_address"`
 	StopSequence         *int       `json:"stop_sequence"`
 	TotalStops           *int       `json:"total_stops"`
 	DeliveryInstructions *string    `json:"delivery_instructions"`
+
+	// UpdatedAt is the delivery change feed's cursor (Part 7), the same pair
+	// the order feed carries.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ReorderRequest tells which historical order to duplicate.
@@ -312,14 +329,15 @@ type UpdateCartItemRequest struct {
 
 // CheckoutRequest is the payload for placing an order from the cart.
 //
-// ProjectID is optional and additive; when supplied it must name a project
-// owned by the calling customer, or checkout is refused.
+// ProjectID and ScheduleHoldID are optional and additive; when supplied they
+// must name records owned by the calling customer, or checkout is refused.
 type CheckoutRequest struct {
 	DeliveryMethod  string     `json:"delivery_method"` // DELIVERY or PICKUP
 	DeliveryAddress string     `json:"delivery_address"`
 	PaymentMethod   string     `json:"payment_method"` // ACCOUNT or CARD
 	Notes           string     `json:"notes"`
 	ProjectID       *uuid.UUID `json:"project_id"`
+	ScheduleHoldID  *uuid.UUID `json:"schedule_hold_id,omitempty"`
 }
 
 // CheckoutResponse confirms a placed order.

@@ -36,8 +36,10 @@ type Repository interface {
 	GetOrderStatusForCustomer(ctx context.Context, orderID, customerID uuid.UUID) (string, error)
 	OrderDeliveryInMotion(ctx context.Context, orderID uuid.UUID) (bool, string, error)
 	ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error)
+	ListInvoicesByCustomerFiltered(ctx context.Context, customerID uuid.UUID, since *time.Time) ([]PortalInvoiceDTO, error)
 	GetInvoiceByIDAndCustomer(ctx context.Context, invoiceID, customerID uuid.UUID) (*PortalInvoiceDTO, error)
 	ListDeliveriesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalDeliveryDTO, error)
+	ListDeliveriesByCustomerFiltered(ctx context.Context, customerID uuid.UUID, since *time.Time) ([]PortalDeliveryDTO, error)
 	GetDeliveryByIDAndCustomer(ctx context.Context, deliveryID, customerID uuid.UUID) (*PortalDeliveryDTO, error)
 	CreateReorder(ctx context.Context, customerID, sourceOrderID uuid.UUID) (uuid.UUID, error)
 
@@ -69,6 +71,7 @@ type Repository interface {
 	LookupQuoteLineProduct(ctx context.Context, productID uuid.UUID) (sku, description, uom string, err error)
 	CreatePortalQuote(ctx context.Context, customerID uuid.UUID, hdr portalQuoteInsert, lines []portalQuoteLineInsert) (uuid.UUID, error)
 	ListPortalQuotes(ctx context.Context, customerID uuid.UUID) ([]PortalQuoteDTO, error)
+	ListPortalQuotesFiltered(ctx context.Context, customerID uuid.UUID, since *time.Time) ([]PortalQuoteDTO, error)
 	GetPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*PortalQuoteDTO, error)
 
 	// Delivery reschedule
@@ -76,6 +79,31 @@ type Repository interface {
 	CreateRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID, userID *uuid.UUID, requestedDate time.Time, reason string) (uuid.UUID, error)
 	GetRescheduleRequest(ctx context.Context, id, customerID uuid.UUID) (*DeliveryRescheduleDTO, error)
 	GetLatestRescheduleRequest(ctx context.Context, deliveryID, customerID uuid.UUID) (*DeliveryRescheduleDTO, error)
+
+	// The frame, the Today board, the timeline and scheduling (the pro
+	// portal's core): /me, /today, the order timeline with its site
+	// instructions, and the delivery windows and pickup slots with their
+	// holds. Every method is scoped by the customer the same way the reads
+	// above are.
+	GetCustomerUserByID(ctx context.Context, userID, customerID uuid.UUID) (*CustomerUser, error)
+	GetCustomerAccount(ctx context.Context, customerID uuid.UUID) (*PortalAccountDTO, error)
+	ListCustomerYards(ctx context.Context, customerID uuid.UUID) ([]PortalYardDTO, error)
+	TodayQuotes(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayQuoteRow, error)
+	TodayQuotesCount(ctx context.Context, customerID uuid.UUID) (int, error)
+	TodayDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, since *time.Time, limit int) ([]TodayDeliveryRow, error)
+	TodayDeliveriesCount(ctx context.Context, customerID uuid.UUID, pickup bool) (int, error)
+	NextDeliveries(ctx context.Context, customerID uuid.UUID, pickup bool, limit int) ([]TodayDeliveryRow, error)
+	TodayInvoices(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayInvoiceRow, error)
+	TodayInvoicesCount(ctx context.Context, customerID uuid.UUID) (int, error)
+	TodayOpenOrders(ctx context.Context, customerID uuid.UUID, since *time.Time, limit int) ([]TodayOrderRow, error)
+	TodayOpenOrdersCount(ctx context.Context, customerID uuid.UUID) (int, error)
+	ReadOrderDeliveryState(ctx context.Context, orderID, customerID uuid.UUID) (*orderDeliveryState, error)
+	SetOrderSiteInstructions(ctx context.Context, orderID, customerID uuid.UUID, instructions string) error
+	ListScheduleWindows(ctx context.Context, customerID, yardID uuid.UUID, kind, from, to string) ([]ScheduleWindowView, error)
+	CreateScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
+	ChangeScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, holdID uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error)
+	ReleaseScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) error
+	GetScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) (*ScheduleHoldDTO, error)
 }
 
 // PostgresRepository implements Repository against Postgres.
@@ -235,7 +263,7 @@ func (r *PostgresRepository) getOrderLines(ctx context.Context, orderID uuid.UUI
 func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderID, customerID uuid.UUID) (*PortalOrderDTO, error) {
 	query := `
 		SELECT o.id, o.status, o.total_amount::float8, o.created_at, o.updated_at,
-		       o.project_id, p.name
+		       o.project_id, p.name, NULLIF(o.site_delivery_instructions, '')
 		FROM orders o
 		LEFT JOIN projects p ON p.id = o.project_id
 		WHERE o.id = $1 AND o.customer_id = $2
@@ -243,7 +271,7 @@ func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderI
 	var o PortalOrderDTO
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, orderID, customerID).Scan(
 		&o.ID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
-		&o.ProjectID, &o.ProjectName,
+		&o.ProjectID, &o.ProjectName, &o.SiteDeliveryInstructions,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -257,44 +285,16 @@ func (r *PostgresRepository) GetOrderByIDAndCustomer(ctx context.Context, orderI
 		return nil, err
 	}
 	o.Lines = lines
+	if hold, err := r.activeHoldForOrder(ctx, customerID, orderID); err == nil {
+		o.ScheduleHold = hold
+	}
 	return &o, nil
 }
 
-// ListInvoicesByCustomer fetches invoices for a customer.
+// ListInvoicesByCustomer fetches invoices for a customer, delegating to the
+// one filtered query so list and feed can never disagree.
 func (r *PostgresRepository) ListInvoicesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalInvoiceDTO, error) {
-	query := `
-		SELECT i.id, i.order_id, i.status, i.total_amount, i.subtotal, i.tax_amount,
-		       (SELECT pt.code FROM payment_terms pt WHERE pt.id = i.payment_terms_id), i.due_date, i.paid_at, i.created_at,
-		       i.number, (i.status IN ('UNPAID', 'PARTIAL') AND i.due_date < CURRENT_DATE)
-		FROM invoices i
-		WHERE i.customer_id = $1
-		ORDER BY i.created_at DESC
-		LIMIT 50
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list invoices: %w", err)
-	}
-	defer rows.Close()
-
-	invoices := make([]PortalInvoiceDTO, 0)
-	for rows.Next() {
-		var inv PortalInvoiceDTO
-		if err := rows.Scan(
-			&inv.ID, &inv.OrderID, &inv.Status, &inv.TotalAmount,
-			&inv.Subtotal, &inv.TaxAmount, &inv.PaymentTerms,
-			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.Number, &inv.IsOverdue,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan invoice: %w", err)
-		}
-		inv.Lines = make([]PortalLineDTO, 0)
-		invoices = append(invoices, inv)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration error: %w", err)
-	}
-
-	return invoices, nil
+	return r.ListInvoicesByCustomerFiltered(ctx, customerID, nil)
 }
 
 // GetInvoiceByIDAndCustomer fetches a single invoice scoped to a customer.
@@ -350,55 +350,10 @@ func (r *PostgresRepository) GetInvoiceByIDAndCustomer(ctx context.Context, invo
 	return &inv, nil
 }
 
-// ListDeliveriesByCustomer fetches deliveries with POD info, driver, and vehicle for a customer.
+// ListDeliveriesByCustomer fetches deliveries for a customer, delegating to
+// the one filtered query so list and feed can never disagree.
 func (r *PostgresRepository) ListDeliveriesByCustomer(ctx context.Context, customerID uuid.UUID) ([]PortalDeliveryDTO, error) {
-	query := `
-		SELECT d.id, d.order_id, d.status, d.pod_proof_url, d.pod_signed_by, d.pod_timestamp,
-		       d.created_at, o.id::text,
-		       dr.name, dr.phone_number, dr.photo_url,
-		       v.name, v.photo_url,
-		       rt.scheduled_date, d.estimated_arrival,
-		       c.address,
-		       d.stop_sequence, d.delivery_instructions,
-		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id)
-		FROM deliveries d
-		JOIN orders o ON d.order_id = o.id
-		JOIN customers c ON o.customer_id = c.id
-		LEFT JOIN delivery_routes rt ON d.route_id = rt.id
-		LEFT JOIN drivers dr ON rt.driver_id = dr.id
-		LEFT JOIN vehicles v ON rt.vehicle_id = v.id
-		WHERE o.customer_id = $1
-		ORDER BY d.created_at DESC
-		LIMIT 50
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list deliveries: %w", err)
-	}
-	defer rows.Close()
-
-	deliveries := make([]PortalDeliveryDTO, 0)
-	for rows.Next() {
-		var d PortalDeliveryDTO
-		if err := rows.Scan(
-			&d.ID, &d.OrderID, &d.Status, &d.PODProofURL, &d.PODSignedBy,
-			&d.PODTimestamp, &d.CreatedAt, &d.OrderNumber,
-			&d.DriverName, &d.DriverPhone, &d.DriverPhotoURL,
-			&d.VehicleName, &d.VehiclePhotoURL,
-			&d.ScheduledDate, &d.EstimatedArrival,
-			&d.DeliveryAddress,
-			&d.StopSequence, &d.DeliveryInstructions,
-			&d.TotalStops,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan delivery: %w", err)
-		}
-		deliveries = append(deliveries, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration error: %w", err)
-	}
-
-	return deliveries, nil
+	return r.ListDeliveriesByCustomerFiltered(ctx, customerID, nil)
 }
 
 // GetDeliveryByIDAndCustomer fetches a single delivery scoped to a customer.
@@ -411,7 +366,8 @@ func (r *PostgresRepository) GetDeliveryByIDAndCustomer(ctx context.Context, del
 		       rt.scheduled_date, d.estimated_arrival,
 		       c.address,
 		       d.stop_sequence, d.delivery_instructions,
-		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id)
+		       (SELECT COUNT(*) FROM deliveries WHERE route_id = d.route_id),
+		       d.scheduled_start, d.scheduled_end
 		FROM deliveries d
 		JOIN orders o ON d.order_id = o.id
 		JOIN customers c ON o.customer_id = c.id
@@ -430,6 +386,7 @@ func (r *PostgresRepository) GetDeliveryByIDAndCustomer(ctx context.Context, del
 		&d.DeliveryAddress,
 		&d.StopSequence, &d.DeliveryInstructions,
 		&d.TotalStops,
+		&d.ScheduledStart, &d.ScheduledEnd,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

@@ -109,6 +109,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 	// Checkout endpoint (Sprint 27)
 	mux.Handle("POST /api/portal/v1/checkout", authMw(http.HandlerFunc(h.HandleCheckout)))
 
+	// The pro portal's core (M35): the frame's /me and /today reads, the
+	// order timeline and site instructions, and scheduling.
+	mux.Handle("GET /api/portal/v1/me", authMw(http.HandlerFunc(h.HandleMe)))
+	mux.Handle("GET /api/portal/v1/today", authMw(http.HandlerFunc(h.HandleToday)))
+	mux.Handle("GET /api/portal/v1/orders/{id}/timeline", authMw(http.HandlerFunc(h.HandleOrderTimeline)))
+	mux.Handle("PUT /api/portal/v1/orders/{id}/delivery-instructions", authMw(http.HandlerFunc(h.HandleSetDeliveryInstructions)))
+	mux.Handle("GET /api/portal/v1/schedule/windows", authMw(http.HandlerFunc(h.HandleListScheduleWindows)))
+	mux.Handle("POST /api/portal/v1/schedule/holds", authMw(http.HandlerFunc(h.HandleCreateScheduleHold)))
+	mux.Handle("GET /api/portal/v1/schedule/holds/{id}", authMw(http.HandlerFunc(h.HandleGetScheduleHold)))
+	mux.Handle("PUT /api/portal/v1/schedule/holds/{id}", authMw(http.HandlerFunc(h.HandleChangeScheduleHold)))
+	mux.Handle("DELETE /api/portal/v1/schedule/holds/{id}", authMw(http.HandlerFunc(h.HandleReleaseScheduleHold)))
+
 	// User Management endpoints (Sprint 34)
 	mux.Handle("GET /api/portal/v1/users", authMw(http.HandlerFunc(h.HandleListUsers)))
 	mux.Handle("GET /api/portal/v1/invites", authMw(http.HandlerFunc(h.HandleListInvites)))
@@ -177,8 +189,13 @@ func (h *Handler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
 	portalWriteJSON(w, cfg)
 }
 
-// HandleDashboard returns contractor dashboard data.
+// HandleDashboard returns contractor dashboard data. The dashboard is made
+// of money (balance, credit, past due), so it sits behind the see_money
+// capability.
 func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapSeeMoney) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	data, err := h.svc.GetDashboard(r.Context(), customerID)
 	if err != nil {
@@ -294,6 +311,9 @@ func (h *Handler) HandleGetOrder(w http.ResponseWriter, r *http.Request) {
 
 // HandleReorder creates a new draft order from a historical order.
 func (h *Handler) HandleReorder(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -312,19 +332,36 @@ func (h *Handler) HandleReorder(w http.ResponseWriter, r *http.Request) {
 	portalWriteJSONStatus(w, http.StatusCreated, resp)
 }
 
-// HandleListInvoices returns invoices for the customer.
+// HandleListInvoices returns invoices for the customer. The list is money,
+// so it sits behind the see_money capability, and it carries the change feed
+// pair (ETag, X-Portal-Latest-Change) so an offline cache can poll it cheaply.
 func (h *Handler) HandleListInvoices(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapSeeMoney) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
-	invoices, err := h.svc.ListInvoices(r.Context(), customerID)
+	var since *time.Time
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid since: expected an RFC3339 timestamp", http.StatusBadRequest, err)
+			return
+		}
+		since = &t
+	}
+	result, err := h.svc.ListInvoicesFiltered(r.Context(), customerID, since)
 	if err != nil {
 		portalWriteError(w, r, "Failed to load invoices", err, http.StatusInternalServerError)
 		return
 	}
-	portalWriteJSON(w, invoices)
+	writeFeedHeaders(w, r, result.ETag, result.LatestUpdatedAt, result.Rows)
 }
 
-// HandleGetInvoice returns a single invoice for the customer.
+// HandleGetInvoice returns a single invoice for the customer (see_money).
 func (h *Handler) HandleGetInvoice(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapSeeMoney) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	idStr := r.PathValue("id")
 	invoiceID, err := uuid.Parse(idStr)
@@ -341,15 +378,25 @@ func (h *Handler) HandleGetInvoice(w http.ResponseWriter, r *http.Request) {
 	portalWriteJSON(w, inv)
 }
 
-// HandleListDeliveries returns deliveries for the customer.
+// HandleListDeliveries returns deliveries for the customer, carrying the
+// change feed pair (ETag, X-Portal-Latest-Change).
 func (h *Handler) HandleListDeliveries(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
-	deliveries, err := h.svc.ListDeliveries(r.Context(), customerID)
+	var since *time.Time
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid since: expected an RFC3339 timestamp", http.StatusBadRequest, err)
+			return
+		}
+		since = &t
+	}
+	result, err := h.svc.ListDeliveriesFiltered(r.Context(), customerID, since)
 	if err != nil {
 		portalWriteError(w, r, "Failed to load deliveries", err, http.StatusInternalServerError)
 		return
 	}
-	portalWriteJSON(w, deliveries)
+	writeFeedHeaders(w, r, result.ETag, result.LatestUpdatedAt, result.Rows)
 }
 
 // HandleGetDelivery returns a single delivery for the customer.
@@ -376,6 +423,9 @@ func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {
 // 409 for a refusal the state machine or the dispatch board owns, 200 with the
 // previous status on success so a consumer can show what it changed from.
 func (h *Handler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -399,6 +449,9 @@ func (h *Handler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
 
 // HandleSetOrderProject attaches or detaches an order's project.
 func (h *Handler) HandleSetOrderProject(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -453,15 +506,25 @@ func (h *Handler) HandleVolumeBreaks(w http.ResponseWriter, r *http.Request) {
 
 // --- Quotes -------------------------------------------------------------
 
-// HandleListQuotes returns the customer's quotes.
+// HandleListQuotes returns the customer's quotes, carrying the change feed
+// pair (ETag, X-Portal-Latest-Change).
 func (h *Handler) HandleListQuotes(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
-	quotes, err := h.svc.ListQuotes(r.Context(), customerID)
+	var since *time.Time
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid since: expected an RFC3339 timestamp", http.StatusBadRequest, err)
+			return
+		}
+		since = &t
+	}
+	result, err := h.svc.ListQuotesFiltered(r.Context(), customerID, since)
 	if err != nil {
 		portalWriteError(w, r, "Failed to load quotes", err, http.StatusInternalServerError)
 		return
 	}
-	portalWriteJSON(w, quotes)
+	writeFeedHeaders(w, r, result.ETag, result.LatestUpdatedAt, result.Rows)
 }
 
 // HandleGetQuote returns one quote, scoped to the customer.
@@ -486,6 +549,9 @@ func (h *Handler) HandleGetQuote(w http.ResponseWriter, r *http.Request) {
 // Validation failures are 400, not 500: "a line with no product_id needs a
 // description" is the client's problem to fix and the message says which line.
 func (h *Handler) HandleCreateQuote(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapRequestQuotes) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -515,6 +581,9 @@ func (h *Handler) HandleDeclineQuote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) decideQuote(w http.ResponseWriter, r *http.Request, decide func(context.Context, uuid.UUID, uuid.UUID) (*PortalQuoteDTO, error)) {
+	if !requireCapability(w, r, CapApproveQuotes) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	quoteID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -538,6 +607,9 @@ func (h *Handler) decideQuote(w http.ResponseWriter, r *http.Request, decide fun
 // 202 Accepted, not 200 or 201: the ask is recorded, the schedule is NOT
 // changed, and the dispatcher decides. A 200 here would read as "done".
 func (h *Handler) HandleRequestReschedule(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapSchedule) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -616,14 +688,12 @@ func getPortalUserRole(r *http.Request) string {
 	return claims.Role
 }
 
-// requireAdmin checks that the caller has admin role and writes 403 if not.
-// Returns true if the caller is an admin.
+// requireAdmin guards the team management surface: the manage_team
+// capability, resolved from the role server side. The name stays because the
+// behaviour is the same one it always had (the account's owner manages its
+// people); the check is a capability, never a role string.
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if getPortalUserRole(r) != "Admin" {
-		httputil.RespondError(w, r, "Admin access required", http.StatusForbidden, nil)
-		return false
-	}
-	return true
+	return requireCapability(w, r, CapManageTeam)
 }
 
 // --- Catalog Handlers (Sprint 27) ---
@@ -680,6 +750,9 @@ func (h *Handler) HandleGetCart(w http.ResponseWriter, r *http.Request) {
 
 // HandleAddToCart adds an item to the customer's cart.
 func (h *Handler) HandleAddToCart(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -699,6 +772,9 @@ func (h *Handler) HandleAddToCart(w http.ResponseWriter, r *http.Request) {
 
 // HandleUpdateCartItem updates a cart item quantity.
 func (h *Handler) HandleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 	idStr := r.PathValue("id")
@@ -724,6 +800,9 @@ func (h *Handler) HandleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 
 // HandleRemoveCartItem removes an item from the cart.
 func (h *Handler) HandleRemoveCartItem(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	idStr := r.PathValue("id")
 	itemID, err := uuid.Parse(idStr)
@@ -742,6 +821,9 @@ func (h *Handler) HandleRemoveCartItem(w http.ResponseWriter, r *http.Request) {
 
 // HandleCheckout places an order from the current cart.
 func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
+	if !requireCapability(w, r, CapOrder) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
@@ -753,7 +835,7 @@ func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.Checkout(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, r, "Checkout failed", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Checkout failed", err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
 	portalWriteJSONStatus(w, http.StatusCreated, resp)

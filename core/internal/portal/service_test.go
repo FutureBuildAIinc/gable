@@ -68,7 +68,7 @@ func validClaims(customerID, userID uuid.UUID) PortalClaims {
 		CustomerUserID: userID,
 		Email:          "buyer@acme.example",
 		Name:           "Jo Buyer",
-		Role:           "Buyer",
+		Role:           RoleProjectManager,
 	}
 }
 
@@ -250,12 +250,12 @@ func TestInviteUser_RoleWhitelist(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: the three valid roles must pass validation. With a nil
+// CORRECTNESS: the five contractor roles must pass validation. With a nil
 // repository the call panics once it reaches persistence, which is exactly the
 // signal that validation let it through — so the test recovers and asserts that
 // it got that far.
 func TestInviteUser_ValidRolesPassValidation(t *testing.T) {
-	for _, role := range []string{"Admin", "Buyer", "View-Only"} {
+	for _, role := range PortalRoles() {
 		t.Run(role, func(t *testing.T) {
 			if !reachedPersistence(func() {
 				svc := newTokenService(testSecret)
@@ -273,7 +273,9 @@ func TestUpdateUserRoleAndStatus_Whitelists(t *testing.T) {
 	svc := newTokenService(testSecret)
 	ctx := context.Background()
 
-	for _, role := range []string{"admin", "Root", "", "Admin;--"} {
+	// The legacy trio and every malformed string are refused: the five
+	// contractor roles of migration 130 are the only vocabulary.
+	for _, role := range []string{"admin", "Root", "", "Admin;--", "Admin", "Buyer", "View-Only"} {
 		if err := svc.UpdateUserRole(ctx, uuid.New(), uuid.New(), role); err == nil {
 			t.Errorf("UpdateUserRole accepted %q", role)
 		}
@@ -284,7 +286,7 @@ func TestUpdateUserRoleAndStatus_Whitelists(t *testing.T) {
 		}
 	}
 
-	for _, role := range []string{"Admin", "Buyer", "View-Only"} {
+	for _, role := range PortalRoles() {
 		if !reachedPersistence(func() {
 			_ = svc.UpdateUserRole(ctx, uuid.New(), uuid.New(), role)
 		}) {
@@ -650,6 +652,15 @@ func TestRegisterRoutes_OnlyThreeRoutesArePublic(t *testing.T) {
 		{http.MethodPost, "/api/portal/v1/invites"},
 		{http.MethodPut, "/api/portal/v1/users/" + id + "/role"},
 		{http.MethodPut, "/api/portal/v1/users/" + id + "/status"},
+		{http.MethodGet, "/api/portal/v1/me"},
+		{http.MethodGet, "/api/portal/v1/today"},
+		{http.MethodGet, "/api/portal/v1/orders/" + id + "/timeline"},
+		{http.MethodPut, "/api/portal/v1/orders/" + id + "/delivery-instructions"},
+		{http.MethodGet, "/api/portal/v1/schedule/windows"},
+		{http.MethodPost, "/api/portal/v1/schedule/holds"},
+		{http.MethodGet, "/api/portal/v1/schedule/holds/" + id},
+		{http.MethodPut, "/api/portal/v1/schedule/holds/" + id},
+		{http.MethodDelete, "/api/portal/v1/schedule/holds/" + id},
 	}
 
 	for _, r := range protected {

@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// validTeamRole is the one gate an invite or a role change passes: one of the
+// five contractor roles (migration 130), whose capabilities the server
+// resolves. The legacy Admin/Buyer/View-Only spellings were mapped in place;
+// a token or client still carrying one is refused here, the same refusal the
+// old vocabulary gave an unknown string.
+
 // InviteUserRequest is the payload for inviting a new portal user.
 type InviteUserRequest struct {
 	Email string `json:"email"`
@@ -29,7 +35,7 @@ type UpdateUserStatusRequest struct {
 
 // InviteUser generates an invite token, saves it, and simulates sending an email.
 func (s *Service) InviteUser(ctx context.Context, customerID uuid.UUID, req InviteUserRequest) (*PortalInvite, error) {
-	if req.Role != "Admin" && req.Role != "Buyer" && req.Role != "View-Only" {
+	if !ValidPortalRole(req.Role) {
 		return nil, fmt.Errorf("invalid role")
 	}
 
@@ -65,7 +71,7 @@ func (s *Service) ListPortalInvites(ctx context.Context, customerID uuid.UUID) (
 
 // UpdateUserRole changes a user's role if the actor has permission.
 func (s *Service) UpdateUserRole(ctx context.Context, customerID, targetUserID uuid.UUID, role string) error {
-	if role != "Admin" && role != "Buyer" && role != "View-Only" {
+	if !ValidPortalRole(role) {
 		return fmt.Errorf("invalid role")
 	}
 	return s.repo.UpdateUserRole(ctx, targetUserID, customerID, role)

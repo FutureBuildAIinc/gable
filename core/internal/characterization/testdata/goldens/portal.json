@@ -52,7 +52,7 @@
           "email": "demo@tarnwick.example",
           "id": "<id-3>",
           "name": "Sam Tarnwick",
-          "role": "Admin",
+          "role": "owner",
           "status": "Active",
           "updated_at": "<ts+0d>"
         }
