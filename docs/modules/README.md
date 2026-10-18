@@ -62,6 +62,7 @@ The pages:
 | Documents, dealer profile and delivery record | [documents.md](documents.md) | The printed forms (invoice, pick ticket, statement, quote, purchase order) with the dealer's and the issuing yard's identity, the dealer profile and logo, the email routes and the record of every send. | M3. |
 | Notification (email sender) | [notification.md](notification.md) | The SMTP sender chosen by `SMTP_HOST`, the log sender it replaces, the environment settings and the local mail catcher. | M3. |
 | Delivery | [delivery.md](delivery.md) | The fleet, the day's routes, the stops and proof of delivery, the dispatch board, the delivered stop to fulfilment link. | C5-1d. |
+| Customer quotes | [customer-quotes.md](customer-quotes.md) | The contractor's quote to their own customer with a three tier markup, the capability link, the selections loop, the approval record and the two price walls. | M35 parts 9 and 10. |
 
 ## Conventions every page uses
 

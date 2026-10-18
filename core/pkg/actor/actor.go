@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 )
 
@@ -171,7 +172,7 @@ func respondHeaderRejected(w http.ResponseWriter, r *http.Request, header string
 		"header", header,
 		"status", http.StatusBadRequest,
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", httputil.SafePath(r.URL.Path),
 		"request_id", reqID,
 	)
 	w.Header().Set("Content-Type", "application/json")

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // Stable error codes (ADR 0001 §3). Clients branch on these, never on
@@ -240,7 +242,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error(e.Message,
 			"status", e.Status,
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", httputil.SafePath(r.URL.Path),
 			"request_id", requestID(w, r),
 		)
 	}
