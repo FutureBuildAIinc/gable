@@ -47,6 +47,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY web/nginx-headers.conf /etc/nginx/gable-headers.conf
+COPY web/nginx-headers-frameable.conf /etc/nginx/gable-headers-frameable.conf
 
 COPY --from=builder /app/web/apps/front-door/dist /usr/share/nginx/html/front-door
 COPY --from=builder /app/web/apps/desk/dist /usr/share/nginx/html/desk
