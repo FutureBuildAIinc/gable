@@ -106,13 +106,18 @@ export interface FramedWindow {
  * The framed decision for one window: the flag is present and valid, the page
  * sits inside another window, and that parent is at this page's own origin
  * (reading a cross origin parent's location throws, which reads as not framed).
+ * When the parent's path is readable it must be the shell's: another same
+ * origin page framing a flagged address is not the work shell.
  */
 export function readFramedByShell(win: FramedWindow): boolean {
   if (!framedFlagFromSearch(win.location.search)) return false;
   if (win.parent === (win as unknown)) return false;
   try {
-    const parent = win.parent as { location: { origin: string } };
-    return parent.location.origin === win.location.origin;
+    const parent = win.parent as { location: { origin: string; pathname?: string } };
+    if (parent.location.origin !== win.location.origin) return false;
+    const parentPath = parent.location.pathname;
+    if (typeof parentPath === 'string' && parentPath !== '/shell' && !parentPath.startsWith('/shell/')) return false;
+    return true;
   } catch {
     return false;
   }
@@ -141,6 +146,7 @@ export function chromeActionFrom(
   event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
   win: { readonly parent: unknown; readonly location: { readonly origin: string } },
 ): ChromeAction | null {
+  if (win.parent === (win as unknown)) return null;
   if (event.source === null || event.source !== win.parent) return null;
   if (event.origin !== win.location.origin) return null;
   const data = event.data;
@@ -273,6 +279,7 @@ export function frameActionFrom(
   event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
   win: { readonly parent: unknown; readonly location: { readonly origin: string } },
 ): string | null {
+  if (win.parent === (win as unknown)) return null;
   if (event.source === null || event.source !== win.parent) return null;
   if (event.origin !== win.location.origin) return null;
   return frameActionOf(event.data);
@@ -301,6 +308,7 @@ export function yardChangedFrom(
   event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
   win: { readonly parent: unknown; readonly location: { readonly origin: string } },
 ): string | null | undefined {
+  if (win.parent === (win as unknown)) return undefined;
   if (event.source === null || event.source !== win.parent) return undefined;
   if (event.origin !== win.location.origin) return undefined;
   return yardOf(event.data);
@@ -340,6 +348,7 @@ export function signOutRequestFrom(
   event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
   win: { readonly parent: unknown; readonly location: { readonly origin: string } },
 ): string | null {
+  if (win.parent === (win as unknown)) return null;
   if (event.source === null || event.source !== win.parent) return null;
   if (event.origin !== win.location.origin) return null;
   return nonceOf(event.data, SIGN_OUT_REQUEST_MESSAGE);

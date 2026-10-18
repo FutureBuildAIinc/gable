@@ -118,6 +118,21 @@ describe('gable-work-shell', () => {
     el.remove();
   });
 
+  it('a yard the person was not granted is refused before it is stored or announced', async () => {
+    const el = mountDesk();
+    (el as unknown as { _yards: { id: string; code: string; name: string }[] })._yards = [
+      { id: 'b-1', code: 'KEL-MAIN', name: 'Kelowna Main Yard' },
+    ];
+    await el.updateComplete;
+    el.dispatchEvent(new CustomEvent('gable-shell-yard', { detail: { branchId: 'b-9' }, bubbles: true }));
+    await el.updateComplete;
+    expect(window.localStorage.getItem('gable_current_branch_id')).toBeNull();
+    el.dispatchEvent(new CustomEvent('gable-shell-yard', { detail: { branchId: 'b-1' }, bubbles: true }));
+    await el.updateComplete;
+    expect(window.localStorage.getItem('gable_current_branch_id')).toBe('b-1');
+    el.remove();
+  });
+
   it('sign out with a frame that never answers times out: the shell clears its own custody and says so', async () => {
     vi.useFakeTimers();
     authCustody.signInWithToken(

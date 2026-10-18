@@ -6,20 +6,21 @@
 // desk, the desk hides its own header band (app-shell.ts reads
 // framedByShell()), tells the shell which chrome controls it can act on
 // (Theme), posts its title up on every route change, follows the shell's
-// yard picks, and runs its own sign out when the shell asks, answering with
-// the ask's nonce. Standalone, nothing here listens and the desk is exactly
-// as it was.
+// yard picks (a yard the person was not granted is refused), and runs its own
+// sign out when the shell asks, answering with the ask's nonce. Standalone,
+// nothing here listens and the desk is exactly as it was.
 
 import {
   announceChromeControls,
   announceChromeTitle,
   chromeActionFrom,
   frameActionFrom,
-  framedByShell,
   listenForHostSignOut,
   orphanedFrame,
+  readFramedByShell,
   toggleTheme,
   yardChangedFrom,
+  type FramedListenWindow,
 } from '@gable/design-system';
 import { authCustody } from '@gable/auth';
 import { router } from './router.ts';
@@ -71,14 +72,18 @@ export function orphanedAtBoot(): boolean {
   }
 }
 
-/** Boot the framed mode. Standalone this is a no-op: no listeners, no messages. */
-export function bootFramedMode(): void {
-  if (!framedByShell()) return;
+/**
+ * Boot the framed mode. Standalone this is a no-op: no listeners, no
+ * messages. The window is a parameter so the framed branch is testable; the
+ * app always passes the real one.
+ */
+export function bootFramedMode(win: FramedListenWindow = window): void {
+  if (!readFramedByShell(win)) return;
 
   // The shell's chrome controls the desk can act on: Theme. There is no
   // feedback surface in the desk, so none is announced.
   try {
-    announceChromeControls(window, ['theme']);
+    announceChromeControls(win, ['theme']);
   } catch {
     // no parent left to tell
   }
@@ -86,22 +91,28 @@ export function bootFramedMode(): void {
   // The chrome feed: the desk's title goes up on every route change.
   router.addEventListener('route-changed', (e) => {
     const match = (e as CustomEvent).detail;
-    const path = match?.route?.path ?? window.location.pathname;
+    const path = match?.route?.path ?? '/';
     try {
-      announceChromeTitle(window, { title: titleForPath(path), actions: [] });
+      announceChromeTitle(win, { title: titleForPath(path), actions: [] });
     } catch {
       // no parent left to tell
     }
   });
 
   // The shell's asks: chrome actions, yard picks, page actions, and the sign
-  // out handshake.
-  window.addEventListener('message', (event: MessageEvent) => {
-    const action = chromeActionFrom(event, window);
+  // out handshake. Every reader refuses a message whose source is not the
+  // parent (and a top level window outright).
+  win.addEventListener('message', (event: MessageEvent) => {
+    const action = chromeActionFrom(event, win);
     if (action === 'theme') toggleTheme();
-    const yard = yardChangedFrom(event, window);
-    if (yard !== undefined) branchContext.setCurrent(yard);
-    const frameAction = frameActionFrom(event, window);
+    const yard = yardChangedFrom(event, win);
+    if (yard !== undefined) {
+      // null is "all yards"; any other id must be one the person was granted.
+      if (yard === null || branchContext.branches.some((b) => b.id === yard)) {
+        branchContext.setCurrent(yard);
+      }
+    }
+    const frameAction = frameActionFrom(event, win);
     if (frameAction !== null) {
       window.dispatchEvent(new CustomEvent(FRAME_ACTION_EVENT, { detail: { id: frameAction } }));
     }
@@ -111,5 +122,5 @@ export function bootFramedMode(): void {
   // person stores are the desk's to end) and answers with the ask's nonce.
   listenForHostSignOut(() => {
     authCustody.signOut();
-  });
+  }, win);
 }

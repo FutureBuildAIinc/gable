@@ -78,6 +78,14 @@ describe('readFramedByShell', () => {
     expect(readFramedByShell(win)).toBe(true);
   });
 
+  it('is true when the parent is the shell path, false when the parent is another same origin page', () => {
+    const { win } = framedWindow();
+    const shellParent = { location: { origin: ORIGIN, pathname: '/shell/' }, postMessage: () => {} };
+    expect(readFramedByShell({ ...win, parent: shellParent })).toBe(true);
+    const otherParent = { location: { origin: ORIGIN, pathname: '/evil' }, postMessage: () => {} };
+    expect(readFramedByShell({ ...win, parent: otherParent })).toBe(false);
+  });
+
   it('is false at the top level even with the flag', () => {
     const win = {
       location: { search: `?${FRAMED_PARAM}=${FRAMED_BY_WORK_SHELL}`, origin: ORIGIN },
@@ -154,6 +162,28 @@ describe('chrome actions and controls', () => {
     expect(acceptChromeControls({ ...good, source: {} }, host)).toBeNull();
     expect(acceptChromeControls(good, { origin: ORIGIN, contentWindow: null })).toBeNull();
     expect(acceptChromeControls({ ...good, data: { type: CHROME_CONTROLS_MESSAGE, actions: 'theme' } }, host)).toBeNull();
+  });
+});
+
+describe('the frame boundary readers refuse a top level window', () => {
+  // window.parent === window at the top level, so a same window postMessage
+  // would satisfy source === parent: every frame side reader refuses it.
+  function topLevel() {
+    const win: { location: { origin: string; search: string }; parent: unknown } = {
+      location: { origin: ORIGIN, search: '' },
+      parent: undefined,
+    };
+    win.parent = win;
+    return win;
+  }
+
+  it('chromeActionFrom, frameActionFrom, yardChangedFrom and signOutRequestFrom answer null at the top level', () => {
+    const win = topLevel();
+    const fromSelf = { origin: ORIGIN, source: win };
+    expect(chromeActionFrom({ ...fromSelf, data: { type: CHROME_ACTION_MESSAGE, action: 'theme' } }, win)).toBeNull();
+    expect(frameActionFrom({ ...fromSelf, data: { type: FRAME_ACTION_MESSAGE, id: 'new' } }, win)).toBeNull();
+    expect(yardChangedFrom({ ...fromSelf, data: { type: YARD_CHANGED_MESSAGE, branchId: 'b-1' } }, win)).toBeUndefined();
+    expect(signOutRequestFrom({ ...fromSelf, data: { type: SIGN_OUT_REQUEST_MESSAGE, nonce: 'n-1' } }, win)).toBeNull();
   });
 });
 

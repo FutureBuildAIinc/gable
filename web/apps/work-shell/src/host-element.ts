@@ -232,6 +232,8 @@ export class GableWorkShell extends LitElement {
 
   private _onYard = (e: Event) => {
     const { branchId } = (e as CustomEvent<{ branchId: string | null }>).detail;
+    // null is "all yards"; any other id must be one the person was granted.
+    if (branchId !== null && !this._yards.some((y) => y.id === branchId)) return;
     this._currentYardId = branchId;
     storeYard(branchId);
     announceYardChanged(this._frameWindow(), window.location.origin, branchId);
