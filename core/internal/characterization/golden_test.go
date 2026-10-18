@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,11 @@ var (
 	reWholeDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	reKey       = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
 	rePDFDT     = regexp.MustCompile(`D:\d{14}Z?`)
+	// Word-formatted calendar dates as document.style.Date and style.Day
+	// print them across the supported locales: month-first (M D, Y) and
+	// day-first (D M Y, including padded days and Sept/June/July spellings).
+	reWordDateMonthFirst = regexp.MustCompile(`\b(Jan|Feb|Mar|Apr|May|June|Jun|July|Jul|Aug|Sept|Sep|Oct|Nov|Dec) ([12]\d|3[01]|[1-9]), (\d{4})\b`)
+	reWordDateDayFirst   = regexp.MustCompile(`\b([12]\d|3[01]|0?[1-9]) (Jan|Feb|Mar|Apr|May|June|Jun|July|Jul|Aug|Sept|Sep|Oct|Nov|Dec) (\d{4})\b`)
 )
 
 // volatileNumberFields are response fields whose numeric values measure the
@@ -197,7 +203,59 @@ func (n *normaliser) string(s string) string {
 	s = reTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
 	s = rePgTS.ReplaceAllStringFunc(s, n.tsPlaceholder)
 	s = reDate.ReplaceAllStringFunc(s, n.dayOffset)
+	s = reWordDateMonthFirst.ReplaceAllStringFunc(s, n.wordMonthFirstOffset)
+	s = reWordDateDayFirst.ReplaceAllStringFunc(s, n.wordDayFirstOffset)
 	return s
+}
+
+var wordMonthNumber = map[string]string{
+	"Jan":  "01",
+	"Feb":  "02",
+	"Mar":  "03",
+	"Apr":  "04",
+	"May":  "05",
+	"Jun":  "06",
+	"June": "06",
+	"Jul":  "07",
+	"July": "07",
+	"Aug":  "08",
+	"Sep":  "09",
+	"Sept": "09",
+	"Oct":  "10",
+	"Nov":  "11",
+	"Dec":  "12",
+}
+
+func (n *normaliser) wordMonthFirstOffset(m string) string {
+	sub := reWordDateMonthFirst.FindStringSubmatch(m)
+	if sub == nil {
+		return m
+	}
+	return n.wordPartsOffset(m, sub[3], sub[1], sub[2])
+}
+
+func (n *normaliser) wordDayFirstOffset(m string) string {
+	sub := reWordDateDayFirst.FindStringSubmatch(m)
+	if sub == nil {
+		return m
+	}
+	return n.wordPartsOffset(m, sub[3], sub[2], sub[1])
+}
+
+func (n *normaliser) wordPartsOffset(raw, year, monthWord, dayStr string) string {
+	mm, ok := wordMonthNumber[monthWord]
+	if !ok {
+		return raw
+	}
+	day, err := strconv.Atoi(dayStr)
+	if err != nil {
+		return raw
+	}
+	iso := fmt.Sprintf("%s-%s-%02d", year, mm, day)
+	if _, err := time.Parse(dayLayout, iso); err != nil {
+		return raw
+	}
+	return n.dayOffset(iso)
 }
 
 // tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the
