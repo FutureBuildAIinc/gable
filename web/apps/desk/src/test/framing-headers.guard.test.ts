@@ -68,12 +68,21 @@ describe('the framing headers guard', () => {
     const frameable = blocks.filter((b) => b.body.includes('gable-headers-frameable.conf'))
     expect(frameable.map((b) => b.header)).toEqual(['/'])
 
-    for (const path of ['= /', '/door/', '/shell/', '^~ /portal/']) {
+    for (const path of ['= /', '/door/', '/shell/', '^~ /portal/', '= /portal']) {
       const block = at(path)
       expect(block, `a location block for ${path}`).toBeDefined()
       expect(block?.body, `${path} includes the deny headers`).toContain('gable-headers.conf')
       expect(block?.body, `${path} is not frameable`).not.toContain('gable-headers-frameable.conf')
     }
+
+    // The portal blocks serve the desk's index.html IN PLACE: a bare
+    // `/index.html` last argument to try_files is an internal redirect, which
+    // re-matches the desk's catch all and would hand portal pages the
+    // frameable headers. The `=404` tail keeps the answer inside the block.
+    const portalPrefix = at('^~ /portal/')
+    expect(portalPrefix?.body).toContain('try_files $uri /index.html =404;')
+    const portalExact = at('= /portal')
+    expect(portalExact?.body).toContain('try_files /index.html =404;')
 
     // The desk's hashed assets ride the default deny headers too (framing a
     // script is meaningless, and the default must never silently widen).
