@@ -32,7 +32,7 @@ type ScheduleWindowView struct {
 	Date          string    `json:"date"` // YYYY-MM-DD, the yard's own day
 	StartUTC      time.Time `json:"start_utc"`
 	EndUTC        time.Time `json:"end_utc"`
-	StartLocal    string    `json:"start_local"` // HH:MM in the yard's zone
+	StartLocal    string    `json:"start_local"` // hh:mm in the yard's zone
 	EndLocal      string    `json:"end_local"`
 	Capacity      int       `json:"capacity"`
 	Remaining     int       `json:"remaining"`
@@ -280,7 +280,7 @@ func parseLocalDay(s string) (time.Time, error) {
 
 // windowBoundsInZone resolves a window's start and end on a calendar day,
 // interpreted in the yard's own zone, returned as UTC instants plus the local
-// HH:MM spellings for display.
+// hh:mm spellings for display.
 func windowBoundsInZone(w windowRow, day time.Time) (start, end time.Time, startLocal, endLocal string, err error) {
 	loc := loadYardLocation(w.yardTZ)
 	localDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)

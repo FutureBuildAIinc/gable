@@ -102,11 +102,11 @@ func (s *Service) validated(yardID uuid.UUID, kind string, weekday int, start, e
 	}
 	startT, err := time.Parse("15:04", start)
 	if err != nil {
-		return nil, fmt.Errorf("start_time must be HH:MM")
+		return nil, fmt.Errorf("start_time must be hh:mm")
 	}
 	endT, err := time.Parse("15:04", end)
 	if err != nil {
-		return nil, fmt.Errorf("end_time must be HH:MM")
+		return nil, fmt.Errorf("end_time must be hh:mm")
 	}
 	if !endT.After(startT) {
 		return nil, fmt.Errorf("end_time must be after start_time")

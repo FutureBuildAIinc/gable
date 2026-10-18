@@ -36,7 +36,7 @@ type Window struct {
 	YardTimezone  string    `json:"yard_timezone"`
 	Kind          string    `json:"kind"`
 	Weekday       int       `json:"weekday"`    // 0 Sunday .. 6 Saturday
-	StartTime     string    `json:"start_time"` // HH:MM, local to the yard
+	StartTime     string    `json:"start_time"` // hh:mm, local to the yard
 	EndTime       string    `json:"end_time"`
 	Capacity      int       `json:"capacity"`
 	CutoffMinutes int       `json:"cutoff_minutes"`
@@ -45,7 +45,7 @@ type Window struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// WindowRequest is the create and update payload. Times are HH:MM strings in
+// WindowRequest is the create and update payload. Times are hh:mm strings in
 // the yard's own zone; the API never exchanges a naive local timestamp for an
 // instant.
 type WindowRequest struct {

@@ -4779,7 +4779,7 @@ export interface paths {
         };
         /**
          * Open delivery windows and pickup slots at a yard
-         * @description The yard's active windows expanded over a date range into concrete slots with the places left (capacity minus the holds already placed). yard_id is required and must be one of the account's own yards (any other yard is a 404, never a 403); kind, from and to are optional (from defaults to today, to fourteen days out; the range is capped at 62 days). Every instant is UTC and each slot carries its local HH:MM spellings in the yard's own zone.
+         * @description The yard's active windows expanded over a date range into concrete slots with the places left (capacity minus the holds already placed). yard_id is required and must be one of the account's own yards (any other yard is a 404, never a 403); kind, from and to are optional (from defaults to today, to fourteen days out; the range is capped at 62 days). Every instant is UTC and each slot carries its local hh:mm spellings in the yard's own zone.
          */
         get: operations["portalListScheduleWindows"];
         put?: never;
@@ -7000,7 +7000,7 @@ export interface paths {
         put?: never;
         /**
          * Define a delivery window or pickup slot
-         * @description Creates one recurring weekly rule for a yard. The yard is held to the caller's branch wall (a caller held to branch A cannot define branch B's windows); an unknown yard and every validation failure (kind, weekday 0 to 6, HH:MM times with end after start, positive capacity, non negative cutoff) are 400s.
+         * @description Creates one recurring weekly rule for a yard. The yard is held to the caller's branch wall (a caller held to branch A cannot define branch B's windows); an unknown yard and every validation failure (kind, weekday 0 to 6, hh:mm times with end after start, positive capacity, non negative cutoff) are 400s.
          */
         post: operations["schedulingCreateWindow"];
         delete?: never;
@@ -12496,7 +12496,7 @@ export interface components {
             start_utc: string;
             /** Format: date-time */
             end_utc: string;
-            /** @description HH:MM in the yard's zone, for display. */
+            /** @description hh:mm in the yard's zone, for display. */
             start_local: string;
             end_local: string;
             capacity: number;
@@ -14889,9 +14889,9 @@ export interface components {
             kind: "delivery" | "pickup";
             /** @description 0 Sunday to 6 Saturday. */
             weekday: number;
-            /** @description HH:MM, the yard's local time of day. */
+            /** @description hh:mm, the yard's local time of day. */
             start_time: string;
-            /** @description HH:MM, the yard's local time of day. */
+            /** @description hh:mm, the yard's local time of day. */
             end_time: string;
             capacity: number;
             /** @description Holds stop this many minutes before the window starts. */
