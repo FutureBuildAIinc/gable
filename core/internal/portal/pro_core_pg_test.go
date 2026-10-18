@@ -678,6 +678,64 @@ func TestSchedule_CurrentDateInYardTimezone(t *testing.T) {
 	}
 }
 
+// Unattached checkout holds (order_id IS NULL) expire after the checkout hold
+// TTL and free their window capacity so abandoned checkouts do not permanently
+// consume slots.
+func TestSchedule_ExpiredUnattachedHoldFreesCapacity(t *testing.T) {
+	f := setupPro(t)
+	ctx := context.Background()
+	repo := NewRepository(f.db)
+	mux := muxFor(repo, f.aCustomer, f.users[RoleOwner], RoleOwner)
+
+	// Place an unattached checkout hold on winCap1 (capacity 1).
+	rec, holdBody := call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winCap1, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("initial checkout hold answered %d: %s", rec.Code, rec.Body.String())
+	}
+	staleHoldID, _ := holdBody["id"].(string)
+
+	// Age the unattached hold past the checkout hold TTL (31 minutes old).
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE portal_schedule_holds SET created_at = NOW() - interval '31 minutes' WHERE id = $1`, staleHoldID); err != nil {
+		t.Fatalf("age checkout hold: %v", err)
+	}
+
+	// Open windows list frees the capacity (remaining == 1).
+	rec, _ = call(mux, "GET", fmt.Sprintf(
+		"/api/portal/v1/schedule/windows?yard_id=%s&from=%s&to=%s", f.aYard, f.winDate, f.winDate), "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list windows answered %d: %s", rec.Code, rec.Body.String())
+	}
+	var views []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &views)
+	foundCap1 := false
+	for _, v := range views {
+		if v["window_id"] == f.winCap1.String() {
+			foundCap1 = true
+			if rem, _ := v["remaining"].(float64); rem != 1 {
+				t.Errorf("winCap1 remaining after stale checkout hold = %v, want 1", v["remaining"])
+			}
+		}
+	}
+	if !foundCap1 {
+		t.Fatalf("winCap1 missing from windows list")
+	}
+
+	// Reading the stale hold reports status = "expired".
+	rec, readBody := call(mux, "GET", "/api/portal/v1/schedule/holds/"+staleHoldID, "", nil)
+	if rec.Code != http.StatusOK || readBody["status"] != "expired" {
+		t.Errorf("stale hold status = %d / %v, want 200 / expired", rec.Code, readBody["status"])
+	}
+
+	// A new hold on winCap1 succeeds (201 Created).
+	rec, _ = call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winCap1, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("hold after stale hold expiry answered %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // Checkout with a schedule hold creates the order and attaches the hold in one
 // transaction (a failure leaves neither), and ChangeScheduleHold neither
 // releases the existing hold before the new one is secured nor re-applies the

@@ -109,15 +109,34 @@ func (r *PostgresRepository) InTx(ctx context.Context, fn func(context.Context) 
 	return r.db.RunInTx(ctx, fn)
 }
 
+// checkoutHoldTTL is the lifetime of an unattached checkout hold (order_id IS
+// NULL). Holds attached to an order stay held until released or fulfilled.
+const checkoutHoldTTL = 30 * time.Minute
+
+// expireStaleCheckoutHolds marks unattached checkout holds older than
+// checkoutHoldTTL as 'expired' so abandoned checkouts release their capacity.
+func expireStaleCheckoutHolds(ctx context.Context, exec database.Executor) error {
+	_, err := exec.Exec(ctx, `
+		UPDATE portal_schedule_holds
+		SET status = 'expired', updated_at = NOW()
+		WHERE status = 'held'
+		  AND order_id IS NULL
+		  AND created_at < NOW() - ($1::bigint * interval '1 second')
+	`, int64(checkoutHoldTTL/time.Second))
+	return err
+}
+
 // heldCount counts the holds already placed on one window and date, excluding
-// excludeHoldID when retargeting an existing hold in place. It takes the
-// executor the caller resolved: inside RunInTx that is the transaction, so the
-// count reads what the lock protects.
+// excludeHoldID when retargeting an existing hold in place and excluding stale
+// unattached checkout holds. It takes the executor the caller resolved: inside
+// RunInTx that is the transaction, so the count reads what the lock protects.
 func heldCount(ctx context.Context, exec database.Executor, windowID uuid.UUID, date string, excludeHoldID uuid.UUID) (int, error) {
 	var n int
-	err := exec.QueryRow(ctx,
-		`SELECT COUNT(*) FROM portal_schedule_holds WHERE window_id = $1 AND hold_date = $2 AND status = 'held' AND id <> $3`,
-		windowID, date, excludeHoldID).Scan(&n)
+	err := exec.QueryRow(ctx, `
+		SELECT COUNT(*) FROM portal_schedule_holds
+		WHERE window_id = $1 AND hold_date = $2 AND status = 'held' AND id <> $3
+		  AND (order_id IS NOT NULL OR created_at >= NOW() - ($4::bigint * interval '1 second'))
+	`, windowID, date, excludeHoldID, int64(checkoutHoldTTL/time.Second)).Scan(&n)
 	return n, err
 }
 
@@ -167,6 +186,9 @@ func (r *PostgresRepository) ListScheduleWindows(ctx context.Context, customerID
 	}
 	if !ok {
 		return nil, ErrYardNotFound
+	}
+	if err := expireStaleCheckoutHolds(ctx, r.db.GetExecutor(ctx)); err != nil {
+		return nil, fmt.Errorf("failed to expire stale checkout holds: %w", err)
 	}
 	today := yardLocalToday(yardTZ)
 	if strings.TrimSpace(from) == "" {
@@ -298,10 +320,14 @@ func (r *PostgresRepository) CreateScheduleHold(ctx context.Context, customerID 
 func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID uuid.UUID, userID *uuid.UUID, holdID uuid.UUID, req ScheduleWindowRequest) (*ScheduleHoldDTO, error) {
 	var out *ScheduleHoldDTO
 	err := r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		ex := r.db.GetExecutor(txCtx)
+		if err := expireStaleCheckoutHolds(txCtx, ex); err != nil {
+			return fmt.Errorf("failed to expire stale checkout holds: %w", err)
+		}
 		var existingWindowID uuid.UUID
 		var existingDate string
 		var orderLink *uuid.UUID
-		err := r.db.GetExecutor(txCtx).QueryRow(txCtx, `
+		err := ex.QueryRow(txCtx, `
 			SELECT window_id, hold_date::text, order_id FROM portal_schedule_holds
 			WHERE id = $1 AND customer_id = $2 AND status = 'held' FOR UPDATE
 		`, holdID, customerID).Scan(&existingWindowID, &existingDate, &orderLink)
@@ -336,6 +362,9 @@ func (r *PostgresRepository) ChangeScheduleHold(ctx context.Context, customerID 
 func (r *PostgresRepository) AttachScheduleHoldToOrder(ctx context.Context, customerID, holdID, orderID uuid.UUID) error {
 	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
 		ex := r.db.GetExecutor(txCtx)
+		if err := expireStaleCheckoutHolds(txCtx, ex); err != nil {
+			return fmt.Errorf("failed to expire stale checkout holds: %w", err)
+		}
 		var windowID uuid.UUID
 		var date, tz string
 		var startMin, endMin float64
@@ -417,10 +446,14 @@ func (r *PostgresRepository) ReleaseScheduleHold(ctx context.Context, customerID
 
 // GetScheduleHold reads one hold with its window facts, scoped to the customer.
 func (r *PostgresRepository) GetScheduleHold(ctx context.Context, customerID, holdID uuid.UUID) (*ScheduleHoldDTO, error) {
+	ex := r.db.GetExecutor(ctx)
+	if err := expireStaleCheckoutHolds(ctx, ex); err != nil {
+		return nil, fmt.Errorf("failed to expire stale checkout holds: %w", err)
+	}
 	var h ScheduleHoldDTO
 	var startMin, endMin float64
 	var date, tz string
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+	err := ex.QueryRow(ctx, `
 		SELECT h.id, h.window_id, w.yard_id, w.kind, h.hold_date::text,
 		       EXTRACT(EPOCH FROM w.start_time) / 60, EXTRACT(EPOCH FROM w.end_time) / 60,
 		       h.order_id, h.status, h.created_at, h.updated_at,
@@ -488,6 +521,9 @@ func (r *PostgresRepository) holdLocked(ctx context.Context, customerID uuid.UUI
 	`, windowID))
 	if err != nil {
 		return nil, ErrWindowNotFound
+	}
+	if err := expireStaleCheckoutHolds(ctx, ex); err != nil {
+		return nil, fmt.Errorf("failed to expire stale checkout holds: %w", err)
 	}
 
 	ok, err := r.yardBelongsToCustomer(ctx, w.yardID, customerID)
