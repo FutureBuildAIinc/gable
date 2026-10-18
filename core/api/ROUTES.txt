@@ -112,6 +112,10 @@ POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.Handl
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
 POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
+GET	/api/v1/auth/config	internal/signinmethods	h.GetConfig
+GET	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.GetAllowlist)
+PUT	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.PutAllowlist)
+POST	/api/v1/auth/start/{method}	internal/signinmethods	h.Start
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV

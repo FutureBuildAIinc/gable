@@ -29,12 +29,16 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
-  Building2, ClipboardList, CreditCard, FileText, Hammer, ScrollText, LayoutDashboard,
+  Building2, ClipboardList, CreditCard, FileText, Fingerprint, Hammer, Mail, ScrollText, LayoutDashboard,
   LayoutGrid, Package, Receipt, BookOpen, BarChart3, Settings, ShoppingBag,
-  Store, Tags, Truck, Users, Globe, Monitor,
+  Store, Tags, TriangleAlert, Truck, Users, Globe, Monitor,
 } from 'lucide';
-import { icon, cn, useThemeSubject } from '@gable/design-system';
-import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
+import { icon, cn, useThemeSubject, googleGlyph, microsoftGlyph } from '@gable/design-system';
+import {
+  authCustody, authConfig, InvalidTokenError,
+  authMethodsConfig, resetAuthMethodsCache, recordIdentity, readIdentity, forgetIdentity,
+  type AuthMethodsRuntimeConfig, type SignInMethodCode, type SignInMethodConfig, type TappedIdentity,
+} from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
 
@@ -74,6 +78,19 @@ function initialsFor(name: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+/** The error envelope's message off a refusal, when the body carries one. */
+async function serverMessage(resp: Response): Promise<string | null> {
+  const body = await resp.json().catch(() => null);
+  if (body !== null && typeof body === 'object' && 'error' in body) {
+    const err = (body as Record<string, unknown>)['error'];
+    if (err !== null && typeof err === 'object' && 'message' in err) {
+      const message = (err as Record<string, unknown>)['message'];
+      if (typeof message === 'string' && message !== '') return message;
+    }
+  }
+  return null;
+}
+
 @customElement('gable-front-door')
 export class GableFrontDoor extends LitElement {
   // Light DOM so the shared Tailwind tokens apply, exactly like the desk.
@@ -85,6 +102,13 @@ export class GableFrontDoor extends LitElement {
   @state() private _devName = 'Local Developer';
   @state() private _token = '';
   @state() private _signInError: string | null = null;
+  @state() private _errorSource: SignInMethodCode | 'continue-as' | 'token' | 'session' | null = null;
+  // The runtime auth methods config (S8): the dealer's allowed sign in
+  // methods, discovered from the server, in the server's order. Null until
+  // the answer arrives (or fails closed) in a production build.
+  @state() private _authCfg: AuthMethodsRuntimeConfig | null = null;
+  @state() private _email = '';
+  @state() private _password = '';
 
   connectedCallback() {
     super.connectedCallback();
@@ -95,6 +119,74 @@ export class GableFrontDoor extends LitElement {
       this._userName = authCustody.displayName;
       this._roles = authCustody.roles;
       void this._loadCatalog();
+    }
+    // A production build discovers the dealer's allowed sign in methods at
+    // boot; a dev build keeps its persona cards and never asks.
+    if (!authConfig.devMode) {
+      void this._loadAuthConfig();
+    }
+  }
+
+  private async _loadAuthConfig() {
+    this._authCfg = await authMethodsConfig(import.meta.env.VITE_API_URL || '');
+  }
+
+  private async _retryAuthConfig() {
+    resetAuthMethodsCache();
+    await this._loadAuthConfig();
+  }
+
+  /** One method's start attempt: the server's plain refusal shows inline. */
+  private async _startMethod(
+    method: SignInMethodConfig,
+    source: SignInMethodCode | 'continue-as' = method.method,
+  ) {
+    this._signInError = null;
+    this._errorSource = source;
+    if (method.start_url === null) {
+      this._signInError = 'This method cannot start here.';
+      return;
+    }
+    try {
+      const resp = await fetch(method.start_url, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      if (resp.ok) {
+        // No method answers a redirect yet; when one does, this is where
+        // the navigation happens.
+        return;
+      }
+      this._signInError = await serverMessage(resp) ?? 'Sign in did not start.';
+    } catch {
+      this._signInError = 'The server could not be reached.';
+    }
+  }
+
+  /** The email and password form: the portal login answers the session cookie. */
+  private async _signInEmailPassword() {
+    this._signInError = null;
+    this._errorSource = 'email_password';
+    if (this._email === '' || this._password === '') {
+      this._signInError = 'Enter your email and password.';
+      return;
+    }
+    try {
+      const resp = await fetch('/api/portal/v1/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: this._email, password: this._password }),
+      });
+      if (resp.ok) {
+        // The session rides the portal cookie; the portal is where this
+        // sign in continues.
+        window.location.assign('/portal');
+        return;
+      }
+      this._signInError = await serverMessage(resp) ?? 'Sign in failed.';
+    } catch {
+      this._signInError = 'The server could not be reached.';
     }
   }
 
@@ -108,6 +200,7 @@ export class GableFrontDoor extends LitElement {
       // retry could only 401 again, so go back to the sign in card.
       if (authCustody.session === null) {
         this._signOut();
+        this._errorSource = 'session';
         this._signInError = 'Your session expired. Sign in again.';
         return;
       }
@@ -117,6 +210,7 @@ export class GableFrontDoor extends LitElement {
 
   private _signIn() {
     this._signInError = null;
+    this._errorSource = 'token';
     try {
       if (authConfig.devMode) {
         authCustody.signInDev(this._devName);
@@ -133,6 +227,7 @@ export class GableFrontDoor extends LitElement {
     useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.roles;
+    this._tapIdentity();
     void this._loadCatalog();
   }
 
@@ -149,6 +244,7 @@ export class GableFrontDoor extends LitElement {
    */
   private _signInAsPersona(persona: DemoPersona) {
     this._signInError = null;
+    this._errorSource = null;
     try {
       authCustody.signInDev(persona.name, { role: persona.role, homeYardCode: persona.homeYardCode });
     } catch (err) {
@@ -158,13 +254,72 @@ export class GableFrontDoor extends LitElement {
     useThemeSubject(authCustody.subject);
     this._userName = authCustody.displayName;
     this._roles = authCustody.personaRole !== null ? [authCustody.personaRole] : [];
+    this._tapIdentity(persona.homeYardCode);
     void this._loadCatalog();
+  }
+
+  /** Remember the last signed in user's display block for the next visit. */
+  private _tapIdentity(yard: string | null = null, method: SignInMethodCode | null = null) {
+    const name = authCustody.displayName;
+    if (name === null) return;
+    const role = authCustody.personaRole ?? this._roles[0] ?? null;
+    recordIdentity(localStorage, { displayName: name, role, yard: yard ?? null, method });
+  }
+
+  private _methodLabelFor(code: SignInMethodCode): string {
+    const configured = this._authCfg?.methods.find((m) => m.method === code);
+    if (configured !== undefined) return configured.label;
+    switch (code) {
+      case 'email_password': return 'Email and password';
+      case 'passkey': return 'Passkey';
+      case 'magic_link': return 'Email a sign in link';
+      case 'google': return 'Google';
+      case 'microsoft': return 'Microsoft';
+      case 'oidc': return 'Single sign on';
+    }
+  }
+
+  private _focusFirstAllowedMethod() {
+    const first = this._authCfg?.methods[0];
+    if (first === undefined) return;
+    if (first.kind === 'form') {
+      this.querySelector<HTMLInputElement>('input[aria-label="Email"]')?.focus();
+      return;
+    }
+    this.querySelector<HTMLButtonElement>(`button[aria-label="Sign in with ${first.label}"]`)?.focus();
+  }
+
+  /**
+   * Clicking Continue as <name> starts the remembered method when it is still
+   * in the dealer's allowlist, or focuses the first allowed method when it is
+   * no longer allowed.
+   */
+  private _continueAs(last: TappedIdentity) {
+    const methods = this._authCfg?.methods ?? [];
+    const allowed = last.method !== undefined && last.method !== null
+      ? methods.find((m) => m.method === last.method)
+      : undefined;
+    if (allowed !== undefined) {
+      if (allowed.kind === 'form') {
+        if (this._email !== '' && this._password !== '') {
+          void this._signInEmailPassword();
+        } else {
+          this.querySelector<HTMLInputElement>('input[aria-label="Email"]')?.focus();
+        }
+        return;
+      }
+      void this._startMethod(allowed, 'continue-as');
+      return;
+    }
+    this._focusFirstAllowedMethod();
   }
 
   private _signOut() {
     authCustody.signOut();
+    forgetIdentity(localStorage);
     useThemeSubject(null);
     this._signInError = null;
+    this._errorSource = null;
     this._userName = null;
     this._roles = [];
     this._state = { kind: 'signed-out' };
@@ -202,12 +357,30 @@ export class GableFrontDoor extends LitElement {
     const headerRoleWords = personaRole !== null
       ? ROLE_WORDS[personaRole as keyof typeof ROLE_WORDS] ?? personaRole
       : null;
+    const dealerName = !authConfig.devMode ? (this._authCfg?.dealerName ?? null) : null;
+    const dealerMarkUrl = !authConfig.devMode ? (this._authCfg?.dealerMarkUrl ?? null) : null;
     return html`
-      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
-        <div class="flex items-center gap-3 justify-self-start">
-          <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
-          <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
-        </div>
+      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
+        ${dealerName !== null ? html`
+          <div class="flex items-center gap-2.5 min-w-0 shrink-0 justify-self-start">
+            ${dealerMarkUrl !== null
+              ? html`<img
+                  src=${dealerMarkUrl}
+                  alt=""
+                  class="h-8 w-8 rounded-lg object-contain bg-white/5 border border-white/5 shrink-0"
+                />`
+              : html`<span
+                  aria-hidden="true"
+                  class="h-8 w-8 rounded-lg bg-gable-green/10 border border-gable-green/30 flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0"
+                >${initialsFor(dealerName)}</span>`}
+            <span class="text-sm font-semibold text-white max-w-[200px] sm:max-w-[240px] truncate">${dealerName}</span>
+          </div>
+        ` : html`
+          <div class="flex items-center gap-3 justify-self-start">
+            <gable-brand-logo variant="mark" size="md" class-name="text-white drop-shadow-glow"></gable-brand-logo>
+            <span class="hidden md:block"><gable-brand-logo variant="text" size="md"></gable-brand-logo></span>
+          </div>
+        `}
         <div class="text-center text-sm font-medium tracking-wide text-zinc-400 truncate">
           ${this._headerWord}
         </div>
@@ -278,12 +451,16 @@ export class GableFrontDoor extends LitElement {
 
   private _renderSignIn() {
     // The heading and the card width differ between dev (the wide card and
-    // the tenant's name) and a production build (the base wrapper on
-    // refactor/v1, the plain product name). Every dealer's real door carries
-    // their own tenant name, so the production door must not render "Gable
-    // Building Supply".
+    // the demo tenant's name) and a production build, which leads with the
+    // dealer's own name from /api/v1/auth/config when one is configured and
+    // falls back to Gable's own lockup when none is set.
     const dev = authConfig.devMode;
-    const headingText = dev ? 'Sign in to Gable Building Supply' : 'Sign in to Gable';
+    const dealerName = !dev ? (this._authCfg?.dealerName ?? null) : null;
+    const headingText = dev
+      ? 'Sign in to Gable Building Supply'
+      : dealerName !== null
+        ? `Sign in to ${dealerName}`
+        : 'Sign in to Gable';
     const outerClasses = dev
       ? 'flex items-start justify-center py-12'
       : 'flex items-center justify-center py-16';
@@ -298,32 +475,218 @@ export class GableFrontDoor extends LitElement {
             <p class="text-sm text-zinc-400">
               ${dev
                 ? 'This is the local demo. Each card signs in as that person, shaping what the screens offer.'
-                : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
+                : this._signInSubtitle()}
             </p>
           </div>
-          ${dev ? this._renderPersonaCards() : html`
-            <label class="block space-y-1.5">
-              <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
-              <textarea
-                .value=${this._token}
-                @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
-                rows="4"
-                aria-label="Bearer token"
-                placeholder="eyJhbGciOi…"
-                class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
-              ></textarea>
-            </label>
-            ${this._signInError ? html`
-              <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
-            ` : nothing}
-            <button
-              @click=${() => this._signIn()}
-              class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
-            >
-              Sign in
-            </button>
-          `}
+          ${dev ? this._renderPersonaCards() : this._renderMethodsSignIn()}
         </div>
+      </div>
+    `;
+  }
+
+  /**
+   * The production sign in's word: the form leads ("your work account");
+   * with only redirect style methods on the card, the choice leads.
+   */
+  private _signInSubtitle(): string {
+    const cfg = this._authCfg;
+    if (cfg !== null && !cfg.degraded && !cfg.methods.some((m) => m.kind === 'form')) {
+      return 'Choose how you sign in.';
+    }
+    return 'Sign in with your work account.';
+  }
+
+  /**
+   * The production sign in: the dealer's allowed methods, in the server's
+   * order, discovered at runtime. The bearer token paste stays as the out of
+   * band path it always was, under its own disclosure.
+   */
+  private _renderMethodsSignIn() {
+    if (this._authCfg === null) {
+      return html`
+        <div class="flex items-center justify-center gap-3 py-8" role="status">
+          <div class="h-6 w-6 animate-spin rounded-full border-2 border-gable-green border-t-transparent"></div>
+          <span class="text-sm text-muted-foreground font-medium tracking-wide">Reading the sign in methods…</span>
+        </div>
+      `;
+    }
+    const last = readIdentity(localStorage);
+    const lastMethodLabel = last?.method !== undefined && last.method !== null
+      ? this._methodLabelFor(last.method)
+      : null;
+    return html`
+      ${this._authCfg.degraded && this._authCfg.notice ? html`
+        <div
+          role="alert"
+          class="rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2.5 flex items-start justify-between gap-2.5 text-sm text-amber-300"
+        >
+          <div class="flex items-start gap-2 min-w-0">
+            <span class="shrink-0 mt-0.5">${icon(TriangleAlert, 16)}</span>
+            <span>${this._authCfg.notice}</span>
+          </div>
+          <button
+            type="button"
+            @click=${() => void this._retryAuthConfig()}
+            class="shrink-0 rounded border border-amber-300/50 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-300/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ` : nothing}
+      ${this._signInError && this._errorSource === 'session' ? html`
+        <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+      ` : nothing}
+      ${last ? html`
+        <div class="space-y-1.5">
+          <button
+            type="button"
+            @click=${() => this._continueAs(last)}
+            aria-label="Continue as ${last.displayName}${lastMethodLabel ? ` with ${lastMethodLabel}` : ''}"
+            class="w-full rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 flex items-center gap-3 text-left hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+          >
+            <div class="h-8 w-8 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green flex items-center justify-center text-[11px] font-mono font-bold text-gable-green shrink-0">
+              ${initialsFor(last.displayName)}
+            </div>
+            <div class="min-w-0 leading-tight">
+              <div class="text-sm font-medium text-white truncate">Continue as ${last.displayName}</div>
+              ${lastMethodLabel ? html`
+                <div class="text-xs text-muted-foreground truncate">with ${lastMethodLabel}</div>
+              ` : nothing}
+            </div>
+          </button>
+          ${this._signInError && this._errorSource === 'continue-as' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
+        </div>
+      ` : nothing}
+      <div class="space-y-2.5">
+        ${this._renderMethodList(this._authCfg.methods)}
+      </div>
+      <details class="border-t border-white/15 pt-4">
+        <summary class="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer select-none rounded hover:text-white hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-colors">
+          Use a bearer token instead
+        </summary>
+        <div class="pt-3 space-y-3">
+          <p class="text-xs text-zinc-400">
+            Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.
+          </p>
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
+            <textarea
+              .value=${this._token}
+              @input=${(e: Event) => { this._token = (e.target as HTMLTextAreaElement).value; }}
+              rows="4"
+              aria-label="Bearer token"
+              placeholder="Paste the token"
+              class="w-full bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2 text-base sm:text-xs font-mono text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            ></textarea>
+          </label>
+          <button
+            type="button"
+            @click=${() => this._signIn()}
+            class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-surface-2 border border-zinc-500 px-4 py-3 sm:py-2.5 text-sm font-medium text-zinc-300 hover:text-white hover:border-gable-green focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+          >
+            Sign in with the token
+          </button>
+          ${this._signInError && this._errorSource === 'token' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
+        </div>
+      </details>
+    `;
+  }
+
+  /**
+   * The methods in the server's order, with a quiet "or" divider between the
+   * form and the other kinds; no divider when only one kind shows.
+   */
+  private _renderMethodList(methods: readonly SignInMethodConfig[]) {
+    const out: unknown[] = [];
+    for (let i = 0; i < methods.length; i++) {
+      if (i > 0 && (methods[i - 1].kind === 'form') !== (methods[i].kind === 'form')) {
+        out.push(html`
+          <div class="flex items-center gap-3 py-1" role="presentation">
+            <span class="h-px flex-1 bg-white/15"></span>
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">or</span>
+            <span class="h-px flex-1 bg-white/15"></span>
+          </div>
+        `);
+      }
+      out.push(this._renderMethod(methods[i]));
+    }
+    return out;
+  }
+
+  /** One allowed method's leading mark, in the icon style the door already uses. */
+  private _methodIcon(m: SignInMethodConfig) {
+    switch (m.method) {
+      case 'passkey': return icon(Fingerprint, 18);
+      case 'magic_link': return icon(Mail, 18);
+      case 'google': return googleGlyph(18);
+      case 'microsoft': return microsoftGlyph(18);
+      case 'oidc': return icon(Building2, 18);
+      default: return nothing;
+    }
+  }
+
+  /** One allowed method: the form, or the button that starts it. */
+  private _renderMethod(m: SignInMethodConfig) {
+    if (m.kind === 'form') {
+      return html`
+        <div class="space-y-2.5">
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Email</span>
+            <input
+              type="email"
+              .value=${this._email}
+              @input=${(e: Event) => { this._email = (e.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
+              aria-label="Email"
+              autocomplete="username"
+              class="w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            />
+          </label>
+          <label class="block space-y-1.5">
+            <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
+            <input
+              type="password"
+              .value=${this._password}
+              @input=${(e: Event) => { this._password = (e.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._signInEmailPassword(); }}
+              aria-label="Password"
+              autocomplete="current-password"
+              class="w-full min-h-[44px] sm:min-h-0 bg-surface-2 border border-zinc-500 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green focus:border-gable-green transition-all"
+            />
+          </label>
+          <button
+            type="button"
+            @click=${() => void this._signInEmailPassword()}
+            class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-gable-green/10 border border-gable-green px-4 py-3 sm:py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow [[data-theme=light]_&]:bg-gable-green [[data-theme=light]_&]:text-black [[data-theme=light]_&]:hover:bg-gable-green-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+          >
+            Sign in
+          </button>
+          ${this._signInError && this._errorSource === 'email_password' ? html`
+            <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+          ` : nothing}
+        </div>
+      `;
+    }
+    return html`
+      <div class="space-y-1.5">
+        <button
+          type="button"
+          @click=${() => void this._startMethod(m)}
+          aria-label="Sign in with ${m.label}"
+          class="w-full min-h-[44px] sm:min-h-0 flex items-center justify-center rounded-lg border border-zinc-500 bg-surface-2 px-4 py-3 sm:py-2.5 text-sm font-medium text-white hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+        >
+          <span class="inline-flex items-center gap-2.5 max-w-full">
+            <span class="shrink-0 text-zinc-300">${this._methodIcon(m)}</span>
+            <span class="min-w-0 text-center leading-snug">${m.label}</span>
+          </span>
+        </button>
+        ${this._signInError && this._errorSource === m.method ? html`
+          <p role="alert" class="text-sm text-safety-red">${this._signInError}</p>
+        ` : nothing}
       </div>
     `;
   }
@@ -342,7 +705,7 @@ export class GableFrontDoor extends LitElement {
             @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
             @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this._signIn(); }}
             aria-label="Display name"
-            class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
+            class="w-full min-h-[44px] sm:min-h-0 bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
           />
         </label>
         ${this._signInError ? html`
@@ -350,7 +713,7 @@ export class GableFrontDoor extends LitElement {
         ` : nothing}
         <button
           @click=${() => this._signIn()}
-          class="w-full rounded-lg bg-gable-green/10 border border-gable-green/30 px-4 py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow transition-all"
+          class="w-full min-h-[44px] sm:min-h-0 rounded-lg bg-gable-green/10 border border-gable-green px-4 py-3 sm:py-2.5 text-sm font-medium text-gable-green hover:bg-gable-green/20 hover:shadow-glow [[data-theme=light]_&]:bg-gable-green [[data-theme=light]_&]:text-black [[data-theme=light]_&]:hover:bg-gable-green-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
         >
           Sign in
         </button>
