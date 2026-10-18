@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/jackc/pgx/v5"
 )
+
+const dealerLogoPath = "/api/v1/dealer-profile/logo"
 
 // Repository reads and writes dealer_signin_methods. Every statement goes
 // through GetExecutor(ctx), so calls inside a transaction run on the
@@ -25,6 +28,26 @@ func NewRepository(db *database.DB) (*Repository, error) {
 		return nil, errors.New("signin methods: the repository requires a database")
 	}
 	return &Repository{db: db}, nil
+}
+
+// DealerBrand reads the dealer's public display name (trading name when set,
+// else legal name) and optional logo path from the single dealer_profile row.
+// When the row is absent, both answers are empty so the door falls back to
+// Gable's own lockup.
+func (r *Repository) DealerBrand(ctx context.Context) (string, *string, error) {
+	var name string
+	var markURL *string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT CASE WHEN trim(trading_name) <> '' THEN trim(trading_name) ELSE trim(legal_name) END,
+		        CASE WHEN logo IS NULL THEN NULL ELSE $1 END
+		   FROM dealer_profile WHERE id = 1`, dealerLogoPath).Scan(&name, &markURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return name, markURL, nil
 }
 
 // List answers the stored rows in the dealer's order. A code outside the

@@ -60,14 +60,24 @@ func (s *Service) rows(ctx context.Context) ([]Row, time.Time, error) {
 	return stored, updated, nil
 }
 
-// Config answers the public auth config: the server's auth mode and the
-// allowed methods in the dealer's stored order.
+// Config answers the public auth config: the server's auth mode, the dealer's
+// public display name and optional mark URL, and the allowed methods in the
+// dealer's stored order.
 func (s *Service) Config(ctx context.Context, authMode string) (*ConfigResponse, error) {
 	rows, _, err := s.rows(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := &ConfigResponse{AuthMode: authMode, Methods: make([]MethodView, 0, len(rows))}
+	name, markURL, err := s.repo.DealerBrand(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &ConfigResponse{
+		AuthMode:      authMode,
+		DealerName:    name,
+		DealerMarkURL: markURL,
+		Methods:       make([]MethodView, 0, len(rows)),
+	}
 	for _, r := range rows {
 		out.Methods = append(out.Methods, viewOf(r))
 	}

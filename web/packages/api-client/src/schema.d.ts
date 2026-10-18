@@ -6846,7 +6846,7 @@ export interface paths {
         };
         /**
          * The runtime auth config
-         * @description Public (answers before any sign in). The auth mode the server runs in and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
          */
         get: operations["authConfigGet"];
         put?: never;
@@ -14529,6 +14529,10 @@ export interface components {
              * @enum {string}
              */
             auth_mode: "dev" | "production";
+            /** @description The dealer's public display name (trading name when set on the dealer profile, else legal name; empty when neither is set). */
+            dealer_name: string;
+            /** @description The path of the dealer's logo when one is uploaded on the dealer profile, else null. */
+            dealer_mark_url: string | null;
             /** @description The allowed methods, in the dealer's stored order. */
             methods: components["schemas"]["AuthConfigMethod"][];
         };
@@ -29241,7 +29245,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The auth mode and the allowed methods, in the dealer's order. */
+            /** @description The auth mode, the dealer brand and the allowed methods, in the dealer's order. */
             200: {
                 headers: {
                     [name: string]: unknown;

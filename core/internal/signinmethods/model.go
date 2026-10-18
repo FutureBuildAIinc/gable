@@ -138,12 +138,15 @@ func viewOf(r Row) MethodView {
 }
 
 // ConfigResponse is the public GET /api/v1/auth/config body: the auth mode
-// the server runs in and the allowed methods in the dealer's stored order.
-// It is a strict allowlist type: no secret, no internal host, no other
+// the server runs in, the dealer's public display name and optional mark URL
+// for the white labelled door, and the allowed methods in the dealer's stored
+// order. It is a strict allowlist type: no secret, no internal host, no other
 // tenant, nothing else.
 type ConfigResponse struct {
-	AuthMode string       `json:"auth_mode"`
-	Methods  []MethodView `json:"methods"`
+	AuthMode      string       `json:"auth_mode"`
+	DealerName    string       `json:"dealer_name"`
+	DealerMarkURL *string      `json:"dealer_mark_url"`
+	Methods       []MethodView `json:"methods"`
 }
 
 // AllowlistResponse is the admin read of the same allowlist.

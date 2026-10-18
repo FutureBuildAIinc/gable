@@ -70,6 +70,8 @@ func newFixture(t *testing.T, maxConns int32) *fixture {
 		_, _ = db.Pool.Exec(context.Background(),
 			`INSERT INTO dealer_signin_methods (method, sort_order) VALUES ('email_password', 1) ON CONFLICT (method) DO NOTHING`)
 		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM dealer_signin_methods WHERE method <> 'email_password'`)
+		_, _ = db.Pool.Exec(context.Background(),
+			`UPDATE dealer_profile SET legal_name = '', trading_name = '', phone = '', email = '', website = '', remit_to = '', logo = NULL, logo_content_type = NULL WHERE id = 1`)
 	}
 	if _, err := db.Pool.Exec(ctx, `DELETE FROM dealer_signin_methods`); err == nil {
 		t.Fatal("deleting every row was allowed; the guard trigger is missing")
@@ -166,9 +168,9 @@ func eqStrings(a, b []string) bool {
 	return true
 }
 
-// TestConfigBeforeSignIn: the public config answers with exactly the
-// allowlist type, in the dealer's stored order, and carries no field the
-// type does not name.
+// TestConfigBeforeSignIn: the public config answers with the strict allowlist
+// type (auth_mode, dealer_name, dealer_mark_url, methods), in the dealer's
+// stored order, and carries no field the type does not name.
 func TestConfigBeforeSignIn(t *testing.T) {
 	f := newFixture(t, 0)
 
@@ -176,11 +178,17 @@ func TestConfigBeforeSignIn(t *testing.T) {
 	if got.status != http.StatusOK {
 		t.Fatalf("the config answered %d, want 200", got.status)
 	}
-	if !eqStrings(keys(got.body), []string{"auth_mode", "methods"}) {
-		t.Errorf("the config body keys = %v, want exactly auth_mode and methods", keys(got.body))
+	if !eqStrings(keys(got.body), []string{"auth_mode", "dealer_mark_url", "dealer_name", "methods"}) {
+		t.Errorf("the config body keys = %v, want exactly auth_mode, dealer_mark_url, dealer_name and methods", keys(got.body))
 	}
 	if got.body["auth_mode"] != "production" {
 		t.Errorf("the auth mode = %v, want production", got.body["auth_mode"])
+	}
+	if got.body["dealer_name"] != "" {
+		t.Errorf("the default dealer_name = %v, want empty string", got.body["dealer_name"])
+	}
+	if got.body["dealer_mark_url"] != nil {
+		t.Errorf("the default dealer_mark_url = %v, want nil", got.body["dealer_mark_url"])
 	}
 	methods := got.body["methods"].([]any)
 	if len(methods) != 1 {
@@ -195,6 +203,47 @@ func TestConfigBeforeSignIn(t *testing.T) {
 	}
 	if first["start_url"] != "/api/portal/v1/login" {
 		t.Errorf("the form method's start_url = %v, want the portal login", first["start_url"])
+	}
+
+	// When the dealer profile carries a trading name, legal name, contact
+	// fields and a logo, only dealer_name (preferring trading_name) and
+	// dealer_mark_url join the config response; nothing else leaks.
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE dealer_profile
+		    SET legal_name = 'Gable Lumber Ltd.',
+		        trading_name = 'Gable Building Supply',
+		        phone = '250-555-0100',
+		        email = 'info@gable.example',
+		        website = 'https://gable.example',
+		        remit_to = '100 Main St',
+		        logo = $1,
+		        logo_content_type = 'image/png'
+		  WHERE id = 1`, []byte{0x89, 0x50, 0x4e, 0x47}); err != nil {
+		t.Fatalf("updating dealer_profile: %v", err)
+	}
+	got = f.do("GET", "/api/v1/auth/config", "")
+	if !eqStrings(keys(got.body), []string{"auth_mode", "dealer_mark_url", "dealer_name", "methods"}) {
+		t.Fatalf("the config body keys with profile = %v, want only auth_mode, dealer_mark_url, dealer_name, methods", keys(got.body))
+	}
+	if got.body["dealer_name"] != "Gable Building Supply" {
+		t.Errorf("dealer_name with trading_name = %v, want Gable Building Supply", got.body["dealer_name"])
+	}
+	if got.body["dealer_mark_url"] != "/api/v1/dealer-profile/logo" {
+		t.Errorf("dealer_mark_url with logo = %v, want /api/v1/dealer-profile/logo", got.body["dealer_mark_url"])
+	}
+
+	// When trading_name is blank, dealer_name falls back to legal_name, and
+	// without a logo dealer_mark_url is null.
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE dealer_profile SET trading_name = '   ', logo = NULL, logo_content_type = NULL WHERE id = 1`); err != nil {
+		t.Fatalf("updating dealer_profile fallback: %v", err)
+	}
+	got = f.do("GET", "/api/v1/auth/config", "")
+	if got.body["dealer_name"] != "Gable Lumber Ltd." {
+		t.Errorf("dealer_name with legal_name fallback = %v, want Gable Lumber Ltd.", got.body["dealer_name"])
+	}
+	if got.body["dealer_mark_url"] != nil {
+		t.Errorf("dealer_mark_url without logo = %v, want nil", got.body["dealer_mark_url"])
 	}
 
 	// An admin replacement sets the order the door renders; the config
