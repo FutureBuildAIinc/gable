@@ -946,9 +946,11 @@ func TestSchedule_CapacityRaceAtPoolSize4(t *testing.T) {
 	}
 }
 
-// Tenancy: another account's yard, order and hold are all 404s, never 403s.
+// Tenancy: another account's yard, order and hold are all 404s, never 403s,
+// and writes by tenant B leave tenant A's rows untouched in the database.
 func TestSchedule_TenancyRefusals(t *testing.T) {
 	f := setupPro(t)
+	ctx := context.Background()
 	repo := NewRepository(f.db)
 
 	// A yard the account does not hold.
@@ -963,6 +965,14 @@ func TestSchedule_TenancyRefusals(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("hold on B's order answered %d, want 404", rec.Code)
 	}
+	// Create a valid hold for tenant A so tenant B can attempt to read, change, and release it.
+	rec, aHoldBody := call(mux, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winPickup, f.winDate), nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create A's hold answered %d: %s", rec.Code, rec.Body.String())
+	}
+	aHoldID, _ := aHoldBody["id"].(string)
+
 	// B holding A's window: the yard is not B's.
 	muxB := muxFor(repo, f.bCustomer, uuid.New(), RoleOwner)
 	rec, _ = call(muxB, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
@@ -970,10 +980,68 @@ func TestSchedule_TenancyRefusals(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("B holding A's window answered %d, want 404", rec.Code)
 	}
+	// B reading A's hold.
+	rec, _ = call(muxB, "GET", "/api/portal/v1/schedule/holds/"+aHoldID, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("B reading A's hold answered %d, want 404", rec.Code)
+	}
+	// B changing A's hold.
+	rec, _ = call(muxB, "PUT", "/api/portal/v1/schedule/holds/"+aHoldID, fmt.Sprintf(
+		`{"window_id":"%s","date":"%s"}`, f.winCap1, f.winDate), nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("B changing A's hold answered %d, want 404", rec.Code)
+	}
+	// B releasing A's hold.
+	rec, _ = call(muxB, "DELETE", "/api/portal/v1/schedule/holds/"+aHoldID, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("B releasing A's hold answered %d, want 404", rec.Code)
+	}
+	var holdStatus string
+	var holdWin uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT status, window_id FROM portal_schedule_holds WHERE id = $1`, aHoldID).Scan(&holdStatus, &holdWin); err != nil {
+		t.Fatalf("verify A's hold in DB: %v", err)
+	}
+	if holdStatus != "held" || holdWin != f.winPickup {
+		t.Errorf("A's hold after B's mutations = (%q, %s), want (held, %s)", holdStatus, holdWin, f.winPickup)
+	}
+
 	// B reading A's timeline.
 	rec, _ = call(muxB, "GET", "/api/portal/v1/orders/"+f.aFulfilled.String()+"/timeline", "", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("B reading A's timeline answered %d, want 404", rec.Code)
+	}
+	// B setting delivery instructions on A's order.
+	rec, _ = call(muxB, "PUT", "/api/portal/v1/orders/"+f.aConfirmed.String()+"/delivery-instructions",
+		`{"instructions":"cross-tenant write"}`, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("B updating A's delivery instructions answered %d, want 404", rec.Code)
+	}
+	var aInstr *string
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT site_delivery_instructions FROM orders WHERE id = $1`, f.aConfirmed).Scan(&aInstr); err != nil {
+		t.Fatalf("verify A's order instructions in DB: %v", err)
+	}
+	if aInstr != nil {
+		t.Errorf("A's order instructions after B's write = %v, want nil", *aInstr)
+	}
+
+	// B reading Today sees none of A's quotes, deliveries, or invoices, and only B's own open order.
+	rec, todayB := call(muxB, "GET", "/api/portal/v1/today", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("B's today answered %d: %s", rec.Code, rec.Body.String())
+	}
+	if q, _ := todayB["quotes_awaiting_pro"].(map[string]any); q["count"] != float64(0) {
+		t.Errorf("B's today quotes_awaiting_pro.count = %v, want 0", q["count"])
+	}
+	if d, _ := todayB["next_deliveries"].(map[string]any); d["count"] != float64(0) {
+		t.Errorf("B's today next_deliveries.count = %v, want 0", d["count"])
+	}
+	if inv, _ := todayB["invoices_due"].(map[string]any); inv["count"] != float64(0) {
+		t.Errorf("B's today invoices_due.count = %v, want 0", inv["count"])
+	}
+	if oo, _ := todayB["open_orders"].(map[string]any); oo["count"] != float64(1) {
+		t.Errorf("B's today open_orders.count = %v, want 1 (only B's own order)", oo["count"])
 	}
 }
 
@@ -1186,12 +1254,21 @@ func TestChangeFeed_InvoicesQuotesDeliveriesToday(t *testing.T) {
 		}
 	}
 
-	// A feed is scoped to the customer even with a cursor.
+	// Every change feed is scoped to the customer even with a since cursor.
 	muxB := muxFor(repo, f.bCustomer, uuid.New(), RoleOwner)
-	rec, _ := call(muxB, "GET", "/api/portal/v1/invoices?since=2000-01-01T00:00:00Z", "", nil)
-	var rows []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &rows)
-	if len(rows) != 0 {
-		t.Errorf("customer B's invoice feed holds %d of A's rows", len(rows))
+	for _, feedPath := range []string{
+		"/api/portal/v1/invoices?since=2000-01-01T00:00:00Z",
+		"/api/portal/v1/quotes?since=2000-01-01T00:00:00Z",
+		"/api/portal/v1/deliveries?since=2000-01-01T00:00:00Z",
+	} {
+		rec, _ := call(muxB, "GET", feedPath, "", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("customer B %s answered %d", feedPath, rec.Code)
+		}
+		var rows []map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &rows)
+		if len(rows) != 0 {
+			t.Errorf("customer B %s holds %d of A's rows, want 0", feedPath, len(rows))
+		}
 	}
 }
