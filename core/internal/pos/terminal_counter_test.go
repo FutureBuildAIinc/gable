@@ -1,0 +1,433 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package pos_test
+
+// The counter's card legs on the simulated terminal (CP-05, IX-01): the
+// approved flow end to end, the decline, the no answer that runs the sweep
+// and the manager's resolution, the drawer's refusal while an intent stands,
+// the cancel that is honest about the device, and the wire walls of the
+// manager routes (only a manager resolves).
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/google/uuid"
+)
+
+// withTerminal wires the simulated terminal and its ledger into the counter,
+// with the wait the test wants.
+func withTerminal(outcome payment.SimulatedOutcome, wait time.Duration) func(*fixture) {
+	return func(f *fixture) {
+		ledger := payment.NewTerminalLedger(f.db).WithAuditLog(audit.NewLogger(f.db))
+		f.terminal = payment.NewSimulatedTerminal(outcome, ledger)
+		f.service.WithTerminal(f.terminal, ledger)
+		if wait > 0 {
+			f.service.WithTerminalWait(wait)
+		}
+	}
+}
+
+// cardFor answers a card tender of the last sale's total.
+func (f *fixture) cardFor() map[string]any {
+	f.t.Helper()
+	var total int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT ROUND(total * 100)::bigint FROM pos_transactions ORDER BY created_at DESC LIMIT 1`).Scan(&total); err != nil {
+		f.t.Fatal(err)
+	}
+	return tender("card", total)
+}
+
+// terminalIntentOf reads the one intent of a sale.
+func (f *fixture) terminalIntentOf(t *testing.T, saleID string) (id uuid.UUID, state, verdict string) {
+	t.Helper()
+	var iid uuid.UUID
+	var st, vd string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id, state, answer_verdict FROM payment_terminal_intents WHERE transaction_id = $1`, saleID).
+		Scan(&iid, &st, &vd); err != nil {
+		t.Fatalf("the sale's terminal intent: %v", err)
+	}
+	return iid, st, vd
+}
+
+// TestCounterCardApproveEndToEnd: the card leg rides the intent, the device
+// approves, the completion's one transaction records the tender as a payment
+// applied to the invoice, and the intent stands authorized with only safe
+// answer fields.
+func TestCounterCardApproveEndToEnd(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(saleID, f.cardFor())
+	if r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	id, state, verdict := f.terminalIntentOf(t, saleID)
+	if state != "authorized" || verdict != "authorized" {
+		t.Fatalf("the intent is %s verdict %s, wanted authorized", state, verdict)
+	}
+	var ref, last4, brand string
+	var answered bool
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT answer_provider_ref, answer_last4, answer_brand, answered_at IS NOT NULL FROM payment_terminal_intents WHERE id = $1`, id).
+		Scan(&ref, &last4, &brand, &answered); err != nil || !answered {
+		t.Fatalf("the answered intent: %v answered=%t", err, answered)
+	}
+	if ref == "" || last4 != "4242" || brand == "" {
+		t.Fatalf("the answer's safe fields are ref %q last4 %q brand %q", ref, last4, brand)
+	}
+	var tenders int
+	var gwRef *string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*), max(gateway_tx_id) FROM pos_tenders WHERE transaction_id = $1 AND method = 'CARD'`, saleID).
+		Scan(&tenders, &gwRef); err != nil || tenders != 1 {
+		t.Fatalf("the card tender: %v count=%d", err, tenders)
+	}
+	if gwRef == nil || *gwRef != ref {
+		t.Fatalf("the tender carries gateway ref %v, wanted the device's %q", gwRef, ref)
+	}
+}
+
+// TestCounterCardDeclineEndToEnd: the device's own no refuses the completion
+// (card_declined), the sale stays open and the intent stands declined.
+func TestCounterCardDeclineEndToEnd(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimDecline, 0))
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(saleID, f.cardFor())
+	if r.status != http.StatusConflict {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	code, blockers, _ := errorOf(t, r)
+	if code == "" && len(blockers) == 0 {
+		t.Fatal("the decline answered no code")
+	}
+	_, state, verdict := f.terminalIntentOf(t, saleID)
+	if state != "declined" || verdict != "declined" {
+		t.Fatalf("the intent is %s verdict %s, wanted declined", state, verdict)
+	}
+	var status string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT status FROM pos_transactions WHERE id = $1`, saleID).Scan(&status); err != nil || status != "OPEN" {
+		t.Fatalf("the refused sale is %s (%v), wanted OPEN", status, err)
+	}
+}
+
+// TestCounterCardNoAnswerSweepResolveDeclined: the device never answers; the
+// completion refuses with the waiting state's own refusal, the drawer refuses
+// while the intent stands, the sweep turns the intent lost and files the
+// manager item, and the manager's declined resolution closes it (the
+// terminal's own record said no).
+func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 250*time.Millisecond))
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	f.openTill(0)
+	r := f.completeSale(saleID, f.cardFor())
+	if r.status != http.StatusConflict {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	id, state, _ := f.terminalIntentOf(t, saleID)
+	if state != "pending_at_device" {
+		t.Fatalf("the unanswered intent is %s, wanted pending_at_device", state)
+	}
+	// the desk reads its waiting state
+	g := f.do("GET", "/api/v1/pos/terminal-intents/"+id.String(), nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if g.status != http.StatusOK || str(t, g.body, "state") != "pending_at_device" {
+		t.Fatalf("the waiting state = %d %s", g.status, g.raw)
+	}
+	// the cancel is honest: the device holds the leg
+	c := f.do("POST", "/api/v1/pos/terminal-intents/"+id.String()+"/cancel", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if c.status != http.StatusConflict {
+		t.Fatalf("the cancel at the device = %d: %s", c.status, c.raw)
+	}
+	// the drawer refuses while the intent stands
+	sessionID := f.currentTill(t)
+	cl := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if cl.status != http.StatusConflict {
+		t.Fatalf("the close = %d: %s", cl.status, cl.raw)
+	}
+	// only a manager sweeps
+	sw := f.do("POST", "/api/v1/pos/terminal-intents/sweep", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if sw.status != http.StatusForbidden {
+		t.Fatalf("the cashier sweep = %d, wanted 403", sw.status)
+	}
+	// the lease runs out (the sweep only decides an intent past its lease)
+	mustExec(t, f.db, `UPDATE payment_terminal_intents SET lease_until = NOW() - INTERVAL '1 minute' WHERE id = $1`, id)
+	sw = f.do("POST", "/api/v1/pos/terminal-intents/sweep", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if sw.status != http.StatusOK {
+		t.Fatalf("the manager sweep = %d: %s", sw.status, sw.raw)
+	}
+	_, state, _ = f.terminalIntentOf(t, saleID)
+	if state != "lost" {
+		t.Fatalf("the swept intent is %s, wanted lost", state)
+	}
+	// the manager's queue holds the item; only a manager resolves
+	li := f.do("GET", "/api/v1/pos/terminal-lost-items", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if li.status != http.StatusOK {
+		t.Fatalf("the queue = %d: %s", li.status, li.raw)
+	}
+	items, _ := li.body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("the queue holds %d items, wanted 1 (%s)", len(items), li.raw)
+	}
+	item := items[0].(map[string]any)
+	itemID, _ := item["id"].(string)
+	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID+"/resolve",
+		map[string]any{"outcome": "declined", "reference": "read the terminal"},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if rr.status != http.StatusForbidden {
+		t.Fatalf("the cashier resolve = %d, wanted 403", rr.status)
+	}
+	rr = f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID+"/resolve",
+		map[string]any{"outcome": "declined", "reference": "read the terminal"},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if rr.status != http.StatusOK {
+		t.Fatalf("the manager resolve = %d: %s", rr.status, rr.raw)
+	}
+	if str(t, rr.body, "state") != "resolved_declined" {
+		t.Fatalf("the item ended %s", str(t, rr.body, "state"))
+	}
+	// a second resolution is refused
+	rr = f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID+"/resolve",
+		map[string]any{"outcome": "declined", "reference": "again"},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if rr.status != http.StatusConflict {
+		t.Fatalf("the second resolve = %d, wanted 409", rr.status)
+	}
+	// the drawer closes now that no intent stands
+	cl = f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if cl.status != http.StatusOK {
+		t.Fatalf("the close after the sweep = %d: %s", cl.status, cl.raw)
+	}
+}
+
+// currentTill reads the register's open session id.
+func (f *fixture) currentTill(t *testing.T) string {
+	t.Helper()
+	r := f.do("GET", "/api/v1/pos/till/current?register_id="+f.register, nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("current till = %d: %s", r.status, r.raw)
+	}
+	return str(t, r.body, "id")
+}
+
+// TestResolveAuthorizedAppliesTenderToCompletedSale: a sale that completed
+// without the card leg (the terminal's answer landed after the counter gave
+// up and the sale was paid another way) takes its money on resolution: the
+// payment applies to the sale's invoice and the tender row appears, in the
+// resolution's own transaction.
+func TestResolveAuthorizedAppliesTenderToCompletedSale(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	// a lost sale intent of the completed sale, filed by hand the way the
+	// sweep files it
+	ledger := payment.NewTerminalLedger(f.db)
+	var saleNumber string
+	var branch uuid.UUID
+	var register string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT number, branch_id, register_id FROM pos_transactions WHERE id = $1`, saleID).
+		Scan(&saleNumber, &branch, &register); err != nil {
+		t.Fatal(err)
+	}
+	_ = saleNumber
+	intent := &payment.TerminalIntent{ID: uuid.New(), TransactionID: mustParseUUID(saleID), LegKey: "card-0",
+		RegisterID: register, BranchID: branch, AmountCents: 599, Kind: payment.TerminalKindSale,
+		DeviceID: register, IdempotencyKey: "sale-" + saleID + "-card-0-hand",
+		LeaseUntil: time.Now().Add(-time.Minute)}
+	if err := ledger.Claim(context.Background(), intent); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := ledger.MarkDispatched(context.Background(), intent.ID, "devref-ap", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if _, err := ledger.Sweep(context.Background(), time.Now()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	items, err := ledger.OpenLostItems(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	var itemID uuid.UUID
+	for _, it := range items {
+		if it.IntentID == intent.ID {
+			itemID = it.ID
+		}
+	}
+	if itemID == uuid.Nil {
+		t.Fatal("the sweep filed no manager item")
+	}
+	var paymentsBefore int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM payments p JOIN pos_tenders t ON t.payment_id = p.id WHERE t.transaction_id = $1 AND t.method = 'CARD'`, saleID).
+		Scan(&paymentsBefore); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID.String()+"/resolve",
+		map[string]any{"outcome": "authorized", "reference": "read the terminal", "reason": "the terminal approved"},
+		"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t))
+	if rr.status != http.StatusOK {
+		t.Fatalf("the manager resolve = %d: %s", rr.status, rr.raw)
+	}
+	if str(t, rr.body, "state") != "resolved_authorized" {
+		t.Fatalf("the item ended %s", str(t, rr.body, "state"))
+	}
+	// the invoice was already paid by the cash tender, so the terminal's
+	// money records as the payment's unapplied credit on the account
+	var paymentsAfter int64
+	var unapplied int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*), COALESCE(SUM(ROUND(p.amount_unapplied * 100)), 0) FROM payments p
+		  WHERE p.id IN (SELECT t.payment_id FROM pos_tenders t
+		                  WHERE t.transaction_id = $1 AND t.method = 'CARD')`, saleID).
+		Scan(&paymentsAfter, &unapplied); err != nil {
+		t.Fatal(err)
+	}
+	if paymentsAfter != paymentsBefore+1 || unapplied != 599 {
+		t.Fatalf("the resolution recorded %d card payments (before %d) holding %d cents unapplied", paymentsAfter, paymentsBefore, unapplied)
+	}
+}
+
+// TestResolveAuthorizedRefundsWhenSaleGone: a lost sale intent of a sale
+// that never completed gives the money back through the gateway on
+// resolution (the same day void first), and only then closes the item.
+func TestResolveAuthorizedRefundsWhenSaleGone(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 0))
+	voids := &recordingGateway{}
+	f.service.WithGateway(voids)
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	ledger := payment.NewTerminalLedger(f.db)
+	var branch uuid.UUID
+	var register string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT branch_id, register_id FROM pos_transactions WHERE id = $1`, saleID).Scan(&branch, &register); err != nil {
+		t.Fatal(err)
+	}
+	intent := &payment.TerminalIntent{ID: uuid.New(), TransactionID: mustParseUUID(saleID), LegKey: "card-0",
+		RegisterID: register, BranchID: branch, AmountCents: 599, Kind: payment.TerminalKindSale,
+		DeviceID: register, IdempotencyKey: "sale-" + saleID + "-card-0-gone",
+		LeaseUntil: time.Now().Add(-time.Minute)}
+	if err := ledger.Claim(context.Background(), intent); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if ok, err := ledger.MarkDispatched(context.Background(), intent.ID, "devref-gone", time.Now().Add(-time.Minute)); err != nil || !ok {
+		t.Fatalf("dispatch: %t %v", ok, err)
+	}
+	// the answer landed after the sweep's read: the intent carries the
+	// verdict the manager reads
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE payment_terminal_intents SET state = 'lost' WHERE id = $1`, intent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Sweep(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items, err := ledger.OpenLostItems(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	var itemID uuid.UUID
+	for _, it := range items {
+		if it.IntentID == intent.ID {
+			itemID = it.ID
+		}
+	}
+	if itemID == uuid.Nil {
+		t.Fatal("the sweep filed no manager item")
+	}
+	rr := f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID.String()+"/resolve",
+		map[string]any{"outcome": "authorized", "reference": "read the terminal"},
+		"X-Test-Role", "owner", "X-Test-Sub", mustUUID(t))
+	if rr.status != http.StatusOK {
+		t.Fatalf("the manager resolve = %d: %s", rr.status, rr.raw)
+	}
+	if voids.voided != 1 {
+		t.Fatalf("the sale gone resolution voided %d charges, wanted 1", voids.voided)
+	}
+	if str(t, rr.body, "state") != "resolved_authorized" {
+		t.Fatalf("the item ended %s", str(t, rr.body, "state"))
+	}
+}
+
+// TestCancelClosesUndispatchedClaim: a claim the device never reached
+// cancels lost with no manager item.
+func TestCancelClosesUndispatchedClaim(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimNoAnswer, 0))
+	saleID := f.startSale(nil)
+	ledger := payment.NewTerminalLedger(f.db)
+	var branch uuid.UUID
+	var register string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT branch_id, register_id FROM pos_transactions WHERE id = $1`, saleID).Scan(&branch, &register); err != nil {
+		t.Fatal(err)
+	}
+	intent := &payment.TerminalIntent{ID: uuid.New(), TransactionID: mustParseUUID(saleID), LegKey: "card-9",
+		RegisterID: register, BranchID: branch, AmountCents: 100, Kind: payment.TerminalKindSale,
+		DeviceID: register, IdempotencyKey: "sale-" + saleID + "-card-9",
+		LeaseUntil: time.Now().Add(-time.Minute)}
+	if err := ledger.Claim(context.Background(), intent); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	c := f.do("POST", "/api/v1/pos/terminal-intents/"+intent.ID.String()+"/cancel", nil,
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if c.status != http.StatusOK || str(t, c.body, "state") != "lost" {
+		t.Fatalf("the cancel = %d %s", c.status, c.raw)
+	}
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM payment_terminal_lost_items WHERE intent_id = $1`, intent.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("the cancelled claim filed %d manager items, wanted 0", n)
+	}
+}
+
+// recordingGateway records the voids and refunds a resolution asks for.
+type recordingGateway struct{ voided, refunded int }
+
+func (g *recordingGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
+	return &payment.GatewayResult{TransactionID: "rec-" + req.IdempotencyKey, Status: payment.GatewayStatusApproved}, nil
+}
+func (g *recordingGateway) Capture(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
+	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusApproved}, nil
+}
+func (g *recordingGateway) Void(ctx context.Context, id string) (*payment.GatewayResult, error) {
+	g.voided++
+	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusVoided}, nil
+}
+func (g *recordingGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
+	g.refunded++
+	return &payment.GatewayResult{TransactionID: id, Status: payment.GatewayStatusRefunded}, nil
+}
+
+func mustParseUUID(s string) uuid.UUID {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}

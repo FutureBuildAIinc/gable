@@ -275,4 +275,34 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
 7. Change the FB Connect address and Save without entering the id again: the id shows empty with "Enter the webhook id
    again for the new address", and the Market check says it is off until it is entered.
 
+
+### The card terminal at the counter, from the claim to the manager's queue
+
+Needs the demo seed, two yards, a register each, and the simulated terminal selected by configuration
+(`POS_TERMINAL_SIMULATOR=approve` for the first half, `no_answer` for the second; an unset value wires no terminal,
+so a production configuration runs none of this).
+
+1. Sign in as a cashier at yard one's register, start a sale, add a stocked line, and tender the whole total to the
+   card. The desk shows the plain waiting state (the card leg is claimed and at the device); the completion answers
+   only when the terminal does. With the approve script the sale completes: the card tender is a payment applied to
+   the sale's invoice, and `GET /api/v1/pos/terminal-intents/<id>` (the id the desk held) shows `state authorized`
+   with only safe answer fields (brand, last four, auth code, the provider reference).
+2. Sign in as a cashier at yard two's register, `POS_TERMINAL_SIMULATOR=decline`, and tender a card: the completion
+   refuses `card_declined`, the sale stays open, and the intent stands `declined`.
+3. With `POS_TERMINAL_SIMULATOR=no_answer`, tender a card: the desk's waiting state holds, its cancel answers 409
+   `terminal_at_device` (honest about the device: the money may still move), and the completion answered the waiting
+   refusal naming the intent.
+4. Try to close the drawer while the intent stands: the close refuses `terminal_intent_in_flight` naming the intent.
+5. After the intent's lease runs out, `POST /api/v1/pos/terminal-intents/sweep` as a manager (a cashier is a 403):
+   the pass reports what it closed and queued. `GET /api/v1/pos/terminal-lost-items` shows the manager item: who
+   resolves it (the register), what amount, the device reference, the transaction.
+6. Read the terminal's own record, then `POST /api/v1/pos/terminal-lost-items/<id>/resolve` with `outcome declined`
+   (the terminal said no): the item closes `resolved_declined`, nothing moved, and the drawer now closes. A second
+   resolve is 409 `lost_item_settled`.
+7. For an `authorized` resolution of a sale that completed without the leg, the same resolve with
+   `outcome authorized` records the money against the sale's invoice (the part still open) and the rest as unapplied
+   credit; for a sale that never completed, the money goes back through the gateway (the same day void first) before
+   the item closes. Only the manager roles resolve; every route runs behind the branch wall, so yard two's cashier
+   and manager find yard one's intents and items as missing rows.
+
 None of the other walks of the plan are written yet; they land with their items.

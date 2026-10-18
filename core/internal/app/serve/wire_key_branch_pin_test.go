@@ -1613,9 +1613,23 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		return n
 	}
 
+	// The card terminal's own routes (CP-05): no terminal is wired on this
+	// stack, so both reads answer the unavailable refusal; the legs hold the
+	// routes to the pin all the same.
+	_, buf := f.key(t, f.bound, "GET", "/api/v1/pos/terminal-intents/"+f.txnB.String(), "", nil)
+	f.twinLeg("GET", "/api/v1/pos/terminal-intents/{id}")
+	if !strings.Contains(string(buf), `"code":"unavailable"`) {
+		t.Errorf("bound key terminal intent read answered another refusal: %s", buf)
+	}
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/terminal-lost-items", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/terminal-lost-items")
+	if !strings.Contains(string(buf), `"code":"unavailable"`) {
+		t.Errorf("bound key terminal lost items read answered another refusal: %s", buf)
+	}
+
 	// The open till of the foreign register: no session answers, while the
 	// pin's own register answers its own.
-	_, buf := f.key(t, f.bound, "GET", "/api/v1/pos/till/current?register_id="+f.regB, "", nil)
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/till/current?register_id="+f.regB, "", nil)
 	f.twinLeg("GET", "/api/v1/pos/till/current")
 	if strings.Contains(string(buf), f.tillB.String()) {
 		t.Errorf("bound key till current of the foreign register answered the foreign session: %s", buf)
