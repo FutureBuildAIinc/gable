@@ -37,3 +37,6 @@ frontends:
   - id: desk
     name: Desk
     path: web/apps/desk
+  - id: pro-portal
+    name: Contractor Pro Portal
+    path: web/apps/pro-portal

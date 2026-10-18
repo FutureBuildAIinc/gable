@@ -1,0 +1,420 @@
+/* SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0 */
+/* SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors */
+
+@import '../../../packages/design-system/src/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-portal-ground;
+  }
+
+  body {
+    @apply m-0 min-w-80 bg-portal-ground font-sans text-white antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+}
+
+@layer components {
+  .pro-shell {
+    @apply min-h-dvh bg-portal-ground text-white;
+  }
+
+  .pro-rail {
+    @apply hidden lg:sticky lg:top-0 lg:flex lg:h-dvh lg:w-60 lg:shrink-0 lg:flex-col lg:border-r lg:border-zinc-800 lg:bg-portal-panel lg:p-4;
+  }
+
+  .pro-content {
+    @apply min-w-0 flex-1;
+  }
+
+  .pro-topbar {
+    @apply sticky top-0 z-30 flex min-h-16 items-center gap-3 border-b border-zinc-800 bg-portal-ground/95 px-4 py-3 backdrop-blur lg:static lg:border-b-0 lg:bg-transparent lg:px-7 lg:pt-5 lg:backdrop-blur-none;
+  }
+
+  .pro-dealer-mark {
+    @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-gable-green bg-gable-green-tint font-mono text-sm font-bold text-gable-green;
+  }
+
+  .pro-dealer-name {
+    @apply truncate text-sm font-semibold text-white;
+  }
+
+  .pro-account-name {
+    @apply truncate text-xs text-zinc-400;
+  }
+
+  .pro-main {
+    @apply mx-auto w-full max-w-6xl px-4 pb-28 pt-4 lg:px-7 lg:pb-12 lg:pt-2;
+  }
+
+  .pro-main-narrow {
+    @apply mx-auto max-w-3xl;
+  }
+
+  .pro-bottom-nav {
+    @apply fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-zinc-800 bg-portal-ground/95 px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden;
+  }
+
+  .pro-nav-item {
+    @apply flex min-h-12 min-w-14 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1 text-[11px] font-medium text-zinc-400 no-underline lg:min-h-11 lg:w-full lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-sm;
+  }
+
+  .pro-nav-item-active {
+    @apply bg-gable-green-tint text-gable-green;
+  }
+
+  .pro-page-kicker {
+    @apply m-0 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-gable-green;
+  }
+
+  .pro-page-title {
+    @apply mb-0 mt-1 text-2xl font-semibold leading-tight tracking-tight text-white lg:text-3xl;
+  }
+
+  .pro-page-subtitle {
+    @apply mb-0 mt-2 text-sm leading-relaxed text-zinc-400;
+  }
+
+  .pro-section-title {
+    @apply mb-2 mt-6 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400;
+  }
+
+  .pro-card {
+    @apply rounded-2xl border border-zinc-800 bg-slate-steel p-4 shadow-elevation-1;
+  }
+
+  .pro-card + .pro-card {
+    @apply mt-3;
+  }
+
+  .pro-card-link {
+    @apply block w-full text-left no-underline transition-colors hover:border-zinc-500;
+  }
+
+  .pro-card-title {
+    @apply text-sm font-semibold leading-snug text-white;
+  }
+
+  .pro-text-dim {
+    @apply text-zinc-400;
+  }
+
+  .pro-text-small {
+    @apply text-xs leading-relaxed text-zinc-400;
+  }
+
+  .pro-data {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+
+  .pro-money {
+    @apply font-mono font-medium tabular-nums tracking-tight text-white;
+  }
+
+  .pro-money-large {
+    @apply font-mono text-3xl font-medium tabular-nums tracking-tight text-white;
+  }
+
+  .pro-row {
+    @apply flex items-center gap-3;
+  }
+
+  .pro-row-grow {
+    @apply min-w-0 flex-1;
+  }
+
+  .pro-btn {
+    @apply inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold no-underline;
+  }
+
+  .pro-btn-primary {
+    @apply border-gable-green bg-gable-green text-deep-space hover:bg-gable-green-hover;
+  }
+
+  .pro-btn-secondary {
+    @apply border-zinc-500 bg-surface-3 text-white hover:border-gable-green;
+  }
+
+  .pro-btn-ghost {
+    @apply border-transparent bg-transparent text-zinc-300 hover:bg-surface-3 hover:text-white;
+  }
+
+  .pro-btn-danger {
+    @apply border-rose-400 bg-rose-950 text-rose-300;
+  }
+
+  .pro-btn-small {
+    @apply min-h-9 px-3 text-xs;
+  }
+
+  .pro-btn-wide {
+    @apply w-full;
+  }
+
+  .pro-icon-btn {
+    @apply grid size-11 shrink-0 place-items-center rounded-xl border border-zinc-500 bg-surface-2 text-zinc-300;
+  }
+
+  .pro-shell gable-theme-toggle button {
+    @apply border-zinc-500;
+  }
+
+  .pro-input,
+  .pro-select,
+  .pro-textarea {
+    @apply min-h-11 w-full rounded-xl border border-zinc-500 bg-surface-2 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-gable-green;
+  }
+
+  .pro-textarea {
+    @apply min-h-24 resize-y;
+  }
+
+  .pro-label {
+    @apply mb-1 block text-xs font-medium text-zinc-300;
+  }
+
+  .pro-field {
+    @apply mb-3 block;
+  }
+
+  .pro-check {
+    @apply size-5 shrink-0 accent-gable-green;
+  }
+
+  .pro-chip {
+    @apply inline-flex shrink-0 items-center gap-1 rounded-full border border-transparent bg-surface-3 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-zinc-300;
+  }
+
+  .pro-chip-green {
+    @apply bg-gable-green-tint text-gable-green;
+  }
+
+  .pro-chip-blue {
+    @apply bg-sky-950 text-sky-400;
+  }
+
+  .pro-chip-red {
+    @apply bg-rose-950 text-rose-300;
+  }
+
+  .pro-chip-amber {
+    @apply bg-amber-950 text-amber-300;
+  }
+
+  .pro-tabs {
+    @apply gable-scrollbar-x -mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 lg:mx-0 lg:px-0;
+  }
+
+  .pro-tab {
+    @apply min-h-10 shrink-0 rounded-full border border-zinc-500 bg-transparent px-4 text-sm font-medium text-zinc-300;
+  }
+
+  .pro-tab-active {
+    @apply border-gable-green bg-gable-green text-deep-space;
+  }
+
+  .pro-stat-grid {
+    @apply grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4;
+  }
+
+  .pro-stat {
+    @apply min-w-0 rounded-2xl border border-zinc-800 bg-slate-steel p-3;
+  }
+
+  .pro-stat-value {
+    @apply block truncate font-mono text-xl font-medium tabular-nums text-white;
+  }
+
+  .pro-stat-label {
+    @apply mt-1 block text-xs leading-snug text-zinc-400;
+  }
+
+  .pro-list {
+    @apply m-0 grid list-none gap-3 p-0;
+  }
+
+  .pro-line-list {
+    @apply divide-y divide-zinc-800;
+  }
+
+  .pro-line {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0;
+  }
+
+  .pro-line-title {
+    @apply text-sm font-medium text-white;
+  }
+
+  .pro-line-meta {
+    @apply mt-1 text-xs leading-relaxed text-zinc-400;
+  }
+
+  .pro-total-row {
+    @apply flex items-center justify-between gap-4 py-2 text-sm text-zinc-300;
+  }
+
+  .pro-total-grand {
+    @apply mt-2 border-t border-zinc-700 pt-3 text-base font-semibold text-white;
+  }
+
+  .pro-swatch {
+    @apply grid size-12 shrink-0 place-items-center rounded-xl border border-zinc-700 bg-gradient-to-br from-sage-fill to-surface-3 text-white;
+  }
+
+  .pro-swatch-sheet {
+    @apply from-amber-700 to-surface-3;
+  }
+
+  .pro-swatch-hardware {
+    @apply from-sky-800 to-surface-3;
+  }
+
+  .pro-swatch-cedar {
+    @apply from-orange-800 to-surface-3;
+  }
+
+  .pro-empty {
+    @apply rounded-2xl border border-dashed border-zinc-500 bg-slate-steel p-6 text-center;
+  }
+
+  .pro-notice {
+    @apply mb-4 rounded-2xl border border-sky-400 bg-sky-950 p-3 text-sm text-sky-300;
+  }
+
+  .pro-warning {
+    @apply mb-4 rounded-2xl border border-amber-400 bg-amber-950 p-3 text-sm text-amber-200;
+  }
+
+  .pro-error {
+    @apply mb-4 rounded-2xl border border-rose-400 bg-rose-950 p-3 text-sm text-rose-200;
+  }
+
+  .pro-success {
+    @apply mb-4 rounded-2xl border border-gable-green bg-gable-green-tint p-3 text-sm text-gable-green;
+  }
+
+  .pro-sheet-backdrop {
+    @apply fixed inset-0 z-50 bg-backdrop/70;
+  }
+
+  .pro-sheet {
+    @apply fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-3xl border-x border-t border-zinc-500 bg-surface-3 p-5 shadow-elevation-3 lg:left-1/2 lg:top-1/2 lg:w-full lg:max-w-2xl lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:border lg:pb-5;
+  }
+
+  .pro-two-col {
+    @apply grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-start;
+  }
+
+  .pro-three-col {
+    @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3;
+  }
+
+  .pro-form-grid {
+    @apply grid gap-x-3 sm:grid-cols-2;
+  }
+
+  .pro-timeline {
+    @apply m-0 grid list-none gap-0 p-0 lg:grid-cols-5 lg:gap-2;
+  }
+
+  .pro-timeline-step {
+    @apply relative flex gap-3 pb-5 lg:block lg:pb-0;
+  }
+
+  .pro-timeline-dot {
+    @apply z-10 grid size-8 shrink-0 place-items-center rounded-full border border-zinc-500 bg-surface-2 font-mono text-xs text-zinc-300;
+  }
+
+  .pro-timeline-dot-done {
+    @apply border-gable-green bg-gable-green-tint text-gable-green;
+  }
+
+  .pro-timeline-dot-current {
+    @apply border-sky-400 bg-sky-950 text-sky-300;
+  }
+
+  .pro-timeline-label {
+    @apply pt-1 text-sm font-medium text-zinc-300 lg:pt-2;
+  }
+
+  .pro-timeline-meta {
+    @apply text-xs text-zinc-400;
+  }
+
+  .pro-schedule-slot {
+    @apply w-full rounded-2xl border border-zinc-500 bg-slate-steel p-4 text-left hover:border-gable-green;
+  }
+
+  .pro-schedule-slot-selected {
+    @apply border-gable-green bg-gable-green-tint;
+  }
+
+  .pro-public-wrap {
+    @apply mx-auto grid w-full max-w-6xl gap-5 px-4 py-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-start lg:px-7;
+  }
+
+  .pro-public-header {
+    @apply flex items-center justify-between gap-3 border-b border-zinc-800 pb-4 lg:col-span-2;
+  }
+
+  .pro-public-side {
+    @apply lg:sticky lg:top-5;
+  }
+
+  .pro-option {
+    @apply flex w-full items-center gap-3 rounded-2xl border border-zinc-500 bg-slate-steel p-3 text-left;
+  }
+
+  .pro-option-selected {
+    @apply border-gable-green bg-gable-green-tint;
+  }
+
+  .pro-signature {
+    @apply h-40 w-full touch-none rounded-2xl border border-zinc-500 bg-surface-2;
+  }
+
+  .pro-sr-only {
+    @apply sr-only;
+  }
+}
+
+@media print {
+  .pro-bottom-nav,
+  .pro-rail,
+  .pro-topbar,
+  .pro-no-print {
+    display: none !important;
+  }
+
+  .pro-public-wrap {
+    display: block;
+    max-width: none;
+  }
+
+  .pro-card,
+  .pro-option {
+    break-inside: avoid;
+  }
+}

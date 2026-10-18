@@ -1,0 +1,40 @@
+{
+  "name": "@gable/pro-portal",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:screens": "playwright test"
+  },
+  "dependencies": {
+    "@gable/api-client": "*",
+    "@gable/auth": "*",
+    "@gable/design-system": "*",
+    "lit": "^3.2.1",
+    "lucide": "^0.469.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.11",
+    "autoprefixer": "^10.4.24",
+    "jsdom": "^29.0.2",
+    "postcss": "^8.5.23",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "vitest": "^4.1.11"
+  },
+  "license": "LicenseRef-OpenLBM-Surface-1.0"
+}
