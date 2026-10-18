@@ -202,6 +202,47 @@ yard `WK`, granted `WK` only), or send `X-Branch-Id` of `WK` through the API.
 6. A key bound to `KEL-MAIN` keeps its pin: with such a key, `GET /api/v1/customers/<id of a customer linked only to
    WK>` must answer 404, whatever the customer's other yards.
 
+### M6: a branch on the ledger (GL-02, GL-03, MY-02)
+
+Proves: every journal entry and line carries its branch, the statements cut by one yard or consolidated, a period
+closes and reopens, a year closes into Retained Earnings by yard, and the AR and AP subledgers tie out. Sign in as
+Morgan Hale (owner), who reaches every yard, on the demo seed with its three yards (`KEL-MAIN`, `WK`, `LK`).
+
+1. Open Accounting, Trial Balance. The branch control reads Consolidated or the yard in the header's switcher; choose
+   Consolidated. Every account shows one row, and Total Debits equals Total Credits. Choose `WK`: the figures shrink to
+   that yard's own and the page still balances. Choose `LK`, then Consolidated again: the consolidated debit total is
+   the sum of the three yards' (read each off the page).
+2. Click the Cash row (1010) with `WK` chosen. The ledger lines of Cash for that yard open under the table: entry
+   number, date, memo, branch (every row names the West Kelowna Satellite, none another) and debit and credit, with a total that
+   matches the row clicked.
+3. Open Accounting, Profit & Loss. With Consolidated chosen, note Total Revenue; choose each yard and note theirs: the
+   three add up to the consolidated figure to the cent. Press "Compare to previous period": a second column holds the
+   previous period of the same length beside each total. Click the Sales Revenue row: its lines open for the window
+   and the chosen yard.
+4. Open Accounting, Balance Sheet. Consolidated and each yard balance (Total Assets equals Total Liabilities plus
+   Total Equity). Choose a yard and click a row to see its ledger lines as of the date.
+5. Book a hand made entry at one yard. Journal Entries, New Entry: choose the yard `LK`, a date, debit Cash and credit
+   Sales Revenue for 100.00, Create Entry, then Post. Its row shows the entry's yard. Back on the Trial Balance with
+   `LK` chosen the new amounts appear; with `WK` chosen they do not.
+6. Close and reopen a period through the API (the owner holds every yard): `GET /api/v1/gl/fiscal-periods` to read a
+   period's `id` and `revision`, then `POST /api/v1/gl/fiscal-periods/<id>/close` with `If-Match: "<revision>"` answers
+   200 with the revision moved on. Post another hand made entry dated inside that period: the post is refused (the
+   period is closed). `POST /api/v1/gl/fiscal-periods/<id>/reopen` with the new revision and `{"reason":"a late bill"}`
+   answers 200; the same post now succeeds. A reopen without a reason answers 400, a close with a stale revision
+   answers 409 `stale_revision`, and the audit log holds one row for each act (`gl.period_closed`,
+   `gl.period_reopened`).
+7. Close a year: `POST /api/v1/gl/years/<year>/close` answers the closing entry ids, one per yard with activity. On the
+   Trial Balance of that year's last day, every revenue and expense account holds zero at each yard and Retained Earnings
+   (3020) holds each yard's own net; the Profit & Loss of that year still shows what each yard earned. Closing the same
+   year again writes nothing new.
+8. Tie out the subledgers: `GET /api/v1/gl/tie-out` answers, for the AR control account (1020) against the customer
+   subledger and the AP control account (2010) against the open vendor bills, the control, the subledger and the
+   difference, each in cents. A clean ledger answers a zero difference on each. `GET /api/v1/gl/tie-out?as_of=` of an
+   earlier day answers 400: the subledgers hold only their current balances.
+9. The wall: with a key or user held to `WK` only, `GET /api/v1/gl/trial-balance` with no `X-Branch-Id` and no
+   `branch_id` answers 403 (the consolidated view needs every yard), `branch_id` of `LK` answers 403, and `branch_id`
+   of `WK` answers 200. The same caller closing a period or a year answers 403.
+
 ### M3: documents with the dealer's and the yard's identity, and a real email sender
 
 Proves the matrix rows IX-07 (a real email sender), MY-05 (document forms with the dealer's and the yard's branding)
