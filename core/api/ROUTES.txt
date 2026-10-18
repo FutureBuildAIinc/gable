@@ -308,6 +308,11 @@ POST	/api/v1/payments/{id}/refunds	internal/payment	h.HandleRefund
 POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
 GET	/api/v1/pos/customers	internal/pos	h.FindCustomers
+GET	/api/v1/pos/end-of-day	internal/pos	h.GetBranchDay
+POST	/api/v1/pos/end-of-day/close	internal/pos	h.CloseBranchDay
+GET	/api/v1/pos/end-of-day/{id}/deposit-candidates	internal/pos	h.ListDepositCandidates
+POST	/api/v1/pos/end-of-day/{id}/deposit-match	internal/pos	h.MatchDeposit
+POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
 POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent
@@ -319,8 +324,14 @@ POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
 GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill
+GET	/api/v1/pos/till/policy	internal/pos	h.GetVariancePolicy
+PUT	/api/v1/pos/till/policy	internal/pos	h.PutVariancePolicy
+GET	/api/v1/pos/till/signoffs	internal/pos	h.ListPendingSignoffs
 POST	/api/v1/pos/till/{id}/close	internal/pos	h.CloseTill
+GET	/api/v1/pos/till/{id}/movements	internal/pos	h.ListMovements
+POST	/api/v1/pos/till/{id}/movements	internal/pos	h.CreateMovement
 GET	/api/v1/pos/till/{id}/report	internal/pos	h.TillReportHandler
+POST	/api/v1/pos/till/{id}/signoff	internal/pos	h.SignOffTill
 GET	/api/v1/pos/till/{id}/zreport	internal/pos	h.GetZReport
 GET	/api/v1/pos/transactions	internal/pos	h.ListTransactions
 POST	/api/v1/pos/transactions	internal/pos	h.StartTransaction

@@ -30,6 +30,8 @@ func TestTheCloseRefusesWhileAVoidIsParkedAtTheGateway(t *testing.T) {
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
 	})
+	// the final count below is off by design: the variance is not the subject
+	f.allowAnyVariance()
 	f.openTill(0)
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	sessionID := f.currentTillID(t)

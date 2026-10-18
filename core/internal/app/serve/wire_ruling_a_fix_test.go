@@ -104,6 +104,7 @@ func TestRulingA_ARolledBackFirstDocumentLeavesNoLink(t *testing.T) {
 	f := newKeyPinFixture(t)
 	B := f.custB.String()
 	reg := noheaderRegister(t, f, f.branchA, f.yardA)
+	openTillOn(t, f, reg, f.branchA)
 	hdr := headerA(f)
 	count := func(table string) int {
 		return noheaderCount(t, f, `SELECT count(*) FROM `+table+` WHERE customer_id = $1`, f.custB)

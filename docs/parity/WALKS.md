@@ -303,4 +303,72 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
 7. Change the FB Connect address and Save without entering the id again: the id shows empty with "Enter the webhook id
    again for the new address", and the Market check says it is off until it is entered.
 
+### M26: till control and end of day by branch
+
+Proves: CP-08 (no sale without an open till, drops, pickups, paid in and paid out, the variance sign off) and CP-09 (the
+end of day by branch and its deposit reconciliation), across two yards: `KEL-MAIN` (`REG-01`) and `LK` (`REG-LK`).
+
+Note on who is signed in: the local stack runs `AUTH_MODE=dev`, where the server sees no person, so it cannot tell the
+cashier from the manager and the rule that a different person signs off is held by the API tests
+(`TestTheSignOffPostsTheVarianceAndNamesTheManager`), not by this walk. The walk shows the queue, the sign off and what
+it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET /api/v1/branches`.
+
+1. **No sale without a till.** With no drawer open at `REG-LK`:
+   `curl -s -X POST -H 'Content-Type: application/json' -d '{"register_id":"REG-LK"}' http://127.0.0.1:8080/api/v1/pos/transactions`
+   answers 409 with the blocker `till_not_open`, and no sale exists. In the desk (Jordan Pike, Point of Sale) the
+   counter says the same in words, and Open Till is the way in.
+2. **Drawer cash at the first yard (Jordan Pike).** Open Till at `REG-01` with a float of $200.00. Ring a cash sale of
+   one 2x4x8 SPF Premium and pay it with the exact cash. Press Drawer Cash and record, one at a time: a Safe drop of
+   $50.00; a Paid out of $5.00 for postage; a Pickup of $20.00 taken by `demo-owner` (the cashier cannot be the taker:
+   leave it blank or name the cashier and the screen or the server refuses); a Paid in of $3.00 as a fee received. A
+   Paid out for Other asks what for. Read the drawer: `GET /api/v1/pos/till/<session id>/report` lists the four
+   movements, `movement_totals_by_kind` carries 5000, 2000, 500 and 300, and the expected cash is the float plus the
+   sale, less the drop, the pickup and the paid out, plus the paid in.
+3. **What the movements post.** `make pg-shell`, then `select e.memo, a.code, l.debit, l.credit from gl_journal_lines l
+   join gl_journal_entries e on e.id = l.journal_entry_id join gl_accounts a on a.id = l.account_id where e.memo like
+   'Till %' order by e.created_at, a.code;` shows each movement as one balanced entry: the drop and the pickup move cash
+   (`1010`) to Undeposited Funds (`1015`), the paid out debits Operating Expenses (`5020`), the paid in credits Fees and
+   Charges Revenue (`4030`).
+4. **A close inside the limit (Jordan Pike).** Close Till and count the cash $0.50 short of the expected figure (the
+   count is blind: the expected figures show only after it posts). The result reads "Z-Report - Till Closed" with
+   the short, and `5030` carries it. The Z report (`GET /api/v1/pos/till/<id>/zreport`) lists the four movements.
+5. **A close over the limit (Drew Patel, second yard).** Open Till at `REG-LK` with a float of $200.00, ring one cash
+   sale, and close counting $20.00 short. The default limit is $5.00 (`GET /api/v1/pos/till/policy?branch_id=<LK id>`
+   answers the default and its source): the result reads "Count Posted - Waiting for Sign Off", the session is
+   `pending_signoff`, `5030` carries nothing for it yet, there is no Z report, and the register takes no sale
+   (step 1's call answers `till_not_open` again).
+6. **The manager signs it off (Robin Diaz).** Open Daily Till: under "Drawers waiting for sign off" register `REG-LK`
+   shows the short, the limit and who closed it. Type a reason and Sign off: the drawer leaves the queue, `5030` now
+   carries the $20.00, the session is `closed` and `GET /api/v1/pos/till/<id>/report` names who signed off and why. The
+   Z report now exists. Set the yard's own limit with
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"branch_id":"<LK id>","variance_threshold_cents":5000}' .../api/v1/pos/till/policy`
+   and repeat step 5 with a $20.00 short: it closes at once, inside the new limit.
+7. **The end of day by branch (Robin Diaz).** Open Daily Till and its "End of Day" card for Kelowna Main Yard: the
+   register `REG-01` with its drawer, the sales, the expected and the counted cash, the over and short, and the cash,
+   checks and card to deposit. The cash to deposit is the counted cash less the float, plus the drop and the pickup.
+   Switch the yard in the header to Lake Country Outpost: its own card, with `REG-LK` only. Nothing of one yard shows in
+   the other.
+8. **Closing the day.** First make the bank account the deposit goes to: `POST /api/v1/bankrecon/accounts` with a name and
+   the id of the cash account `1010` (or a bank account of its own in the chart). At Kelowna Main Yard open a second
+   drawer (Open Till at `REG-01`) and return to the End of Day card: "Close the day" is off and the card says a drawer
+   is still open. Close that drawer too, type a deposit slip reference (`SLIP-0001`), choose the bank account under
+   "Deposit to" and Close the day: the card names who closed it, when and the slip. The close posted the deposit
+   (`select e.memo, a.code, l.debit, l.credit from gl_journal_lines l join gl_journal_entries e on e.id = l.journal_entry_id
+   join gl_accounts a on a.id = l.account_id where e.memo like 'Branch deposit%';`): the bank account's GL account is
+   debited the cash and checks deposited, `1015` is credited what the day's drop and pickup put there and `1010` the
+   rest, so `1015` nets to nothing for the day. A second close of the same day answers 409 `day_already_closed`
+   through the API (`POST /api/v1/pos/end-of-day/close` with the yard, the date, a slip and the bank account), and Open
+   Till at `REG-01` now answers 409 `day_closed`. Lake Country Outpost's day is still open.
+9. **Reopening the day (Robin Diaz).** A late drawer or a correction before the deposit is matched: on the End of Day
+   card press Reopen the day, type why and confirm. The deposit entry is reversed (the same legs the other way, naming
+   the entry it reverses), the card is open again and Open Till at `REG-01` works. Close the day again with a slip
+   reference: a new deposit is posted. Once the deposit is matched to a bank line (step 10) the reopen answers 409
+   `deposit_already_matched`.
+10. **Matching the deposit to the bank.** Import a statement line for the deposit (`POST /api/v1/bankrecon/import` with
+   `{"bank_account_id":"<id>","csv_content":"Date,Amount,Description,Reference\n<the day>,<the deposit>,BRANCH DEPOSIT,SLIP-0001"}`;
+   the day is the business date the card shows). On the End of Day card press "Match the deposit to the bank": the line is
+   offered, the nearest amount first, and only a line of the day's bank account can be taken. Match it: the card shows the
+   bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
+   line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
+
 None of the other walks of the plan are written yet; they land with their items.

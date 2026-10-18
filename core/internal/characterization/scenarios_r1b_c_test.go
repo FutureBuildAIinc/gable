@@ -717,6 +717,15 @@ func r1bCPOSGroups() []groupDef {
 				{name: "pos.till.close.bad_body", method: "POST", path: "/api/v1/pos/till/{c_till}/close", body: "not an object"},
 				{name: "pos.till.close.not_found", method: "POST", path: "/api/v1/pos/till/" + cMissingID + "/close",
 					body: map[string]any{"counted_by_method": map[string]any{"cash": 100}}},
+				// The count below is off by design (the Z report and the ledger link
+				// are what this group pins), so the branch's variance threshold is
+				// set out of reach first: a close over the threshold would wait for
+				// a manager's sign off instead (CP-08).
+				{name: "pos.till.policy.set", method: "PUT", path: "/api/v1/pos/till/policy",
+					body: map[string]any{"branch_id": "{branch}", "variance_threshold_cents": 100000000}},
+				{name: "pos.till.policy.get", method: "GET", path: "/api/v1/pos/till/policy?branch_id={branch}"},
+				{name: "pos.till.policy.bad_body", method: "PUT", path: "/api/v1/pos/till/policy",
+					body: map[string]any{"branch_id": "{branch}", "variance_threshold_cents": -1}},
 				{
 					name: "pos.till.close", method: "POST", path: "/api/v1/pos/till/{c_till}/close",
 					body: map[string]any{"counted_by_method": map[string]any{"cash": 20000}, "notes": "r1b c close count"},
@@ -729,6 +738,44 @@ func r1bCPOSGroups() []groupDef {
 					body:    map[string]any{"register_id": "REG-01", "opening_float_cents": 10000},
 					extract: map[string]string{"c_till_reopened": "/id"},
 				},
+				// The drawer's movements (CP-08): a drop into the reopened drawer, the
+				// refusals, the list, and a movement into the closed one.
+				{name: "pos.till.movement.drop", method: "POST", path: "/api/v1/pos/till/{c_till_reopened}/movements",
+					body: map[string]any{"kind": "safe_drop", "amount_cents": 1000}},
+				{name: "pos.till.movement.paid_out", method: "POST", path: "/api/v1/pos/till/{c_till_reopened}/movements",
+					body: map[string]any{"kind": "paid_out", "amount_cents": 250, "reason_code": "postage"}},
+				{name: "pos.till.movement.bad_reason", method: "POST", path: "/api/v1/pos/till/{c_till_reopened}/movements",
+					body: map[string]any{"kind": "paid_out", "amount_cents": 250, "reason_code": "lunch"}},
+				{name: "pos.till.movement.pickup_alone", method: "POST", path: "/api/v1/pos/till/{c_till_reopened}/movements",
+					body: map[string]any{"kind": "pickup", "amount_cents": 250}},
+				{name: "pos.till.movement.closed_session", method: "POST", path: "/api/v1/pos/till/{c_till}/movements",
+					body: map[string]any{"kind": "safe_drop", "amount_cents": 1000}},
+				{name: "pos.till.movement.not_found", method: "POST", path: "/api/v1/pos/till/" + cMissingID + "/movements",
+					body: map[string]any{"kind": "safe_drop", "amount_cents": 1000}},
+				{name: "pos.till.movement.list", method: "GET", path: "/api/v1/pos/till/{c_till_reopened}/movements"},
+				{name: "pos.till.movement.list.not_found", method: "GET", path: "/api/v1/pos/till/" + cMissingID + "/movements"},
+				{name: "pos.till.report.reopened", method: "GET", path: "/api/v1/pos/till/{c_till_reopened}/report"},
+				// The sign off (CP-08): nothing waits in this run, so the queue is
+				// empty and a sign off of a closed drawer is refused.
+				{name: "pos.till.signoffs.list", method: "GET", path: "/api/v1/pos/till/signoffs"},
+				{name: "pos.till.signoff.not_pending", method: "POST", path: "/api/v1/pos/till/{c_till}/signoff",
+					body: map[string]any{"reason": "r1b c sign off"}},
+				{name: "pos.till.signoff.no_reason", method: "POST", path: "/api/v1/pos/till/{c_till}/signoff",
+					body: map[string]any{"reason": " "}},
+				// The end of day by branch (CP-09): the register ends the run with an
+				// open drawer, so the day cannot close and the refusal pins the shape.
+				{name: "pos.eod.summary", method: "GET", path: "/api/v1/pos/end-of-day?branch_id={branch}&date={today}", maskBody: true},
+				{name: "pos.eod.summary.bad_date", method: "GET", path: "/api/v1/pos/end-of-day?branch_id={branch}&date=tomorrow"},
+				{name: "pos.eod.close.till_open", method: "POST", path: "/api/v1/pos/end-of-day/close",
+					body: map[string]any{"branch_id": "{branch}", "date": "{today}", "deposit_slip_ref": "R1B-C-SLIP"}},
+				{name: "pos.eod.close.bad_body", method: "POST", path: "/api/v1/pos/end-of-day/close", body: "not an object"},
+				{name: "pos.eod.candidates.not_found", method: "GET", path: "/api/v1/pos/end-of-day/" + cMissingID + "/deposit-candidates"},
+				{name: "pos.eod.reopen.not_found", method: "POST", path: "/api/v1/pos/end-of-day/" + cMissingID + "/reopen",
+					body: map[string]any{"reason": "r1b c reopen"}},
+				{name: "pos.eod.reopen.no_reason", method: "POST", path: "/api/v1/pos/end-of-day/" + cMissingID + "/reopen",
+					body: map[string]any{"reason": " "}},
+				{name: "pos.eod.match.not_found", method: "POST", path: "/api/v1/pos/end-of-day/" + cMissingID + "/deposit-match",
+					body: map[string]any{"bank_transaction_id": cMissingID}},
 				{name: "pos.till.report.after_close", method: "GET", path: "/api/v1/pos/till/{c_till}/report"},
 				// The frozen report's payload is pinned whole: the normaliser
 				// rewrites its ids and timestamps the same way it does the

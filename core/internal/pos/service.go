@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -57,9 +58,11 @@ type InvoiceWriter interface {
 }
 
 // LedgerPoster posts the till drawer's over/short inside the close's
-// transaction (gl.Service).
+// transaction and a movement's entry inside its own (gl.Service).
 type LedgerPoster interface {
 	PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error)
+	PostEntry(ctx context.Context, in gl.PostingInput) (*gl.JournalEntry, error)
+	PostReversal(ctx context.Context, in gl.ReversalInput) (*gl.JournalEntry, error)
 }
 
 // EventRecorder writes the act's events, last, in its transaction.
@@ -91,6 +94,7 @@ type Service struct {
 	tx        TxRunner
 	ar        ARCore
 	inventory CounterInventory
+	bank      BankLines
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -148,6 +152,18 @@ func (s *Service) holdTillBranch(ctx context.Context, sessionID uuid.UUID) error
 		return httpx.NotFound("till session not found")
 	}
 	return s.holdRecordBranch(ctx, "till session", branch, sessionID)
+}
+
+// holdDayCloseBranch is holdSaleBranch for a branch day close.
+func (s *Service) holdDayCloseBranch(ctx context.Context, closeID uuid.UUID) error {
+	branch, found, err := s.repo.DayCloseBranch(ctx, closeID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return httpx.NotFound("branch day close not found")
+	}
+	return s.holdRecordBranch(ctx, "branch day close", &branch, closeID)
 }
 
 func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {
@@ -260,6 +276,26 @@ func (s *Service) recordEvent(ctx context.Context, ev outbox.Event) error {
 	return s.events.Write(ctx, ev)
 }
 
+// openDrawer answers the register's open till session, or the till_not_open
+// refusal: a counter sale starts and completes only into an open drawer, so
+// its money is in a count (CP-08).
+func (s *Service) openDrawer(ctx context.Context, registerID string) (*TillSession, error) {
+	// The register is held to the caller's wall first: a register of another
+	// branch answers its own refusal, never the missing drawer.
+	if _, err := s.repo.GetRegisterBranch(ctx, registerID); err != nil {
+		return nil, err
+	}
+	session, err := s.repo.GetOpenTillSession(ctx, registerID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, conflict("till_not_open",
+			fmt.Sprintf("register %s has no open till session: open the drawer before selling", registerID))
+	}
+	return session, nil
+}
+
 // StartSale opens a cart on a register, numbered POS- through the sequence
 // and attached to the register's open till session when one exists. A sale
 // without a customer is a walk-in sale: the walk-in customer is resolved at
@@ -282,9 +318,11 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
 			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
-		if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
-			sale.TillSessionID = &session.ID
+		session, err := s.openDrawer(ctx, in.RegisterID)
+		if err != nil {
+			return err
 		}
+		sale.TillSessionID = &session.ID
 		if err := s.repo.CreateSale(ctx, sale); err != nil {
 			return err
 		}

@@ -5,7 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select';
 import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
-import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
+import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import { chargeRefusal, standingOf, money, PO_REFUSAL } from './standing';
 import { formatPrice4 } from '../../lib/utils';
@@ -15,6 +15,8 @@ import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
+import './TillMovementDialog.ts';
+import { kindLabel } from './movements.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
@@ -81,6 +83,8 @@ export class POSTerminal extends LitElement {
   @state() private _counts: Record<string, string> = {};
   @state() private _closeResult: TillReport | null = null;
   @state() private _tillBusy = false;
+  // The drawer's cash movements dialog (CP-08).
+  @state() private _showMovement = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -711,7 +715,7 @@ export class POSTerminal extends LitElement {
 
   /** True while a dialog of the app is open: no key acts behind it. */
   private get _dialogOpen(): boolean {
-    return this._showTillOpen || this._showTillClose || this._showReturn
+    return this._showTillOpen || this._showTillClose || this._showMovement || this._showReturn
       || document.querySelector('[role="dialog"], [aria-modal="true"]') !== null;
   }
 
@@ -1155,6 +1159,23 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  /** The drawer's cash movements, in the till dialog frame (CP-08). */
+  private _renderMovementModal() {
+    if (!this._showMovement || !this._till) return nothing;
+    return this._overlay(html`
+      <gable-till-movement-dialog session-id=${this._till.id}
+        @movement-cancel=${() => { this._showMovement = false; }}
+        @movement-recorded=${(e: CustomEvent<TillMovement>) => this._onMovementRecorded(e.detail)}></gable-till-movement-dialog>
+    `);
+  }
+
+  private _onMovementRecorded(m: TillMovement) {
+    this._showMovement = false;
+    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
+    if (this._errorTimer) clearTimeout(this._errorTimer);
+    this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
+  }
+
   private _renderTillCloseModal() {
     if (!this._showTillClose) return nothing;
     const close = () => { this._showTillClose = false; this._tillReport = null; this._closeResult = null; };
@@ -1165,8 +1186,11 @@ export class POSTerminal extends LitElement {
       const os = r.session.over_short_cents ?? 0;
       const osColor = os === 0 ? 'rgb(var(--gb-till-ok))' : os < 0 ? 'rgb(var(--gb-till-bad))' : 'rgb(var(--gb-till-warn))';
       const osLabel = os === 0 ? 'BALANCED' : os < 0 ? `SHORT ${fmt(Math.abs(os))}` : `OVER ${fmt(os)}`;
+      // A count over the branch's threshold is not closed yet: a manager signs it off
+      const waiting = r.session.status === 'pending_signoff';
       return this._overlay(html`
-        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report - Till Closed</h2>
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">${waiting ? 'Count Posted - Waiting for Sign Off' : 'Z-Report - Till Closed'}</h2>
+        ${waiting ? html`<p data-testid="till-waiting-signoff" style="margin:0 0 12px;font-size:13px;color:rgb(var(--gb-till-warn))">The count is over the limit of ${fmt(r.session.variance_threshold_cents ?? 0)}. A manager must sign it off before the drawer is closed and the variance is booked.</p>` : nothing}
         <div style="text-align:center;padding:16px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:10px;margin-bottom:16px">
           <div style="font-size:12px;color:rgb(var(--gb-till-muted));text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
           <div style="font-size:32px;font-weight:800;color:${osColor}">${osLabel}</div>
@@ -1310,6 +1334,9 @@ export class POSTerminal extends LitElement {
             <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
           <span class="max-w-[8rem] truncate text-xs text-slate-200" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
+            <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
+              title="Safe drop, pickup, cash paid in or paid out"
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
@@ -1666,6 +1693,7 @@ export class POSTerminal extends LitElement {
         ${this._renderHotkeyLegend()}
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
+        ${this._renderMovementModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`

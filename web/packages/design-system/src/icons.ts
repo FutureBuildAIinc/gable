@@ -37,25 +37,6 @@ export function icon(
 }
 
 /**
- * The named icons the shell chrome draws for the catalog's apps (the catalog
- * carries each app's icon id). An unknown id answers the grid, the desk's
- * own, so a new app id never renders blank.
- */
-const APP_ICONS = {
-  grid: LayoutGrid,
-  receipt: Receipt,
-  storefront: Store,
-  warehouse: Warehouse,
-  truck: Truck,
-} as const;
-
-export type AppIconId = keyof typeof APP_ICONS;
-
-export function appIcon(id: string): Parameters<typeof createElement>[0] {
-  return APP_ICONS[id as AppIconId] ?? LayoutGrid;
-}
-
-/**
  * The two provider marks a sign in button carries, drawn here by hand in the
  * helper's own idiom (a 24 box, currentColor, the stroke width and caps
  * lucide uses) rather than brought in as files: monochrome on purpose, so
@@ -91,4 +72,23 @@ function glyph(size: number, cls: string, body: string) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}"${classAttr} ` +
     `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
   )}`;
+}
+
+/**
+ * The named icons the shell chrome draws for the catalog's apps (the catalog
+ * carries each app's icon id). An unknown id answers the grid, the desk's
+ * own, so a new app id never renders blank.
+ */
+const APP_ICONS = {
+  grid: LayoutGrid,
+  receipt: Receipt,
+  storefront: Store,
+  warehouse: Warehouse,
+  truck: Truck,
+} as const;
+
+export type AppIconId = keyof typeof APP_ICONS;
+
+export function appIcon(id: string): Parameters<typeof createElement>[0] {
+  return APP_ICONS[id as AppIconId] ?? LayoutGrid;
 }
