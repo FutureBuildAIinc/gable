@@ -16,12 +16,25 @@ import { join } from 'node:path';
 const SHOTS_DIR = process.env.SHOTS_DIR ?? 'screens/shots';
 mkdirSync(SHOTS_DIR, { recursive: true });
 
+// A structurally valid but invented JWT (never a real credential: `none`
+// algorithm, placeholder signature, far future exp as a bare epoch number).
+// Seeding a token session, not a dev one, keeps the screens run green against
+// a standard build (VITE_AUTH_DEV_MODE unset): the custody refuses dev
+// handoffs there.
+function fakeToken(claims: Record<string, unknown>): string {
+  const seg = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  return `${seg({ alg: 'none', typ: 'JWT' })}.${seg(claims)}.${seg({ sig: 'stub' })}`;
+}
+
 const SESSION = {
   v: 1,
-  kind: 'dev',
-  name: 'Avery Brooks',
-  role: 'sales',
-  homeYardCode: 'KEL-MAIN',
+  kind: 'token',
+  token: fakeToken({
+    sub: 'screens-sales',
+    name: 'Avery Brooks',
+    roles: ['sales'],
+    exp: 4102444800,
+  }),
 };
 
 const BRANCHES = [
