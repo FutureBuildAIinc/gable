@@ -34,6 +34,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
+	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
@@ -100,6 +101,8 @@ var publicAPIPaths = []string{
 	"/api/public/v1/",
 	"/api/integration/",
 	"/api/v1/a2a/",
+	"/api/v1/auth/config",
+	"/api/v1/auth/start/",
 }
 
 // machineKeyValidator adapts the techadmin service to the machine-key auth
@@ -398,12 +401,29 @@ func Run() {
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
+	pricingResolveRepo := pricing.NewResolveRepository(db)
 	pricingSvc := pricing.NewService(pricingRepo).
+		WithRepository(pricingResolveRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
-	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc).
+		WithBranchGuard(wall.guard)
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, wall.mw, db, "admin", "owner"))
+
+	// The pricing catalogue: levels, profiles, product price lists, vendor
+	// levels and costs, contracts and the cost read (ADR 0006 section 5.6).
+	// Price writes are admin, owner and finance; the reads add sales; the
+	// calculate read is open to every role the counter routes admit, since
+	// the counter prices through it.
+	catalogSvc := pricing.NewCatalogService(pricing.NewCatalogRepository(db)).
+		WithTxRunner(db).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithAudit(pricingAuditAdapter{l: auditLog})
+	catalogHandler := pricing.NewCatalogHandler(catalogSvc).
+		WithEngine(pricingSvc).
+		WithBranchGuard(wall.guard)
+	catalogHandler.RegisterCatalogRoutes(mux, pricingCatalogWall(wall.keyWall, wall.mw, db))
 
 	// Market check: our prices against a live store through an FB Connect
 	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
@@ -411,7 +431,7 @@ func Run() {
 	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
 		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
 		WithAudit(marketcheck.AuditRecorder{L: auditLog})
-	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, db)
+	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, wall.mw, db)
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -421,7 +441,8 @@ func Run() {
 			WithAudit(pricingAuditAdapter{l: auditLog})
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
-		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
+		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc).
+			WithProgramReader(pricingResolveRepo.CustomerProgram)
 		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
@@ -508,7 +529,6 @@ func Run() {
 		Invoices:   invoiceSvc,
 		Accounts:   accountSvc,
 		Pricing:    pricingSvc,
-		Customers:  customerSvc,
 		Escalators: escalatorRepo,
 		QuoteLines: quoteRepo,
 	})
@@ -636,6 +656,23 @@ func Run() {
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
 	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	// Sign in method allowlist (S9): the dealer's allowed sign in methods,
+	// discovered by the front door through the public config route. The
+	// allowlist's admin routes are the dealer's admin roles alone; the
+	// config and start routes are on the public path list above.
+	signinRepo, err := signinmethods.NewRepository(db)
+	if err != nil {
+		logger.Error("Sign in methods repository error", "error", err)
+		os.Exit(1)
+	}
+	signinSvc, err := signinmethods.NewService(signinRepo, db, auditLog)
+	if err != nil {
+		logger.Error("Sign in methods service error", "error", err)
+		os.Exit(1)
+	}
+	signinmethods.NewHandler(signinSvc, cfg.AuthMode).RegisterRoutes(mux, signinmethods.Guards{
+		Admin: middleware.RequireRole("admin", "owner"),
+	})
 	docStore := document.NewStore(db)
 	docSvc := document.NewService(productRepo).
 		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
@@ -710,12 +747,13 @@ func Run() {
 	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, logger).
-		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc}).
 		WithTaxProvider(taxSvc).
 		WithInvoices(invoiceSvc).
 		WithAR(accountSvc).
 		WithInventory(inventorySvc).
-		WithLedger(glSvc). // post drawer over/short to the GL inside the close's transaction
+		WithLedger(glSvc).                            // post drawer over/short and movements to the GL inside the act's transaction
+		WithBankLines(bankrecon.NewDepositLines(db)). // the branch day's deposit match reads and claims statement lines
 		WithAuditLog(auditLog).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
@@ -949,8 +987,13 @@ func Run() {
 	// Reuse the module-level quoteSvc so a portal accept/decline runs the same
 	// state machine — and the same auto-PO and price-protection side effects —
 	// as a counter salesperson closing the quote from the ERP.
-	portalSvc.WithQuoteService(quoteSvc)
-	portalHandler := portal.NewHandler(portalSvc)
+	portalSvc.WithQuoteService(quoteSvc).
+		WithParsingService(parsingSvc).
+		WithAccountService(accountSvc).
+		WithInvoiceService(invoiceSvc).
+		WithDocumentService(docSvc)
+	portalHandler := portal.NewHandler(portalSvc).
+		WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
@@ -1408,8 +1451,8 @@ func rowOrNone(r links.Row, ok bool) links.Row {
 // walls: the settings behind the admin and owner role guard, the run behind
 // the pricing rules' wall. One function, so serve and the wire test mount the
 // same guards.
-func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, db *database.DB) {
+func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, mw func(http.Handler) http.Handler, db *database.DB) {
 	marketcheck.NewHandler(svc).RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner"),
-		pricingRulesCustomerWall(keyWall, db, "admin", "owner"))
+		pricingRulesCustomerWall(keyWall, mw, db, "admin", "owner"))
 }

@@ -105,3 +105,82 @@ CREATE INDEX IF NOT EXISTS idx_schedule_holds_customer
 -- 3. Site delivery instructions ------------------------------------------------
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS site_delivery_instructions TEXT;
+
+-- 4. Named material lists (procurement board) ---------------------------------
+
+CREATE TABLE IF NOT EXISTS procurement_projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PLANNING' CHECK (status IN ('PLANNING', 'QUOTING', 'ORDERED', 'FULFILLED', 'CANCELLED')),
+    created_by UUID REFERENCES customer_users(id) ON DELETE SET NULL,
+    quote_id UUID REFERENCES quotes(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_procurement_projects_customer
+    ON procurement_projects(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS procurement_project_lines (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES procurement_projects(id) ON DELETE CASCADE,
+    line_no INT NOT NULL DEFAULT 1,
+    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+    description TEXT NOT NULL,
+    qty_entered NUMERIC(12, 4) NOT NULL CHECK (qty_entered > 0),
+    uom TEXT NOT NULL DEFAULT 'EA',
+    notes TEXT,
+    indicative_unit_price_cents BIGINT,
+    indicative_line_total_cents BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_procurement_lines_project
+    ON procurement_project_lines(project_id, line_no);
+
+-- 5. Saved payment methods (gateway tokens only, never raw card or bank digits)
+
+CREATE TABLE IF NOT EXISTS portal_payment_methods (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES customer_users(id) ON DELETE SET NULL,
+    gateway TEXT NOT NULL DEFAULT 'stub',
+    gateway_token TEXT NOT NULL,
+    method_type TEXT NOT NULL DEFAULT 'CARD' CHECK (method_type IN ('CARD', 'BANK')),
+    brand TEXT,
+    last4 TEXT NOT NULL CHECK (char_length(last4) BETWEEN 1 AND 4),
+    exp_month INT,
+    exp_year INT,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'removed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_payment_methods_customer
+    ON portal_payment_methods(customer_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_payment_methods_one_default
+    ON portal_payment_methods(customer_id) WHERE is_default AND status = 'active';
+
+-- 6. Single-flight portal payment intents -------------------------------------
+
+CREATE TABLE IF NOT EXISTS portal_payment_intents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    idempotency_key TEXT NOT NULL UNIQUE,
+    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
+    invoice_ids UUID[] NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'CHARGING', 'SETTLED', 'FAILED', 'ABANDONED')),
+    gateway TEXT NOT NULL DEFAULT 'stub',
+    gateway_ref TEXT,
+    payment_id UUID REFERENCES payments(id) ON DELETE SET NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (status <> 'SETTLED' OR payment_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_payment_intents_customer
+    ON portal_payment_intents(customer_id, created_at DESC);

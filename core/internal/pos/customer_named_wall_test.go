@@ -50,6 +50,7 @@ func newNamedWall(t *testing.T) *namedWall {
 	exec(`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', 'WL-POS-N', 'named wall B')`, branchB)
 	w := &namedWall{hidden: uuid.New()}
 	f := newFixture(t, db)
+	f.seedTill()
 	w.f = f
 	w.reachable = f.customerID
 	exec(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-cw-a', $1, TRUE, 'test')`, f.branchID)
@@ -132,21 +133,30 @@ func (w *namedWall) syncBody(customer uuid.UUID) (string, string) {
 		w.f.productID.String(), time.Now().UTC().Format(time.RFC3339))
 }
 
-// RULE (ruling A): the offline sync serves a user naming another yard's
-// customer: the sale is written and its invoice posts at the selling yard.
-func TestTheSyncServesAUserNamingAnotherYardsCustomer(t *testing.T) {
+// RULE (money never queues): the offline sync refuses every batch that
+// parses, a user naming another yard's customer included, and nothing of it
+// is written: no sale, no invoice, no sync log row. The customer walls ahead
+// of the handler keep their own refusals (the bound key's is the serve
+// package's wire test).
+func TestTheSyncRefusesEveryBatchByRule(t *testing.T) {
 	w := newNamedWall(t)
 	f := w.f
 	client, req := w.syncBody(w.hidden)
 	r := f.do("POST", "/api/v1/pos/sync", req, w.headers...)
-	if r.status != http.StatusOK || !strings.Contains(string(r.raw), `"synced_count":1`) {
-		t.Fatalf("sync naming another yard's customer = %d: %s, want the sale synced", r.status, r.raw)
+	if r.status != http.StatusConflict {
+		t.Fatalf("sync naming another yard's customer = %d: %s, want the rule's 409", r.status, r.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, client); n != 1 {
-		t.Errorf("the synced sale was not written")
+	if code, _, _ := errorOf(t, r); code != "money_never_queues" {
+		t.Errorf("code = %q, want money_never_queues (the body: %s)", code, r.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, w.hidden, f.branchID); n != 1 {
-		t.Errorf("the synced sale posted %d invoices at the selling yard, want 1", n)
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
+		t.Errorf("the refused sync wrote its sale")
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, w.hidden, f.branchID); n != 0 {
+		t.Errorf("the refused sync posted %d invoices at the selling yard, want 0", n)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_sync_log`); n != 0 {
+		t.Errorf("the refused sync wrote %d sync log rows, want 0", n)
 	}
 }
 
@@ -291,9 +301,7 @@ func TestAUserReturnNamesAnotherYardsCustomer(t *testing.T) {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
-	if r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": 0}, w.headers...); r.status != http.StatusCreated {
-		t.Fatalf("open till = %d: %s", r.status, r.raw)
-	}
+	// the drawer is the one newNamedWall opened
 	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": f.register}, w.headers...)
 	if r.status != http.StatusCreated {
 		t.Fatalf("create = %d: %s", r.status, r.raw)

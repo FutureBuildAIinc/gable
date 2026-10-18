@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -33,6 +34,8 @@ type Repository interface {
 	CreateSale(ctx context.Context, s *Sale) error
 	LockSale(ctx context.Context, id uuid.UUID) error
 	BumpSaleRevision(ctx context.Context, id uuid.UUID) error
+	// AttachSaleToTill puts a cart that has no drawer into one.
+	AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error
 	GetSale(ctx context.Context, id uuid.UUID) (*Sale, error)
 	UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error
 	CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error
@@ -88,6 +91,32 @@ type Repository interface {
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
 	CloseTillSession(ctx context.Context, s *TillSession) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
+	// The till's movements (CP-08).
+	CreateTillMovement(ctx context.Context, m *TillMovement) error
+	ListTillMovements(ctx context.Context, sessionID uuid.UUID) ([]TillMovement, error)
+	ListTillMovementsPage(ctx context.Context, sessionID uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillMovement, bool, error)
+	TillMovementTotals(ctx context.Context, sessionID uuid.UUID) (map[string]int64, error)
+	// The variance threshold and the sign off queue (CP-08).
+	VarianceThreshold(ctx context.Context, branch *uuid.UUID) (int64, bool, error)
+	SignOffTillSession(ctx context.Context, s *TillSession) error
+	ListPendingSignoffs(ctx context.Context, branch *uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillSession, bool, error)
+	GetVariancePolicy(ctx context.Context, branch uuid.UUID) (*VariancePolicy, error)
+	SetVariancePolicy(ctx context.Context, branch uuid.UUID, cents *int64, actor string) error
+	// The branch day (CP-09).
+	BranchZone(ctx context.Context, branch uuid.UUID) (string, bool, error)
+	LockBranchDay(ctx context.Context, branch uuid.UUID) error
+	BranchDayClosed(ctx context.Context, branch uuid.UUID) (bool, error)
+	ListBranchDaySessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	ListUnsettledSessions(ctx context.Context, branch uuid.UUID, date string) ([]TillSession, error)
+	BranchCollectionsNet(ctx context.Context, branch uuid.UUID, date string) (httpx.Cents, error)
+	DayCloseBranch(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error)
+	GetDayClose(ctx context.Context, branch uuid.UUID, date string) (*DayClose, error)
+	GetDayCloseByID(ctx context.Context, id uuid.UUID, forUpdate bool) (*DayClose, error)
+	CreateDayClose(ctx context.Context, c *DayClose) error
+	MatchDayClose(ctx context.Context, id uuid.UUID, m *DepositMatch) error
+	ReopenDayClose(ctx context.Context, id uuid.UUID, actor, reason string, reversalID *uuid.UUID) error
+	// BranchToday is the branch's business date now in its own zone.
+	BranchToday(ctx context.Context, branch uuid.UUID) (time.Time, error)
 
 	// Z-reports
 	CreateZReport(ctx context.Context, z *ZReport) error
@@ -166,6 +195,8 @@ type Repository interface {
 	SaleBranch(ctx context.Context, id uuid.UUID) (branch uuid.UUID, found bool, err error)
 	TillSessionBranch(ctx context.Context, id uuid.UUID) (branch *uuid.UUID, found bool, err error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
+	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error)
+	LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
 	LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[string][]salesdoc.KitComponent, error)
 	LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error)
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
@@ -217,6 +248,8 @@ type TillAggregate struct {
 	TenderedByMethod map[string]int64
 	CashRefundsCents int64
 	CardRefundsCents int64
+	// MovementTotals sums the session's movements by kind (CP-08).
+	MovementTotals map[string]int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so
@@ -351,6 +384,16 @@ func (r *PostgresRepository) BumpSaleRevision(ctx context.Context, id uuid.UUID)
 	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to move the sale's revision: %w", err)
+	}
+	return nil
+}
+
+// AttachSaleToTill puts a cart made before the open till rule into the
+// register's open drawer, inside the completion's transaction.
+func (r *PostgresRepository) AttachSaleToTill(ctx context.Context, saleID, sessionID uuid.UUID) error {
+	if _, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET till_session_id = $2 WHERE id = $1 AND till_session_id IS NULL`,
+		saleID, sessionID); err != nil {
+		return fmt.Errorf("failed to put the sale into the drawer: %w", err)
 	}
 	return nil
 }
@@ -498,22 +541,53 @@ func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lin
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_line_items (id, transaction_id, position, line_type, parent_line_id, product_id, charge_code_id,
-				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, priced_unit_price,
-				price_source, override_reason, discount_percent, discount_amount, discount_reason, price_adjusted_by,
-				line_total, taxable, revenue_account_code, created_at)
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in,
+				unit_price, priced_unit_price, price_source, price_basis, override_reason,
+				discount_percent, discount_amount, discount_reason, price_adjusted_by,
+				line_total, taxable, revenue_account_code, cost_source, unit_cost, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000,
-				$14::numeric / 10000, $15::numeric / 10000, $16::numeric / 10000, $17, $18, $19::numeric / 10000,
-				$20::numeric / 100, $21, $22, $23::numeric / 100, $24, $25, NOW())`,
+				$14::numeric / 10000, $15, $16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000,
+				$19::numeric / 10000, $20::numeric / 10000, $21, $22, $23, $24::numeric / 10000,
+				$25::numeric / 100, $26, $27, $28::numeric / 100, $29, $30, $31, $32::numeric / 10000, NOW())`,
 			l.ID, saleID, l.Position, string(l.LineType), l.ParentLineID, l.ProductID, l.ChargeCodeID,
 			l.SKU, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM, qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty),
-			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), l.OverrideReason,
+			strArg(l.StockUOM), qtyArg(l.StockQuantity), qtyArg(l.TallyThickness()), qtyArg(l.TallyWidth()),
+			priceArg(l.UnitPrice), priceArg(l.PricedUnitPrice), string(l.PriceSource), strArg(l.PriceBasis), l.OverrideReason,
 			qtyArg(l.DiscountPercent), centsArg(l.DiscountAmount), l.DiscountReason, l.PriceAdjustedBy,
-			centsArg(l.LineTotal), l.Taxable, l.RevenueAccountCode)
+			centsArg(l.LineTotal), l.Taxable, l.RevenueAccountCode, strArg(l.CostSource), priceArg(l.StockingUnitCost))
 		if err != nil {
 			return fmt.Errorf("failed to add the sale line: %w", mapWriteError(err))
 		}
+		if err := r.insertTallyRows(ctx, l.ID, l.Tally); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// insertTallyRows writes one counter line's tally rows (ADR 0006 section
+// 4.2), in request order.
+func (r *PostgresRepository) insertTallyRows(ctx context.Context, lineID uuid.UUID, t *salesdoc.Tally) error {
+	if t == nil {
+		return nil
+	}
+	for j, row := range t.Rows {
+		if _, err := r.ex(ctx).Exec(ctx, `
+			INSERT INTO line_tally_rows (pos_line_item_id, position, pieces, length_ft)
+			VALUES ($1, $2, $3, $4::numeric / 10000)`,
+			lineID, j, row.Pieces, int64(row.LengthFT)); err != nil {
+			return fmt.Errorf("failed to insert a tally row: %w", mapWriteError(err))
+		}
+	}
+	return nil
+}
+
+func strArg(s *string) any {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return *s
 }
 
 func qtyArg(q *httpx.Quantity) any {
@@ -566,7 +640,56 @@ func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]
 		sc.Finish(&l)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachTallyRows(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// attachTallyRows reads every line's tally rows (ADR 0006 section 4.2) into
+// the lines' tallies and completes the exact linear feet and the display
+// board feet the wire carries.
+func (r *PostgresRepository) attachTallyRows(ctx context.Context, lines []salesdoc.Line) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT pos_line_item_id, pieces, ROUND(length_ft * 10000)::bigint
+		FROM line_tally_rows WHERE pos_line_item_id = ANY($1) ORDER BY pos_line_item_id, position`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to get tally rows: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lineID uuid.UUID
+		var row salesdoc.TallyRow
+		var length int64
+		if err := rows.Scan(&lineID, &row.Pieces, &length); err != nil {
+			return fmt.Errorf("failed to scan a tally row: %w", err)
+		}
+		row.LengthFT = httpx.Quantity(length)
+		for i := range lines {
+			if lines[i].ID == lineID {
+				if lines[i].Tally == nil {
+					lines[i].Tally = &salesdoc.Tally{Rows: []salesdoc.TallyRow{}}
+				}
+				lines[i].Tally.Rows = append(lines[i].Tally.Rows, row)
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to walk tally rows: %w", err)
+	}
+	salesdoc.CompleteTallies(lines)
+	return nil
 }
 
 func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
@@ -648,10 +771,10 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				unit_price, line_total, restock, sale_line_id, created_at)
-			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
+				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, created_at)
+			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType)
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity))
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
@@ -1496,6 +1619,93 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 			return nil, err
 		}
 		out[ref.ID.String()] = ref
+	}
+	return out, rows.Err()
+}
+
+// LookupProductUnits reads the unit set of every named product (ADR 0006
+// sections 3.1 and 3.3): the defaults and cross section a counter line's
+// units resolve from, then the set rows.
+func (r *PostgresRepository) LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]salesdoc.ProductUnitSet, error) {
+	out := map[uuid.UUID]salesdoc.ProductUnitSet{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, uom_primary::text, sale_uom::text, price_uom::text, random_length,
+		       ROUND(COALESCE(board_thickness_in, 0) * 10000)::bigint,
+		       ROUND(COALESCE(board_width_in, 0) * 10000)::bigint,
+		       board_thickness_in IS NOT NULL
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var set salesdoc.ProductUnitSet
+		var thick, width int64
+		var hasSection bool
+		if err := rows.Scan(&id, &set.StockUOM, &set.SaleUOM, &set.PriceUOM, &set.RandomLength, &thick, &width, &hasSection); err != nil {
+			return nil, err
+		}
+		if hasSection {
+			t, w := httpx.Quantity(thick), httpx.Quantity(width)
+			set.BoardThick, set.BoardWidth = &t, &w
+		}
+		out[id] = set
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unitRows, err := r.ex(ctx).Query(ctx, `
+		SELECT product_id, uom, ROUND(unit_qty * 10000)::bigint, ROUND(stock_qty * 10000)::bigint,
+		       sell, purchase, price
+		FROM product_units WHERE product_id = ANY($1) ORDER BY uom`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer unitRows.Close()
+	for unitRows.Next() {
+		var id uuid.UUID
+		var row salesdoc.UnitSetRow
+		var unitQty, stockQty int64
+		if err := unitRows.Scan(&id, &row.UOM, &unitQty, &stockQty, &row.Sell, &row.Purchase, &row.Price); err != nil {
+			return nil, err
+		}
+		row.UnitQty, row.StockQty = httpx.Quantity(unitQty), httpx.Quantity(stockQty)
+		set := out[id]
+		set.Rows = append(set.Rows, row)
+		out[id] = set
+	}
+	return out, unitRows.Err()
+}
+
+// LookupCatalogue reads the unit catalogue rows for the given codes: what a
+// counter line's units are checked against (ADR 0006 sections 2.1 and 7.5).
+func (r *PostgresRepository) LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := make(map[string]units.CatalogueUnit, len(codes))
+	if len(codes) == 0 {
+		return out, nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT code, dimension,
+		       ROUND(COALESCE(std_unit_qty, 0) * 10000)::bigint,
+		       ROUND(COALESCE(std_ref_qty, 0) * 10000)::bigint,
+		       std_unit_qty IS NOT NULL, is_active
+		FROM units WHERE code = ANY($1)`, codes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u units.CatalogueUnit
+		var stdUnit, stdRef int64
+		if err := rows.Scan(&u.Code, &u.Dimension, &stdUnit, &stdRef, &u.HasStdSize, &u.IsActive); err != nil {
+			return nil, err
+		}
+		u.StdUnitQty, u.StdRefQty = httpx.Quantity(stdUnit), httpx.Quantity(stdRef)
+		out[u.Code] = u
 	}
 	return out, rows.Err()
 }

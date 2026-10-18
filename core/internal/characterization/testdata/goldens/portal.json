@@ -113,11 +113,15 @@
             "id": "<id-7>",
             "image_url": "",
             "line_total": 9.5,
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
             "product_id": "<id-5>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 9.5
@@ -142,11 +146,15 @@
             "id": "<id-7>",
             "image_url": "",
             "line_total": 9.5,
+            "price_uom": "PCS",
+            "price_uom_qty": 1,
             "product_id": "<id-5>",
             "product_name": "2x4x8 SPF Premium",
             "product_sku": "LUM-248-PREM",
             "quantity": 2,
-            "unit_price": 4.75
+            "unit_price": 4.75,
+            "uom": "PCS",
+            "uom_qty": 1
           }
         ],
         "subtotal": 9.5

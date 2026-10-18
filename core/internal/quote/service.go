@@ -963,11 +963,24 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 		src.DeliveryType = order.DeliveryPickup
 	}
 	for _, l := range q.Lines {
-		src.Lines = append(src.Lines, order.QuoteSourceLine{
+		row := order.QuoteSourceLine{
 			QuoteLineID: l.ID, ProductID: l.ProductID, SKU: l.SKU, Description: l.Description,
 			Quantity: l.Quantity, UOM: string(l.UOM), PriceUOM: l.PriceUOM,
 			UOMQty: l.UOMQty, PriceUOMQty: l.PriceUOMQty, UnitPrice: l.UnitPrice,
-		})
+			StockUOM: l.StockUOM, StockQuantity: l.StockQuantity, UnitCost: l.UnitCost,
+		}
+		if l.Tally != nil {
+			t := &order.QuoteSourceTally{
+				ThicknessIn: l.Tally.ThicknessIn, WidthIn: l.Tally.WidthIn,
+				LinearFeet: l.Tally.LinearFeet, BoardFeet: l.Tally.BoardFeet,
+				Rows: make([]order.QuoteSourceTallyRow, 0, len(l.Tally.Rows)),
+			}
+			for _, r := range l.Tally.Rows {
+				t.Rows = append(t.Rows, order.QuoteSourceTallyRow{Pieces: r.Pieces, LengthFT: r.LengthFT})
+			}
+			row.Tally = t
+		}
+		src.Lines = append(src.Lines, row)
 	}
 	return src
 }

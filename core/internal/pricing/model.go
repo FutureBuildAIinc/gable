@@ -18,13 +18,25 @@ type PricingSource string
 
 const (
 	SourceContract        PricingSource = "CONTRACT"
-	SourceTier            PricingSource = "TIER"
-	SourceRetail          PricingSource = "RETAIL"
 	SourceQuantityBreak   PricingSource = "QUANTITY_BREAK"
 	SourceJobOverride     PricingSource = "JOB_OVERRIDE"
 	SourcePromotional     PricingSource = "PROMOTIONAL"
-	SourceCategoryTier    PricingSource = "CATEGORY_TIER"
 	SourceCategoryAccount PricingSource = "CATEGORY_ACCOUNT"
+	SourceCategoryProfile PricingSource = "CATEGORY_PROFILE"
+	SourceCategoryLevel   PricingSource = "CATEGORY_LEVEL"
+	SourceLevel           PricingSource = "LEVEL"
+	SourceBranch          PricingSource = "BRANCH"
+	SourceBase            PricingSource = "BASE"
+
+	// The pre C3-2A-pricing bases. The engine no longer answers them: the
+	// tier path became the level rung, the category tier arm became the
+	// profile and level arms, and the retail base became base. They stay as
+	// named constants so the callers outside this module that compare the
+	// compatibility answers keep compiling until C3-2B deletes them.
+	// Deprecated: read ParsePricingSource for the live vocabulary.
+	SourceTier         PricingSource = "TIER"
+	SourceRetail       PricingSource = "RETAIL"
+	SourceCategoryTier PricingSource = "CATEGORY_TIER"
 )
 
 // MarshalText writes the lowercase wire name.
@@ -36,8 +48,9 @@ func (s PricingSource) MarshalText() ([]byte, error) {
 // other spelling, the legacy uppercase included, is not a price basis.
 func ParsePricingSource(name string) (PricingSource, bool) {
 	for _, s := range []PricingSource{
-		SourceContract, SourceTier, SourceRetail, SourceQuantityBreak,
-		SourceJobOverride, SourcePromotional, SourceCategoryTier, SourceCategoryAccount,
+		SourceContract, SourceQuantityBreak, SourceJobOverride, SourcePromotional,
+		SourceCategoryAccount, SourceCategoryProfile, SourceCategoryLevel,
+		SourceLevel, SourceBranch, SourceBase,
 	} {
 		if strings.ToLower(string(s)) == name {
 			return s, true
@@ -86,12 +99,13 @@ type CalculatedPrice struct {
 }
 
 // ScaledPrice is the engine's own answer (ADR 0006 section 7.3): the exact
-// scale 4 price with its source. Until C3-2A-pricing every price is in the
-// product's stocking unit.
+// scale 4 price with its source, and the reference price it answers against.
+// Until C3-2B every price is in the product's stocking unit.
 type ScaledPrice struct {
-	Price   httpx.Price   `json:"unit_price_ten_thousandths"`
-	Source  PricingSource `json:"price_basis"`
-	Details string        `json:"details"`
+	Price     httpx.Price   `json:"unit_price_ten_thousandths"`
+	Source    PricingSource `json:"price_basis"`
+	Details   string        `json:"details"`
+	Reference httpx.Price   `json:"reference_price_ten_thousandths"`
 }
 
 // Float64 renders the scaled price the way the compatibility entry points
@@ -102,12 +116,16 @@ func (s ScaledPrice) Float64() float64 {
 
 // CustomerContract is one customer's negotiated price for one product. The
 // price is a fixed price at scale 4, returned as stored and never rounded
-// (ADR 0006 R4.2).
+// (ADR 0006 R4.2). Under the stocking unit hold the price unit is the
+// product's stocking unit; branch_id null is the all branch row.
 type CustomerContract struct {
 	ID            uuid.UUID       `json:"id"`
 	CustomerID    uuid.UUID       `json:"customer_id"`
 	ProductID     uuid.UUID       `json:"product_id"`
 	ContractPrice httpx.Price     `json:"contract_price_ten_thousandths"`
+	PriceUOM      string          `json:"price_uom"`
+	BranchID      *uuid.UUID      `json:"branch_id"`
+	Revision      int64           `json:"revision"`
 	CreatedAt     httpx.Timestamp `json:"created_at"`
 	UpdatedAt     httpx.Timestamp `json:"updated_at"`
 }
@@ -123,6 +141,11 @@ type PricingRule struct {
 	ProductID  *uuid.UUID `json:"product_id"`
 	CustomerID *uuid.UUID `json:"customer_id"`
 	JobID      *uuid.UUID `json:"job_id"`
+	// PriceUOM is the unit a fixed price is per (ADR 0006 section 5.2): the
+	// product's stocking unit until C3-2B, so a percent or markup rule (which
+	// answers in the reference price's unit) carries none.
+	PriceUOM string `json:"price_uom"`
+
 	// Category scopes the rule to a product category. Empty means unscoped:
 	// the rule applies to every product. The column is nullable and the
 	// repository COALESCEs NULL to "", so NULL and "" are the same thing here.

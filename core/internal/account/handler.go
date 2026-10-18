@@ -43,6 +43,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, guard, finance func(http.Ha
 	mux.HandleFunc("GET /api/v1/ar/customers/{id}/statement", wrap(guard, h.HandleStatement))
 	mux.HandleFunc("GET /api/v1/ar/reconciliation", wrap(finance, h.HandleReconciliation))
 	mux.HandleFunc("POST /api/v1/ar/applications/{id}/reverse", wrap(finance, h.HandleReverse))
+	h.registerARRoutes(mux, guard, finance)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

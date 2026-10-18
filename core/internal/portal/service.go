@@ -9,9 +9,13 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -38,6 +42,15 @@ type Service struct {
 	// portal's quote decision endpoints rather than letting them bypass the
 	// state machine.
 	quoteSvc *quote.Service
+
+	// Phase 2 upstream seams: material list parsing, AR core, invoices,
+	// document PDF formatter, and the stubbed payment gateway (kept in
+	// payments.go).
+	parsingSvc     *parsing.Service
+	accountSvc     *account.Service
+	invoiceSvc     *invoice.Service
+	docSvc         *document.Service
+	paymentGateway any
 }
 
 // NewService creates a new portal service.
@@ -53,14 +66,15 @@ func NewService(
 	productSvc *product.Service,
 ) *Service {
 	return &Service{
-		repo:         repo,
-		jwtSecret:    []byte(jwtSecret),
-		logger:       logger,
-		pricingSvc:   pricingSvc,
-		customerSvc:  customerSvc,
-		inventorySvc: inventorySvc,
-		orderSvc:     orderSvc,
-		productSvc:   productSvc,
+		repo:           repo,
+		jwtSecret:      []byte(jwtSecret),
+		logger:         logger,
+		pricingSvc:     pricingSvc,
+		customerSvc:    customerSvc,
+		inventorySvc:   inventorySvc,
+		orderSvc:       orderSvc,
+		productSvc:     productSvc,
+		paymentGateway: defaultPortalPaymentGateway(),
 	}
 }
 
@@ -70,6 +84,35 @@ func NewService(
 func (s *Service) WithQuoteService(quoteSvc *quote.Service) *Service {
 	s.quoteSvc = quoteSvc
 	return s
+}
+
+// WithParsingService wires Gable's material list and photo intake service.
+func (s *Service) WithParsingService(parsingSvc *parsing.Service) *Service {
+	s.parsingSvc = parsingSvc
+	return s
+}
+
+// WithAccountService wires Gable's AR core for statements, aging, and payments.
+func (s *Service) WithAccountService(accountSvc *account.Service) *Service {
+	s.accountSvc = accountSvc
+	return s
+}
+
+// WithInvoiceService wires Gable's invoice service for PDF generation.
+func (s *Service) WithInvoiceService(invoiceSvc *invoice.Service) *Service {
+	s.invoiceSvc = invoiceSvc
+	return s
+}
+
+// WithDocumentService wires Gable's PDF document formatter for invoices and statements.
+func (s *Service) WithDocumentService(docSvc *document.Service) *Service {
+	s.docSvc = docSvc
+	return s
+}
+
+func (s *Service) pgRepo() (*PostgresRepository, bool) {
+	r, ok := s.repo.(*PostgresRepository)
+	return r, ok
 }
 
 // PortalClaims holds JWT claims for portal auth.
@@ -205,11 +248,34 @@ func (s *Service) GetDelivery(ctx context.Context, deliveryID, customerID uuid.U
 	return s.repo.GetDeliveryByIDAndCustomer(ctx, deliveryID, customerID)
 }
 
-// CreateReorder duplicates a historical order as a new DRAFT.
+// CreateReorder duplicates a historical order as a new DRAFT, re-pricing
+// product lines through the customer's pricing waterfall (M5) and optionally
+// tagging the draft with a customer project.
 func (s *Service) CreateReorder(ctx context.Context, customerID uuid.UUID, req ReorderRequest) (*ReorderResponse, error) {
+	if req.ProjectID != nil {
+		ok, err := s.repo.ProjectBelongsToCustomer(ctx, *req.ProjectID, customerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify project: %w", err)
+		}
+		if !ok {
+			return nil, ErrProjectNotFound
+		}
+	}
+
 	newOrderID, err := s.repo.CreateReorder(ctx, customerID, req.OrderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reorder: %w", err)
+	}
+
+	if err := s.repriceReorderedDraft(ctx, customerID, newOrderID); err != nil {
+		s.logger.Warn("Portal reorder: customer repricing fallback to base price",
+			"customer_id", customerID, "order_id", newOrderID, "error", err)
+	}
+	if req.ProjectID != nil {
+		if err := s.repo.SetOrderProject(ctx, newOrderID, customerID, req.ProjectID); err != nil {
+			s.logger.Warn("Portal reorder: failed to attach project",
+				"customer_id", customerID, "order_id", newOrderID, "project_id", *req.ProjectID, "error", err)
+		}
 	}
 
 	s.logger.Info("Portal reorder created", "customer_id", customerID, "source_order", req.OrderID, "new_order", newOrderID)

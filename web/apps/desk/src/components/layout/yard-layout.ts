@@ -3,6 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { framedByShell } from '@gable/design-system';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { icon } from '../../lib/icons.ts';
@@ -34,9 +35,33 @@ export class GableYardLayout extends LitElement {
 
   render() {
     const path = router.currentPath;
+    const framed = framedByShell();
+    const nav = html`
+      <nav class="${framed
+        ? 'sticky top-0 w-full h-12 bg-slate-steel/80 backdrop-blur-md border-b border-white/10 flex items-center justify-around z-40'
+        : 'fixed bottom-0 left-0 right-0 md:max-w-md md:mx-auto h-16 bg-slate-steel/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around z-50'}">
+        ${navItems.map(item => {
+          const isActive = item.path === '/yard' ? path === '/yard' : path.startsWith(item.path);
+          return html`
+            <a href="${item.path}" class="${cn(
+              framed
+                ? 'flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg transition-colors'
+                : 'flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-colors',
+              isActive ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'
+            )}">
+              ${icon(item.iconData, framed ? 16 : 20)}
+              <span class="text-[10px] font-mono uppercase tracking-wider">${item.label}</span>
+            </a>
+          `;
+        })}
+      </nav>
+    `;
 
     return html`
       <div class="min-h-screen bg-deep-space text-white font-sans md:max-w-md md:mx-auto md:border-x md:border-white/10 relative shadow-2xl flex flex-col">
+        ${framed
+          ? nav
+          : html`
         <header class="h-16 flex items-center justify-between px-4 border-b border-white/10 bg-slate-steel/80 backdrop-blur-md sticky top-0 z-50">
           <div class="font-bold text-lg tracking-wider font-mono">
             GABLE<span class="text-amber-400">YARD</span>
@@ -45,26 +70,13 @@ export class GableYardLayout extends LitElement {
             Y1
           </div>
         </header>
+        `}
 
-        <main class="flex-1 pb-20 overflow-y-auto">
+        <main class="flex-1 ${framed ? 'pb-6' : 'pb-20'} overflow-y-auto">
           ${this.pageContent}
         </main>
 
-        <!-- Bottom Tab Navigation -->
-        <nav class="fixed bottom-0 left-0 right-0 md:max-w-md md:mx-auto h-16 bg-slate-steel/95 backdrop-blur-md border-t border-white/10 flex items-center justify-around z-50">
-          ${navItems.map(item => {
-            const isActive = item.path === '/yard' ? path === '/yard' : path.startsWith(item.path);
-            return html`
-              <a href="${item.path}" class="${cn(
-                'flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-colors',
-                isActive ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'
-              )}">
-                ${icon(item.iconData, 20)}
-                <span class="text-[10px] font-mono uppercase tracking-wider">${item.label}</span>
-              </a>
-            `;
-          })}
-        </nav>
+        ${framed ? nothing : nav}
       </div>
     `;
   }

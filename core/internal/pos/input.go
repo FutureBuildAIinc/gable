@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -235,6 +236,7 @@ type returnLineRequest struct {
 	LineID      *string         `json:"line_id"`
 	Description *string         `json:"description"`
 	Quantity    json.RawMessage `json:"quantity"`
+	UOM         *string         `json:"uom"`
 	UnitPrice   json.RawMessage `json:"unit_price_ten_thousandths"`
 	Restock     *bool           `json:"restock"`
 }
@@ -296,6 +298,9 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		if q, ok := v.Quantity(field("quantity"), l.Quantity, true); ok {
 			v.Check(q > 0, field("quantity"), "must be greater than zero")
 			rl.Quantity = q
+		}
+		if l.UOM != nil {
+			rl.UOM = uppercase(strings.TrimSpace(*l.UOM))
 		}
 		if !isAbsentRaw(l.UnitPrice) {
 			if n, ok := v.Int(field("unit_price_ten_thousandths"), l.UnitPrice, true); ok {
@@ -503,4 +508,138 @@ func (r *paybackIntentRequest) parse() (*PaybackIntentIn, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// movementRequest is POST /pos/till/{id}/movements.
+type movementRequest struct {
+	Kind        *string         `json:"kind"`
+	AmountCents json.RawMessage `json:"amount_cents"`
+	ReasonCode  *string         `json:"reason_code"`
+	Note        *string         `json:"note"`
+	TakenBy     *string         `json:"taken_by"`
+}
+
+func (r *movementRequest) parse() (MovementIn, error) {
+	v := &httpx.Validator{}
+	var in MovementIn
+	kind := ""
+	if r.Kind != nil {
+		kind = *r.Kind
+	}
+	v.Enum("kind", kind, string(MovementSafeDrop), string(MovementPickup), string(MovementPaidIn), string(MovementPaidOut))
+	in.Kind = MovementKind(kind)
+	if n, ok := v.Int("amount_cents", r.AmountCents, true); ok {
+		v.Check(n > 0, "amount_cents", "must be more than zero")
+		in.AmountCents = httpx.Cents(n)
+	}
+	if r.ReasonCode != nil {
+		in.ReasonCode = *r.ReasonCode
+	}
+	if r.Note != nil {
+		in.Note = strings.TrimSpace(*r.Note)
+	}
+	if r.TakenBy != nil {
+		in.TakenBy = strings.TrimSpace(*r.TakenBy)
+	}
+	paid := in.Kind == MovementPaidIn || in.Kind == MovementPaidOut
+	switch {
+	case paid && in.ReasonCode == "":
+		v.Check(false, "reason_code", "is required for a paid in or paid out")
+	case paid:
+		reason, known := movementReasons[in.ReasonCode]
+		account := reason.paidOutAccount
+		if in.Kind == MovementPaidIn {
+			account = reason.paidInAccount
+		}
+		v.Check(known && account != "", "reason_code",
+			"must be one of: "+strings.Join(MovementReasonCodes(in.Kind), ", "))
+	case kind != "":
+		v.Check(in.ReasonCode == "", "reason_code", "a drop or pickup carries no reason code")
+	}
+	v.Check(in.ReasonCode != "other" || in.Note != "", "note", "is required when the reason code is other")
+	if in.Kind == MovementPickup {
+		v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+	} else if kind != "" {
+		v.Check(in.TakenBy == "", "taken_by", "only a pickup names the person taking the cash")
+	}
+	if err := v.Err(); err != nil {
+		return MovementIn{}, err
+	}
+	return in, nil
+}
+
+// signOffRequest is POST /pos/till/{id}/signoff.
+type signOffRequest struct {
+	Reason *string `json:"reason"`
+}
+
+// variancePolicyRequest is PUT /pos/till/policy: the branch and its own
+// threshold in cents, null to fall back to the database wide default.
+type variancePolicyRequest struct {
+	BranchID       *string         `json:"branch_id"`
+	ThresholdCents json.RawMessage `json:"variance_threshold_cents"`
+}
+
+func (r *variancePolicyRequest) parse() (uuid.UUID, *int64, error) {
+	v := &httpx.Validator{}
+	branch, _ := v.UUID("branch_id", r.BranchID, true)
+	var cents *int64
+	if isAbsentRaw(r.ThresholdCents) {
+		// null clears the override, but the key must be sent: an empty body
+		// is not an instruction
+		v.Check(r.ThresholdCents != nil, "variance_threshold_cents", "is required (null clears the branch override)")
+	} else if n, ok := v.Int("variance_threshold_cents", r.ThresholdCents, true); ok {
+		v.Check(n >= 0, "variance_threshold_cents", "must not be negative")
+		cents = &n
+	}
+	if err := v.Err(); err != nil {
+		return uuid.Nil, nil, err
+	}
+	return branch, cents, nil
+}
+
+// dayCloseRequest is POST /pos/end-of-day/close.
+type dayCloseRequest struct {
+	BranchID       *string `json:"branch_id"`
+	Date           *string `json:"date"`
+	DepositSlipRef *string `json:"deposit_slip_ref"`
+	BankAccountID  *string `json:"bank_account_id"`
+}
+
+func (r *dayCloseRequest) parse() (branch uuid.UUID, date, slip string, bank *uuid.UUID, err error) {
+	v := &httpx.Validator{}
+	branch, _ = v.UUID("branch_id", r.BranchID, true)
+	if r.Date != nil {
+		date = *r.Date
+	}
+	if _, perr := time.Parse("2006-01-02", date); perr != nil {
+		v.Check(false, "date", "is required, as YYYY-MM-DD")
+	}
+	if r.DepositSlipRef != nil {
+		slip = strings.TrimSpace(*r.DepositSlipRef)
+	}
+	v.Check(slip != "", "deposit_slip_ref", "is required: the reference printed on the deposit slip")
+	v.Check(len(slip) <= 64, "deposit_slip_ref", "must be at most 64 characters")
+	if r.BankAccountID != nil {
+		if id, ok := v.UUID("bank_account_id", r.BankAccountID, false); ok {
+			bank = &id
+		}
+	}
+	return branch, date, slip, bank, v.Err()
+}
+
+// depositMatchRequest is POST /pos/end-of-day/{id}/deposit-match.
+type depositMatchRequest struct {
+	BankTransactionID *string `json:"bank_transaction_id"`
+}
+
+func (r *depositMatchRequest) parse() (uuid.UUID, error) {
+	v := &httpx.Validator{}
+	id, _ := v.UUID("bank_transaction_id", r.BankTransactionID, true)
+	return id, v.Err()
+}
+
+// dayReopenRequest is POST /pos/end-of-day/{id}/reopen.
+type dayReopenRequest struct {
+	Reason *string `json:"reason"`
 }

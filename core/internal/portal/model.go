@@ -193,15 +193,29 @@ type PortalDeliveryDTO struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ReorderRequest tells which historical order to duplicate.
+// ReorderRequest tells which historical order to duplicate, and optionally tags
+// the new draft order with a customer project.
 type ReorderRequest struct {
-	OrderID uuid.UUID `json:"order_id"`
+	OrderID   uuid.UUID  `json:"order_id"`
+	ProjectID *uuid.UUID `json:"project_id,omitempty"`
 }
 
 // ReorderResponse confirms the new draft order.
 type ReorderResponse struct {
 	OrderID uuid.UUID `json:"order_id"`
 	Message string    `json:"message"`
+}
+
+// YardAvailabilityDTO is the contractor-safe stock and lead time projection for
+// a single yard (branch). It never carries cost, margin, or reservation details.
+type YardAvailabilityDTO struct {
+	YardID       uuid.UUID `json:"yard_id"`
+	YardCode     string    `json:"yard_code"`
+	YardName     string    `json:"yard_name"`
+	OnHand       float64   `json:"on_hand"`
+	Available    float64   `json:"available"`
+	InStock      bool      `json:"in_stock"`
+	LeadTimeDays *int      `json:"lead_time_days"`
 }
 
 // --- Catalog DTOs ---
@@ -270,6 +284,10 @@ type CatalogProductDTO struct {
 	// around that number.
 	LeadTimeDays *int `json:"lead_time_days"`
 
+	// Availability is the per-yard stock and lead time breakdown across active
+	// dealer yards.
+	Availability []YardAvailabilityDTO `json:"availability,omitempty"`
+
 	// Category tree coordinates (migration 049's product_categories). Category
 	// above stays the flat display string it has always been; these are the
 	// structured view, and are null/empty for a product with no category link.
@@ -314,6 +332,15 @@ type CartItemDTO struct {
 	UnitPrice   float64   `json:"unit_price"`
 	LineTotal   float64   `json:"line_total"`
 	Available   float64   `json:"available"`
+
+	// The line shape's unit fields (ADR 0006 section 7.6): the quantity is
+	// in the item's uom, the price is per price_uom, and the pair between
+	// them was resolved when the item was added. The portal's float wire
+	// keeps its shape until C5-1; these ride the stored columns.
+	UOM         string  `json:"uom"`
+	PriceUOM    string  `json:"price_uom"`
+	UOMQty      float64 `json:"uom_qty"`
+	PriceUOMQty float64 `json:"price_uom_qty"`
 }
 
 // AddToCartRequest is the payload for adding an item to the cart.

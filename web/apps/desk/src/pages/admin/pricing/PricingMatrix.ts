@@ -160,13 +160,13 @@ export class GablePricingMatrix extends LitElement {
         ToastService.show('Rule updated successfully', 'success');
       } else {
         // A new rule, or an override of an inherited one (which loses the ancestor's id and revision).
-        const targetType: TargetType = cell.rule?.target_type ?? this._drawerTargetType ?? 'tier';
+        const targetType: TargetType = cell.rule?.target_type ?? this._drawerTargetType ?? 'level';
         await categoryPricingService.createRule({
           ...values,
           target_type: targetType,
           ...(targetType === 'account'
             ? { customer_id: customerId ?? cell.rule?.customer_id ?? undefined }
-            : { tier: cell.tier }),
+            : { price_level_id: cell.level ?? undefined }),
           category_id: cell.category_id,
           is_active: true,
         });
@@ -217,14 +217,14 @@ export class GablePricingMatrix extends LitElement {
 
     const rules: CategoryRuleBulkItem[] = [];
     for (const key of this._selectedCells) {
-      const [catId, tier] = key.split(':');
+      const [catId, level] = key.split(':');
       // A cell that already holds its own rule is replaced by naming its id; the others create.
-      const direct = this._matrix.cells.find(c => c.category_id === catId && c.tier === tier && !c.inherited)?.rule;
+      const direct = this._matrix.cells.find(c => c.category_id === catId && c.level === level && !c.inherited)?.rule;
       rules.push({
         ...parsed.values,
         ...(direct?.id ? { id: direct.id, revision: direct.revision } : {}),
-        target_type: 'tier',
-        tier,
+        target_type: 'level',
+        price_level_id: level,
         category_id: catId,
         is_active: true,
       });
@@ -254,7 +254,7 @@ export class GablePricingMatrix extends LitElement {
       category_id: rule.category_id,
       category_name: rule.category_name || '',
       category_path: rule.category_path || '',
-      tier: '',
+      level: '',
       rule,
       inherited: false,
     };
@@ -268,7 +268,7 @@ export class GablePricingMatrix extends LitElement {
       category_id: this._matrix?.categories?.[0]?.id || '',
       category_name: this._matrix?.categories?.[0]?.name || '',
       category_path: this._matrix?.categories?.[0]?.path || '',
-      tier: '',
+      level: '',
       rule: undefined,
       inherited: false,
     };
@@ -307,7 +307,7 @@ export class GablePricingMatrix extends LitElement {
               Pricing Matrix
             </h1>
             <p class="text-slate-400 mt-1">
-              Configure tier and account-level pricing rules by product category.
+              Configure account, profile and level pricing rules by product category.
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -478,7 +478,7 @@ export class GablePricingMatrix extends LitElement {
               ` : this._matrix ? html`
                 <gable-matrix-grid
                   .categories=${this._matrix.categories}
-                  .tiers=${this._matrix.tiers}
+                  .tiers=${this._matrix.levels}
                   .cells=${this._matrix.cells}
                   ?bulk-mode=${this._bulkMode}
                   .selectedCells=${this._selectedCells}
@@ -544,12 +544,12 @@ export class GablePricingMatrix extends LitElement {
         ${this._drawerOpen && this._drawerCell ? html`
           <gable-rule-drawer
             .rule=${this._drawerCell.rule || {
-              target_type: this._drawerTargetType || 'tier',
-              tier: this._drawerCell.tier,
+              target_type: this._drawerTargetType || 'level',
+              price_level_id: this._drawerCell.level,
               category_id: this._drawerCell.category_id,
             }}
             category-name=${this._drawerCell.category_name}
-            tier-name=${this._drawerCell.tier}
+            tier-name=${this._drawerCell.level}
             target-type=${this._drawerTargetType || ''}
             @save-rule=${this._handleSaveRule}
             @delete-rule=${this._handleDeleteRule}

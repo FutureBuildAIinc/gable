@@ -143,9 +143,8 @@ type customerRow struct {
 	AddressLine1     string   `json:"address_line1"`
 	City             string   `json:"city"`
 	Region           string   `json:"region"`
-	Tier             string   `json:"tier"`
 	PaymentTermsCode string   `json:"payment_terms_code"`
-	PriceLevel       string   `json:"price_level"`
+	PriceLevel       string   `json:"price_level"` // the level whose profile the customer lands on
 	CreditLimitCAD   *float64 `json:"credit_limit_cad"`
 	PSTExempt        bool     `json:"pst_exempt"`
 	HomeYard         string   `json:"home_yard"`
@@ -611,7 +610,6 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 		if err := db.QueryRowContext(ctx, `SELECT id FROM payment_terms WHERE code = $1`, row.PaymentTermsCode).Scan(&termsID); err != nil {
 			db.QueryRowContext(ctx, `SELECT id FROM payment_terms WHERE code = 'NET30'`).Scan(&termsID)
 		}
-		priceLevelID := priceLevelIDs[row.PriceLevel]
 		var creditLimit interface{} = nil
 		if row.CreditLimitCAD != nil {
 			creditLimit = *row.CreditLimitCAD
@@ -642,19 +640,24 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 		// fields so a fresh deploy adopts new names/emails; ON CONFLICT
 		// preserves a row the rest of the seed wrote for the same account.
 		var id string
+		// The import maps the row's level name to that level's profile: the
+		// customer's pricing program is a profile id now.
+		var profileID interface{} = nil
+		if levelID, ok := priceLevelIDs[row.PriceLevel]; ok && levelID != uuid.Nil {
+			_ = db.QueryRowContext(ctx, `SELECT id FROM price_profiles WHERE price_level_id = $1 LIMIT 1`, levelID).Scan(&profileID)
+		}
 		err := db.QueryRowContext(ctx, `INSERT INTO customers
-			(account_number, name, email, phone, address, tier,
-				price_level_id, salesperson_id, primary_branch_id,
+			(account_number, name, email, phone, address,
+				price_profile_id, salesperson_id, primary_branch_id,
 				currency, credit_limit, payment_terms_id, is_active)
-			VALUES ($1,$2,$3,$4,$5,$6::customer_tier,$7,$8,$9,
-				(SELECT value FROM system_settings WHERE key = 'currency.default'),$10,$11,TRUE)
+			VALUES ($1,$2,$3,$4,$5,COALESCE($6, price_profile_default_id()),$7,$8,
+				(SELECT value FROM system_settings WHERE key = 'currency.default'),$9,$10,TRUE)
 			ON CONFLICT (account_number) DO UPDATE SET
 				name = EXCLUDED.name,
 				email = EXCLUDED.email,
 				phone = EXCLUDED.phone,
 				address = EXCLUDED.address,
-				tier = EXCLUDED.tier,
-				price_level_id = EXCLUDED.price_level_id,
+				price_profile_id = COALESCE(EXCLUDED.price_profile_id, price_profile_default_id()),
 				salesperson_id = EXCLUDED.salesperson_id,
 				primary_branch_id = EXCLUDED.primary_branch_id,
 				currency = EXCLUDED.currency,
@@ -664,7 +667,7 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 				updated_at = NOW()
 			RETURNING id`,
 			row.AccountNumber, row.Name, row.Email, row.Phone, row.AddressLine1,
-			row.Tier, priceLevelID, salespersonID, branchID,
+			profileID, salespersonID, branchID,
 			creditLimit, termsID,
 		).Scan(&id)
 		if err != nil || id == "" {
@@ -1029,10 +1032,10 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	// statement per order, the product's own description, SKU and unit.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
-			description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+			description, sku, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, priced_unit_price, price_source, line_total, taxable,
 			quantity_allocated, quantity_fulfilled, created_at)
 		SELECT $1, l.product_id, l.qty, l.unit_tt::numeric / 10000, 'PRODUCT', l.pos,
-			COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1,
+			COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, p.uom_primary::text, l.qty,
 			l.unit_tt::numeric / 10000, 'PRICE_LIST', l.total_c::numeric / 100, TRUE, 0, l.qty, $7
 		FROM unnest($2::uuid[], $3::numeric[], $4::bigint[], $5::bigint[], $6::int[]) AS l(product_id, qty, unit_tt, total_c, pos)
 		JOIN products p ON p.id = l.product_id`,
@@ -1053,9 +1056,9 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
-			quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable, created_at)
+			quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, unit_price, price_each, price_source, line_total, taxable, created_at)
 		SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
-			ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable, $3
+			ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.stock_uom, ol.stock_quantity, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable, $3
 		FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID, day); err != nil {
 		return seedInvoice{}, fmt.Errorf("invoice lines: %w", err)
 	}

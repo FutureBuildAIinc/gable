@@ -87,7 +87,7 @@ async function _happy() {
   );
   const adjustedRevision: number = adjusted.body.revision;
 
-  const customers = await client.get("/api/v1/customers", { query: { q: "acme", tier: "gold", is_active: true, limit: 20 } });
+  const customers = await client.get("/api/v1/customers", { query: { q: "acme", is_active: true, limit: 20 } });
   const limit: number | null | undefined = customers.body.items[0]?.credit_limit_cents;
   const terms: string | undefined = customers.body.items[0]?.payment_terms.code;
   const shipTo = await client.post(
@@ -150,7 +150,7 @@ async function _happy() {
     query: { customer_id: "8f14e45f", product_id: "8f14e45f", quantity: "120" },
   });
   const unitPrice: number = priced.body.unit_price_ten_thousandths;
-  const basis: "contract" | "tier" | "retail" | "quantity_break" | "job_override" | "promotional" | "category_tier" | "category_account" =
+  const basis: "contract" | "quantity_break" | "job_override" | "promotional" | "category_account" | "category_profile" | "category_level" | "level" | "branch" | "base" =
     priced.body.price_basis;
   const total: number = priced.body.line_total_cents;
   const moved = await client.put(

@@ -77,8 +77,9 @@ func TestKeyBranchPin_JobOfAnotherCustomer(t *testing.T) {
 	// document that takes the job is priced by it: without the refusal the
 	// leak shows as the other customer's price.
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO pricing_rules (name, rule_type, product_id, job_id, fixed_price)
-		 VALUES ('pin job override', 'JOB_OVERRIDE', $1, $2, 0.42)`, f.posProd, f.jobB); err != nil {
+		`INSERT INTO pricing_rules (name, rule_type, product_id, job_id, fixed_price, price_uom)
+		 SELECT 'pin job override', 'JOB_OVERRIDE', $1, $2, 0.42, p.uom_primary FROM products p WHERE p.id = $1`,
+		f.posProd, f.jobB); err != nil {
 		t.Fatalf("seed the job rule: %v", err)
 	}
 	A := f.custID.String()
@@ -413,10 +414,10 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 
 // TestKeyBranchPin_PosSyncCustomerWall is round 10 P1-1: the offline sync
 // replays whole sales whose bodies name a customer, so a key pinned to A
-// posting a sale on a customer held only by B (its ACCOUNT tender invoicing
-// that customer at branch A) is refused at the wall with nothing written. The
-// A control completes the same sale on the pin's own customer, and the user
-// keeps the reach.
+// posting a sale on a customer held only by B is refused at the wall with
+// nothing written. The walls keep that hold (money never queues never got
+// past them anyway): the control calls on the pin's own customer and on the
+// user's reach now answer the rule's 409 refusal, still writing nothing.
 func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	f, _, first := round5Fixture(t)
 	// The register's completion deducts stock from the default (null location)
@@ -471,16 +472,20 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 		t.Errorf("the refused pos sync still wrote its replayed transaction")
 	}
 
-	// The A control: the same sale on the pin's own customer completes and its
-	// ACCOUNT tender invoices that customer, and the user keeps the same reach
-	// on the foreign customer's sale at the foreign register.
+	// The A control: the same sale on the pin's own customer passes the walls
+	// and is refused by rule (money never queues), nothing written; the user
+	// keeps the same reach on the foreign customer's sale at the foreign
+	// register, refused by the same rule.
 	ownBefore := invoicesOn(f.custID)
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", sync(f.regA, f.custID.String()), nil)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("bound key pos sync on the pin's own customer: %d %s, want the sale synced", status, buf)
+	if status != http.StatusConflict || !strings.Contains(string(buf), "money_never_queues") {
+		t.Errorf("bound key pos sync on the pin's own customer: %d %s, want the rule's 409", status, buf)
 	}
-	if grown := invoicesOn(f.custID) - ownBefore; grown != 1 {
-		t.Errorf("the control pos sync wrote %d invoices on the pin's customer, want its ACCOUNT tender's one", grown)
+	if grown := invoicesOn(f.custID) - ownBefore; grown != 0 {
+		t.Errorf("the refused control pos sync wrote %d invoices on the pin's customer, want none", grown)
 	}
-	f.allow(t, "user", "POST", "/api/v1/pos/sync", sync(f.regB, f.custB.String()), nil, http.StatusOK)
+	if txnExists() {
+		t.Errorf("the refused control pos sync still wrote its replayed transaction")
+	}
+	f.allow(t, "user", "POST", "/api/v1/pos/sync", sync(f.regB, f.custB.String()), nil, http.StatusConflict)
 }

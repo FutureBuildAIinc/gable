@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -40,12 +41,12 @@ type BranchGuard interface {
 	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
-// PriceEngine prices a stocked product line for a customer and quantity
-// (ADR 0005 section 1: today's engine wrapped at the order boundary, its
-// result converted to a scale 4 price once). When none is wired the product's
-// base price is the list price.
+// PriceEngine prices one line for a customer, quantity and unit (ADR 0006
+// sections 5.3 and 7.5: pricing.Resolve through the wiring, its answer in the
+// price's own unit with the line's conversion pair). When none is wired the
+// product's base price is the list price, in the product's price unit.
 type PriceEngine interface {
-	PriceFor(ctx context.Context, customerID, productID uuid.UUID, basePrice httpx.Price, quantity httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error)
+	PriceFor(ctx context.Context, customerID, productID uuid.UUID, quantity httpx.Quantity, uom string, jobID *uuid.UUID) (salesdoc.EngineAnswer, error)
 }
 
 // TaxProvider is the configured tax provider path behind the rate resolver
@@ -267,7 +268,7 @@ type lineAudits struct {
 // quote (price_source QUOTE, the price kept exactly, no engine call).
 func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID uuid.UUID, jobID *uuid.UUID, actor string) ([]OrderLine, lineAudits, error) {
 	var out lineAudits
-	refs, codes, kits, err := s.lookups(ctx, d.Lines)
+	refs, codes, kits, sets, catalogue, err := s.lookups(ctx, d.Lines)
 	if err != nil {
 		return nil, out, err
 	}
@@ -341,6 +342,7 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 		default: // product
 			line.LineType = salesdoc.LineProduct
 			var ref *salesdoc.ProductRef
+			var set *salesdoc.ProductUnitSet
 			if pl.ProductID != nil {
 				if r, ok := refs[pl.ProductID.String()]; ok {
 					ref = &r
@@ -349,7 +351,16 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 						Message: "a referenced record does not exist",
 						Details: []httpx.FieldError{{Field: fmt.Sprintf("lines[%d].product_id", i), Message: "no such product"}}}
 				}
+				if ps, ok := sets[*pl.ProductID]; ok {
+					set = &ps
+				}
 			}
+			// The units (ADR 0006 section 3.3): the request's, or the
+			// product's defaults. A stocked line is sold in any sale unit of
+			// the product; the pair resolves from its set and is stored on
+			// the line, and the stocking quantity converts exactly or the
+			// line is refused (ResolveLineUnits below).
+			var uom string
 			if ref != nil {
 				line.ProductID = &ref.ID
 				if line.SKU == nil || *line.SKU == "" {
@@ -359,70 +370,114 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 				if line.Description == "" {
 					line.Description = ref.Description
 				}
-				// A stocked line is sold in its product's stocking unit
-				// (ADR 0005 section 1): any other unit is refused until
-				// cycle 3's conversions land.
-				stock := ref.UOMPrimary
-				if pl.UOM != "" && pl.UOM != stock {
-					return nil, out, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
-						Message: "a stocked line is sold in its product's stocking unit",
-						Details: []httpx.FieldError{httpx.Blocker("unit_not_stock_unit",
-							fmt.Sprintf("lines[%d] is sold in %s but the product stocks in %s", i, pl.UOM, stock))}}
-				}
-				uom := stock
-				line.UOM = &uom
 				line.Taxable = ref.Taxable
+				uom = pl.UOM
+				if uom == "" {
+					uom = set.SaleUOM
+				}
 			} else {
 				// a non stock line: the dealer does not carry it
-				uom := pl.UOM
-				line.UOM = &uom
+				uom = pl.UOM
 				if pl.Taxable != nil {
 					line.Taxable = *pl.Taxable
 				} else {
 					line.Taxable = true
 				}
 			}
+			line.UOM = &uom
 			priceUOM := pl.PriceUOM
 			if priceUOM == "" {
 				priceUOM = *line.UOM
+				if ref != nil && set.PriceUOM != "" {
+					priceUOM = set.PriceUOM
+				}
 			}
 			line.PriceUOM = &priceUOM
-			// The pair rules of ADR 0001 7a run on the RESOLVED units: the
-			// parse sees only what the request named, and a stocked line's
-			// unit is filled from the product just above.
-			if err := checkResolvedPair(i, *line.UOM, priceUOM, pl.UOMQty, pl.PriceUOMQty); err != nil {
-				return nil, out, err
-			}
-			if pl.UOMQty == 0 && pl.PriceUOMQty == 0 {
-				line.UOMQty, line.PriceUOMQty = salesdocPtr(salesdoc.One), salesdocPtr(salesdoc.One)
+
+			// The quantity, or the tally's linear feet (ADR 0006 section
+			// 4.3): the engine prices what the line sells.
+			if len(pl.TallyRows) > 0 {
+				rows := make([]units.TallyRow, 0, len(pl.TallyRows))
+				for _, r := range pl.TallyRows {
+					rows = append(rows, units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT})
+				}
+				linearFeet, lfErr := units.LinearFeet(rows)
+				if lfErr != nil {
+					return nil, out, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
+						Message: "one or more fields failed validation",
+						Details: []httpx.FieldError{{Field: fmt.Sprintf("lines[%d].tally", i),
+							Message: "the tally's linear feet are beyond the quantity bound of 99999999.9999 linear feet"}}}
+				}
+				line.Quantity = &linearFeet
 			} else {
-				line.UOMQty, line.PriceUOMQty = salesdocPtr(pl.UOMQty), salesdocPtr(pl.PriceUOMQty)
+				qty := pl.Quantity
+				line.Quantity = &qty
 			}
-			qty := pl.Quantity
-			line.Quantity = &qty
+
+			// The engine's answer decides the line's price unit (ADR 0006
+			// sections 3.3 and 7.5): a priced line carries the engine's unit
+			// and pair; an override must name it, so the audit row compares
+			// the two prices in one unit.
+			var answer *salesdoc.EngineAnswer
+			if ref != nil {
+				ans, err := s.enginePrice(ctx, customerID, *ref, set, *line.Quantity, uom, jobID)
+				if err != nil {
+					return nil, out, err
+				}
+				answer = &ans
+			}
+			if pl.UnitPrice == nil {
+				if answer != nil {
+					priceUOM = answer.PriceUOM
+					line.PriceUOM = &priceUOM
+				}
+			} else if answer != nil && priceUOM != answer.PriceUOM {
+				return nil, out, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
+					Message: "one or more fields failed validation",
+					Details: []httpx.FieldError{{Field: fmt.Sprintf("lines[%d].price_uom", i),
+						Message: "an override prices in " + priceUOM + " but the engine answered per " + answer.PriceUOM +
+							": the override and the engine's answer must be comparable in the audit row"}}}
+			}
+
+			// The pair, the tally's rules and the stocking quantity resolve
+			// from the product's set (ADR 0006 sections 3.3, 3.4 and 4).
+			v := &httpx.Validator{}
+			path := fmt.Sprintf("lines[%d]", i)
+			in := salesdoc.LineUnits{UOM: uom, PriceUOM: priceUOM,
+				UOMQty: pl.UOMQty, PriceUOMQty: pl.PriceUOMQty,
+				TallyRows: pl.TallyRows, HasQuantity: pl.HasQuantity}
+			if !salesdoc.ResolveLineUnits(v, path, &line, in, set, catalogue) {
+				return nil, out, v.Err()
+			}
 
 			// The price. Absent: the engine's answer, stored as both the
 			// priced and the charged price. Present: an override beside the
 			// engine's answer, stored as PRICE_LIST when the two agree
 			// (ADR 0005 section 2.3).
-			var enginePrice httpx.Price
-			if ref != nil {
-				enginePrice, err = s.enginePrice(ctx, customerID, ref, pl.Quantity, jobID)
-				if err != nil {
-					return nil, out, err
-				}
-			}
 			if pl.UnitPrice == nil {
-				line.UnitPrice = &enginePrice
-				line.PricedUnitPrice = &enginePrice
-				line.PriceSource = salesdoc.PriceSourceList
+				if answer != nil {
+					p := answer.Price
+					line.UnitPrice = &p
+					line.PricedUnitPrice = &p
+					line.PriceSource = salesdoc.PriceSourceList
+					basis := answer.Basis
+					line.PriceBasis = &basis
+				} else {
+					return nil, out, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
+						Message: "one or more fields failed validation",
+						Details: []httpx.FieldError{{Field: fmt.Sprintf("lines[%d].unit_price_ten_thousandths", i),
+							Message: "is required on a non stock line: there is no product to price it from"}}}
+				}
 			} else {
 				p := *pl.UnitPrice
 				line.UnitPrice = &p
-				if ref != nil {
-					line.PricedUnitPrice = &enginePrice
-					if p == enginePrice {
+				if ref != nil && answer != nil {
+					e := answer.Price
+					line.PricedUnitPrice = &e
+					if p == answer.Price {
 						line.PriceSource = salesdoc.PriceSourceList
+						basis := answer.Basis
+						line.PriceBasis = &basis
 					} else {
 						line.PriceSource = salesdoc.PriceSourceOverride
 						reason := pl.OverrideReason
@@ -431,12 +486,21 @@ func (s *Service) buildLines(ctx context.Context, d *Draft, orderID, customerID 
 						out.overrides = append(out.overrides, audit.Entry{
 							Action: auditLinePriceOverridden, EntityType: "order", EntityID: orderID, UserID: actor,
 							Changes: map[string]any{"line_id": line.ID, "product_id": line.ProductID,
-								"engine_price_ten_thousandths":   int64(enginePrice),
+								"engine_price_ten_thousandths":   int64(answer.Price),
+								"engine_price_uom":               answer.PriceUOM,
 								"override_price_ten_thousandths": int64(p), "reason": pl.OverrideReason}})
 					}
 				} else {
 					line.PriceSource = salesdoc.PriceSourceManual
 				}
+			}
+
+			// The line's resolved cost, per the stocking unit (ADR 0006
+			// section 7.5): the product's average cost, the cost COGS reads.
+			if ref != nil && ref.AverageCost > 0 {
+				source := "AVERAGE_COST"
+				cost := ref.AverageCost
+				line.CostSource, line.StockingUnitCost = &source, &cost
 			}
 
 			line.IsSpecialOrder = pl.IsSpecialOrder
@@ -538,14 +602,19 @@ func actorString(actor string) *string {
 
 func salesdocPtr(q httpx.Quantity) *httpx.Quantity { return &q }
 
-// enginePrice asks the wrapped pricing engine, converting its answer to a
-// scale 4 price once (ADR 0005 section 1); with no engine wired the product's
-// base price is the list price.
-func (s *Service) enginePrice(ctx context.Context, customerID uuid.UUID, ref *salesdoc.ProductRef, qty httpx.Quantity, jobID *uuid.UUID) (httpx.Price, error) {
+// enginePrice asks the pricing engine for one line's answer (ADR 0006
+// sections 5.3 and 7.5): the price in its own unit, the line's pair and the
+// basis; with no engine wired the product's base price is the list price, in
+// the product's price unit.
+func (s *Service) enginePrice(ctx context.Context, customerID uuid.UUID, ref salesdoc.ProductRef, set *salesdoc.ProductUnitSet, qty httpx.Quantity, uom string, jobID *uuid.UUID) (salesdoc.EngineAnswer, error) {
 	if s.pricer == nil {
-		return ref.BasePrice, nil
+		priceUOM := ref.UOMPrimary
+		if set != nil && set.PriceUOM != "" {
+			priceUOM = set.PriceUOM
+		}
+		return salesdoc.EngineAnswer{Price: ref.BasePrice, PriceUOM: priceUOM, UOMQty: salesdoc.One, PriceUOMQty: salesdoc.One, Basis: "base"}, nil
 	}
-	return s.pricer.PriceFor(ctx, customerID, ref.ID, ref.BasePrice, qty, jobID)
+	return s.pricer.PriceFor(ctx, customerID, ref.ID, qty, uom, jobID)
 }
 
 func plainLines(lines []OrderLine) []salesdoc.Line {
@@ -556,12 +625,14 @@ func plainLines(lines []OrderLine) []salesdoc.Line {
 	return out
 }
 
-// lookups reads every product, charge code and kit definition the draft's
-// lines name, in three queries.
-func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (map[string]salesdoc.ProductRef, map[string]salesdoc.ChargeCode, map[string][]salesdoc.KitComponent, error) {
+// lookups reads every product, charge code, kit definition and unit set the
+// draft's lines name, and the unit catalogue rows their units are checked
+// against (ADR 0006 sections 2.1 and 3.3).
+func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (map[string]salesdoc.ProductRef, map[string]salesdoc.ChargeCode, map[string][]salesdoc.KitComponent, map[uuid.UUID]salesdoc.ProductUnitSet, map[string]units.CatalogueUnit, error) {
 	var productIDs []uuid.UUID
 	var kitIDs []uuid.UUID
 	var codes []string
+	unitCodes := map[string]bool{}
 	for _, pl := range parsed {
 		if pl.ProductID != nil {
 			productIDs = append(productIDs, *pl.ProductID)
@@ -570,14 +641,20 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 		if pl.ChargeCode != "" {
 			codes = append(codes, pl.ChargeCode)
 		}
+		if pl.UOM != "" {
+			unitCodes[pl.UOM] = true
+		}
+		if pl.PriceUOM != "" {
+			unitCodes[pl.PriceUOM] = true
+		}
 	}
 	refs, err := s.repo.LookupProducts(ctx, productIDs)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	kits, err := s.repo.LookupKitComponents(ctx, kitIDs)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	// A kit's components price, cost and stock like any product: read them
 	// into the same map the lines default from.
@@ -595,17 +672,41 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 	if len(componentIDs) > 0 {
 		componentRefs, err := s.repo.LookupProducts(ctx, componentIDs)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		for k, v := range componentRefs {
 			refs[k] = v
 		}
 	}
+	sets, err := s.repo.LookupProductUnits(ctx, productIDs)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	// A set's own default units are catalogue business too: the defaults a
+	// line takes are checked like the units the request named.
+	for _, id := range productIDs {
+		if set, ok := sets[id]; ok {
+			if set.SaleUOM != "" {
+				unitCodes[set.SaleUOM] = true
+			}
+			if set.PriceUOM != "" {
+				unitCodes[set.PriceUOM] = true
+			}
+		}
+	}
+	codeList := make([]string, 0, len(unitCodes))
+	for code := range unitCodes {
+		codeList = append(codeList, code)
+	}
+	catalogue, err := s.repo.LookupCatalogue(ctx, codeList)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 	codeMap, err := s.repo.LookupChargeCodes(ctx, codes)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	return refs, codeMap, kits, nil
+	return refs, codeMap, kits, sets, catalogue, nil
 }
 
 // applyTotalsAndTax sums the lines and resolves the tax (ADR 0005 section 3):
@@ -1646,6 +1747,29 @@ type QuoteSourceLine struct {
 	UOMQty      httpx.Quantity
 	PriceUOMQty httpx.Quantity
 	UnitPrice   httpx.Price
+	// The stocking fields, the tally and the cost ride exactly as the quote
+	// stored them (ADR 0006 sections 3.4 and 4.3): the order copies, never
+	// re-resolves.
+	StockUOM      *string
+	StockQuantity *httpx.Quantity
+	UnitCost      httpx.Price
+	Tally         *QuoteSourceTally
+}
+
+// QuoteSourceTally is one quote line's tally as the order copies it, the
+// rows in request order.
+type QuoteSourceTally struct {
+	ThicknessIn *httpx.Quantity
+	WidthIn     *httpx.Quantity
+	LinearFeet  httpx.Quantity
+	BoardFeet   *httpx.Quantity
+	Rows        []QuoteSourceTallyRow
+}
+
+// QuoteSourceTallyRow is one length of a copied tally.
+type QuoteSourceTallyRow struct {
+	Pieces   int
+	LengthFT httpx.Quantity
 }
 
 // QuoteSource is a quote being converted: what the order copies (ADR 0005
@@ -1836,7 +1960,7 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 			productIDs = append(productIDs, *l.ProductID)
 		}
 	}
-	refs, _, kits, err := s.lookups(ctx, quoteParsedLines(src))
+	refs, _, kits, unitSets, _, err := s.lookups(ctx, quoteParsedLines(src))
 	if err != nil {
 		return nil, err
 	}
@@ -1855,25 +1979,20 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 			sku := ql.SKU
 			line.SKU = &sku
 		}
-		uom, priceUOM := ql.UOM, ql.PriceUOM
+		uom, priceUOM := string(ql.UOM), ql.PriceUOM
 		if priceUOM == "" {
 			priceUOM = uom
 		}
+		var ref salesdoc.ProductRef
 		if ql.ProductID != nil {
-			ref, ok := refs[ql.ProductID.String()]
+			var ok bool
+			ref, ok = refs[ql.ProductID.String()]
 			if !ok {
 				return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
 					Message: "a referenced record does not exist",
 					Details: []httpx.FieldError{{Field: fmt.Sprintf("lines[%d].product_id", i), Message: "no such product"}}}
 			}
 			line.ProductID = &ref.ID
-			stock := ref.UOMPrimary
-			if uom != stock {
-				return nil, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
-					Message: "a stocked line is sold in its product's stocking unit",
-					Details: []httpx.FieldError{httpx.Blocker("unit_not_stock_unit",
-						fmt.Sprintf("lines[%d] is sold in %s but the product stocks in %s", i, uom, stock))}}
-			}
 			line.Taxable = ref.Taxable
 			if line.SKU == nil {
 				sku := ref.SKU
@@ -1886,12 +2005,45 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 			// a non stock line: the dealer does not carry it
 			line.Taxable = true
 		}
+		// The line's units, pair, stocking quantity and tally convert as they
+		// stand (ADR 0006 sections 3.3 and 4.3): the quote resolved them at
+		// its own create and no document already written moves, so the order
+		// copies them, the tally's rows included, never shared.
 		line.UOM, line.PriceUOM = &uom, &priceUOM
 		uomQty, priceUomQty := ql.UOMQty, ql.PriceUOMQty
 		if uomQty == 0 && priceUomQty == 0 {
 			uomQty, priceUomQty = salesdoc.One, salesdoc.One
 		}
 		line.UOMQty, line.PriceUOMQty = &uomQty, &priceUomQty
+		line.StockUOM, line.StockQuantity = ql.StockUOM, ql.StockQuantity
+		if ql.ProductID != nil && !ref.IsKit && line.StockUOM != nil && *line.StockUOM != "" {
+			var setPtr *salesdoc.ProductUnitSet
+			if set, hasSet := unitSets[*ql.ProductID]; hasSet {
+				setPtr = &set
+			}
+			resolvedUOM, resolvedQty, err := salesdoc.ResolveStockMove(i, &line, ref.UOMPrimary, setPtr)
+			if err != nil {
+				return nil, err
+			}
+			line.StockUOM, line.StockQuantity = &resolvedUOM, &resolvedQty
+		}
+		if ql.Tally != nil {
+			// Rows are copied, never shared: editing one document's tally
+			// never moves another's (ADR 0006 section 4.3).
+			line.Tally = &salesdoc.Tally{
+				ThicknessIn: ql.Tally.ThicknessIn, WidthIn: ql.Tally.WidthIn,
+				LinearFeet: ql.Tally.LinearFeet, BoardFeet: ql.Tally.BoardFeet,
+				Rows: make([]salesdoc.TallyRow, 0, len(ql.Tally.Rows)),
+			}
+			for _, r := range ql.Tally.Rows {
+				line.Tally.Rows = append(line.Tally.Rows, salesdoc.TallyRow{Pieces: r.Pieces, LengthFT: r.LengthFT})
+			}
+		}
+		if ql.UnitCost > 0 {
+			source := "AVERAGE_COST"
+			cost := ql.UnitCost
+			line.CostSource, line.StockingUnitCost = &source, &cost
+		}
 		price := ql.UnitPrice
 		line.UnitPrice = &price
 		line.PricedUnitPrice = &price

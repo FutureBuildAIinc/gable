@@ -5,8 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { creditLimitInputText, customerRequestFromCustomer, parseCreditLimitCents } from '../../services/CustomerService.ts';
-import { CUSTOMER_TIERS } from '../../types/customer.ts';
-import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
+import type { Customer, CustomerRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import { BUTTON_PRIMARY, BUTTON_QUIET, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
 
 /**
@@ -30,7 +29,6 @@ export class GableCustomerForm extends LitElement {
     @state() private email = '';
     @state() private phone = '';
     @state() private address = '';
-    @state() private tier: CustomerTier = 'retail';
     @state() private termsId = '';
     @state() private creditLimit = '';
     @state() private poRequired = false;
@@ -50,7 +48,6 @@ export class GableCustomerForm extends LitElement {
                 this.email = c.email ?? '';
                 this.phone = c.phone ?? '';
                 this.address = c.address ?? '';
-                this.tier = c.tier;
                 this.termsId = c.payment_terms_id;
                 this.creditLimit = creditLimitInputText(c.credit_limit_cents);
                 this.poRequired = c.po_required;
@@ -83,7 +80,6 @@ export class GableCustomerForm extends LitElement {
             email: orNull(this.email),
             phone: orNull(this.phone),
             address: orNull(this.address),
-            tier: this.tier,
             credit_limit_cents: limit.cents,
             po_required: this.poRequired,
             is_active: this.isActive,
@@ -122,12 +118,6 @@ export class GableCustomerForm extends LitElement {
                     <div class="md:col-span-2">
                         ${labeled(id('address'), 'Billing address', textInput(id('address'), this.address, v => { this.address = v; }), err.address)}
                     </div>
-                    ${labeled(
-                        id('tier'),
-                        'Tier',
-                        html`<gable-select id=${id('tier')} label="Tier" .value=${this.tier} .options=${CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))} @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier; }}></gable-select>`,
-                        err.tier,
-                    )}
                     ${labeled(
                         id('terms'),
                         'Payment terms',

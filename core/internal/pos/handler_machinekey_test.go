@@ -8,7 +8,8 @@ package pos_test
 // (starting a sale, opening a till, recording a return) are user-only, and
 // a key is refused 403 "a cashier must be a user"; the routes that carry no
 // cashier identity of their own (item changes, completion, void, the sync,
-// the close, the reports) stay reachable with pos scopes.
+// the close, the reports) stay reachable with pos scopes, the sync refused
+// by rule (money never queues) once it is past the key.
 
 import (
 	"encoding/json"
@@ -107,13 +108,18 @@ func TestMachineKeyNeverGetsFabricatedCashier(t *testing.T) {
 		`{"reason":"keyed","revision":`+jsonNumberOf(revision)+`}`); code == http.StatusForbidden {
 		t.Errorf("void with a machine key: 403, want reachable")
 	}
-	// the offline sync
+	// the offline sync: reachable for a key, and refused by rule (money never
+	// queues), with nothing of the batch written
+	clientID := uuid.NewString()
 	if code := keyedDo("POST", "/api/v1/pos/sync",
-		`{"batch_id":"key-sync","register_id":"`+f.register+`","items":[{"client_id":"`+uuid.NewString()+`","cashier_id":"`+uuid.NewString()+`","items":[{"product_id":"`+f.productID.String()+`","quantity":"1"}],"tenders":[{"method":"cash","amount_cents":599}]}]}`); code == http.StatusForbidden {
-		t.Errorf("sync with a machine key: 403, want reachable")
+		`{"batch_id":"key-sync","register_id":"`+f.register+`","items":[{"client_id":"`+clientID+`","cashier_id":"`+uuid.NewString()+`","items":[{"product_id":"`+f.productID.String()+`","quantity":"1"}],"tenders":[{"method":"cash","amount_cents":599}]}]}`); code != http.StatusConflict {
+		t.Errorf("sync with a machine key: %d, want the rule's 409", code)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE id = $1`, clientID); n != 0 {
+		t.Errorf("the refused sync wrote %d transactions, want 0", n)
 	}
 	// the till close (a drawer the unkeyed fixture opened)
-	f.openTill(0)
+	f.ensureTill()
 	sessionID := f.currentTillID(t)
 	if code := keyedDo("POST", "/api/v1/pos/till/"+sessionID+"/close",
 		`{"counted_by_method":{"cash":0}}`); code == http.StatusForbidden {

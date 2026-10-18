@@ -6,9 +6,10 @@ package portal
 import (
 	"context"
 	"fmt"
+	"math/big"
 
-	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
@@ -60,6 +61,38 @@ func (row catalogRow) toDTO() CatalogProductDTO {
 	}
 }
 
+// resolveCustomerPrice is one product's price for one customer through
+// pricing.Resolve (ADR 0006 sections 5.3 and 7.6), answered per the display
+// unit named: the engine's answer carries its own price unit, and the pair
+// converts it into the unit the portal shows, exactly, the float taken at
+// the edge (the portal's wire stays float until C5-1). ok is false when the
+// engine did not answer, the caller's base price fallback.
+func (s *Service) resolveCustomerPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, uom string, quantity float64) (float64, string, bool) {
+	if s.pricingSvc == nil {
+		return 0, "", false
+	}
+	qty := httpx.Quantity(int64(quantity*10000 + 0.5))
+	res, err := s.pricingSvc.Resolve(ctx, pricing.Request{
+		CustomerID: customerID,
+		ProductID:  productID,
+		Quantity:   qty,
+		UOM:        uom,
+	})
+	if err != nil {
+		return 0, "", false
+	}
+	uq, pq := res.UOMQty, res.PriceUOMQty
+	if uq <= 0 || pq <= 0 {
+		uq, pq = 10000, 10000
+	}
+	// The price per one display unit: the answer's price times the pair's
+	// price side over its unit side, one rational.
+	per := new(big.Rat).SetInt64(int64(res.UnitPrice))
+	per.Mul(per, new(big.Rat).SetFrac64(int64(pq), int64(uq)))
+	f, _ := per.Float64()
+	return f / 10000, string(res.PriceBasis), true
+}
+
 // ListCatalog returns catalog products enriched with customer-specific pricing and availability.
 func (s *Service) ListCatalog(ctx context.Context, customerID uuid.UUID, filter CatalogFilter) ([]CatalogProductDTO, error) {
 	rows, err := s.repo.ListCatalogProducts(ctx, filter)
@@ -67,34 +100,26 @@ func (s *Service) ListCatalog(ctx context.Context, customerID uuid.UUID, filter 
 		return nil, fmt.Errorf("failed to list catalog: %w", err)
 	}
 
-	cust, err := s.customerSvc.GetCustomer(ctx, customerID)
-	if err != nil {
-		s.logger.Warn("Catalog: could not load customer for pricing, using base prices", "customer_id", customerID, "error", err)
-		cust = &customer.Customer{ID: customerID}
-	}
-
 	products := make([]CatalogProductDTO, 0, len(rows))
 	for _, row := range rows {
 		dto := row.toDTO()
 
 		// Pricing waterfall
-		if s.pricingSvc != nil && cust != nil {
-			cp, pErr := s.pricingSvc.CalculatePrice(ctx, cust, row.ID, row.BasePrice)
-			if pErr == nil {
-				dto.CustomerPrice = cp.FinalPrice
-				dto.PriceSource = string(cp.Source)
-			} else {
-				dto.CustomerPrice = row.BasePrice
-				dto.PriceSource = "retail"
-			}
+		if price, source, ok := s.resolveCustomerPrice(ctx, customerID, row.ID, row.UOM, 1); ok {
+			dto.CustomerPrice = price
+			dto.PriceSource = source
 		} else {
 			dto.CustomerPrice = row.BasePrice
 			dto.PriceSource = "retail"
 		}
 
-		// Inventory availability
+		// Inventory availability and per-yard breakdown
 		dto.Available = s.getAvailableQty(ctx, row.ID)
 		dto.InStock = dto.Available > 0
+		if yards, lt := s.getYardAvailability(ctx, row.ID, row.LeadTimeDays); len(yards) > 0 {
+			dto.Availability = yards
+			dto.LeadTimeDays = lt
+		}
 
 		products = append(products, dto)
 	}
@@ -109,11 +134,6 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
 
-	cust, err := s.customerSvc.GetCustomer(ctx, customerID)
-	if err != nil {
-		cust = &customer.Customer{ID: customerID}
-	}
-
 	dto := &CatalogDetailDTO{
 		CatalogProductDTO: row.toDTO(),
 		WeightLbs:         row.WeightLbs,
@@ -123,15 +143,9 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 	}
 
 	// Pricing waterfall
-	if s.pricingSvc != nil && cust != nil {
-		cp, pErr := s.pricingSvc.CalculatePrice(ctx, cust, row.ID, row.BasePrice)
-		if pErr == nil {
-			dto.CustomerPrice = cp.FinalPrice
-			dto.PriceSource = string(cp.Source)
-		} else {
-			dto.CustomerPrice = row.BasePrice
-			dto.PriceSource = "retail"
-		}
+	if price, source, ok := s.resolveCustomerPrice(ctx, customerID, row.ID, row.UOM, 1); ok {
+		dto.CustomerPrice = price
+		dto.PriceSource = source
 	} else {
 		dto.CustomerPrice = row.BasePrice
 		dto.PriceSource = "retail"
@@ -148,9 +162,13 @@ func (s *Service) GetCatalogProduct(ctx context.Context, customerID, productID u
 			"product_id", row.ID, "customer_id", customerID, "error", bErr)
 	}
 
-	// Inventory
+	// Inventory and per-yard availability
 	dto.Available = s.getAvailableQty(ctx, row.ID)
 	dto.InStock = dto.Available > 0
+	if yards, lt := s.getYardAvailability(ctx, row.ID, row.LeadTimeDays); len(yards) > 0 {
+		dto.Availability = yards
+		dto.LeadTimeDays = lt
+	}
 
 	return dto, nil
 }

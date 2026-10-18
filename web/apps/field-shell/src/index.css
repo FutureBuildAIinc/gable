@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0 */
+/* SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors */
+
+/* The field shell's entry stylesheet: the shared tokens plus the app's own
+   Tailwind directives, the same shape as the work shell's. */
+
+@import '../../../packages/design-system/src/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

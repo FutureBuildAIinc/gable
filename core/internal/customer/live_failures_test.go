@@ -19,12 +19,12 @@ import (
 )
 
 // seedRaw makes customers of this fixture straight in the database.
-func (f *fixture) seedRaw(active bool, tier string) string {
+func (f *fixture) seedRaw(active bool) string {
 	f.t.Helper()
 	id := uuid.NewString()
-	if _, err := f.db.Pool.Exec(context.Background(), `INSERT INTO customers (id, name, account_number, tier, is_active, primary_branch_id)
-		VALUES ($1, 'Raw Co', $2, $3::customer_tier, $4, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`,
-		id, f.account(), tier, active); err != nil {
+	if _, err := f.db.Pool.Exec(context.Background(), `INSERT INTO customers (id, name, account_number, is_active, primary_branch_id)
+		VALUES ($1, 'Raw Co', $2, $3, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`,
+		id, f.account(), active); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.db.Pool.Exec(context.Background(), `INSERT INTO customer_branches (customer_id, branch_id)
@@ -40,8 +40,7 @@ func (f *fixture) seedRaw(active bool, tier string) string {
 // not refused.
 func TestLiveFailure_SilentFilterNoOps(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
-	active := f.seedRaw(true, "GOLD")
-	inactive := f.seedRaw(false, "RETAIL")
+	inactive := f.seedRaw(false)
 
 	r := f.do("GET", "/api/v1/customers?is_active=false&limit=200&q="+f.prefix, nil)
 	if r.status != http.StatusOK {
@@ -51,10 +50,10 @@ func TestLiveFailure_SilentFilterNoOps(t *testing.T) {
 	if len(items) != 1 || str(t, items[0].(map[string]any), "id") != inactive {
 		t.Errorf("is_active=false served %d customers, want exactly the inactive one: %s", len(items), r.raw)
 	}
-	r = f.do("GET", "/api/v1/customers?tier=gold&limit=200&q="+f.prefix, nil)
+	r = f.do("GET", "/api/v1/customers?salesperson_id="+uuid.NewString()+"&limit=200&q="+f.prefix, nil)
 	items, _ = r.body["items"].([]any)
-	if len(items) != 1 || str(t, items[0].(map[string]any), "id") != active {
-		t.Errorf("tier=gold served %d customers, want exactly the gold one: %s", len(items), r.raw)
+	if len(items) != 0 {
+		t.Errorf("salesperson_id of a stranger served %d customers, want none: %s", len(items), r.raw)
 	}
 	if r := f.do("GET", "/api/v1/customers?nope=1", nil); r.status != http.StatusBadRequest {
 		t.Errorf("an unsupported parameter = %d, want 400", r.status)
@@ -67,8 +66,8 @@ func TestLiveFailure_SilentFilterNoOps(t *testing.T) {
 // was by offset.
 func TestLiveFailure_ListEnvelope(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
-	f.seedRaw(true, "RETAIL")
-	f.seedRaw(true, "RETAIL")
+	f.seedRaw(true)
+	f.seedRaw(true)
 
 	r := f.do("GET", "/api/v1/customers?limit=1&q="+f.prefix, nil)
 	if _, ok := r.body["items"].([]any); !ok {
@@ -129,7 +128,7 @@ func TestLiveFailure_CreateWhatTheDatabaseCannotTake(t *testing.T) {
 func TestLiveFailure_CreditLimitEditIsAnEvent(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	id := f.seedRaw(true, "RETAIL")
+	id := f.seedRaw(true)
 	var acct string
 	if err := f.db.Pool.QueryRow(context.Background(), `SELECT account_number FROM customers WHERE id = $1`, id).Scan(&acct); err != nil {
 		t.Fatal(err)

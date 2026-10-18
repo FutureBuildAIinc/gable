@@ -563,7 +563,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PortalDeliveryReschedule"
         "409":
-          description: Conflict — either the idempotency key is already being processed, or the stop is history / the truck is rolling.
+          description: "Conflict: either the idempotency key is already being processed, or the stop is history / the truck is rolling."
           content:
             application/json:
               schema:
@@ -1664,6 +1664,884 @@ paths:
           $ref: "#/components/responses/LegacyForbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/portal/v1/quotes/intake:
+    post:
+      operationId: portalQuoteIntake
+      tags: [portal]
+      summary: Parse a material list or photo and optionally create a quote request
+      description: >-
+        Behind the request_quotes capability. Reads a pasted material list
+        without AI or a photo/file with AI through Gable's parsing and product
+        matching service. When create_quote is true, it creates an unpriced
+        portal quote request in the same step unless the AI result is
+        synthetic and allow_synthetic is false (409 SYNTHETIC_INTAKE_REFUSED).
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalQuoteIntakeRequest"
+      responses:
+        "200":
+          description: Parsed and matched items without creating a quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuoteIntakeResponse"
+        "201":
+          description: Parsed items and the created quote request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuoteIntakeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Synthetic AI output refused without allow_synthetic, or idempotency claim in progress.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/quotes/{id}/convert:
+    post:
+      operationId: portalConvertQuote
+      tags: [portal]
+      summary: Convert a priced or accepted quote into an order
+      description: >-
+        Behind the order capability (a session without it is a 403). Only a
+        priced (SENT) or ACCEPTED quote owned by the calling account may be
+        converted; an unpriced (DRAFT), declined, or expired quote is a 409
+        (QUOTE_NOT_PRICED or QUOTE_NOT_CONVERTIBLE). Runs the ERP quote
+        service's ConvertInProcess.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: The created order reference.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalConvertQuoteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Quote is not convertible, or idempotency claim in progress.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/orders/{id}/reorder-preview:
+    get:
+      operationId: portalReorderPreview
+      tags: [portal]
+      summary: Price difference preview for reordering a historical order
+      description: >-
+        Behind the order capability. Resolves each product line on the
+        historical order through pricing.Resolve at the customer's current
+        pricing and compares original vs current prices in integer cents.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The line-by-line price difference preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalReorderPreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/procurement/projects:
+    get:
+      operationId: portalListProcurementProjects
+      tags: [portal]
+      summary: List named material lists on the procurement board
+      description: Scoped to the calling customer account.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The account's named material lists, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalProcurementProject"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalCreateProcurementProject
+      tags: [portal]
+      summary: Create a named material list on the procurement board
+      description: Behind the order or request_quotes capability.
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCreateProcurementProjectRequest"
+      responses:
+        "201":
+          description: The created material list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/procurement/projects/{id}:
+    get:
+      operationId: portalGetProcurementProject
+      tags: [portal]
+      summary: One named material list with its lines
+      description: Scoped to the calling customer account; another customer's list is a 404.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The material list with its lines and indicative integer-cent prices.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: portalUpdateProcurementProject
+      tags: [portal]
+      summary: Rename or advance a named material list
+      description: Behind the order or request_quotes capability. Validates the lifecycle transition.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpdateProcurementProjectRequest"
+      responses:
+        "200":
+          description: The updated material list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: portalDeleteProcurementProject
+      tags: [portal]
+      summary: Delete a named material list
+      description: Behind the order or request_quotes capability.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/procurement/projects/{id}/lines:
+    post:
+      operationId: portalAddProcurementLine
+      tags: [portal]
+      summary: Add a line to a named material list
+      description: Behind the order or request_quotes capability. Only editable in PLANNING status.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpsertProcurementLineRequest"
+      responses:
+        "201":
+          description: The updated material list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/procurement/projects/{id}/lines/{lineId}:
+    put:
+      operationId: portalUpdateProcurementLine
+      tags: [portal]
+      summary: Update a line on a named material list
+      description: Behind the order or request_quotes capability. Only editable in PLANNING status.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: lineId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalUpsertProcurementLineRequest"
+      responses:
+        "200":
+          description: The updated material list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: portalDeleteProcurementLine
+      tags: [portal]
+      summary: Delete a line from a named material list
+      description: Behind the order or request_quotes capability. Only editable in PLANNING status.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: lineId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The updated material list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/procurement/projects/{id}/submit-rfq:
+    post:
+      operationId: portalSubmitProcurementRFQ
+      tags: [portal]
+      summary: Submit a named material list as a quote request
+      description: >-
+        Behind the request_quotes capability. Creates a portal quote request
+        from the list's lines, links the quote_id onto the list, and advances
+        its status from PLANNING to QUOTING.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalSubmitProcurementRFQRequest"
+      responses:
+        "201":
+          description: The updated material list in QUOTING status with quote_id set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProcurementProject"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/billing/summary:
+    get:
+      operationId: portalBillingSummary
+      tags: [portal]
+      summary: Balance tiles, aging buckets, and per-job financial summaries
+      description: >-
+        Behind the see_money capability (a session without it is a 403).
+        All money figures are integer cents.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The account's balance tiles, aging buckets, and job summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalBillingSummary"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/statement:
+    get:
+      operationId: portalGetStatement
+      tags: [portal]
+      summary: Live customer statement and aging
+      description: >-
+        Behind the see_money capability. Built through the AR core's
+        account.Service.Statement over an optional [from, to] date range
+        (defaults to the last 30 days). All money figures are integer cents.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+        - name: to
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The live statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/statements:
+    get:
+      operationId: portalListStatements
+      tags: [portal]
+      summary: Historical statement run snapshots for the customer
+      description: Behind the see_money capability. Lists statement run items scoped to the calling customer.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The customer's statement run snapshots, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalStatementRunItem"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/invoices/{id}/pdf:
+    get:
+      operationId: portalInvoicePDF
+      tags: [portal]
+      summary: Download an invoice PDF
+      description: >-
+        Behind the see_money capability. Verifies the invoice belongs to the
+        calling customer account (another customer's invoice is a 404) and
+        renders the PDF through Gable's document formatter.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invoice PDF document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/statement/pdf:
+    get:
+      operationId: portalStatementPDF
+      tags: [portal]
+      summary: Download a live customer statement PDF
+      description: >-
+        Behind the see_money capability. Renders the calling customer's
+        statement PDF through Gable's document formatter over an optional
+        [from, to] date range.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+        - name: to
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The statement PDF document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/statements/{id}/pdf:
+    get:
+      operationId: portalStatementRunItemPDF
+      tags: [portal]
+      summary: Download a historical statement run snapshot PDF
+      description: >-
+        Behind the see_money capability. Verifies the statement run item
+        belongs to the calling customer account (another customer's item is a
+        404) and renders the PDF for that run's period through Gable's
+        document formatter.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The statement PDF document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/payment-methods:
+    get:
+      operationId: portalListPaymentMethods
+      tags: [portal]
+      summary: List saved payment methods on the account
+      description: >-
+        Behind the pay capability. Returns only tokenized display metadata
+        (gateway, method_type, brand, last4, exp_month, exp_year, is_default);
+        the vault token is never serialized.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The account's active saved payment methods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalPaymentMethod"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalCreatePaymentMethod
+      tags: [portal]
+      summary: Save a tokenized payment method on the account
+      description: >-
+        Behind the pay capability. Accepts only a gateway vault token and
+        display metadata; any payload carrying raw card PANs, CVVs, or bank
+        account/routing numbers is refused with 400.
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCreatePaymentMethodRequest"
+      responses:
+        "201":
+          description: The saved payment method (without the vault token).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPaymentMethod"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/payment-methods/{id}:
+    delete:
+      operationId: portalDeletePaymentMethod
+      tags: [portal]
+      summary: Revoke a saved payment method
+      description: Behind the pay capability. Scoped to the calling customer account.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked; no body.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/payment-methods/{id}/default:
+    put:
+      operationId: portalSetDefaultPaymentMethod
+      tags: [portal]
+      summary: Mark a saved payment method as the account default
+      description: Behind the pay capability. Scoped to the calling customer account.
+      security:
+        - PortalSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The updated default payment method.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPaymentMethod"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/portal/v1/payments:
+    get:
+      operationId: portalListPayments
+      tags: [portal]
+      summary: List payments and their invoice allocations for the account
+      description: >-
+        Behind the see_money capability. Lists posted payments with their
+        invoice allocations in integer cents and omits internal staff
+        attribution.
+      security:
+        - PortalSession: []
+      responses:
+        "200":
+          description: The account's payments and allocations, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalPayment"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: portalCreatePayment
+      tags: [portal]
+      summary: Pay one or many open invoices through the payment gateway
+      description: >-
+        Behind the pay capability. Charges the open balance of the named
+        invoices through Gable's PaymentGateway using a saved payment_method_id
+        or one-time token (raw card or bank account digits are refused with
+        400), records the payment and applications in the AR core, and guards
+        against duplicate or unknown-outcome charges with a durable
+        portal_payment_intents single-flight record.
+      security:
+        - PortalSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCreatePaymentRequest"
+      responses:
+        "201":
+          description: The recorded payment and its invoice allocations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPayment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/LegacyUnauthorized"
+        "403":
+          $ref: "#/components/responses/LegacyForbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Invoice not payable, payment in flight, or unknown gateway outcome held for reconciliation.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     PortalSession:
@@ -1938,6 +2816,10 @@ components:
         order_id:
           type: string
           format: uuid
+        project_id:
+          type: [string, "null"]
+          format: uuid
+          description: Optional project owned by the calling customer account to attach to the new draft order.
     PortalReorderResponse:
       type: object
       required: [order_id, message]
@@ -2084,6 +2966,11 @@ components:
         lead_time_days:
           type: [integer, "null"]
           description: The dealer's published lead time; null means none was published and must not be read as zero.
+        availability:
+          type: array
+          description: Per-yard stock and lead time breakdown across active dealer yards.
+          items:
+            $ref: "#/components/schemas/PortalYardAvailability"
         category_id:
           type: [string, "null"]
           format: uuid
@@ -2127,6 +3014,11 @@ components:
           type: boolean
         lead_time_days:
           type: [integer, "null"]
+        availability:
+          type: array
+          description: Per-yard stock and lead time breakdown across active dealer yards.
+          items:
+            $ref: "#/components/schemas/PortalYardAvailability"
         category_id:
           type: [string, "null"]
           format: uuid
@@ -2164,7 +3056,7 @@ components:
           description: Float dollars.
     PortalCartItem:
       type: object
-      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available]
+      required: [id, product_id, product_sku, product_name, image_url, quantity, unit_price, line_total, available, uom, price_uom, uom_qty, price_uom_qty]
       properties:
         id:
           type: string
@@ -2187,6 +3079,14 @@ components:
           type: number
           description: Float dollars.
         available:
+          type: number
+        uom:
+          type: string
+        price_uom:
+          type: string
+        uom_qty:
+          type: number
+        price_uom_qty:
           type: number
     PortalAddToCartRequest:
       type: object
@@ -2809,3 +3709,579 @@ components:
           type: [string, "null"]
           format: uuid
           description: Optional; the caller's own unfulfilled order the hold rides on.
+    PortalQuoteIntakeRequest:
+      type: object
+      description: Submits a pasted material list (text) or a photo/file (file_base64) for parsing and catalog matching.
+      properties:
+        text:
+          type: string
+        file_base64:
+          type: string
+        content_type:
+          type: string
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        notes:
+          type: string
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+        create_quote:
+          type: boolean
+        allow_synthetic:
+          type: boolean
+    PortalQuoteIntakeItem:
+      type: object
+      required: [raw_text, parsed_qty, parsed_unit, parsed_description, confidence]
+      properties:
+        raw_text:
+          type: string
+        parsed_qty:
+          type: number
+        parsed_unit:
+          type: string
+        parsed_description:
+          type: string
+        matched_product_id:
+          type: [string, "null"]
+          format: uuid
+        matched_product_name:
+          type: string
+        matched_sku:
+          type: string
+        confidence:
+          type: number
+    PortalQuoteIntakeResponse:
+      type: object
+      required: [source, synthetic, items]
+      properties:
+        source:
+          type: string
+          enum: [text, photo]
+        synthetic:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalQuoteIntakeItem"
+        quote:
+          $ref: "#/components/schemas/PortalQuote"
+    PortalConvertQuoteResponse:
+      type: object
+      required: [quote_id, order_id, order_number, status]
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+        status:
+          type: string
+    PortalYardAvailability:
+      type: object
+      required: [yard_id, yard_code, yard_name, on_hand, available, in_stock, lead_time_days]
+      description: Contractor-safe stock and lead time projection for a single yard. Never carries dealer cost, margin, or reservation details.
+      properties:
+        yard_id:
+          type: string
+          format: uuid
+        yard_code:
+          type: string
+        yard_name:
+          type: string
+        on_hand:
+          type: number
+        available:
+          type: number
+        in_stock:
+          type: boolean
+        lead_time_days:
+          type: [integer, "null"]
+    PortalReorderPreviewLine:
+      type: object
+      required: [line_id, sku, description, quantity, uom, original_unit_price_cents, current_unit_price_cents, price_diff_cents, original_line_total_cents, current_line_total_cents, line_diff_cents, price_source, available_qty, in_stock]
+      properties:
+        line_id:
+          type: string
+          format: uuid
+        product_id:
+          type: [string, "null"]
+          format: uuid
+        sku:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        uom:
+          type: string
+        original_unit_price_cents:
+          type: integer
+        current_unit_price_cents:
+          type: integer
+        price_diff_cents:
+          type: integer
+        original_line_total_cents:
+          type: integer
+        current_line_total_cents:
+          type: integer
+        line_diff_cents:
+          type: integer
+        price_source:
+          type: string
+        available_qty:
+          type: number
+        in_stock:
+          type: boolean
+    PortalReorderPreview:
+      type: object
+      required: [source_order_id, lines, original_total_cents, current_total_cents, total_diff_cents]
+      properties:
+        source_order_id:
+          type: string
+          format: uuid
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalReorderPreviewLine"
+        original_total_cents:
+          type: integer
+        current_total_cents:
+          type: integer
+        total_diff_cents:
+          type: integer
+    PortalProcurementLine:
+      type: object
+      required: [id, project_id, line_no, description, qty_entered, uom, notes, indicative_unit_price_cents, indicative_line_total_cents, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        line_no:
+          type: integer
+        product_id:
+          type: [string, "null"]
+          format: uuid
+        description:
+          type: string
+        qty_entered:
+          type: number
+        uom:
+          type: string
+        notes:
+          type: string
+        indicative_unit_price_cents:
+          type: [integer, "null"]
+        indicative_line_total_cents:
+          type: [integer, "null"]
+        created_at:
+          type: string
+          format: date-time
+    PortalProcurementProject:
+      type: object
+      required: [id, name, status, created_at, updated_at, lines]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [PLANNING, QUOTING, ORDERED, FULFILLED, CANCELLED]
+        created_by:
+          type: [string, "null"]
+          format: uuid
+        quote_id:
+          type: [string, "null"]
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalProcurementLine"
+    PortalCreateProcurementProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    PortalUpdateProcurementProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [PLANNING, QUOTING, ORDERED, FULFILLED, CANCELLED]
+    PortalUpsertProcurementLineRequest:
+      type: object
+      required: [qty_entered]
+      properties:
+        product_id:
+          type: [string, "null"]
+          format: uuid
+        description:
+          type: string
+        qty_entered:
+          type: number
+        uom:
+          type: string
+        notes:
+          type: string
+    PortalSubmitProcurementRFQRequest:
+      type: object
+      properties:
+        project_id:
+          type: [string, "null"]
+          format: uuid
+        notes:
+          type: string
+        delivery_type:
+          type: string
+          enum: [PICKUP, DELIVERY]
+    PortalBalanceTiles:
+      type: object
+      required: [currency, current_balance_cents, credit_limit_cents, available_credit_cents, past_due_cents, unapplied_cash_cents, net_balance_cents, open_invoice_count, overdue_invoice_count]
+      properties:
+        currency:
+          type: string
+        current_balance_cents:
+          type: integer
+        credit_limit_cents:
+          type: [integer, "null"]
+        available_credit_cents:
+          type: [integer, "null"]
+        past_due_cents:
+          type: integer
+        unapplied_cash_cents:
+          type: integer
+        net_balance_cents:
+          type: integer
+        open_invoice_count:
+          type: integer
+        overdue_invoice_count:
+          type: integer
+    PortalAgingBuckets:
+      type: object
+      required: [as_of, currency, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, days_over_90_cents, unapplied_cents, total_open_cents, net_cents]
+      properties:
+        as_of:
+          type: string
+        currency:
+          type: string
+        current_cents:
+          type: integer
+        days_1_30_cents:
+          type: integer
+        days_31_60_cents:
+          type: integer
+        days_61_90_cents:
+          type: integer
+        days_over_90_cents:
+          type: integer
+        unapplied_cents:
+          type: integer
+        total_open_cents:
+          type: integer
+        net_cents:
+          type: integer
+    PortalJobSummary:
+      type: object
+      required: [project_id, project_name, status, budget_cents, quoted_cents, ordered_cents, invoiced_cents, paid_cents, open_balance_cents, quote_variance_cents, order_count, invoice_count, delivery_count, delivered_count]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+        status:
+          type: string
+        budget_cents:
+          type: integer
+        quoted_cents:
+          type: integer
+        ordered_cents:
+          type: integer
+        invoiced_cents:
+          type: integer
+        paid_cents:
+          type: integer
+        open_balance_cents:
+          type: integer
+        quote_variance_cents:
+          type: integer
+        order_count:
+          type: integer
+        invoice_count:
+          type: integer
+        delivery_count:
+          type: integer
+        delivered_count:
+          type: integer
+    PortalBillingSummary:
+      type: object
+      required: [balance_tiles, aging, job_summaries]
+      properties:
+        balance_tiles:
+          $ref: "#/components/schemas/PortalBalanceTiles"
+        aging:
+          $ref: "#/components/schemas/PortalAgingBuckets"
+        job_summaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalJobSummary"
+    PortalStatementLine:
+      type: object
+      required: [id, date, type, description, amount_cents, balance_after_cents]
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+        amount_cents:
+          type: integer
+        balance_after_cents:
+          type: integer
+        reference_id:
+          type: [string, "null"]
+          format: uuid
+        job_id:
+          type: [string, "null"]
+          format: uuid
+    PortalStatementOpenDoc:
+      type: object
+      required: [kind, id, number, date, total_cents, open_cents]
+      properties:
+        kind:
+          type: string
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        date:
+          type: string
+        due_date:
+          type: [string, "null"]
+        job_id:
+          type: [string, "null"]
+          format: uuid
+        total_cents:
+          type: integer
+        open_cents:
+          type: integer
+    PortalStatement:
+      type: object
+      required: [customer_id, customer_name, from, to, currency, opening_balance_cents, closing_balance_cents, unapplied_cents, net_balance_cents, aging, lines, open_invoices]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        currency:
+          type: string
+        opening_balance_cents:
+          type: integer
+        closing_balance_cents:
+          type: integer
+        unapplied_cents:
+          type: integer
+        net_balance_cents:
+          type: integer
+        aging:
+          $ref: "#/components/schemas/PortalAgingBuckets"
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalStatementLine"
+        open_invoices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalStatementOpenDoc"
+    PortalStatementRunItem:
+      type: object
+      required: [id, run_id, period_start, period_end, currency, opening_balance_cents, closing_balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, days_over_90_cents, unapplied_cents, net_balance_cents, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        run_id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+        period_end:
+          type: string
+        currency:
+          type: string
+        opening_balance_cents:
+          type: integer
+        closing_balance_cents:
+          type: integer
+        current_cents:
+          type: integer
+        days_1_30_cents:
+          type: integer
+        days_31_60_cents:
+          type: integer
+        days_61_90_cents:
+          type: integer
+        days_over_90_cents:
+          type: integer
+        unapplied_cents:
+          type: integer
+        net_balance_cents:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    PortalPaymentMethod:
+      type: object
+      required: [id, customer_id, gateway, method_type, last4, is_default, status, created_at]
+      description: Saved payment method on a contractor account. The vault token is never serialized.
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        gateway:
+          type: string
+        method_type:
+          type: string
+          enum: [CARD, ACH]
+        brand:
+          type: string
+        last4:
+          type: string
+        exp_month:
+          type: integer
+        exp_year:
+          type: integer
+        is_default:
+          type: boolean
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED]
+        created_at:
+          type: string
+          format: date-time
+    PortalCreatePaymentMethodRequest:
+      type: object
+      required: [gateway_token, method_type, last4]
+      properties:
+        gateway_token:
+          type: string
+        method_type:
+          type: string
+          enum: [CARD, ACH]
+        brand:
+          type: string
+        last4:
+          type: string
+        exp_month:
+          type: integer
+        exp_year:
+          type: integer
+        is_default:
+          type: boolean
+    PortalCreatePaymentRequest:
+      type: object
+      required: [invoice_ids]
+      properties:
+        invoice_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        payment_method_id:
+          type: [string, "null"]
+          format: uuid
+        token:
+          type: string
+        idempotency_key:
+          type: string
+    PortalPaymentAllocation:
+      type: object
+      required: [id, invoice_id, invoice_number, amount_cents, applied_on, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        invoice_number:
+          type: string
+        amount_cents:
+          type: integer
+        applied_on:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    PortalPayment:
+      type: object
+      required: [id, number, customer_id, currency, method, status, amount_cents, unapplied_cents, received_on, created_at, allocations]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        customer_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        method:
+          type: string
+        status:
+          type: string
+        amount_cents:
+          type: integer
+        unapplied_cents:
+          type: integer
+        reference:
+          type: string
+        card_brand:
+          type: string
+        card_last4:
+          type: string
+        received_on:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalPaymentAllocation"
+

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The work shell's main window only, and only the two token commands, allowed by name. No core plugin grant, no filesystem, no shell, no device permission (the device grants are the field profile's alone). The tokens stay in the OS keychain behind the core; the commands answer only to the app's own origins.",
+  "windows": ["main"],
+  "permissions": ["allow-core-token", "allow-clear-tokens"]
+}

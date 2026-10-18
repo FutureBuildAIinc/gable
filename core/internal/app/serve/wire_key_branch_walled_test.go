@@ -45,6 +45,7 @@ type walledTwins struct {
 	appA, appB                                     uuid.UUID
 	shipA, shipB                                   uuid.UUID
 	dlvA, dlvB                                     uuid.UUID
+	holdA, holdB                                   uuid.UUID
 	vendor                                         uuid.UUID
 }
 
@@ -64,6 +65,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
 		freightA: uuid.New(), freightB: uuid.New(), appA: uuid.New(), appB: uuid.New(),
 		shipA: uuid.New(), shipB: uuid.New(), dlvA: uuid.New(), dlvB: uuid.New(),
+		holdA: uuid.New(), holdB: uuid.New(),
 	}
 	vendor := uuid.New()
 	w.vendor = vendor
@@ -198,10 +200,19 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 			t.Fatalf("seed email delivery: %v", err)
 		}
 	}
+	for _, h := range []struct{ id, cust uuid.UUID }{{w.holdA, f.custID}, {w.holdB, f.custB}} {
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO credit_holds (id, customer_id, hold_type, reason, status, placed_by)
+			 VALUES ($1, $2, 'MANUAL', 'pin twin', 'ACTIVE', 'pin')`, h.id, h.cust); err != nil {
+			t.Fatalf("seed credit hold: %v", err)
+		}
+	}
 	t.Cleanup(func() {
 		exec := func(stmt string, args ...any) {
 			_, _ = f.db.Pool.Exec(ctx, stmt, args...)
 		}
+		exec(`DELETE FROM credit_limit_changes WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
+		exec(`DELETE FROM credit_holds WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
 		exec(`DELETE FROM email_deliveries WHERE id IN ($1, $2) OR document_id IN ($3, $4)`, w.dlvA, w.dlvB, f.quoteA, f.quoteB)
 		exec(`DELETE FROM inventory WHERE product_id = $1 AND location_id IN ($2, $3)`, f.posProd, f.yardA, f.yardB)
 		exec(`DELETE FROM ar_applications WHERE id IN ($1, $2)`, w.appA, w.appB)
@@ -345,6 +356,14 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		}
 		return f.regA
 	}
+	// the customer of the row's branch: the batch names it, and it is the
+	// customer the wall holds a bound key to
+	custOf := func(row uuid.UUID) uuid.UUID {
+		if row == f.txnB {
+			return f.custB
+		}
+		return f.custID
+	}
 	posTender := fixed(`{"tenders":[{"method":"cash","amount_cents":500}]}`)
 	posReturn := func(row uuid.UUID) string {
 		return fmt.Sprintf(`{"register_id":%q,"refund_method":"cash","reason":"pin","customer_id":%q,`+
@@ -355,7 +374,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":%q}]}`,
-			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), f.custID.String(),
+			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), custOf(row).String(),
 			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	posOpen := func(row uuid.UUID) string {
@@ -504,10 +523,10 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
 			noControl: "the completion deducts stock from a location this fixture does not stock, so the control answers 422 past the body and the transaction read"},
 		{method: "POST", path: "/api/v1/pos/transactions/%s/void", body: fixed(`{"reason":"pin"}`), twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
-		// The sync is held by the module itself now: a batch whose register
-		// names another branch is refused before any item runs (round 7), so
-		// the foreign leg is a held leg and the control on the pin's own
-		// register reaches the module.
+		// The sync's replay is refused by rule (money never queues) once past
+		// the walls, so the foreign leg is held on the customer the batch
+		// names (round 10 P1-1) and the control on the pin's own customer and
+		// register is answered by the rule's 409.
 		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true},
 		// The creates that take the branch they land on from the body.
 		{method: "POST", path: "/api/v1/customers", twin: f.branchB, own: f.branchA,
@@ -534,6 +553,16 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/pos/returns", twin: f.txnB, own: f.txnA, body: posReturn, first: true, controlUser: true},
 		{method: "POST", path: "/api/v1/pos/till/open", twin: f.txnB, own: f.txnA, body: posOpen, first: true, controlUser: true},
 		{method: "POST", path: "/api/v1/pos/transactions", twin: f.txnB, own: f.txnA, body: posStart, first: true, controlUser: true},
+		// Credit holds and credit limit change requests (M25).
+		{method: "POST", path: "/api/v1/ar/credit-holds/%s/override",
+			body: fixed(fmt.Sprintf(`{"override_reason":"pin override","override_until":%q}`, time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339))),
+			twin: w.holdB, own: w.holdA},
+		{method: "POST", path: "/api/v1/ar/credit-holds/%s/release", body: fixed(`{"reason":"pin release"}`), twin: w.holdB, own: w.holdA},
+		{method: "POST", path: "/api/v1/ar/credit-holds", twin: f.custB, own: f.custID,
+			body: func(cust uuid.UUID) string {
+				return fmt.Sprintf(`{"customer_id":%q,"hold_type":"manual","reason":"pin manual hold"}`, cust.String())
+			}},
+		{method: "POST", path: "/api/v1/ar/customers/%s/credit-limit-changes", body: fixed(`{"new_limit_cents":5000000,"reason":"pin limit change"}`), twin: f.custB, own: f.custID},
 	}
 	pathFor := func(l leg, row, row2 uuid.UUID) string {
 		if !strings.Contains(l.path, "%s") {
@@ -677,6 +706,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{path: "/api/v1/quotes/analytics", absent: []string{f.quoteB.String()}, present: nil},
 		{path: "/api/v1/ar/aging", absent: []string{f.custB.String(), w.invB.String()}, present: nil},
 		{path: "/api/v1/ar/aging/summary", absent: []string{f.custB.String(), w.invB.String()}, present: nil},
+		{path: "/api/v1/ar/credit-holds", absent: []string{w.holdB.String(), f.custB.String()}, present: []string{f.custID.String()}},
+		{path: "/api/v1/ar/worklist", absent: []string{f.custB.String(), w.holdB.String()}, present: []string{f.custID.String()}},
 		{path: "/api/v1/pos/transactions?register_id=" + f.regB, absent: []string{f.txnB.String()}, present: nil, first: true},
 		{path: "/api/v1/pos/transactions?register_id=" + f.regA, absent: []string{f.txnB.String()}, present: []string{f.txnA.String()}, first: true},
 	}
