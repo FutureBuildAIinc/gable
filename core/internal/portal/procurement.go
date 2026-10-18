@@ -75,6 +75,12 @@ type UpsertProcurementLineRequest struct {
 	Notes       string     `json:"notes"`
 }
 
+type SubmitProcurementRFQRequest struct {
+	ProjectID    *uuid.UUID `json:"project_id,omitempty"`
+	Notes        string     `json:"notes,omitempty"`
+	DeliveryType string     `json:"delivery_type,omitempty"`
+}
+
 // ListProcurementProjects returns all named material lists for customerID.
 func (s *Service) ListProcurementProjects(ctx context.Context, customerID uuid.UUID) ([]ProcurementProjectDTO, error) {
 	pgRepo, ok := s.pgRepo()
@@ -251,8 +257,44 @@ func (s *Service) DeleteProcurementProject(ctx context.Context, customerID, proj
 	return err
 }
 
-// AddProcurementLine appends a line to a PLANNING material list.
-func (s *Service) AddProcurementLine(ctx context.Context, customerID, projectID uuid.UUID, req UpsertProcurementLineRequest) (*ProcurementLineDTO, error) {
+func (s *Service) normalizeProcurementLine(ctx context.Context, customerID uuid.UUID, req UpsertProcurementLineRequest) (desc, uom string, unitCents, totalCents *int64, err error) {
+	if req.QtyEntered <= 0 {
+		return "", "", nil, nil, fmt.Errorf("%w: positive qty_entered is required", ErrInvalidRequest)
+	}
+	desc = strings.TrimSpace(req.Description)
+	uom = strings.ToUpper(strings.TrimSpace(req.UOM))
+	if req.ProductID != nil && (desc == "" || uom == "") {
+		if _, pDesc, pUOM, lErr := s.repo.LookupQuoteLineProduct(ctx, *req.ProductID); lErr == nil {
+			if desc == "" {
+				desc = pDesc
+			}
+			if uom == "" {
+				uom = pUOM
+			}
+		}
+	}
+	if desc == "" {
+		return "", "", nil, nil, fmt.Errorf("%w: description is required", ErrInvalidRequest)
+	}
+	if uom == "" {
+		uom = "EA"
+	}
+	if !validUOMs[uom] {
+		return "", "", nil, nil, fmt.Errorf("%w: unknown uom %q", ErrInvalidRequest, uom)
+	}
+	if req.ProductID != nil {
+		if price, _, ok := s.resolveCustomerPrice(ctx, customerID, *req.ProductID, uom, req.QtyEntered); ok && price > 0 {
+			u := int64(math.Round(price * 100))
+			t := int64(math.Round(price * req.QtyEntered * 100))
+			unitCents = &u
+			totalCents = &t
+		}
+	}
+	return desc, uom, unitCents, totalCents, nil
+}
+
+// AddProcurementLine appends a line to a PLANNING material list and returns the updated list.
+func (s *Service) AddProcurementLine(ctx context.Context, customerID, projectID uuid.UUID, req UpsertProcurementLineRequest) (*ProcurementProjectDTO, error) {
 	cur, err := s.GetProcurementProject(ctx, customerID, projectID)
 	if err != nil {
 		return nil, err
@@ -260,44 +302,30 @@ func (s *Service) AddProcurementLine(ctx context.Context, customerID, projectID 
 	if cur.Status != ProcurementStatusPlanning {
 		return nil, ErrProcurementLocked
 	}
-	desc := strings.TrimSpace(req.Description)
-	if desc == "" || req.QtyEntered <= 0 {
-		return nil, fmt.Errorf("%w: description and positive qty_entered are required", ErrInvalidRequest)
-	}
-	uom := strings.ToUpper(strings.TrimSpace(req.UOM))
-	if uom == "" {
-		uom = "EA"
-	}
-	if !validUOMs[uom] {
-		return nil, fmt.Errorf("%w: unknown uom %q", ErrInvalidRequest, uom)
+	desc, uom, unitCents, totalCents, err := s.normalizeProcurementLine(ctx, customerID, req)
+	if err != nil {
+		return nil, err
 	}
 
 	pgRepo, _ := s.pgRepo()
 	exec := pgRepo.db.GetExecutor(ctx)
 
-	var l ProcurementLineDTO
-	err = exec.QueryRow(ctx, `
-		INSERT INTO procurement_project_lines (project_id, line_no, product_id, description, qty_entered, uom, notes)
+	_, err = exec.Exec(ctx, `
+		INSERT INTO procurement_project_lines (project_id, line_no, product_id, description, qty_entered, uom, notes, indicative_unit_price_cents, indicative_line_total_cents)
 		VALUES (
 			$1,
 			COALESCE((SELECT MAX(line_no) FROM procurement_project_lines WHERE project_id = $1), 0) + 1,
-			$2, $3, $4, $5, $6
+			$2, $3, $4, $5, $6, $7, $8
 		)
-		RETURNING id, project_id, line_no, product_id, description, qty_entered::float8, uom,
-		          COALESCE(notes, ''), indicative_unit_price_cents, indicative_line_total_cents, created_at
-	`, projectID, req.ProductID, desc, req.QtyEntered, uom, strings.TrimSpace(req.Notes)).Scan(
-		&l.ID, &l.ProjectID, &l.LineNo, &l.ProductID, &l.Description,
-		&l.QtyEntered, &l.UOM, &l.Notes,
-		&l.IndicativeUnitPriceCents, &l.IndicativeLineTotalCents, &l.CreatedAt,
-	)
+	`, projectID, req.ProductID, desc, req.QtyEntered, uom, strings.TrimSpace(req.Notes), unitCents, totalCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add material list line: %w", err)
 	}
-	return &l, nil
+	return s.GetProcurementProject(ctx, customerID, projectID)
 }
 
-// UpdateProcurementLine updates a line on a PLANNING material list.
-func (s *Service) UpdateProcurementLine(ctx context.Context, customerID, projectID, lineID uuid.UUID, req UpsertProcurementLineRequest) (*ProcurementLineDTO, error) {
+// UpdateProcurementLine updates a line on a PLANNING material list and returns the updated list.
+func (s *Service) UpdateProcurementLine(ctx context.Context, customerID, projectID, lineID uuid.UUID, req UpsertProcurementLineRequest) (*ProcurementProjectDTO, error) {
 	cur, err := s.GetProcurementProject(ctx, customerID, projectID)
 	if err != nil {
 		return nil, err
@@ -305,119 +333,136 @@ func (s *Service) UpdateProcurementLine(ctx context.Context, customerID, project
 	if cur.Status != ProcurementStatusPlanning {
 		return nil, ErrProcurementLocked
 	}
-	desc := strings.TrimSpace(req.Description)
-	if desc == "" || req.QtyEntered <= 0 {
-		return nil, fmt.Errorf("%w: description and positive qty_entered are required", ErrInvalidRequest)
-	}
-	uom := strings.ToUpper(strings.TrimSpace(req.UOM))
-	if uom == "" {
-		uom = "EA"
-	}
-	if !validUOMs[uom] {
-		return nil, fmt.Errorf("%w: unknown uom %q", ErrInvalidRequest, uom)
+	desc, uom, unitCents, totalCents, err := s.normalizeProcurementLine(ctx, customerID, req)
+	if err != nil {
+		return nil, err
 	}
 
 	pgRepo, _ := s.pgRepo()
 	exec := pgRepo.db.GetExecutor(ctx)
 
-	var l ProcurementLineDTO
-	err = exec.QueryRow(ctx, `
+	tag, err := exec.Exec(ctx, `
 		UPDATE procurement_project_lines
-		SET product_id = $3, description = $4, qty_entered = $5, uom = $6, notes = $7
+		SET product_id = $3, description = $4, qty_entered = $5, uom = $6, notes = $7,
+		    indicative_unit_price_cents = $8, indicative_line_total_cents = $9
 		WHERE id = $1 AND project_id = $2
-		RETURNING id, project_id, line_no, product_id, description, qty_entered::float8, uom,
-		          COALESCE(notes, ''), indicative_unit_price_cents, indicative_line_total_cents, created_at
-	`, lineID, projectID, req.ProductID, desc, req.QtyEntered, uom, strings.TrimSpace(req.Notes)).Scan(
-		&l.ID, &l.ProjectID, &l.LineNo, &l.ProductID, &l.Description,
-		&l.QtyEntered, &l.UOM, &l.Notes,
-		&l.IndicativeUnitPriceCents, &l.IndicativeLineTotalCents, &l.CreatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProcurementNotFound
-	}
+	`, lineID, projectID, req.ProductID, desc, req.QtyEntered, uom, strings.TrimSpace(req.Notes), unitCents, totalCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update material list line: %w", err)
 	}
-	return &l, nil
+	if tag.RowsAffected() == 0 {
+		return nil, ErrProcurementNotFound
+	}
+	return s.GetProcurementProject(ctx, customerID, projectID)
 }
 
-// DeleteProcurementLine deletes a line from a PLANNING material list.
-func (s *Service) DeleteProcurementLine(ctx context.Context, customerID, projectID, lineID uuid.UUID) error {
+// DeleteProcurementLine deletes a line from a PLANNING material list and returns the updated list.
+func (s *Service) DeleteProcurementLine(ctx context.Context, customerID, projectID, lineID uuid.UUID) (*ProcurementProjectDTO, error) {
 	cur, err := s.GetProcurementProject(ctx, customerID, projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if cur.Status != ProcurementStatusPlanning {
-		return ErrProcurementLocked
+		return nil, ErrProcurementLocked
 	}
 	pgRepo, _ := s.pgRepo()
 	tag, err := pgRepo.db.GetExecutor(ctx).Exec(ctx, `
 		DELETE FROM procurement_project_lines WHERE id = $1 AND project_id = $2
 	`, lineID, projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrProcurementNotFound
+		return nil, ErrProcurementNotFound
 	}
-	return nil
+	return s.GetProcurementProject(ctx, customerID, projectID)
 }
 
 // SubmitProcurementRFQ prices lines indicatively via pricing.Resolve, creates
-// a portal quote request for the dealer, and transitions PLANNING -> QUOTING.
-func (s *Service) SubmitProcurementRFQ(ctx context.Context, customerID, projectID uuid.UUID) (*ProcurementProjectDTO, error) {
-	cur, err := s.GetProcurementProject(ctx, customerID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if cur.Status != ProcurementStatusPlanning {
-		return nil, ErrProcurementLocked
-	}
-	if len(cur.Lines) == 0 {
-		return nil, fmt.Errorf("%w: cannot submit an empty material list for RFQ", ErrInvalidRequest)
-	}
-
-	pgRepo, _ := s.pgRepo()
-	exec := pgRepo.db.GetExecutor(ctx)
-
-	quoteLines := make([]QuoteRequestLine, 0, len(cur.Lines))
-	for _, l := range cur.Lines {
-		if l.ProductID != nil {
-			if price, _, ok := s.resolveCustomerPrice(ctx, customerID, *l.ProductID, l.UOM, l.QtyEntered); ok && price > 0 {
-				unitCents := int64(math.Round(price * 100))
-				totalCents := int64(math.Round(price * l.QtyEntered * 100))
-				_, _ = exec.Exec(ctx, `
-					UPDATE procurement_project_lines
-					SET indicative_unit_price_cents = $2, indicative_line_total_cents = $3
-					WHERE id = $1
-				`, l.ID, unitCents, totalCents)
-			}
+// a portal quote request for the dealer, and transitions PLANNING -> QUOTING
+// inside a single transaction.
+func (s *Service) SubmitProcurementRFQ(ctx context.Context, customerID, projectID uuid.UUID, req SubmitProcurementRFQRequest) (*ProcurementProjectDTO, error) {
+	if req.ProjectID != nil {
+		ok, err := s.repo.ProjectBelongsToCustomer(ctx, *req.ProjectID, customerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify project: %w", err)
 		}
-		quoteLines = append(quoteLines, QuoteRequestLine{
-			ProductID:   l.ProductID,
-			Description: l.Description,
-			Quantity:    l.QtyEntered,
-			UOM:         l.UOM,
-			Note:        l.Notes,
-		})
+		if !ok {
+			return nil, ErrProjectNotFound
+		}
 	}
 
-	q, err := s.CreateQuoteRequest(ctx, customerID, CreateQuoteRequest{
-		Notes: "Material list RFQ: " + cur.Name,
-		Lines: quoteLines,
+	var updated *ProcurementProjectDTO
+	err := s.repo.InTx(ctx, func(txCtx context.Context) error {
+		cur, err := s.GetProcurementProject(txCtx, customerID, projectID)
+		if err != nil {
+			return err
+		}
+		if cur.Status != ProcurementStatusPlanning {
+			return ErrProcurementLocked
+		}
+		if len(cur.Lines) == 0 {
+			return fmt.Errorf("%w: cannot submit an empty material list for RFQ", ErrInvalidRequest)
+		}
+
+		pgRepo, _ := s.pgRepo()
+		exec := pgRepo.db.GetExecutor(txCtx)
+
+		quoteLines := make([]QuoteRequestLine, 0, len(cur.Lines))
+		for _, l := range cur.Lines {
+			if l.ProductID != nil {
+				if price, _, ok := s.resolveCustomerPrice(txCtx, customerID, *l.ProductID, l.UOM, l.QtyEntered); ok && price > 0 {
+					unitCents := int64(math.Round(price * 100))
+					totalCents := int64(math.Round(price * l.QtyEntered * 100))
+					if _, err := exec.Exec(txCtx, `
+						UPDATE procurement_project_lines
+						SET indicative_unit_price_cents = $2, indicative_line_total_cents = $3
+						WHERE id = $1
+					`, l.ID, unitCents, totalCents); err != nil {
+						return fmt.Errorf("failed to update indicative line price: %w", err)
+					}
+				}
+			}
+			quoteLines = append(quoteLines, QuoteRequestLine{
+				ProductID:   l.ProductID,
+				Description: l.Description,
+				Quantity:    l.QtyEntered,
+				UOM:         l.UOM,
+				Note:        l.Notes,
+			})
+		}
+
+		notes := strings.TrimSpace(req.Notes)
+		if notes == "" {
+			notes = "Material list RFQ: " + cur.Name
+		}
+
+		q, err := s.CreateQuoteRequest(txCtx, customerID, CreateQuoteRequest{
+			ProjectID:    req.ProjectID,
+			Notes:        notes,
+			DeliveryType: req.DeliveryType,
+			Lines:        quoteLines,
+		})
+		if err != nil {
+			return err
+		}
+
+		_, err = exec.Exec(txCtx, `
+			UPDATE procurement_projects
+			SET status = 'QUOTING', quote_id = $3, updated_at = NOW()
+			WHERE id = $1 AND customer_id = $2
+		`, projectID, customerID, q.ID)
+		if err != nil {
+			return fmt.Errorf("failed to mark material list as QUOTING: %w", err)
+		}
+
+		updated, err = s.GetProcurementProject(txCtx, customerID, projectID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = exec.Exec(ctx, `
-		UPDATE procurement_projects
-		SET status = 'QUOTING', quote_id = $3, updated_at = NOW()
-		WHERE id = $1 AND customer_id = $2
-	`, projectID, customerID, q.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mark material list as QUOTING: %w", err)
-	}
-
-	return s.GetProcurementProject(ctx, customerID, projectID)
+	return updated, nil
 }
+

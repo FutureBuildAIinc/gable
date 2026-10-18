@@ -54,6 +54,7 @@ func TestKeyBranchPin_PricingCatalogLegs(t *testing.T) {
 		_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM vendor_price_levels WHERE id = $1`, vendorLevel)
 		_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM customer_contracts WHERE branch_id = $1 AND product_id = $2`, f.branchA, f.posProd)
 		_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM product_prices WHERE product_id = $1 AND branch_id = $2`, f.posProd, f.branchA)
+		_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM yard_schedule_windows WHERE yard_id IN ($1, $2)`, f.branchA, f.branchB)
 		_, _ = f.db.Pool.Exec(t.Context(), `DELETE FROM events_outbox WHERE entity_type IN ('contract', 'vendor_cost', 'price_level', 'price_profile', 'product') AND entity_id::text IN (SELECT id::text FROM customer_contracts WHERE branch_id = $1)`, f.branchA)
 	})
 
@@ -126,6 +127,52 @@ func TestKeyBranchPin_PricingCatalogLegs(t *testing.T) {
 	// The cost read at the pin's branch.
 	get("/api/v1/pricing/cost?vendor_id=" + vendor + "&product_id=" + prod + "&branch_id=" + A)
 	f.twinLeg("GET", "/api/v1/pricing/cost")
+
+	// Scheduling windows (PE-08): branch A's yard window succeeds, while branch
+	// B's foreign twin is walled off (403 on payload create, 404 on by-id
+	// reads/writes, excluded from list).
+	B := f.branchB.String()
+	var winBID string
+	if err := f.db.Pool.QueryRow(t.Context(), `
+		INSERT INTO yard_schedule_windows (yard_id, kind, weekday, start_time, end_time, capacity, cutoff_minutes)
+		VALUES ($1, 'delivery', 2, '08:00', '12:00', 4, 60) RETURNING id::text`, f.branchB).Scan(&winBID); err != nil {
+		t.Fatalf("seed branch B window: %v", err)
+	}
+	winBody := post("/api/v1/scheduling/windows",
+		`{"yard_id":"`+A+`","kind":"delivery","weekday":1,"start_time":"07:00","end_time":"11:00","capacity":4,"cutoff_minutes":60}`)
+	winAID := extractID(t, winBody)
+	if st, b := f.key(t, f.bound, "POST", "/api/v1/scheduling/windows",
+		`{"yard_id":"`+B+`","kind":"delivery","weekday":3,"start_time":"07:00","end_time":"11:00","capacity":4,"cutoff_minutes":60}`, nil); st != http.StatusForbidden {
+		t.Fatalf("bound POST scheduling window on branch B: %d %s, want 403", st, b)
+	}
+	f.twinLeg("POST", "/api/v1/scheduling/windows")
+
+	st, listBuf := f.key(t, f.bound, "GET", "/api/v1/scheduling/windows", "", nil)
+	if st != http.StatusOK || !strings.Contains(string(listBuf), winAID) || strings.Contains(string(listBuf), winBID) {
+		t.Fatalf("bound GET scheduling windows: %d %s", st, listBuf)
+	}
+	f.twinLeg("GET", "/api/v1/scheduling/windows")
+
+	get("/api/v1/scheduling/windows/" + winAID)
+	if st, b := f.key(t, f.bound, "GET", "/api/v1/scheduling/windows/"+winBID, "", nil); st != http.StatusNotFound {
+		t.Fatalf("bound GET scheduling window B: %d %s, want 404", st, b)
+	}
+	f.twinLeg("GET", "/api/v1/scheduling/windows/{id}")
+
+	put("/api/v1/scheduling/windows/"+winAID, `{"capacity":6}`)
+	if st, b := f.key(t, f.bound, "PUT", "/api/v1/scheduling/windows/"+winBID, `{"capacity":6}`, nil); st != http.StatusNotFound {
+		t.Fatalf("bound PUT scheduling window B: %d %s, want 404", st, b)
+	}
+	f.twinLeg("PUT", "/api/v1/scheduling/windows/{id}")
+
+	if st, b := f.key(t, f.bound, "DELETE", "/api/v1/scheduling/windows/"+winBID, "", nil); st != http.StatusNotFound {
+		t.Fatalf("bound DELETE scheduling window B: %d %s, want 404", st, b)
+	}
+	status, buf = f.key(t, f.bound, "DELETE", "/api/v1/scheduling/windows/"+winAID, "", nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("bound DELETE scheduling window A: %d %s", status, buf)
+	}
+	f.twinLeg("DELETE", "/api/v1/scheduling/windows/{id}")
 }
 
 // extractID reads the id field of a created row's answer.

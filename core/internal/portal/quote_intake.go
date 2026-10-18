@@ -192,42 +192,59 @@ func (s *Service) IntakeQuote(ctx context.Context, customerID uuid.UUID, req Quo
 }
 
 // ConvertPortalQuote converts a priced (SENT) or ACCEPTED quote belonging to
-// customerID into a live ERP order via quote.Service.ConvertInProcess.
+// customerID into a live ERP order via quote.Service.ConvertInProcess inside a
+// single transaction, preserving any portal project_id linked to the quote.
 func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*ConvertPortalQuoteResponse, error) {
-	current, err := s.repo.GetPortalQuote(ctx, quoteID, customerID)
-	if err != nil {
-		return nil, err
-	}
-
-	if current.ExpiresAt != nil && current.ExpiresAt.Before(time.Now().UTC()) {
-		return nil, fmt.Errorf("%w: quote has expired", ErrQuoteNotConvertible)
-	}
-
-	erpState := quote.QuoteState(current.ERPState)
-	if erpState != quote.QuoteStateSent && erpState != quote.QuoteStateAccepted {
-		return nil, fmt.Errorf("%w: quote state is %s", ErrQuoteNotConvertible, current.Status)
-	}
-
 	if s.quoteSvc == nil {
 		return nil, fmt.Errorf("quote lifecycle service is not configured")
 	}
 
-	res, err := s.quoteSvc.ConvertInProcess(branchctx.WithSystem(ctx), quoteID)
-	if err != nil {
-		var hErr *httpx.Error
-		if errors.As(err, &hErr) && (hErr.Status == 409 || hErr.Status == 422) {
-			return nil, fmt.Errorf("%w: %s", ErrQuoteNotConvertible, hErr.Message)
+	var resp *ConvertPortalQuoteResponse
+	err := s.repo.InTx(ctx, func(txCtx context.Context) error {
+		current, err := s.repo.GetPortalQuote(txCtx, quoteID, customerID)
+		if err != nil {
+			return err
 		}
+
+		if current.ExpiresAt != nil && current.ExpiresAt.Before(time.Now().UTC()) {
+			return fmt.Errorf("%w: quote has expired", ErrQuoteNotConvertible)
+		}
+
+		erpState := quote.QuoteState(current.ERPState)
+		if erpState != quote.QuoteStateSent && erpState != quote.QuoteStateAccepted {
+			return fmt.Errorf("%w: quote state is %s", ErrQuoteNotConvertible, current.Status)
+		}
+
+		res, err := s.quoteSvc.ConvertInProcess(branchctx.WithSystem(txCtx), quoteID)
+		if err != nil {
+			var hErr *httpx.Error
+			if errors.As(err, &hErr) && (hErr.Status == 409 || hErr.Status == 422) {
+				return fmt.Errorf("%w: %s", ErrQuoteNotConvertible, hErr.Message)
+			}
+			return err
+		}
+
+		if current.ProjectID != nil {
+			if err := s.repo.SetOrderProject(txCtx, res.ID, customerID, current.ProjectID); err != nil {
+				return fmt.Errorf("failed to attach project to converted order: %w", err)
+			}
+		}
+
+		resp = &ConvertPortalQuoteResponse{
+			QuoteID:     quoteID,
+			OrderID:     res.ID,
+			OrderNumber: res.Number,
+			Status:      string(res.Status),
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
 	s.logger.Info("Portal quote converted to order",
-		"customer_id", customerID, "quote_id", quoteID, "order_id", res.ID, "order_number", res.Number)
+		"customer_id", customerID, "quote_id", quoteID, "order_id", resp.OrderID, "order_number", resp.OrderNumber)
 
-	return &ConvertPortalQuoteResponse{
-		QuoteID:     quoteID,
-		OrderID:     res.ID,
-		OrderNumber: res.Number,
-		Status:      string(res.Status),
-	}, nil
+	return resp, nil
 }
+

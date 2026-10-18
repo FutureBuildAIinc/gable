@@ -250,7 +250,7 @@ func (s *Service) GetDelivery(ctx context.Context, deliveryID, customerID uuid.U
 
 // CreateReorder duplicates a historical order as a new DRAFT, re-pricing
 // product lines through the customer's pricing waterfall (M5) and optionally
-// tagging the draft with a customer project.
+// tagging the draft with a customer project inside one transaction.
 func (s *Service) CreateReorder(ctx context.Context, customerID uuid.UUID, req ReorderRequest) (*ReorderResponse, error) {
 	if req.ProjectID != nil {
 		ok, err := s.repo.ProjectBelongsToCustomer(ctx, *req.ProjectID, customerID)
@@ -262,20 +262,26 @@ func (s *Service) CreateReorder(ctx context.Context, customerID uuid.UUID, req R
 		}
 	}
 
-	newOrderID, err := s.repo.CreateReorder(ctx, customerID, req.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create reorder: %w", err)
-	}
-
-	if err := s.repriceReorderedDraft(ctx, customerID, newOrderID); err != nil {
-		s.logger.Warn("Portal reorder: customer repricing fallback to base price",
-			"customer_id", customerID, "order_id", newOrderID, "error", err)
-	}
-	if req.ProjectID != nil {
-		if err := s.repo.SetOrderProject(ctx, newOrderID, customerID, req.ProjectID); err != nil {
-			s.logger.Warn("Portal reorder: failed to attach project",
-				"customer_id", customerID, "order_id", newOrderID, "project_id", *req.ProjectID, "error", err)
+	var newOrderID uuid.UUID
+	err := s.repo.InTx(ctx, func(txCtx context.Context) error {
+		var err error
+		newOrderID, err = s.repo.CreateReorder(txCtx, customerID, req.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to create reorder: %w", err)
 		}
+
+		if err := s.repriceReorderedDraft(txCtx, customerID, newOrderID); err != nil {
+			return fmt.Errorf("failed to reprice reordered draft: %w", err)
+		}
+		if req.ProjectID != nil {
+			if err := s.repo.SetOrderProject(txCtx, newOrderID, customerID, req.ProjectID); err != nil {
+				return fmt.Errorf("failed to attach project to reorder: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	s.logger.Info("Portal reorder created", "customer_id", customerID, "source_order", req.OrderID, "new_order", newOrderID)

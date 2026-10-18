@@ -258,6 +258,7 @@ func purgeFixtureRows(ctx context.Context, db *database.DB, customers, branches 
 		`DELETE FROM customer_ship_tos WHERE customer_id = ANY($1)`,
 		`DELETE FROM customer_contacts WHERE customer_id = ANY($1)`,
 		`DELETE FROM crm_activities WHERE customer_id = ANY($1)`,
+		`DELETE FROM yard_schedule_windows WHERE yard_id = ANY($2)`,
 	} {
 		_, _ = db.Pool.Exec(ctx, lists.Replace(stmt))
 	}

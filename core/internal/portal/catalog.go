@@ -61,6 +61,27 @@ func (row catalogRow) toDTO() CatalogProductDTO {
 	}
 }
 
+// customerBranchID resolves the customer's primary branch ID for branch-scoped
+// pricing waterfall resolution (M5).
+func (s *Service) customerBranchID(ctx context.Context, customerID uuid.UUID) *uuid.UUID {
+	if customerID == uuid.Nil {
+		return nil
+	}
+	if s.customerSvc != nil {
+		if cust, err := s.customerSvc.GetCustomer(ctx, customerID); err == nil && cust != nil && cust.PrimaryBranchID != uuid.Nil {
+			id := cust.PrimaryBranchID
+			return &id
+		}
+	}
+	if pgRepo, ok := s.pgRepo(); ok && pgRepo != nil && pgRepo.db != nil {
+		var branchID *uuid.UUID
+		if err := pgRepo.db.GetExecutor(ctx).QueryRow(ctx, `SELECT primary_branch_id FROM customers WHERE id = $1`, customerID).Scan(&branchID); err == nil {
+			return branchID
+		}
+	}
+	return nil
+}
+
 // resolveCustomerPrice is one product's price for one customer through
 // pricing.Resolve (ADR 0006 sections 5.3 and 7.6), answered per the display
 // unit named: the engine's answer carries its own price unit, and the pair
@@ -68,13 +89,21 @@ func (row catalogRow) toDTO() CatalogProductDTO {
 // the edge (the portal's wire stays float until C5-1). ok is false when the
 // engine did not answer, the caller's base price fallback.
 func (s *Service) resolveCustomerPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, uom string, quantity float64) (float64, string, bool) {
+	return s.resolveCustomerPriceAtBranch(ctx, customerID, s.customerBranchID(ctx, customerID), productID, uom, quantity)
+}
+
+func (s *Service) resolveCustomerPriceAtBranch(ctx context.Context, customerID uuid.UUID, branchID *uuid.UUID, productID uuid.UUID, uom string, quantity float64) (float64, string, bool) {
 	if s.pricingSvc == nil {
 		return 0, "", false
+	}
+	if branchID == nil {
+		branchID = s.customerBranchID(ctx, customerID)
 	}
 	qty := httpx.Quantity(int64(quantity*10000 + 0.5))
 	res, err := s.pricingSvc.Resolve(ctx, pricing.Request{
 		CustomerID: customerID,
 		ProductID:  productID,
+		BranchID:   branchID,
 		Quantity:   qty,
 		UOM:        uom,
 	})

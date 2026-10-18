@@ -5,6 +5,8 @@ package portal
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -271,12 +273,12 @@ func (h *Handler) HandleAddProcurementLine(w http.ResponseWriter, r *http.Reques
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
-	line, err := h.svc.AddProcurementLine(r.Context(), customerID, projectID, req)
+	p, err := h.svc.AddProcurementLine(r.Context(), customerID, projectID, req)
 	if err != nil {
 		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
-	portalWriteJSONStatus(w, http.StatusCreated, line)
+	portalWriteJSONStatus(w, http.StatusCreated, p)
 }
 
 func (h *Handler) HandleUpdateProcurementLine(w http.ResponseWriter, r *http.Request) {
@@ -300,12 +302,12 @@ func (h *Handler) HandleUpdateProcurementLine(w http.ResponseWriter, r *http.Req
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
-	line, err := h.svc.UpdateProcurementLine(r.Context(), customerID, projectID, lineID, req)
+	p, err := h.svc.UpdateProcurementLine(r.Context(), customerID, projectID, lineID, req)
 	if err != nil {
 		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
-	portalWriteJSON(w, line)
+	portalWriteJSON(w, p)
 }
 
 func (h *Handler) HandleDeleteProcurementLine(w http.ResponseWriter, r *http.Request) {
@@ -323,11 +325,12 @@ func (h *Handler) HandleDeleteProcurementLine(w http.ResponseWriter, r *http.Req
 		httputil.RespondError(w, r, "Invalid line ID", http.StatusBadRequest, err)
 		return
 	}
-	if err := h.svc.DeleteProcurementLine(r.Context(), customerID, projectID, lineID); err != nil {
+	p, err := h.svc.DeleteProcurementLine(r.Context(), customerID, projectID, lineID)
+	if err != nil {
 		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	portalWriteJSON(w, p)
 }
 
 func (h *Handler) HandleSubmitProcurementRFQ(w http.ResponseWriter, r *http.Request) {
@@ -340,12 +343,20 @@ func (h *Handler) HandleSubmitProcurementRFQ(w http.ResponseWriter, r *http.Requ
 		httputil.RespondError(w, r, "Invalid material list ID", http.StatusBadRequest, err)
 		return
 	}
-	p, err := h.svc.SubmitProcurementRFQ(r.Context(), customerID, projectID)
+	var req SubmitProcurementRFQRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+			return
+		}
+	}
+	p, err := h.svc.SubmitProcurementRFQ(r.Context(), customerID, projectID, req)
 	if err != nil {
 		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return
 	}
-	portalWriteJSON(w, p)
+	portalWriteJSONStatus(w, http.StatusCreated, p)
 }
 
 // --- Part 5 Handlers (see_money) --------------------------------------------
@@ -353,7 +364,14 @@ func (h *Handler) HandleSubmitProcurementRFQ(w http.ResponseWriter, r *http.Requ
 func parseStatementPeriod(r *http.Request) (time.Time, time.Time, error) {
 	now := time.Now().UTC()
 	to := now
-	from := now.AddDate(0, 0, -30)
+	if raw := r.URL.Query().Get("to"); raw != "" {
+		t, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		to = t
+	}
+	from := to.AddDate(0, 0, -30)
 	if raw := r.URL.Query().Get("from"); raw != "" {
 		t, err := time.Parse("2006-01-02", raw)
 		if err != nil {
@@ -361,12 +379,8 @@ func parseStatementPeriod(r *http.Request) (time.Time, time.Time, error) {
 		}
 		from = t
 	}
-	if raw := r.URL.Query().Get("to"); raw != "" {
-		t, err := time.Parse("2006-01-02", raw)
-		if err != nil {
-			return time.Time{}, time.Time{}, err
-		}
-		to = t
+	if from.After(to) {
+		return time.Time{}, time.Time{}, fmt.Errorf("from must not be after to")
 	}
 	return from, to, nil
 }

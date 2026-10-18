@@ -103,7 +103,7 @@ var refusalReasons = map[error]struct {
 		"This quote has not been priced and sent by the dealer yet, or it has already been closed."},
 	ErrQuoteNotConvertible: {"QUOTE_NOT_CONVERTIBLE",
 		"Only a priced or accepted quote that has not expired can be converted into an order."},
-	ErrSyntheticIntakeNotConfirmed: {"SYNTHETIC_INTAKE_CONFIRM_REQUIRED",
+	ErrSyntheticIntakeNotConfirmed: {"SYNTHETIC_INTAKE_REFUSED",
 		"This photo intake used demo extraction and must be reviewed and confirmed before submitting a quote request."},
 	ErrProcurementLocked: {"MATERIAL_LIST_LOCKED",
 		"This material list has already been submitted for quoting or ordering and can no longer be edited."},

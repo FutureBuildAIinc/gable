@@ -13598,6 +13598,12 @@ paths:
             schema:
               $ref: "#/components/schemas/PortalCreatePaymentRequest"
       responses:
+        "200":
+          description: Idempotent replay of an already settled payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPayment"
         "201":
           description: The recorded payment and its invoice allocations.
           content:
@@ -13608,6 +13614,14 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/LegacyUnauthorized"
+        "402":
+          description: Payment was declined by the payment gateway.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
         "403":
           $ref: "#/components/responses/LegacyForbidden"
         "404":
@@ -13626,6 +13640,14 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          description: Payment gateway unavailable or returned an unknown error; intent remains in flight for reconciliation.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortalRefusal"
+                  - $ref: "#/components/schemas/WireError"
   /api/v1/pos/transactions:
     post:
       operationId: posTransactionCreate
@@ -31130,7 +31152,7 @@ components:
             $ref: "#/components/schemas/PortalStatementOpenDoc"
     PortalStatementRunItem:
       type: object
-      required: [id, run_id, period_start, period_end, currency, opening_balance_cents, closing_balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, days_over_90_cents, unapplied_cents, net_balance_cents, created_at]
+      required: [id, run_id, period_start, period_end, currency, opening_balance_cents, invoices_cents, payments_cents, finance_charges_cents, closing_balance_cents, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, days_over_90_cents, unapplied_cents, net_balance_cents, created_at]
       properties:
         id:
           type: string
@@ -31145,6 +31167,12 @@ components:
         currency:
           type: string
         opening_balance_cents:
+          type: integer
+        invoices_cents:
+          type: integer
+        payments_cents:
+          type: integer
+        finance_charges_cents:
           type: integer
         closing_balance_cents:
           type: integer
@@ -31180,7 +31208,7 @@ components:
           type: string
         method_type:
           type: string
-          enum: [CARD, ACH]
+          enum: [CARD, ACH, BANK]
         brand:
           type: string
         last4:
@@ -31205,7 +31233,7 @@ components:
           type: string
         method_type:
           type: string
-          enum: [CARD, ACH]
+          enum: [CARD, ACH, BANK]
         brand:
           type: string
         last4:

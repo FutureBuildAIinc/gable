@@ -233,6 +233,15 @@ func validateGatewayToken(tok string) error {
 
 // --- Saved Payment Methods --------------------------------------------------
 
+func normalizePaymentMethodStatus(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "ACTIVE":
+		return "ACTIVE"
+	default:
+		return "REVOKED"
+	}
+}
+
 func (s *Service) ListPaymentMethods(ctx context.Context, customerID uuid.UUID) ([]PortalPaymentMethodDTO, error) {
 	pgRepo, ok := s.pgRepo()
 	if !ok || pgRepo == nil {
@@ -242,7 +251,7 @@ func (s *Service) ListPaymentMethods(ctx context.Context, customerID uuid.UUID) 
 		SELECT id, customer_id, gateway, method_type, COALESCE(brand, ''), last4,
 		       exp_month, exp_year, is_default, status, created_at
 		FROM portal_payment_methods
-		WHERE customer_id = $1 AND status = 'active'
+		WHERE customer_id = $1 AND status IN ('ACTIVE', 'active')
 		ORDER BY is_default DESC, created_at DESC
 	`, customerID)
 	if err != nil {
@@ -260,6 +269,7 @@ func (s *Service) ListPaymentMethods(ctx context.Context, customerID uuid.UUID) 
 		); err != nil {
 			return nil, err
 		}
+		pm.Status = normalizePaymentMethodStatus(pm.Status)
 		out = append(out, pm)
 	}
 	return out, rows.Err()
@@ -285,8 +295,8 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 	if mType == "" {
 		mType = "CARD"
 	}
-	if mType != "CARD" && mType != "BANK" {
-		return nil, fmt.Errorf("%w: method_type must be CARD or BANK", ErrInvalidRequest)
+	if mType != "CARD" && mType != "BANK" && mType != "ACH" {
+		return nil, fmt.Errorf("%w: method_type must be CARD, ACH, or BANK", ErrInvalidRequest)
 	}
 
 	pgRepo, ok := s.pgRepo()
@@ -299,7 +309,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 		exec := pgRepo.db.GetExecutor(txCtx)
 		var existingCount int
 		if err := exec.QueryRow(txCtx, `
-			SELECT COUNT(*) FROM portal_payment_methods WHERE customer_id = $1 AND status = 'active'
+			SELECT COUNT(*) FROM portal_payment_methods WHERE customer_id = $1 AND status IN ('ACTIVE', 'active')
 		`, customerID).Scan(&existingCount); err != nil {
 			return err
 		}
@@ -307,7 +317,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 		if makeDefault {
 			if _, err := exec.Exec(txCtx, `
 				UPDATE portal_payment_methods SET is_default = FALSE, updated_at = NOW()
-				WHERE customer_id = $1 AND status = 'active' AND is_default = TRUE
+				WHERE customer_id = $1 AND status IN ('ACTIVE', 'active') AND is_default = TRUE
 			`, customerID); err != nil {
 				return err
 			}
@@ -316,11 +326,11 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 		if createdBy != nil && *createdBy != uuid.Nil {
 			creator = createdBy
 		}
-		return exec.QueryRow(txCtx, `
+		if err := exec.QueryRow(txCtx, `
 			INSERT INTO portal_payment_methods (
 				customer_id, created_by, gateway, gateway_token, method_type,
 				brand, last4, exp_month, exp_year, is_default, status
-			) VALUES ($1, $2, 'stub', $3, $4, $5, $6, $7, $8, $9, 'active')
+			) VALUES ($1, $2, 'stub', $3, $4, $5, $6, $7, $8, $9, 'ACTIVE')
 			RETURNING id, customer_id, gateway, method_type, COALESCE(brand, ''), last4,
 			          exp_month, exp_year, is_default, status, created_at
 		`, customerID, creator, strings.TrimSpace(req.GatewayToken), mType,
@@ -328,7 +338,11 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 			&out.ID, &out.CustomerID, &out.Gateway, &out.MethodType,
 			&out.Brand, &out.Last4, &out.ExpMonth, &out.ExpYear,
 			&out.IsDefault, &out.Status, &out.CreatedAt,
-		)
+		); err != nil {
+			return err
+		}
+		out.Status = normalizePaymentMethodStatus(out.Status)
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to save payment method: %w", err)
@@ -343,8 +357,8 @@ func (s *Service) DeletePaymentMethod(ctx context.Context, customerID, methodID 
 	}
 	tag, err := pgRepo.db.GetExecutor(ctx).Exec(ctx, `
 		UPDATE portal_payment_methods
-		SET status = 'removed', is_default = FALSE, updated_at = NOW()
-		WHERE id = $1 AND customer_id = $2 AND status = 'active'
+		SET status = 'REVOKED', is_default = FALSE, updated_at = NOW()
+		WHERE id = $1 AND customer_id = $2 AND status IN ('ACTIVE', 'active')
 	`, methodID, customerID)
 	if err != nil {
 		return err
@@ -365,7 +379,7 @@ func (s *Service) SetDefaultPaymentMethod(ctx context.Context, customerID, metho
 		exec := pgRepo.db.GetExecutor(txCtx)
 		var exists bool
 		if err := exec.QueryRow(txCtx, `
-			SELECT EXISTS(SELECT 1 FROM portal_payment_methods WHERE id = $1 AND customer_id = $2 AND status = 'active')
+			SELECT EXISTS(SELECT 1 FROM portal_payment_methods WHERE id = $1 AND customer_id = $2 AND status IN ('ACTIVE', 'active'))
 		`, methodID, customerID).Scan(&exists); err != nil {
 			return err
 		}
@@ -374,11 +388,11 @@ func (s *Service) SetDefaultPaymentMethod(ctx context.Context, customerID, metho
 		}
 		if _, err := exec.Exec(txCtx, `
 			UPDATE portal_payment_methods SET is_default = FALSE, updated_at = NOW()
-			WHERE customer_id = $1 AND status = 'active' AND is_default = TRUE
+			WHERE customer_id = $1 AND status IN ('ACTIVE', 'active') AND is_default = TRUE
 		`, customerID); err != nil {
 			return err
 		}
-		return exec.QueryRow(txCtx, `
+		if err := exec.QueryRow(txCtx, `
 			UPDATE portal_payment_methods
 			SET is_default = TRUE, updated_at = NOW()
 			WHERE id = $1 AND customer_id = $2
@@ -388,7 +402,11 @@ func (s *Service) SetDefaultPaymentMethod(ctx context.Context, customerID, metho
 			&out.ID, &out.CustomerID, &out.Gateway, &out.MethodType,
 			&out.Brand, &out.Last4, &out.ExpMonth, &out.ExpYear,
 			&out.IsDefault, &out.Status, &out.CreatedAt,
-		)
+		); err != nil {
+			return err
+		}
+		out.Status = normalizePaymentMethodStatus(out.Status)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -450,7 +468,7 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 		err := exec.QueryRow(ctx, `
 			SELECT gateway_token, method_type, COALESCE(brand, ''), last4
 			FROM portal_payment_methods
-			WHERE id = $1 AND customer_id = $2 AND status = 'active'
+			WHERE id = $1 AND customer_id = $2 AND status IN ('ACTIVE', 'active')
 		`, *req.PaymentMethodID, customerID).Scan(&token, &methodType, &brand, &last4)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, ErrPaymentMethodNotFound
@@ -467,7 +485,8 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 		return nil, false, fmt.Errorf("%w: provide payment_method_id or token", ErrInvalidRequest)
 	}
 
-	// Verify ownership of every invoice first (404 for another tenant's invoice).
+	idemKey := computePaymentIntentKey(customerID, req.InvoiceIDs, req.PaymentMethodID, token, req.IdempotencyKey)
+
 	type invFact struct {
 		id       uuid.UUID
 		branchID uuid.UUID
@@ -475,108 +494,163 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 		status   string
 		open     int64
 	}
-	rows, err := exec.Query(ctx, `
-		SELECT id, customer_id, branch_id, COALESCE(currency, 'USD'), status,
-		       ROUND(COALESCE(amount_open, total_amount) * 100)::bigint
-		FROM invoices
-		WHERE id = ANY($1)
-	`, req.InvoiceIDs)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to read invoices: %w", err)
-	}
-	facts := make(map[uuid.UUID]invFact, len(req.InvoiceIDs))
-	for rows.Next() {
-		var f invFact
-		var ownerID uuid.UUID
-		if err := rows.Scan(&f.id, &ownerID, &f.branchID, &f.currency, &f.status, &f.open); err != nil {
-			rows.Close()
-			return nil, false, err
-		}
-		if ownerID != customerID {
-			rows.Close()
-			return nil, false, ErrInvoiceNotFound
-		}
-		facts[f.id] = f
-	}
-	rows.Close()
-	if len(facts) != len(req.InvoiceIDs) {
-		return nil, false, ErrInvoiceNotFound
-	}
-
-	idemKey := computePaymentIntentKey(customerID, req.InvoiceIDs, req.PaymentMethodID, token, req.IdempotencyKey)
-
-	// Check if an intent already exists for this exact request before checking
-	// whether the invoices are still open (a settled replay sees its invoices
-	// already PAID by the first request).
-	var existingStatus string
-	var existingPaymentID *uuid.UUID
-	err = exec.QueryRow(ctx, `
-		SELECT status, payment_id FROM portal_payment_intents WHERE idempotency_key = $1
-	`, idemKey).Scan(&existingStatus, &existingPaymentID)
-	if err == nil {
-		switch existingStatus {
-		case "SETTLED":
-			if existingPaymentID != nil {
-				dto, gErr := s.getPortalPaymentByID(ctx, customerID, *existingPaymentID)
-				if gErr == nil {
-					return dto, true, nil
-				}
-			}
-		case "CHARGING", "PENDING":
-			return nil, false, ErrPaymentInFlight
-		}
-	}
-
 	var (
+		intentID   uuid.UUID
+		replayed   *PortalPaymentDTO
 		totalCents int64
 		branchID   uuid.UUID
 		currency   = "USD"
-		applyLines = make([]account.ApplyLine, 0, len(req.InvoiceIDs))
+		applyLines []account.ApplyLine
 	)
-	for i, id := range req.InvoiceIDs {
-		f := facts[id]
-		if (f.status != "UNPAID" && f.status != "PARTIAL") || f.open <= 0 {
-			return nil, false, ErrInvoiceNotPayable
-		}
-		if i == 0 {
-			branchID = f.branchID
-			currency = f.currency
-		}
-		totalCents += f.open
-		applyLines = append(applyLines, account.ApplyLine{
-			InvoiceID:   f.id,
-			AmountCents: f.open,
-		})
-	}
 
-	// Atomically claim the single-flight intent row BEFORE calling the gateway.
-	var intentID uuid.UUID
-	err = exec.QueryRow(ctx, `
-		INSERT INTO portal_payment_intents (
-			idempotency_key, customer_id, amount_cents, invoice_ids, status, gateway, attempts
-		) VALUES ($1, $2, $3, $4, 'CHARGING', 'stub', 1)
-		ON CONFLICT (idempotency_key) DO UPDATE
-		SET status = 'CHARGING',
-		    attempts = portal_payment_intents.attempts + 1,
-		    updated_at = NOW()
-		WHERE portal_payment_intents.status IN ('FAILED', 'ABANDONED')
-		RETURNING id
-	`, idemKey, customerID, totalCents, req.InvoiceIDs).Scan(&intentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Another request holds or settled the intent.
-		_ = exec.QueryRow(ctx, `
-			SELECT status, payment_id FROM portal_payment_intents WHERE idempotency_key = $1
-		`, idemKey).Scan(&existingStatus, &existingPaymentID)
-		if existingStatus == "SETTLED" && existingPaymentID != nil {
-			dto, gErr := s.getPortalPaymentByID(ctx, customerID, *existingPaymentID)
-			if gErr == nil {
-				return dto, true, nil
-			}
+	// Atomically lock target invoices in deterministic order, verify ownership,
+	// replay settled idempotent intents, block overlapping active intents (P1-1),
+	// verify open/payable status, uniform currency, and absence of pending void
+	// holds (P2-1), and claim the CHARGING intent before calling the gateway.
+	err := pgRepo.InTx(ctx, func(txCtx context.Context) error {
+		txExec := pgRepo.db.GetExecutor(txCtx)
+
+		rows, err := txExec.Query(txCtx, `
+			SELECT id, customer_id, branch_id, COALESCE(currency, 'USD'), status,
+			       ROUND(COALESCE(amount_open, total_amount) * 100)::bigint
+			FROM invoices
+			WHERE id = ANY($1)
+			ORDER BY id ASC
+			FOR UPDATE
+		`, req.InvoiceIDs)
+		if err != nil {
+			return fmt.Errorf("failed to read invoices: %w", err)
 		}
-		return nil, false, ErrPaymentInFlight
-	}
+		facts := make(map[uuid.UUID]invFact, len(req.InvoiceIDs))
+		for rows.Next() {
+			var f invFact
+			var ownerID uuid.UUID
+			if err := rows.Scan(&f.id, &ownerID, &f.branchID, &f.currency, &f.status, &f.open); err != nil {
+				rows.Close()
+				return err
+			}
+			if ownerID != customerID {
+				rows.Close()
+				return ErrInvoiceNotFound
+			}
+			facts[f.id] = f
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(facts) != len(req.InvoiceIDs) {
+			return ErrInvoiceNotFound
+		}
+
+		var existingStatus string
+		var existingPaymentID *uuid.UUID
+		err = txExec.QueryRow(txCtx, `
+			SELECT status, payment_id
+			FROM portal_payment_intents
+			WHERE idempotency_key = $1
+			FOR UPDATE
+		`, idemKey).Scan(&existingStatus, &existingPaymentID)
+		if err == nil {
+			switch existingStatus {
+			case "SETTLED":
+				if existingPaymentID != nil {
+					dto, gErr := s.getPortalPaymentByID(txCtx, customerID, *existingPaymentID)
+					if gErr == nil {
+						replayed = dto
+						return nil
+					}
+				}
+			case "CHARGING", "PENDING":
+				return ErrPaymentInFlight
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+
+		// Refuse if any target invoice is already covered by another active
+		// CHARGING or PENDING intent for this customer (e.g. a concurrent
+		// request or a retry after a gateway timeout with a new Idempotency-Key,
+		// payment method, or overlapping invoice subset).
+		var overlapInFlight bool
+		if err := txExec.QueryRow(txCtx, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM portal_payment_intents
+				WHERE customer_id = $1
+				  AND status IN ('CHARGING', 'PENDING')
+				  AND idempotency_key <> $2
+				  AND invoice_ids && $3
+			)
+		`, customerID, idemKey, req.InvoiceIDs).Scan(&overlapInFlight); err != nil {
+			return err
+		}
+		if overlapInFlight {
+			return ErrPaymentInFlight
+		}
+
+		// Refuse if any target invoice is held by a pending POS void claim.
+		var heldByVoid bool
+		if err := txExec.QueryRow(txCtx, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM pos_refund_intents i
+				JOIN pos_transactions t ON t.id = i.sale_id
+				WHERE t.invoice_id = ANY($1)
+				  AND i.act = 'void'
+				  AND i.state = 'PENDING'
+			)
+		`, req.InvoiceIDs).Scan(&heldByVoid); err != nil {
+			return err
+		}
+		if heldByVoid {
+			return ErrInvoiceNotPayable
+		}
+
+		totalCents = 0
+		applyLines = make([]account.ApplyLine, 0, len(req.InvoiceIDs))
+		for i, id := range req.InvoiceIDs {
+			f := facts[id]
+			if (f.status != "UNPAID" && f.status != "PARTIAL") || f.open <= 0 {
+				return ErrInvoiceNotPayable
+			}
+			if i == 0 {
+				branchID = f.branchID
+				currency = f.currency
+			} else if f.currency != currency {
+				return fmt.Errorf("%w: all invoices in a payment must share the same currency", ErrInvalidRequest)
+			}
+			totalCents += f.open
+			applyLines = append(applyLines, account.ApplyLine{
+				InvoiceID:   f.id,
+				AmountCents: f.open,
+			})
+		}
+
+		err = txExec.QueryRow(txCtx, `
+			INSERT INTO portal_payment_intents (
+				idempotency_key, customer_id, amount_cents, invoice_ids, status, gateway, attempts
+			) VALUES ($1, $2, $3, $4, 'CHARGING', 'stub', 1)
+			ON CONFLICT (idempotency_key) DO UPDATE
+			SET status = 'CHARGING',
+			    attempts = portal_payment_intents.attempts + 1,
+			    updated_at = NOW()
+			WHERE portal_payment_intents.status IN ('FAILED', 'ABANDONED')
+			RETURNING id
+		`, idemKey, customerID, totalCents, req.InvoiceIDs).Scan(&intentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPaymentInFlight
+		}
+		if err != nil {
+			return fmt.Errorf("failed to claim payment intent: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to claim payment intent: %w", err)
+		return nil, false, err
+	}
+	if replayed != nil {
+		return replayed, true, nil
 	}
 
 	// Charge the gateway outside the DB transaction.
@@ -620,7 +694,7 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 		last4 = gwRes.CardLast4
 	}
 	arMethod := "CARD"
-	if methodType == "BANK" {
+	if methodType == "BANK" || methodType == "ACH" {
 		arMethod = "ACH"
 	}
 
