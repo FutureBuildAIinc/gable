@@ -27,6 +27,7 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 	noheaderTaxRate(t, f, f.branchA)
 	noheaderStock(t, f)
 	regNA := noheaderRegister(t, f, f.branchA, f.yardA)
+	openTillOn(t, f, regNA, f.branchA)
 
 	named := func(customer uuid.UUID) int {
 		return noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, customer)
@@ -140,6 +141,7 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 		t.Fatalf("seed stock: %v", err)
 	}
 	regNB := noheaderRegister(t, f, f.branchB, f.yardB)
+	openTillOn(t, f, regNB, f.branchB)
 	boundB := f.mintWithScopes(t, "pos-key-b", pinKeyScopes, &f.branchB)
 
 	invoicesAtB := func() int {

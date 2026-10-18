@@ -5280,7 +5280,7 @@ export interface paths {
         put?: never;
         /**
          * Start a sale
-         * @description Opens a cart on a register for the resolved cashier, attached to the register's open till session when there is one, at revision 1 with its POS- number (the gapped series; a rolled back create abandons the number). register_id defaults REG-01; the customer names the account the invoice posts to, and its absence means the walk-in customer the counter books to. The cashier is the JWT's subject; a machine key is refused 403 ("a cashier must be a user").
+         * @description Opens a cart on a register for the resolved cashier, attached to the register's open till session, at revision 1 with its POS- number (the gapped series; a rolled back create abandons the number). register_id defaults REG-01; the customer names the account the invoice posts to, and its absence means the walk-in customer the counter books to. The cashier is the JWT's subject; a machine key is refused 403 ("a cashier must be a user"). A register with no open till session refuses the sale: 409 with the blocker till_not_open, nothing written (a register of another branch is refused by the branch wall first). The same refusal stops the offline sync, which rebuilds each sale through this path.
          */
         post: operations["posTransactionCreate"];
         delete?: never;
@@ -5464,7 +5464,7 @@ export interface paths {
         put?: never;
         /**
          * Tender and complete the sale
-         * @description The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, insufficient_stock; 503 when the tax provider fails before any row is written. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, insufficient_stock; 503 when the tax provider fails before any row is written. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
          */
         post: operations["posTransactionComplete"];
         delete?: never;
@@ -5544,7 +5544,7 @@ export interface paths {
         put?: never;
         /**
          * Replay a batch of offline sales
-         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits.
+         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits. A sale replayed at a register with no open till session is an error entry (till_not_open): the counter takes no sale outside a drawer.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -5584,7 +5584,7 @@ export interface paths {
         put?: never;
         /**
          * Open the drawer
-         * @description Opens a till session for the resolved cashier on a register with its opening float in cents; register_id defaults REG-01. A register with an open session is refused (409, a session is already open). The cashier is the JWT's subject; a machine key is refused 403. Writes till.opened.
+         * @description Opens a till session for the resolved cashier on a register with its opening float in cents; register_id defaults REG-01. A register with an open session is refused (409, a session is already open). The cashier is the JWT's subject; a machine key is refused 403. A branch whose business date is closed takes no new drawer (409 day_closed). Writes till.opened.
          */
         post: operations["posTillOpen"];
         delete?: never;
@@ -5667,6 +5667,194 @@ export interface paths {
         get: operations["posTillZReport"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The session's movements
+         * @description The session's movements, oldest first, a cursor page. A session the caller's branch context hides answers 404.
+         */
+        get: operations["posTillMovementList"];
+        put?: never;
+        /**
+         * Record a drop, pickup, paid in or paid out
+         * @description Records cash moving in or out of an open drawer: safe_drop and pickup take cash out to undeposited funds (1015), paid_out takes it out for an expense (5020), paid_in brings it in (4030, 5020 or 4090 by the reason). The row carries the register's branch, the actor and, for a pickup, the second person taking the cash (taken_by), who is never the acting cashier nor the session's cashier (409 pickup_needs_second_person). paid_in and paid_out name a reason_code from the closed lowercase list (supplies, freight, fuel, postage, meals, repairs for paid out; fee_received, vendor_refund for paid in; other for both, with a note); a drop or pickup names none. The movement changes the drawer's expected cash (drops, pickups and paid out lower it, paid in raises it). The balanced entry, the audit row and till.movement_recorded are written in the act's transaction; the session is held FOR SHARE against the close's FOR UPDATE. A session that is not open, including one waiting for sign off, answers 409 session_closed; one the caller's branch context hides, 404; a caller with no branch in context and no grant for the session's branch, 403. The actor is the JWT's subject; a machine key is refused 403.
+         */
+        post: operations["posTillMovementCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/signoffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counted drawers waiting for a manager
+         * @description The sessions in pending_signoff inside the caller's reach, oldest close first, a cursor page; branch_id narrows to one branch the caller may target (403 for any other). Finance and owner only.
+         */
+        get: operations["posTillSignoffList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/{id}/signoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign off a counted drawer's variance
+         * @description Releases a session in pending_signoff: the over or short posts to 5030, the session ends closed with who signed off, the reason and the time, the Z snapshot is written and till.closed is the last statement, all in one transaction. The signer is never the person who closed the drawer nor its cashier (409 signoff_same_person); a blank reason is a 400; a session that is not waiting is 409. Finance and owner only, never a machine key. A session the caller's branch context hides answers 404; a caller with no branch in context and no grant for it, 403.
+         */
+        post: operations["posTillSignoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/till/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A branch's variance threshold
+         * @description The threshold in cents a close's over or short is held to at the branch: the branch's own override, else the database wide default (system_settings till.variance_threshold_cents). source says which; none means no threshold is in force. Finance and owner only; a branch the caller may not target is 403.
+         */
+        get: operations["posTillPolicyGet"];
+        /**
+         * Set a branch's variance threshold
+         * @description Sets the branch's own threshold in cents, or clears it with null so the database wide default applies again. Finance and owner only, never a machine key; a branch the caller may not target is 403. Audited.
+         */
+        put: operations["posTillPolicyPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/end-of-day": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The branch's end of day summary
+         * @description One branch's business date (date, YYYY-MM-DD in the branch's time zone, defaulting to the branch's today): each register's sessions, tenders by method, movements, expected against counted, over and short, the cash and checks to deposit and the card total, and the branch totals, each the sum of its registers' to the cent. A session belongs to the date it opened. cash_to_deposit is the counted cash (the expected, for a drawer still open) less the opening float plus the drops and pickups; checks_to_deposit the counted checks; card_total the net card collected. collections_net_cents is the branch's net collections of the date as the Daily Till counts them. ready_to_close is true when no drawer is open or waiting for sign off. close is the day's close once it exists. Finance and owner only. A branch the caller may not target is 403; an unknown branch 404.
+         */
+        get: operations["posEndOfDayGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/end-of-day/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close the branch's business date
+         * @description Closes the date for the branch: who, when, the deposit slip reference and a frozen totals snapshot, with the audit row and till.day_closed in one transaction. Refused 409 till_open while a drawer of the branch dated that day or before is open, 409 signoff_pending while one waits for a manager (both blockers when both), 409 day_already_closed for a second close of a branch date, 409 date_not_reached for a date after the branch's today. The close posts the deposit it records in the same transaction: debit the GL account of the bank account named by bank_account_id (required, 400, when cash and checks are to be deposited; 404 for an unknown bank account, 409 bank_account_inactive for a retired one) for the cash and checks to deposit, credit 1015 Undeposited Funds for the day's drops and pickups, credit 1010 Cash for the rest (a debit when the drawers held less than the safe's share). Cards are not part of the deposit. The entry is named on the close (gl_entry_id); a closed fiscal period is 409 period_closed. A day with nothing to deposit and nothing in 1015 needs no bank account and posts nothing. The close takes the branch's day lock a drawer opening also takes, so a closed day never holds an open drawer and a branch whose date is closed takes no new drawer (409 day_closed on POST /pos/till/open). Finance and owner only, never a machine key; a branch the caller may not target is 403.
+         */
+        post: operations["posEndOfDayClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/end-of-day/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a closed branch day
+         * @description Reopens a closed branch day for a late drawer or a correction. Under the branch's day lock, the close's deposit entry is reversed (a reversal entry naming it, dated the branch's today; a closed fiscal period is 409 period_closed), the close row is marked REOPENED (keeping its frozen totals snapshot and naming the reversal entry) so the day closes again like any open day, and the audit row (with the reason) and till.day_reopened are written, all in one transaction. A blank reason is a 400. A close already reopened answers 409 day_not_closed, and a day whose deposit is matched to a bank statement line cannot reopen: 409 deposit_already_matched. A close the caller's branch context hides answers 404; a caller with no branch in context and no grant for it, 403. Finance and owner only, never a machine key.
+         */
+        post: operations["posEndOfDayReopen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/end-of-day/{id}/deposit-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bank statement lines that may be the day's deposit
+         * @description The unmatched deposit lines of the bank statement dated from three days before the business date to ten days after, nearest to the day's cash and checks to deposit first, at most 20. A close the caller's branch context hides answers 404; a caller with no branch in context and no grant, 403. Finance and owner only.
+         */
+        get: operations["posEndOfDayDepositCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/end-of-day/{id}/deposit-match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Match the day's deposit to a bank statement line
+         * @description Claims an unmatched deposit line of the bank statement through bank reconciliation (status matched) and records on the day's close the line, the difference in cents (the bank's amount less the cash and checks to deposit) and who matched it. A day matches once (409 deposit_already_matched); a line that is not an unmatched deposit, or that another day holds, is 409 bank_line_unavailable; a line of another bank account than the day's is 409 bank_account_mismatch; an unknown line is 404. The claimed line is linked to the close's deposit entry (bank_transactions.matched_journal_entry_id). The audit row and till.deposit_matched are written in the same transaction. Finance and owner only, never a machine key.
+         */
+        post: operations["posEndOfDayDepositMatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7405,6 +7593,70 @@ export interface paths {
         /** Get one sales person */
         get: operations["salesTeamGet"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The runtime auth config
+         * @description Public (answers before any sign in). The auth mode the server runs in, the dealer's public display name and optional mark URL for the white labelled door (read from the single dealer_profile row), and the dealer's allowed sign in methods in the stored order, each with what the front door needs to render it: the kind (form, passkey, link or redirect), the label, the start URL (the portal login for the form method, the start route for the others) and, for oidc, the issuer URL and client id. A strict allowlist response type: it never carries a secret, an internal host or another tenant's data. The dealer is the install's single tenant.
+         */
+        get: operations["authConfigGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/start/{method}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a sign in by one method
+         * @description Public. The route a non form method starts from. A method outside the six is a 404; a method the dealer's allowlist does not hold is a 403; the form method has no start route (a 400); and a method that is allowed but not built on this server yet answers a plain 501 not_implemented, never a crash.
+         */
+        post: operations["authStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer's sign in method allowlist
+         * @description The admin read of the allowlist: the same method views the public config carries, plus the last write time. Role gated admin and owner, the dealer's admin roles alone.
+         */
+        get: operations["authMethodsGet"];
+        /**
+         * Replace the dealer's sign in method allowlist
+         * @description Replaces the whole allowlist. The order of the request's methods is the order the door renders them. The list must hold at least one method, every code one of the six, no code twice, and the oidc fields (issuer URL, client id, display label) belong to the oidc method alone and are required on it; the table never stores a client secret. The write is audited with the before and after in one transaction. Role gated admin and owner.
+         */
+        put: operations["authMethodsPut"];
         post?: never;
         delete?: never;
         options?: never;
@@ -13280,8 +13532,11 @@ export interface components {
         PosTenderMethod: "cash" | "check" | "card" | "account";
         /** @enum {string} */
         PosRefundMethod: "cash" | "card" | "account";
-        /** @enum {string} */
-        PosTillStatus: "open" | "closed";
+        /**
+         * @description pending_signoff is a counted drawer whose over or short passed the branch's variance threshold.
+         * @enum {string}
+         */
+        PosTillStatus: "open" | "pending_signoff" | "closed";
         PosTransactionCreateRequest: {
             /** @description Defaults REG-01. */
             register_id?: string;
@@ -13810,13 +14065,272 @@ export interface components {
             over_short_cents: number | null;
             /**
              * Format: uuid
-             * @description The 5030 over/short entry the close booked.
+             * @description The 5030 over/short entry the close (or the sign off) booked.
              */
             gl_entry_id: string | null;
             notes: string;
+            /** @description Who counted and closed the drawer. */
+            closed_by: string | null;
+            /**
+             * Format: int64
+             * @description The branch's threshold in force at the close; null when none was.
+             */
+            variance_threshold_cents: number | null;
+            /** @description The manager's release of a close that passed the threshold; null otherwise. */
+            sign_off: components["schemas"]["PosTillSignOff"] | null;
+        };
+        PosTillMovementRequest: {
+            kind: components["schemas"]["PosTillMovementKind"];
+            /** Format: int64 */
+            amount_cents: number;
+            /** @description Required for paid_in and paid_out, absent for a drop or pickup. */
+            reason_code?: components["schemas"]["PosTillReasonCode"] | null;
+            /** @description Required, not blank, when the reason_code is other. */
+            note?: string | null;
+            /** @description A pickup's second person, required there and absent for any other kind. */
+            taken_by?: string | null;
+        };
+        /** @enum {string} */
+        PosTillMovementKind: "safe_drop" | "pickup" | "paid_in" | "paid_out";
+        /** @enum {string} */
+        PosTillReasonCode: "supplies" | "freight" | "fuel" | "postage" | "meals" | "repairs" | "fee_received" | "vendor_refund" | "other";
+        PosTillMovement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            till_session_id: string;
+            register_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            kind: components["schemas"]["PosTillMovementKind"];
+            /** Format: int64 */
+            amount_cents: number;
+            reason_code: components["schemas"]["PosTillReasonCode"] | null;
+            note: string;
+            actor: string;
+            taken_by: string | null;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosTillMovementPage: {
+            items: components["schemas"]["PosTillMovement"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PosTillSessionPage: {
+            items: components["schemas"]["PosTillSession"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        PosTillSignoffRequest: {
+            /** @description Why the variance is accepted; not blank. */
+            reason: string;
+        };
+        PosTillSignOff: {
+            signed_off_by: string;
+            reason: string;
+            /** Format: date-time */
+            signed_off_at: string;
+        };
+        PosTillPolicy: {
+            /** Format: uuid */
+            branch_id: string;
+            /**
+             * Format: int64
+             * @description The figure in force; null when none exists.
+             */
+            variance_threshold_cents: number | null;
+            /**
+             * Format: int64
+             * @description The branch's own override.
+             */
+            branch_threshold_cents: number | null;
+            /**
+             * Format: int64
+             * @description The database wide default.
+             */
+            default_threshold_cents: number | null;
+            /** @enum {string} */
+            source: "branch" | "default" | "none";
+        };
+        PosTillPolicyRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /**
+             * Format: int64
+             * @description Null clears the branch's override.
+             */
+            variance_threshold_cents: number | null;
+        };
+        PosEndOfDayCloseRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: date */
+            date: string;
+            deposit_slip_ref: string;
+            /**
+             * Format: uuid
+             * @description The bank account the deposit goes to; required when cash and checks are to be deposited.
+             */
+            bank_account_id?: string | null;
+        };
+        PosEndOfDayReopenRequest: {
+            /** @description Why the day reopens; not blank. */
+            reason: string;
+        };
+        PosDepositMatchRequest: {
+            /** Format: uuid */
+            bank_transaction_id: string;
+        };
+        PosDayFigures: {
+            session_count: number;
+            sale_count: number;
+            /** Format: int64 */
+            sales_total_cents: number;
+            tendered_by_method: {
+                [key: string]: number;
+            };
+            movement_totals_by_kind: {
+                [key: string]: number;
+            };
+            expected_by_method: {
+                [key: string]: number;
+            };
+            counted_by_method: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            over_short_cents: number;
+            /** Format: int64 */
+            cash_to_deposit_cents: number;
+            /** Format: int64 */
+            checks_to_deposit_cents: number;
+            /** Format: int64 */
+            card_total_cents: number;
+        };
+        PosDaySession: {
+            /** Format: uuid */
+            id: string;
+            status: components["schemas"]["PosTillStatus"];
+            /** Format: uuid */
+            cashier_id: string;
+            closed_by: string | null;
+            /** Format: date-time */
+            opened_at: string;
+            /** Format: date-time */
+            closed_at: string | null;
+            /** Format: int64 */
+            opening_float_cents: number;
+            sale_count: number;
+            /** Format: int64 */
+            sales_total_cents: number;
+            tendered_by_method: {
+                [key: string]: number;
+            };
+            movement_totals_by_kind: {
+                [key: string]: number;
+            };
+            expected_by_method: {
+                [key: string]: number;
+            };
+            counted_by_method: {
+                [key: string]: number;
+            };
+            /** Format: int64 */
+            over_short_cents: number;
+            signed_off_by: string | null;
+        };
+        PosDayRegister: components["schemas"]["PosDayFigures"] & {
+            register_id: string;
+            sessions: components["schemas"]["PosDaySession"][];
+        };
+        PosDepositMatch: {
+            /** Format: uuid */
+            bank_transaction_id: string;
+            /** Format: int64 */
+            bank_amount_cents: number;
+            /** Format: date */
+            bank_transaction_date: string;
+            bank_description: string;
+            /**
+             * Format: int64
+             * @description The bank's amount less the cash and checks to deposit.
+             */
+            difference_cents: number;
+            matched_by: string;
+            /** Format: date-time */
+            matched_at: string;
+        };
+        PosDayClose: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: date */
+            business_date: string;
+            deposit_slip_ref: string;
+            closed_by: string;
+            /** Format: date-time */
+            closed_at: string;
+            /** Format: int64 */
+            cash_to_deposit_cents: number;
+            /** Format: int64 */
+            checks_to_deposit_cents: number;
+            /** Format: int64 */
+            card_total_cents: number;
+            /** @description The frozen branch day summary at the close, a JSON object (the PosBranchDay shape with close null). */
+            totals: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The bank account the deposit goes to.
+             */
+            bank_account_id: string | null;
+            /**
+             * Format: uuid
+             * @description The journal entry that posted the deposit; null for a day with nothing to bank.
+             */
+            gl_entry_id: string | null;
+            deposit_match: components["schemas"]["PosDepositMatch"] | null;
+        };
+        PosBranchDay: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: date */
+            business_date: string;
+            registers: components["schemas"]["PosDayRegister"][];
+            totals: components["schemas"]["PosDayFigures"];
+            open_session_count: number;
+            pending_signoff_count: number;
+            ready_to_close: boolean;
+            /** Format: int64 */
+            collections_net_cents: number;
+            close: components["schemas"]["PosDayClose"] | null;
+        };
+        PosDepositCandidate: {
+            /** Format: uuid */
+            bank_transaction_id: string;
+            /** Format: date */
+            transaction_date: string;
+            /** Format: int64 */
+            amount_cents: number;
+            description: string;
+            reference: string;
+        };
+        PosDepositCandidatePage: {
+            items: components["schemas"]["PosDepositCandidate"][];
+            /** @description Always null: at most 20 candidates are listed. */
+            next_cursor: string | null;
+            limit: number;
         };
         PosTillReport: {
             session: components["schemas"]["PosTillSession"];
+            /** @description The session's drops, pickups, paid in and paid out, oldest first; the expected cash carries them. */
+            movements: components["schemas"]["PosTillMovement"][];
+            movement_totals_by_kind: {
+                [key: string]: number;
+            };
             sale_count: number;
             /** Format: int64 */
             sales_total_cents: number;
@@ -15608,6 +16122,54 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description One allowed sign in method. The nullable fields are always present, null when the method does not use them. */
+        AuthConfigMethod: {
+            /** @enum {string} */
+            method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+            /**
+             * @description How the door renders the method.
+             * @enum {string}
+             */
+            kind: "form" | "passkey" | "link" | "redirect";
+            /** @description The door's label; an oidc row carries its own. */
+            label: string;
+            /** @description Where the method starts: the portal login for the form method, the start route for every other. */
+            start_url: string | null;
+            /** @description The oidc issuer URL, null for every other method. */
+            issuer_url: string | null;
+            /** @description The oidc client id, null for every other method. */
+            client_id: string | null;
+        };
+        AuthConfig: {
+            /**
+             * @description The auth mode the server runs in.
+             * @enum {string}
+             */
+            auth_mode: "dev" | "production";
+            /** @description The dealer's public display name (trading name when set on the dealer profile, else legal name; empty when neither is set). */
+            dealer_name: string;
+            /** @description The path of the dealer's logo when one is uploaded on the dealer profile, else null. */
+            dealer_mark_url: string | null;
+            /** @description The allowed methods, in the dealer's stored order. */
+            methods: components["schemas"]["AuthConfigMethod"][];
+        };
+        SigninMethodsAllowlist: {
+            methods: components["schemas"]["AuthConfigMethod"][];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SigninMethodsPutRequest: {
+            methods: {
+                /** @enum {string} */
+                method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+                /** @description The https issuer URL; required on the oidc method, refused on any other. */
+                oidc_issuer_url?: string;
+                /** @description The client id; required on the oidc method, refused on any other. */
+                oidc_client_id?: string;
+                /** @description The display label; optional on the oidc method, refused on any other. */
+                oidc_label?: string;
+            }[];
         };
         TaxExemption: {
             /** Format: uuid */
@@ -27828,6 +28390,385 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTillMovementList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of movements. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillMovementPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillMovementCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillMovementRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded movement. */
+            201: {
+                headers: {
+                    /** @description The session's movement list. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillMovement"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillSignoffList: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of sessions waiting for sign off. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillSessionPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillSignoff: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillSignoffRequest"];
+            };
+        };
+        responses: {
+            /** @description The closed session's report, its sign_off naming the manager. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillReport"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillPolicyGet: {
+        parameters: {
+            query: {
+                branch_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTillPolicyPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosTillPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description The policy now in force. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTillPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayGet: {
+        parameters: {
+            query: {
+                branch_id: string;
+                date?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The branch day. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosBranchDay"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayClose: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosEndOfDayCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description The closed branch day. */
+            201: {
+                headers: {
+                    /** @description The day's summary route. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosBranchDay"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayReopen: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosEndOfDayReopenRequest"];
+            };
+        };
+        responses: {
+            /** @description The reopened branch day, close null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosBranchDay"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayDepositCandidates: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candidate lines. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosDepositCandidatePage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["InternalError"];
+        };
+    };
+    posEndOfDayDepositMatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosDepositMatchRequest"];
+            };
+        };
+        responses: {
+            /** @description The day's close with its deposit match. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosDayClose"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posZReportList: {
         parameters: {
             query?: {
@@ -31305,6 +32246,104 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    authConfigGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The auth mode, the dealer brand and the allowed methods, in the dealer's order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthConfig"];
+                };
+            };
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    authStart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description One of the six method codes. */
+                method: "email_password" | "passkey" | "magic_link" | "google" | "microsoft" | "oidc";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            400: components["responses"]["WireBadRequest"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            /** @description The method is in the dealer's allowlist but not implemented on this server; the standard error envelope with code not_implemented and the plain message that says so. */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+        };
+    };
+    authMethodsGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The allowlist and its last write time. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigninMethodsAllowlist"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    authMethodsPut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SigninMethodsPutRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved allowlist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigninMethodsAllowlist"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     taxExemptionCreate: {

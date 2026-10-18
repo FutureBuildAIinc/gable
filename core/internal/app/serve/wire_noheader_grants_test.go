@@ -213,6 +213,7 @@ func TestNoHeader_Sales(t *testing.T) {
 	noheaderGrant(t, f, "pin-cashier", f.branchA)
 	regNB := noheaderRegister(t, f, f.branchB, f.yardB)
 	regNA := noheaderRegister(t, f, f.branchA, f.yardA)
+	openTillOn(t, f, regNA, f.branchA)
 
 	// Create on B's register: refused, nothing written.
 	status, buf := f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions", `{"register_id":"`+regNB+`"}`)

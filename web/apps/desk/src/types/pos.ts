@@ -9,7 +9,7 @@
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account';
 export type RefundMethod = 'cash' | 'card' | 'account';
-export type TillSessionStatus = 'open' | 'closed';
+export type TillSessionStatus = 'open' | 'pending_signoff' | 'closed';
 export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type PriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
 
@@ -181,6 +181,18 @@ export interface TillSession {
     over_short_cents: number | null;
     gl_entry_id: string | null;
     notes: string;
+    /** Who counted and closed the drawer. */
+    closed_by: string | null;
+    /** The branch's variance threshold in force at the close. */
+    variance_threshold_cents: number | null;
+    /** The manager's release of a close that passed the threshold. */
+    sign_off: TillSignOff | null;
+}
+
+export interface TillSignOff {
+    signed_off_by: string;
+    reason: string;
+    signed_off_at: string;
 }
 
 export interface TillReport {
@@ -191,6 +203,120 @@ export interface TillReport {
     change_cents: number;
     tendered_by_method: Record<string, number>;
     expected_by_method: Record<string, number>;
+    movements: TillMovement[];
+    movement_totals_by_kind: Record<string, number>;
+}
+
+// --- Till movements, variance sign off and the branch day (CP-08, CP-09) ---
+
+export type MovementKind = 'safe_drop' | 'pickup' | 'paid_in' | 'paid_out';
+export type MovementReason =
+    | 'supplies' | 'freight' | 'fuel' | 'postage' | 'meals' | 'repairs'
+    | 'fee_received' | 'vendor_refund' | 'other';
+
+export interface TillMovement {
+    id: string;
+    till_session_id: string;
+    register_id: string;
+    branch_id: string;
+    kind: MovementKind;
+    amount_cents: number;
+    reason_code: MovementReason | null;
+    note: string;
+    actor: string;
+    taken_by: string | null;
+    gl_entry_id: string | null;
+    created_at: string;
+}
+
+export interface MovementRequest {
+    kind: MovementKind;
+    amount_cents: number;
+    reason_code?: MovementReason;
+    note?: string;
+    taken_by?: string;
+}
+
+export interface DayFigures {
+    session_count: number;
+    sale_count: number;
+    sales_total_cents: number;
+    tendered_by_method: Record<string, number>;
+    movement_totals_by_kind: Record<string, number>;
+    expected_by_method: Record<string, number>;
+    counted_by_method: Record<string, number>;
+    over_short_cents: number;
+    cash_to_deposit_cents: number;
+    checks_to_deposit_cents: number;
+    card_total_cents: number;
+}
+
+export interface DaySession {
+    id: string;
+    status: TillSessionStatus;
+    cashier_id: string;
+    closed_by: string | null;
+    opened_at: string;
+    closed_at: string | null;
+    opening_float_cents: number;
+    sale_count: number;
+    sales_total_cents: number;
+    tendered_by_method: Record<string, number>;
+    movement_totals_by_kind: Record<string, number>;
+    expected_by_method: Record<string, number>;
+    counted_by_method: Record<string, number>;
+    over_short_cents: number;
+    signed_off_by: string | null;
+}
+
+export interface DayRegister extends DayFigures {
+    register_id: string;
+    sessions: DaySession[];
+}
+
+export interface DepositMatch {
+    bank_transaction_id: string;
+    bank_amount_cents: number;
+    bank_transaction_date: string;
+    bank_description: string;
+    difference_cents: number;
+    matched_by: string;
+    matched_at: string;
+}
+
+export interface DayClose {
+    id: string;
+    branch_id: string;
+    business_date: string;
+    deposit_slip_ref: string;
+    closed_by: string;
+    closed_at: string;
+    cash_to_deposit_cents: number;
+    checks_to_deposit_cents: number;
+    card_total_cents: number;
+    bank_account_id: string | null;
+    gl_entry_id: string | null;
+    deposit_match: DepositMatch | null;
+}
+
+export interface BranchDay {
+    branch_id: string;
+    business_date: string;
+    registers: DayRegister[];
+    totals: DayFigures;
+    open_session_count: number;
+    pending_signoff_count: number;
+    ready_to_close: boolean;
+    collections_net_cents: number;
+    close: DayClose | null;
+}
+
+export interface DepositCandidate {
+    bank_transaction_id: string;
+    transaction_date: string;
+    amount_cents: number;
+    description: string;
+    reference: string;
 }
 
 // --- Typeahead and offline catalog ---

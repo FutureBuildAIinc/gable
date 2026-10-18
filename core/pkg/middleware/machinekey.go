@@ -84,7 +84,8 @@ const (
 // (ADR 0001): it is a public path the auth middleware never unpacks, and a
 // machine key is not a principal there.
 var machineKeyExcludedSegments = map[string]string{
-	"a2a": "agent-to-agent JWS seam; keeps its own authentication",
+	"a2a":  "agent-to-agent JWS seam; keeps its own authentication",
+	"auth": "the sign in seam itself: the config and start routes are public paths the auth middleware never unpacks, and the allowlist routes are the dealer's admin setting, not a module a scoped key addresses",
 	// The contractors' shared project pipeline is a desk surface: the dealer's
 	// acceptance is recorded against a named desk user, so a machine key is
 	// not a principal there.

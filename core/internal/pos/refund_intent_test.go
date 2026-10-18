@@ -255,7 +255,7 @@ func TestARefusedCardReturnLeavesItsIntentRefusingTheNext(t *testing.T) {
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.events.fail = "pos_return.completed"
+		f.events.setFail("pos_return.completed")
 	})
 	f.openTill(0)
 	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))

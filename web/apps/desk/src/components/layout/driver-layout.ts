@@ -3,6 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { framedByShell } from '@gable/design-system';
 
 @customElement('gable-driver-layout')
 export class GableDriverLayout extends LitElement {
@@ -11,8 +12,13 @@ export class GableDriverLayout extends LitElement {
   @property({ attribute: false }) pageContent: unknown = nothing;
 
   render() {
+    // Framed by the work shell: no header band of the app's own (one header,
+    // the shell's). Standalone: the band stands.
     return html`
       <div class="min-h-screen bg-deep-space text-white font-sans md:max-w-md md:mx-auto md:border-x md:border-white/10 relative shadow-2xl">
+        ${framedByShell()
+          ? nothing
+          : html`
         <header class="h-16 flex items-center justify-between px-4 border-b border-white/10 bg-slate-steel/80 backdrop-blur-md sticky top-0 z-50">
           <div class="font-bold text-lg tracking-wider font-mono">
             GABLE<span class="text-gable-green">DRIVER</span>
@@ -21,6 +27,7 @@ export class GableDriverLayout extends LitElement {
             D1
           </div>
         </header>
+        `}
         <main class="pb-8">
           ${this.pageContent}
         </main>
