@@ -11,13 +11,14 @@ const APPS: ShellApp[] = [
     id: 'desk',
     name: 'Desk',
     path: '/home',
+    icon: 'grid',
     roles: [],
     places: [
       { id: 'orders', label: 'Orders', path: '/orders' },
       { id: 'quotes', label: 'Quotes', path: '/quotes' },
     ],
   },
-  { id: 'pos', name: 'Point of Sale', path: '/pos', roles: [], places: [] },
+  { id: 'pos', name: 'Point of Sale', path: '/pos', icon: 'receipt', roles: [], places: [] },
 ];
 
 function mount(attrs?: (el: GableShellRail) => void): GableShellRail {
@@ -53,6 +54,9 @@ describe('gable-shell-rail', () => {
     const rows = el.querySelectorAll<HTMLButtonElement>('button[data-row]');
     expect(rows.length).toBe(2);
     expect(rows[0]?.getAttribute('aria-label')).toBe('Desk');
+    // Each app row draws its catalog icon (an svg), never a letter monogram.
+    expect(rows[0]?.querySelector('svg')).not.toBeNull();
+    expect(rows[1]?.querySelector('svg')).not.toBeNull();
     cleanup();
   });
 

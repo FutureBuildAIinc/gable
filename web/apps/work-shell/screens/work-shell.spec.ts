@@ -135,12 +135,25 @@ async function probe(page: Page, what: string, selector: string): Promise<Probe 
 }
 
 async function contrastReport(page: Page, theme: string): Promise<void> {
+  // Reveal the rail first: its probes must run before the pointer moves on to
+  // the selector (leaving the rail ends the peek).
+  await page.hover('[data-testid="rail-strip"]');
+  await expect(page.locator('gable-shell-rail nav[data-mode="wide"]')).toBeVisible();
+  const railProbes: (Probe | null)[] = [
+    await probe(page, 'rail app icon (idle)', 'gable-shell-rail button[data-row]:not([aria-current="true"]) svg'),
+    await probe(page, 'rail app icon (current)', 'gable-shell-rail button[data-row][aria-current="true"] svg'),
+  ];
+  await page.locator('gable-shell-header button[data-action="selector"]').click();
+  await expect(page.locator('gable-shell-header [data-selector-panel]')).toBeVisible();
   const probes: (Probe | null)[] = [
     await probe(page, 'header dealer name', 'gable-shell-header header .md\\:block'),
     await probe(page, 'header selector crumb', 'gable-shell-header button[data-action="selector"]'),
     await probe(page, 'header theme control', 'gable-shell-header button[data-action="theme"]'),
     await probe(page, 'header yard label', 'gable-shell-header button[data-action="yards"]'),
     await probe(page, 'header account name', 'gable-shell-header button[data-action="account"]'),
+    ...railProbes,
+    await probe(page, 'selector app icon (idle)', 'gable-shell-header [data-selector-panel] [role="menuitem"]:not([aria-current="true"]) svg'),
+    await probe(page, 'selector current check', 'gable-shell-header [data-selector-panel] [aria-current="true"] svg:last-child'),
   ];
   const lines: string[] = [];
   for (const p of probes) {

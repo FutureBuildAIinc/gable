@@ -90,6 +90,8 @@ export interface ShellApp {
   name: string;
   /** The path the frame opens for the app itself. */
   path: string;
+  /** The app's icon id (the design system's appIcon registry). */
+  icon: string;
   /** The roles the app serves; an empty list serves every role. */
   roles: readonly string[];
   /** The few top level places the rail lists under the app. */

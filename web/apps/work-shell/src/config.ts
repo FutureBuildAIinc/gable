@@ -21,6 +21,7 @@ export const SHELL_APPS = [
     id: 'desk',
     name: 'Desk',
     path: '/home',
+    icon: 'grid',
     roles: [],
     places: [
       { id: 'home', label: 'Home', path: '/home' },
@@ -33,6 +34,7 @@ export const SHELL_APPS = [
     id: 'pos',
     name: 'Point of Sale',
     path: '/pos',
+    icon: 'receipt',
     roles: ['owner', 'admin', 'sales', 'cashier'],
     places: [],
   },
@@ -40,6 +42,7 @@ export const SHELL_APPS = [
     id: 'yard',
     name: 'Yard',
     path: '/yard',
+    icon: 'warehouse',
     roles: ['owner', 'admin', 'warehouse'],
     places: [
       { id: 'pick', label: 'Pick queue', path: '/yard' },
@@ -51,6 +54,7 @@ export const SHELL_APPS = [
     id: 'driver',
     name: 'Driver',
     path: '/driver',
+    icon: 'truck',
     roles: ['owner', 'admin', 'driver'],
     places: [],
   },
@@ -58,6 +62,7 @@ export const SHELL_APPS = [
     id: 'portal',
     name: 'Portal',
     path: '/portal',
+    icon: 'storefront',
     roles: ['owner', 'admin', 'sales'],
     places: [
       { id: 'orders', label: 'Orders', path: '/portal/orders' },

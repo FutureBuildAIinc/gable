@@ -26,7 +26,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { icon } from '@gable/design-system';
+import { appIcon, icon } from '@gable/design-system';
 import type { FrameAction } from '@gable/design-system';
 import {
   Building2,
@@ -357,8 +357,13 @@ export class GableShellHeader extends LitElement {
                 current ? 'bg-gable-green/10 text-gable-green font-semibold' : 'text-zinc-200 hover:bg-white/5'
               }`}
             >
+              <span aria-hidden="true" class="shrink-0 ${current ? 'text-gable-green' : 'text-zinc-500'}">
+                ${icon(appIcon(app.icon), 15)}
+              </span>
               <span class="flex-1 truncate">${app.name}</span>
-              ${current ? html`<span class="text-[10px] uppercase tracking-wider font-bold">here</span>` : nothing}
+              ${current
+                ? html`<span aria-hidden="true" class="shrink-0 text-gable-green/70">${icon(Check, 14)}</span>`
+                : nothing}
             </button>
           `;
         })}

@@ -12,7 +12,7 @@
  */
 
 export { cn } from './cn.ts';
-export { icon } from './icons.ts';
+export { icon, appIcon, type AppIconId } from './icons.ts';
 export { GableBrandLogo } from './brand-logo.ts';
 export { GableThemeToggle } from './theme-toggle.ts';
 export {

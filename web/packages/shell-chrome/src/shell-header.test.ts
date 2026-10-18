@@ -7,8 +7,8 @@ import type { GableShellHeader } from './shell-header.ts';
 import type { ShellApp } from './shell-state.ts';
 
 const APPS: ShellApp[] = [
-  { id: 'desk', name: 'Desk', path: '/home', roles: [], places: [] },
-  { id: 'pos', name: 'Point of Sale', path: '/pos', roles: [], places: [] },
+  { id: 'desk', name: 'Desk', path: '/home', icon: 'grid', roles: [], places: [] },
+  { id: 'pos', name: 'Point of Sale', path: '/pos', icon: 'receipt', roles: [], places: [] },
 ];
 
 function mount(attrs?: (el: GableShellHeader) => void): GableShellHeader {
@@ -69,6 +69,10 @@ describe('gable-shell-header', () => {
     expect(control?.getAttribute('aria-expanded')).toBe('true');
     const items = el.querySelectorAll<HTMLButtonElement>('[data-selector-panel] [role="menuitem"]');
     expect(items.length).toBe(2);
+    // Each row carries the app's catalog icon; the current row's marker is a
+    // quiet check, not a word.
+    expect(items[0]?.querySelector('svg')).not.toBeNull();
+    expect(items[0]?.textContent).not.toContain('here');
 
     items[1]?.click();
     await el.updateComplete;

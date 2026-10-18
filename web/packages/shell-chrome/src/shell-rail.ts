@@ -16,9 +16,9 @@
 
 import { LitElement, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import { icon } from '@gable/design-system';
+import { appIcon, icon } from '@gable/design-system';
 import { Pin, PinOff, PanelLeftClose, PanelLeftOpen } from 'lucide';
-import { initialsOf, type RailChoice, type RailMode, type ShellApp, type ShellPlace } from './shell-state.ts';
+import type { RailChoice, RailMode, ShellApp, ShellPlace } from './shell-state.ts';
 
 @customElement('gable-shell-rail')
 export class GableShellRail extends LitElement {
@@ -147,13 +147,13 @@ export class GableShellRail extends LitElement {
         aria-label=${app.name}
         aria-current=${current ? 'true' : 'false'}
         @click=${() => this._open(app.id, app.path)}
-        class=${`group relative flex h-11 w-11 mx-auto items-center justify-center rounded-lg text-[11px] font-mono font-bold transition-colors ${
+        class=${`group relative flex h-11 w-11 mx-auto items-center justify-center rounded-lg transition-colors ${
           current
             ? 'bg-gable-green/10 text-gable-green shadow-[inset_2px_0_0_0_rgb(var(--gb-gable-green))]'
             : 'text-zinc-400 hover:text-white hover:bg-white/5'
         }`}
       >
-        ${initialsOf(app.name)}
+        ${icon(appIcon(app.icon), 18)}
         <span
           aria-hidden="true"
           class="pointer-events-none absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-slate-steel px-2 py-1 text-xs font-sans font-medium text-zinc-200 opacity-0 shadow-elevation-2 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
@@ -181,10 +181,10 @@ export class GableShellRail extends LitElement {
         >
           <span
             aria-hidden="true"
-            class=${`h-6 w-6 shrink-0 rounded-md flex items-center justify-center text-[9px] font-mono font-bold ${
+            class=${`h-6 w-6 shrink-0 rounded-md flex items-center justify-center ${
               current ? 'bg-gable-green/20 text-gable-green' : 'bg-white/5 text-zinc-400'
             }`}
-            >${initialsOf(app.name)}</span
+            >${icon(appIcon(app.icon), 14)}</span
           >
           <span class="flex-1 truncate">${app.name}</span>
         </button>

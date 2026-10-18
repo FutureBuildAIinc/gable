@@ -16,9 +16,9 @@ import {
 } from './shell-state.ts';
 
 const CATALOG: ShellApp[] = [
-  { id: 'desk', name: 'Desk', path: '/home', roles: [], places: [{ id: 'orders', label: 'Orders', path: '/orders' }] },
-  { id: 'pos', name: 'Point of Sale', path: '/pos', roles: ['cashier', 'sales', 'owner'], places: [] },
-  { id: 'driver', name: 'Driver', path: '/driver', roles: ['driver'], places: [] },
+  { id: 'desk', name: 'Desk', path: '/home', icon: 'grid', roles: [], places: [{ id: 'orders', label: 'Orders', path: '/orders' }] },
+  { id: 'pos', name: 'Point of Sale', path: '/pos', icon: 'receipt', roles: ['cashier', 'sales', 'owner'], places: [] },
+  { id: 'driver', name: 'Driver', path: '/driver', icon: 'truck', roles: ['driver'], places: [] },
 ];
 
 describe('the rail posture', () => {
