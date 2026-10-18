@@ -74,7 +74,7 @@ func (r *PostgresRepository) ListAccounts(ctx context.Context) ([]GLAccount, err
 		            JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		            WHERE l.account_id = a.id AND e.status = 'POSTED'), 0
 		       ) AS balance,
-		       a.created_at, a.updated_at, a.revision
+		       a.created_at, a.updated_at
 		FROM gl_accounts a
 		ORDER BY a.code
 	`
@@ -92,7 +92,7 @@ func (r *PostgresRepository) ListAccounts(ctx context.Context) ([]GLAccount, err
 			&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 			&a.NormalBalance, &a.IsActive, &a.Description,
 			&balanceFloat,
-			&a.CreatedAt, &a.UpdatedAt, &a.Revision,
+			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}

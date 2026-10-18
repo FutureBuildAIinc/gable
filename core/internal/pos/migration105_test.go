@@ -473,8 +473,14 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	// the service reads the columns migration 114 added to the sale and the
 	// invoice; the database stops at 105 for the legacy rows only
 	mig105Apply(t, conn, "../../migrations/114_pos_sale_account_refs.sql")
-	// the ledger branch dimension: the service stamps every posting's branch
-	mig105Apply(t, conn, "../../migrations/125_gl_branch_and_finstmt.sql")
+	// the ledger columns the service stamps on every posting (migration 125
+	// also reads tables this stage of the schema has not built yet, and there
+	// is nothing to backfill here)
+	if _, err := conn.Exec(context.Background(), `
+		ALTER TABLE gl_journal_entries ADD COLUMN branch_id UUID REFERENCES locations(id);
+		ALTER TABLE gl_journal_lines ADD COLUMN branch_id UUID REFERENCES locations(id);`); err != nil {
+		t.Fatalf("add the ledger branch columns: %v", err)
+	}
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {

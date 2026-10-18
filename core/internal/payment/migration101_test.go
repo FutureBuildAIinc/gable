@@ -977,6 +977,16 @@ func diff101(a, b []string) string {
 // serviceOn101 wires the AR core on the scratch database the migration ran in.
 func serviceOn101(t *testing.T, m *mig101) (*account.Service, *database.DB) {
 	t.Helper()
+	// the ledger's branch columns the service stamps and reads on every
+	// posting (migration 125); this stage of the schema stops at 101, so the
+	// columns are added bare, the rows already there put on a branch
+	if _, err := m.conn.Exec(context.Background(), `
+		ALTER TABLE gl_journal_entries ADD COLUMN branch_id UUID REFERENCES locations(id);
+		ALTER TABLE gl_journal_lines ADD COLUMN branch_id UUID REFERENCES locations(id);
+		UPDATE gl_journal_entries SET branch_id = (SELECT id FROM locations ORDER BY id LIMIT 1);
+		UPDATE gl_journal_lines SET branch_id = (SELECT id FROM locations ORDER BY id LIMIT 1);`); err != nil {
+		t.Fatalf("add the ledger branch columns: %v", err)
+	}
 	db, err := database.Connect(m.conn.Config().ConnString())
 	if err != nil {
 		t.Fatal(err)
