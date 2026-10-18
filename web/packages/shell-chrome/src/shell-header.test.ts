@@ -198,4 +198,27 @@ describe('gable-shell-header', () => {
     expect(events).toEqual(['switch', 'out']);
     cleanup();
   });
+
+  it('phone mode hides the rail and selector controls and keeps the dealer lockup, yard picker, theme and account', async () => {
+    const el = mount((e) => {
+      e.phone = true;
+      e.dealerName = 'Gable Building Supply';
+      e.yards = [{ id: 'b-1', code: 'KEL-MAIN', name: 'Kelowna Main Yard', is_home: true }];
+      e.currentYardId = 'b-1';
+      e.userName = 'Avery Brooks';
+    });
+    await el.updateComplete;
+    expect(el.querySelector('header')?.getAttribute('data-mode')).toBe('phone');
+    expect(el.querySelector('button[data-action="menu"]')).toBeNull();
+    expect(el.querySelector('button[data-action="selector"]')).toBeNull();
+    expect(el.querySelector('button[data-action="feedback"]')).toBeNull();
+    expect(el.querySelector('header')?.textContent).toContain('Gable Building Supply');
+    const yards = el.querySelector<HTMLButtonElement>('button[data-action="yards"]');
+    const theme = el.querySelector<HTMLButtonElement>('button[data-action="theme"]');
+    const account = el.querySelector<HTMLButtonElement>('button[data-action="account"]');
+    expect(yards?.className).toContain('min-h-[44px]');
+    expect(theme?.className).toContain('min-h-[44px]');
+    expect(account?.className).toContain('min-h-[44px]');
+    cleanup();
+  });
 });

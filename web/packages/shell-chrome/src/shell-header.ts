@@ -79,6 +79,8 @@ export class GableShellHeader extends LitElement {
   @property({ attribute: 'user-name' }) userName = '';
   /** The signed in person's role in words. */
   @property({ attribute: 'user-role-label' }) userRoleLabel = '';
+  /** Phone mode: compact top bar with dealer lockup, yard picker, theme and account (at least 44 px touch targets; apps live in the bottom tab bar). */
+  @property({ type: Boolean, attribute: 'phone' }) phone = false;
 
   @state() private _selectorOpen = false;
   @state() private _accountOpen = false;
@@ -236,69 +238,82 @@ export class GableShellHeader extends LitElement {
   render() {
     const app = appById(this.apps, this.currentAppId);
     const initials = initialsOf(this.userName);
+    const iconBox = this.phone ? 'h-11 w-11 min-h-[44px] min-w-[44px]' : 'h-9 w-9';
     return html`
       <header
         role="banner"
+        data-mode=${this.phone ? 'phone' : 'work'}
         class="relative h-14 border-b border-white/5 bg-deep-space/85 backdrop-blur-xl px-3 md:px-4 flex items-center gap-2 z-40"
       >
-        <button
-          type="button"
-          data-action="menu"
-          aria-label="Apps rail"
-          title="Apps rail"
-          @click=${() => this._emit('gable-shell-menu')}
-          class="hidden sm:flex h-9 w-9 shrink-0 rounded-lg items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors"
-        >
-          ${icon(PanelLeft, 16)}
-        </button>
+        ${this.phone
+          ? nothing
+          : html`
+              <button
+                type="button"
+                data-action="menu"
+                aria-label="Apps rail"
+                title="Apps rail"
+                @click=${() => this._emit('gable-shell-menu')}
+                class="hidden sm:flex h-9 w-9 shrink-0 rounded-lg items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors"
+              >
+                ${icon(PanelLeft, 16)}
+              </button>
+            `}
 
-        <div class="flex items-center gap-2.5 min-w-0 shrink-0">
+        <div class="flex items-center gap-2.5 min-w-0 ${this.phone ? 'flex-1' : 'shrink-0'}">
           ${this.dealerMarkUrl !== ''
             ? html`<img
                 src=${this.dealerMarkUrl}
                 alt=""
-                class="h-8 w-8 rounded-lg object-contain bg-white/5 border border-white/5"
+                class="h-8 w-8 shrink-0 rounded-lg object-contain bg-white/5 border border-white/5"
               />`
             : this.dealerName !== ''
               ? html`<span
                   aria-hidden="true"
-                  class="h-8 w-8 rounded-lg bg-gable-green/10 border border-gable-green/30 flex items-center justify-center text-[11px] font-mono font-bold text-gable-green"
+                  class="h-8 w-8 shrink-0 rounded-lg bg-gable-green/10 border border-gable-green/30 flex items-center justify-center text-[11px] font-mono font-bold text-gable-green"
                   >${initialsOf(this.dealerName)}</span
                 >`
               : nothing}
           ${this.dealerName !== ''
-            ? html`<span class="hidden md:block text-sm font-semibold text-white max-w-[220px] truncate"
+            ? html`<span
+                class=${this.phone
+                  ? 'text-sm font-semibold text-white truncate'
+                  : 'hidden md:block text-sm font-semibold text-white max-w-[220px] truncate'}
                 >${this.dealerName}</span
               >`
             : nothing}
         </div>
 
-        <div class="flex-1 min-w-0 flex justify-center px-1 sm:flex-none sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-w-[46vw] sm:px-0">
-          <button
-            type="button"
-            data-action="selector"
-            aria-haspopup="menu"
-            aria-expanded=${this._selectorOpen ? 'true' : 'false'}
-            @click=${() => (this._selectorOpen ? this._closeSelector(true) : this._openSelector())}
-            @keydown=${this._onSelectorKeydown}
-            class="flex items-center gap-2 h-9 max-w-full px-3 rounded-lg border border-white/5 bg-slate-steel/50 text-sm font-medium text-zinc-200 hover:border-gable-green/30 hover:bg-slate-steel transition-colors"
-          >
-            <span class="truncate">
-            ${app === undefined ? 'Apps' : app.name}${''}
-            <span class="hidden sm:inline">${this.frameTitle !== '' ? ` · ${this.frameTitle}` : ''}</span>
-          </span>
-            <span class="text-zinc-500 shrink-0">${icon(ChevronDown, 14)}</span>
-          </button>
-        </div>
+        ${this.phone
+          ? nothing
+          : html`
+              <div class="flex-1 min-w-0 flex justify-center px-1 sm:flex-none sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:max-w-[46vw] sm:px-0">
+                <button
+                  type="button"
+                  data-action="selector"
+                  aria-haspopup="menu"
+                  aria-expanded=${this._selectorOpen ? 'true' : 'false'}
+                  @click=${() => (this._selectorOpen ? this._closeSelector(true) : this._openSelector())}
+                  @keydown=${this._onSelectorKeydown}
+                  class="flex items-center gap-2 h-9 max-w-full px-3 rounded-lg border border-white/5 bg-slate-steel/50 text-sm font-medium text-zinc-200 hover:border-gable-green/30 hover:bg-slate-steel transition-colors"
+                >
+                  <span class="truncate">
+                    ${app === undefined ? 'Apps' : app.name}${''}
+                    <span class="hidden sm:inline">${this.frameTitle !== '' ? ` · ${this.frameTitle}` : ''}</span>
+                  </span>
+                  <span class="text-zinc-500 shrink-0">${icon(ChevronDown, 14)}</span>
+                </button>
+              </div>
+            `}
 
-        <div class="ml-auto flex items-center gap-2 shrink-0">
+        <div class="ml-auto flex items-center ${this.phone ? 'gap-1.5' : 'gap-2'} shrink-0">
           ${this.frameActions.map(
             (action) => html`
               <button
                 type="button"
                 data-action="frame-action"
                 @click=${() => this._emit('gable-shell-frame-action', { id: action.id })}
-                class="hidden lg:block h-9 px-3 rounded-lg border border-gable-green/30 bg-gable-green/10 text-sm font-medium text-gable-green hover:bg-gable-green/20 transition-colors"
+                class="hidden lg:block ${this.phone ? 'min-h-[44px]' : 'h-9'} px-3 rounded-lg border border-gable-green/30 bg-gable-green/10 text-sm font-medium text-gable-green hover:bg-gable-green/20 transition-colors"
               >
                 ${action.label}
               </button>
@@ -311,27 +326,31 @@ export class GableShellHeader extends LitElement {
             aria-label=${this.theme === 'dark' ? 'Light mode' : 'Dark mode'}
             title=${this.theme === 'dark' ? 'Light mode' : 'Dark mode'}
             @click=${() => this._emit('gable-shell-theme')}
-            class="h-9 w-9 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors"
+            class="${iconBox} rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors"
           >
             ${this.theme === 'dark' ? icon(Sun, 16) : icon(Moon, 16)}
           </button>
-          <button
-            type="button"
-            data-action="feedback"
-            aria-label="Feedback"
-            title=${this.feedbackOn ? 'Feedback' : 'The framed app has no feedback channel'}
-            ?disabled=${!this.feedbackOn}
-            @click=${() => this._emit('gable-shell-feedback')}
-            class=${this.feedbackOn
-              ? 'h-9 w-9 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors'
-              : 'h-9 w-9 rounded-lg flex items-center justify-center text-zinc-600 border border-white/5 cursor-not-allowed'}
-          >
-            ${icon(MessageSquarePlus, 16)}
-          </button>
+          ${this.phone && !this.feedbackOn
+            ? nothing
+            : html`
+                <button
+                  type="button"
+                  data-action="feedback"
+                  aria-label="Feedback"
+                  title=${this.feedbackOn ? 'Feedback' : 'The framed app has no feedback channel'}
+                  ?disabled=${!this.feedbackOn}
+                  @click=${() => this._emit('gable-shell-feedback')}
+                  class=${this.feedbackOn
+                    ? `${iconBox} rounded-lg flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/5 border border-white/5 transition-colors`
+                    : `${iconBox} rounded-lg flex items-center justify-center text-zinc-600 border border-white/5 cursor-not-allowed`}
+                >
+                  ${icon(MessageSquarePlus, 16)}
+                </button>
+              `}
           ${this._renderAccount(initials)}
         </div>
       </header>
-      ${this._selectorOpen ? this._renderSelectorPanel() : nothing}
+      ${!this.phone && this._selectorOpen ? this._renderSelectorPanel() : nothing}
     `;
   }
 
@@ -383,11 +402,18 @@ export class GableShellHeader extends LitElement {
           @click=${() => {
             this._yardsOpen = !this._yardsOpen;
           }}
-          class="flex items-center gap-2 px-3 h-9 rounded-md border border-white/10 bg-slate-steel/50 hover:bg-slate-steel hover:border-gable-green/30 transition-colors text-sm text-zinc-200"
+          class="flex items-center gap-1.5 ${this.phone
+            ? 'px-2.5 min-h-[44px] min-w-[44px]'
+            : 'px-3 h-9'} rounded-lg border border-white/10 bg-slate-steel/50 hover:bg-slate-steel hover:border-gable-green/30 transition-colors text-sm text-zinc-200"
         >
-          <span class="text-gable-green">${icon(Building2, 14)}</span>
-          <span class="hidden md:block font-medium max-w-[140px] truncate">${this._yardLabel()}</span>
-          <span class="text-zinc-500">${icon(ChevronDown, 14)}</span>
+          <span class="text-gable-green shrink-0">${icon(Building2, 14)}</span>
+          <span
+            class=${this.phone
+              ? 'font-medium max-w-[96px] sm:max-w-[160px] truncate'
+              : 'hidden md:block font-medium max-w-[140px] truncate'}
+            >${this._yardLabel()}</span
+          >
+          <span class="text-zinc-500 shrink-0">${icon(ChevronDown, 14)}</span>
         </button>
         ${this._yardsOpen
           ? html`
@@ -405,7 +431,7 @@ export class GableShellHeader extends LitElement {
                         role="option"
                         aria-selected=${active ? 'true' : 'false'}
                         @click=${() => this._pickYard(yard.id)}
-                        class="w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-white/5 ${active
+                        class="w-full text-left px-3 min-h-[44px] py-2 flex items-center gap-2 text-sm hover:bg-white/5 ${active
                           ? 'text-gable-green'
                           : 'text-zinc-200'}"
                       >
@@ -438,11 +464,13 @@ export class GableShellHeader extends LitElement {
           aria-label="${label} account"
           @click=${() => (this._accountOpen ? this._closeAccount(false) : this._openAccount('first'))}
           @keydown=${this._onAccountChipKeydown}
-          class="flex items-center gap-2 rounded-full border border-white/10 pl-1 pr-3 py-1 hover:border-gable-green/30 transition-colors"
+          class="flex items-center justify-center gap-2 rounded-full border border-white/10 ${this.phone
+            ? 'min-h-[44px] min-w-[44px] px-2'
+            : 'pl-1 pr-3 py-1'} hover:border-gable-green/30 transition-colors"
         >
           <span
             aria-hidden="true"
-            class="h-7 w-7 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-[10px] font-mono font-bold text-gable-green"
+            class="h-7 w-7 shrink-0 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-[10px] font-mono font-bold text-gable-green"
             >${initials === '' ? '?' : initials}</span
           >
           <span class="hidden lg:block text-xs font-semibold text-white max-w-[140px] truncate">${label}</span>
@@ -471,7 +499,7 @@ export class GableShellHeader extends LitElement {
                       this._closeAccount(false);
                       this._emit('gable-shell-switch-role');
                     }}
-                    class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
+                    class="w-full flex items-center gap-2 px-4 min-h-[44px] py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                   >
                     ${icon(UserRoundPlus, 16, 'w-4 h-4')}
                     Switch role
@@ -483,7 +511,7 @@ export class GableShellHeader extends LitElement {
                       this._closeAccount(false);
                       this._emit('gable-shell-sign-out');
                     }}
-                    class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
+                    class="w-full flex items-center gap-2 px-4 min-h-[44px] py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                   >
                     ${icon(LogOut, 16, 'w-4 h-4')}
                     Sign out

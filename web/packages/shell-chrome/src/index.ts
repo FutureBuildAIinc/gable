@@ -11,3 +11,4 @@ export * from './shell-state.ts';
 export * from './shell-banner.ts';
 export { GableShellHeader, type ShellYard } from './shell-header.ts';
 export { GableShellRail } from './shell-rail.ts';
+export { GableShellTabs } from './shell-tabs.ts';

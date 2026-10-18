@@ -41,6 +41,15 @@ import {
 } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
+import {
+  ROLE_GROUPS,
+  SHELL_PROFILES,
+  isConsoleLauncher,
+  roleEntryFor,
+  shellForRole,
+  type LauncherRole,
+  type RoleGroup,
+} from './roles.ts';
 
 type DoorState =
   | { kind: 'signed-out' }
@@ -96,6 +105,11 @@ export class GableFrontDoor extends LitElement {
   // Light DOM so the shared Tailwind tokens apply, exactly like the desk.
   createRenderRoot() { return this; }
 
+  /** Navigation seam so tests can observe shell routing without replacing window.location. */
+  navigateTo: (path: string) => void = (path: string) => {
+    window.location.assign(path);
+  };
+
   @state() private _state: DoorState = { kind: 'signed-out' };
   @state() private _userName: string | null = null;
   @state() private _roles: string[] = [];
@@ -110,8 +124,17 @@ export class GableFrontDoor extends LitElement {
   @state() private _email = '';
   @state() private _password = '';
 
+  private _isConsoleMode(): boolean {
+    return typeof window !== 'undefined' && isConsoleLauncher(window.location.search);
+  }
+
   connectedCallback() {
     super.connectedCallback();
+    // In ?console=1 launcher mode, the five-group role picker and Continue as
+    // from identity-tap render directly and never fetch or hold a token.
+    if (this._isConsoleMode()) {
+      return;
+    }
     // Whatever bundle landed here first may already hold a session (the
     // sessionStorage handoff): pick it up before choosing a state.
     const session = authCustody.session;
@@ -327,10 +350,42 @@ export class GableFrontDoor extends LitElement {
 
   /** A tile opens its app: a full navigation into the desk bundle. */
   private _open(tile: DoorTile) {
-    window.location.assign(tile.path);
+    this.navigateTo(tile.path);
+  }
+
+  /**
+   * Launch a role from the ?console=1 five-group role picker: record the
+   * display block in identity-tap (never a token) and open the role's target
+   * shell (/shell/, /field/, or /portal).
+   */
+  private _launchConsoleRole(entry: LauncherRole) {
+    recordIdentity(localStorage, {
+      displayName: entry.displayName,
+      role: entry.role,
+      yard: entry.homeYardCode,
+      method: null,
+    });
+    useThemeSubject(entry.subject);
+    this.navigateTo(entry.shell.path);
+  }
+
+  /**
+   * Continue as the remembered identity from identity-tap in ?console=1 mode:
+   * open the target shell for the remembered role without storing or showing a token.
+   */
+  private _continueInConsole(last: TappedIdentity) {
+    const targetShell = (last.role !== null ? shellForRole(last.role) : null) ?? SHELL_PROFILES.work;
+    recordIdentity(localStorage, {
+      displayName: last.displayName,
+      role: last.role,
+      yard: last.yard,
+      method: last.method ?? null,
+    });
+    this.navigateTo(targetShell.path);
   }
 
   private get _headerWord(): string {
+    if (this._isConsoleMode()) return 'Pick a role';
     if (this._state.kind === 'signed-out') return '';
     if (this._state.kind === 'loading') return 'Opening the door…';
     if (this._state.kind === 'error') return 'The catalog did not answer';
@@ -352,15 +407,18 @@ export class GableFrontDoor extends LitElement {
   }
 
   private _renderHeader() {
-    const signedIn = this._state.kind !== 'signed-out';
+    const signedIn = !this._isConsoleMode() && this._state.kind !== 'signed-out';
     const personaRole = authCustody.personaRole;
     const headerRoleWords = personaRole !== null
       ? ROLE_WORDS[personaRole as keyof typeof ROLE_WORDS] ?? personaRole
       : null;
     const dealerName = !authConfig.devMode ? (this._authCfg?.dealerName ?? null) : null;
     const dealerMarkUrl = !authConfig.devMode ? (this._authCfg?.dealerMarkUrl ?? null) : null;
+    const gridCols = signedIn
+      ? 'grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[1fr_auto_1fr]'
+      : 'grid-cols-[1fr_auto_1fr]';
     return html`
-      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-4 sticky top-0 z-40">
+      <header class="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-4 md:px-6 grid ${gridCols} items-center gap-4 sticky top-0 z-40">
         ${dealerName !== null ? html`
           <div class="flex items-center gap-2.5 min-w-0 shrink-0 justify-self-start">
             ${dealerMarkUrl !== null
@@ -417,6 +475,9 @@ export class GableFrontDoor extends LitElement {
   }
 
   private _renderBody() {
+    if (this._isConsoleMode()) {
+      return this._renderConsoleLauncher();
+    }
     switch (this._state.kind) {
       case 'signed-out':
         return this._renderSignIn();
@@ -447,6 +508,129 @@ export class GableFrontDoor extends LitElement {
       case 'ready':
         return this._renderTiles(this._state.apps);
     }
+  }
+
+  /**
+   * The ?console=1 front door launcher: "Continue as" from identity-tap and
+   * the five-group role picker, never storing or showing a bearer token.
+   */
+  private _renderConsoleLauncher() {
+    const last = readIdentity(localStorage);
+    const lastEntry = last?.role !== undefined && last.role !== null ? roleEntryFor(last.role) : null;
+    const lastShell = (last?.role !== undefined && last.role !== null ? shellForRole(last.role) : null) ?? SHELL_PROFILES.work;
+    const lastRoleWords = lastEntry?.label ?? (last?.role ? (ROLE_WORDS[last.role as keyof typeof ROLE_WORDS] ?? last.role) : 'Staff');
+    return html`
+      <div class="max-w-6xl mx-auto space-y-6 animate-fade-in">
+        <div class="glass-card rounded-2xl p-6 sm:p-8 space-y-5">
+          <div class="space-y-1.5">
+            <div class="text-xs font-mono uppercase tracking-wider text-gable-green font-semibold">
+              Gable Shell Launcher
+            </div>
+            <h1 class="text-2xl font-semibold text-white">Pick a role to open its shell</h1>
+            <p class="text-sm text-zinc-300 max-w-3xl">
+              Each role opens the workspace frame built for its work: Gable Work for the office and counter, Gable Field for the yard and delivery runs, and Gable Pro for contractor accounts.
+            </p>
+          </div>
+          ${last ? html`
+            <div class="pt-1">
+              <button
+                type="button"
+                data-testid="console-continue-as"
+                @click=${() => this._continueInConsole(last)}
+                aria-label="Continue as ${last.displayName}, ${lastRoleWords}, open ${lastShell.productName}"
+                class="w-full min-h-[44px] rounded-xl border border-zinc-500 bg-surface-2 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-left hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green transition-all"
+              >
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="h-10 w-10 rounded-full bg-gable-green/15 border border-gable-green flex items-center justify-center text-xs font-mono font-bold text-gable-green shrink-0">
+                    ${initialsFor(last.displayName)}
+                  </div>
+                  <div class="min-w-0 leading-snug">
+                    <div class="text-sm font-semibold text-white truncate">Continue as ${last.displayName}</div>
+                    <div class="text-xs text-zinc-300 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span>${lastRoleWords}</span>
+                      ${last.yard ? html`<span class="font-mono text-zinc-300">${last.yard}</span>` : nothing}
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                  <span class="rounded-md border border-gable-green bg-gable-green/10 px-2.5 py-1 text-xs font-semibold text-gable-green">
+                    ${lastShell.productName}
+                  </span>
+                  <span class="text-xs font-mono text-zinc-300">${lastShell.path}</span>
+                </div>
+              </button>
+            </div>
+          ` : nothing}
+        </div>
+        <div class="space-y-6">
+          ${ROLE_GROUPS.map((group) => this._renderConsoleRoleGroup(group))}
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderConsoleRoleGroup(group: RoleGroup) {
+    return html`
+      <section
+        data-testid="role-group-${group.id}"
+        aria-labelledby="group-heading-${group.id}"
+        class="glass-card rounded-2xl p-6 space-y-4"
+      >
+        <div class="space-y-1">
+          <h2 id="group-heading-${group.id}" class="text-base font-semibold text-white">${group.title}</h2>
+          <p class="text-xs sm:text-sm text-zinc-300">${group.summary}</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          ${group.roles.map((entry) => this._renderConsoleRoleCard(entry))}
+        </div>
+      </section>
+    `;
+  }
+
+  private _renderConsoleRoleCard(entry: LauncherRole) {
+    return html`
+      <button
+        type="button"
+        data-testid="role-card-${entry.role}"
+        data-role=${entry.role}
+        data-shell=${entry.shell.startApp}
+        data-shell-path=${entry.shell.path}
+        @click=${() => this._launchConsoleRole(entry)}
+        aria-label="Open ${entry.shell.productName} as ${entry.label} (${entry.displayName})"
+        class="group w-full min-h-[44px] text-left rounded-xl bg-surface-2 border border-zinc-500 p-4 flex flex-col justify-between gap-3.5 transition-all hover:border-gable-green hover:bg-surface-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green"
+      >
+        <div class="space-y-2.5">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="h-10 w-10 rounded-lg bg-gable-green/15 border border-gable-green flex items-center justify-center text-gable-green shrink-0">
+                ${icon(entry.icon, 20)}
+              </div>
+              <div class="min-w-0">
+                <div class="text-base font-semibold text-white leading-snug">${entry.label}</div>
+                <div class="text-xs text-zinc-300 leading-snug">${entry.displayName}</div>
+              </div>
+            </div>
+            <span class="rounded-md border border-gable-green bg-gable-green/10 px-2.5 py-1 text-xs font-semibold text-gable-green shrink-0">
+              ${entry.shell.productName}
+            </span>
+          </div>
+          <p class="text-xs sm:text-sm text-zinc-300 leading-relaxed">${entry.line}</p>
+          <div class="flex flex-wrap gap-1.5" aria-hidden="true">
+            ${entry.surfaces.map(
+              (surface) => html`
+                <span class="rounded border border-zinc-500 bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-zinc-200">
+                  ${surface}
+                </span>
+              `,
+            )}
+          </div>
+        </div>
+        <div class="pt-2.5 border-t border-zinc-500/50 flex items-center justify-between gap-3 text-xs">
+          <span class="font-medium text-gable-green">Open ${entry.shell.productName}</span>
+          <span class="font-mono text-zinc-300">${entry.homeYardCode} · ${entry.shell.path}</span>
+        </div>
+      </button>
+    `;
   }
 
   private _renderSignIn() {
