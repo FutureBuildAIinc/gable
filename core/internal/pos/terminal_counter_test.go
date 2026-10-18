@@ -109,13 +109,7 @@ func TestCounterCardDeclineEndToEnd(t *testing.T) {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
 	r := f.completeSale(saleID, f.cardFor())
-	if r.status != http.StatusConflict {
-		t.Fatalf("complete = %d: %s", r.status, r.raw)
-	}
-	code, blockers, _ := errorOf(t, r)
-	if code == "" && len(blockers) == 0 {
-		t.Fatal("the decline answered no code")
-	}
+	requireBlocker(t, r, "card_declined")
 	_, state, verdict := f.terminalIntentOf(t, saleID)
 	if state != "declined" || verdict != "declined" {
 		t.Fatalf("the intent is %s verdict %s, wanted declined", state, verdict)
@@ -141,9 +135,7 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	}
 	f.openTill(0)
 	r := f.completeSale(saleID, f.cardFor())
-	if r.status != http.StatusConflict {
-		t.Fatalf("complete = %d: %s", r.status, r.raw)
-	}
+	requireBlocker(t, r, "terminal_answer_pending")
 	id, state, _ := f.terminalIntentOf(t, saleID)
 	if state != "pending_at_device" {
 		t.Fatalf("the unanswered intent is %s, wanted pending_at_device", state)
@@ -155,16 +147,12 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	}
 	// the cancel is honest: the device holds the leg
 	c := f.do("POST", "/api/v1/pos/terminal-intents/"+id.String()+"/cancel", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if c.status != http.StatusConflict {
-		t.Fatalf("the cancel at the device = %d: %s", c.status, c.raw)
-	}
+	requireBlocker(t, c, "terminal_at_device")
 	// the drawer refuses while the intent stands
 	sessionID := f.currentTill(t)
 	cl := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if cl.status != http.StatusConflict {
-		t.Fatalf("the close = %d: %s", cl.status, cl.raw)
-	}
+	requireBlocker(t, cl, "terminal_intent_in_flight")
 	// only a manager sweeps
 	sw := f.do("POST", "/api/v1/pos/terminal-intents/sweep", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if sw.status != http.StatusForbidden {
@@ -210,14 +198,64 @@ func TestCounterCardNoAnswerSweepResolveDeclined(t *testing.T) {
 	rr = f.do("POST", "/api/v1/pos/terminal-lost-items/"+itemID+"/resolve",
 		map[string]any{"outcome": "declined", "reference": "again"},
 		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
-	if rr.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409", rr.status)
-	}
+	requireBlocker(t, rr, "lost_item_settled")
 	// the drawer closes now that no intent stands
 	cl = f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if cl.status != http.StatusOK {
 		t.Fatalf("the close after the sweep = %d: %s", cl.status, cl.raw)
+	}
+}
+
+// TestReviewRetryWhileLostItemOpenIsRefused: a card leg that is in flight
+// (pending_at_device) refuses a second card charge with terminal_leg_in_flight;
+// once the sweep marks the intent lost and opens a manager item, a card retry
+// is refused 409 terminal_answer_unresolved without calling the device again;
+// once the manager resolves the item as declined, the retry charges as attempt
+// #1 and completes the sale.
+func TestReviewRetryWhileLostItemOpenIsRefused(t *testing.T) {
+	f := terminalFixture(t, payment.SimNoAnswer, nil)
+	saleID := f.openSale(t, nil)
+	f.terminal.Script("sale-"+saleID+"-card-0#1", payment.SimApprove)
+
+	r := f.completeSale(saleID, f.cardAll(t, saleID))
+	requireBlocker(t, r, "terminal_answer_pending")
+	if n := len(f.terminal.Dispatched()); n != 1 {
+		t.Fatalf("dispatched = %d, wanted 1", n)
+	}
+
+	// While the leg is still pending_at_device, retrying is refused with terminal_leg_in_flight.
+	inFlight := f.completeSale(saleID, f.cardAll(t, saleID))
+	requireBlocker(t, inFlight, "terminal_leg_in_flight")
+	if n := len(f.terminal.Dispatched()); n != 1 {
+		t.Fatalf("dispatched after in-flight retry = %d, wanted 1", n)
+	}
+
+	f.expireTerminalLeases(t, saleID)
+	f.sweepAsManager(t)
+	itemID := f.itemOfSale(t, saleID)
+
+	// While the manager item is open, retrying is refused with terminal_answer_unresolved.
+	unresolved := f.completeSale(saleID, f.cardAll(t, saleID))
+	requireBlocker(t, unresolved, "terminal_answer_unresolved")
+	if n := len(f.terminal.Dispatched()); n != 1 {
+		t.Fatalf("dispatched while lost item open = %d, wanted 1", n)
+	}
+
+	// After the manager resolves the item as declined, the retry charges as attempt #1.
+	if rr := f.resolveItem(itemID, "declined", "terminal shows no charge"); rr.status != http.StatusOK {
+		t.Fatalf("resolve declined = %d: %s", rr.status, rr.raw)
+	}
+	done := f.completeSale(saleID, f.cardAll(t, saleID))
+	if done.status != http.StatusOK {
+		t.Fatalf("retry after declined resolution = %d: %s", done.status, done.raw)
+	}
+	dispatched := f.terminal.Dispatched()
+	if len(dispatched) != 2 {
+		t.Fatalf("dispatched after retry = %d, wanted 2", len(dispatched))
+	}
+	if dispatched[1].IdempotencyKey != "sale-"+saleID+"-card-0#1" {
+		t.Fatalf("second dispatch key = %q, wanted %q", dispatched[1].IdempotencyKey, "sale-"+saleID+"-card-0#1")
 	}
 }
 

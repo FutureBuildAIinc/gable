@@ -105,10 +105,9 @@ func TestCrashAfterClaimNeverReachesTheDevice(t *testing.T) {
 	}
 	// the drawer refuses while the claim stands
 	sessionID := f.currentTill(t)
-	if cl := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
-		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); cl.status != http.StatusConflict {
-		t.Fatalf("the close with a claim standing = %d, wanted 409: %s", cl.status, cl.raw)
-	}
+	cl := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{"counted_by_method": map[string]any{"cash": 0}},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	requireBlocker(t, cl, "terminal_intent_in_flight")
 	// the sweep closes the claim lost, with no manager item
 	f.expireTerminalLeases(t, saleID)
 	f.sweepAsManager(t)
@@ -233,9 +232,7 @@ func TestCrashAfterAnswerBeforeTheBookingKeepsTheAuthorizedLeg(t *testing.T) {
 		t.Fatalf("money moved before the booking: %+v became %+v", before, after)
 	}
 	// a completion that leaves the authorized leg behind is refused
-	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusConflict {
-		t.Fatalf("a completion around the leg = %d, wanted 409: %s", r.status, r.raw)
-	}
+	requireBlocker(t, f.completeSale(saleID, f.cashAll(t, saleID)), "authorized_leg_unused")
 	seam.set("")
 	if r := f.completeSale(saleID, f.cardAll(t, saleID)); r.status != http.StatusOK {
 		t.Fatalf("the retry = %d: %s", r.status, r.raw)
@@ -274,9 +271,7 @@ func TestSweepClosingTheClaimStopsTheDispatch(t *testing.T) {
 	f.openTill(0)
 	saleID = f.openSale(t, nil)
 	r := f.completeSale(saleID, f.cardAll(t, saleID))
-	if r.status != http.StatusConflict {
-		t.Fatalf("the act whose claim was swept = %d, wanted 409: %s", r.status, r.raw)
-	}
+	requireBlocker(t, r, "terminal_leg_closed")
 	if n := len(f.terminal.Dispatched()); n != 0 {
 		t.Fatalf("the device was called %d times after the sweep closed the claim", n)
 	}
@@ -298,9 +293,7 @@ func TestSimulatedCrashAfterDispatchEndToEnd(t *testing.T) {
 	f, _ := crashFixture(t, payment.SimCrashAfterDispatch, nil)
 	saleID := f.openSale(t, nil)
 	r := f.completeSale(saleID, f.cardAll(t, saleID))
-	if r.status != http.StatusConflict {
-		t.Fatalf("the completion after the device crash = %d, wanted the waiting 409: %s", r.status, r.raw)
-	}
+	requireBlocker(t, r, "terminal_answer_pending")
 	id, state, _ := f.terminalIntentOf(t, saleID)
 	if state != "pending_at_device" {
 		t.Fatalf("the intent is %s, wanted pending_at_device (a dispatch that failed may have reached the device)", state)
@@ -369,9 +362,7 @@ func TestSimulatedLateAnswerEndToEnd(t *testing.T) {
 	f, _ := crashFixture(t, payment.SimLateAnswer, nil)
 	saleID := f.openSale(t, nil)
 	r := f.completeSale(saleID, f.cardAll(t, saleID))
-	if r.status != http.StatusConflict {
-		t.Fatalf("the completion = %d, wanted the waiting 409: %s", r.status, r.raw)
-	}
+	requireBlocker(t, r, "terminal_answer_pending")
 	id, _, _ := f.terminalIntentOf(t, saleID)
 	f.expireTerminalLeases(t, saleID)
 	f.sweepAsManager(t)

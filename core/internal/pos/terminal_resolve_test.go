@@ -89,9 +89,7 @@ func (f *fixture) itemOfSale(t *testing.T, saleID string) (itemID uuid.UUID) {
 func (f *fixture) lostLegOf(t *testing.T, saleID string) (intentID, itemID uuid.UUID) {
 	t.Helper()
 	r := f.completeSale(saleID, f.cardAll(t, saleID))
-	if r.status != http.StatusConflict {
-		t.Fatalf("the unanswered completion = %d, wanted 409: %s", r.status, r.raw)
-	}
+	requireBlocker(t, r, "terminal_answer_pending")
 	intentID, state, _ := f.terminalIntentOf(t, saleID)
 	if state != "pending_at_device" {
 		t.Fatalf("the unanswered intent is %s, wanted pending_at_device", state)
@@ -193,13 +191,9 @@ func TestResolveAuthorizedOnOpenSaleKeepsTheLegForTheCompletion(t *testing.T) {
 		t.Fatalf("%d payments booked before the completion, wanted 0", got)
 	}
 	// a second resolve is refused and moves nothing
-	if r2 := f.resolveItem(itemID, "authorized", "devref-open-1"); r2.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409: %s", r2.status, r2.raw)
-	}
+	requireBlocker(t, f.resolveItem(itemID, "authorized", "devref-open-1"), "lost_item_settled")
 	// completing with cash would leave the authorized card leg behind: refused
-	if r3 := f.completeSale(saleID, f.cashAll(t, saleID)); r3.status != http.StatusConflict {
-		t.Fatalf("a completion around the authorized leg = %d, wanted 409: %s", r3.status, r3.raw)
-	}
+	requireBlocker(t, f.completeSale(saleID, f.cashAll(t, saleID)), "authorized_leg_unused")
 	// the completion with the card tender uses the leg
 	done := f.completeSale(saleID, f.cardAll(t, saleID))
 	if done.status != http.StatusOK {
@@ -260,9 +254,7 @@ func TestResolveAuthorizedOnSalePaidInFullReversesTheWholeCharge(t *testing.T) {
 		t.Fatalf("the leg is %s spent=%t, wanted authorized and spent (put back)", state, spent)
 	}
 	// a second resolve is a conflict and the gateway is not called again
-	if r2 := f.resolveItem(itemID, "authorized", "devref-full-1"); r2.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409: %s", r2.status, r2.raw)
-	}
+	requireBlocker(t, f.resolveItem(itemID, "authorized", "devref-full-1"), "lost_item_settled")
 	if len(gw.voids) != 1 {
 		t.Fatalf("the second resolve called the gateway: voids %v", gw.voids)
 	}
@@ -400,9 +392,7 @@ func TestResolveDeclinedMovesNothing(t *testing.T) {
 	}
 	// the card can be charged again on the open sale: the declined resolution
 	// frees the leg for a new attempt
-	if r2 := f.resolveItem(itemID, "declined", "again"); r2.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409", r2.status)
-	}
+	requireBlocker(t, f.resolveItem(itemID, "declined", "again"), "lost_item_settled")
 }
 
 // TestRacingResolvesCallTheGatewayOnce: three managers resolve one lost item
@@ -513,9 +503,7 @@ func TestResolveAuthorizedSettlesAStrandedVoidClaim(t *testing.T) {
 	if got := f.counterRefunds(t); got != 1 {
 		t.Fatalf("%d refunds booked, wanted exactly 1", got)
 	}
-	if r2 := f.resolveItem(itemID, "authorized", "refund-ref-void-1"); r2.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409", r2.status)
-	}
+	requireBlocker(t, f.resolveItem(itemID, "authorized", "refund-ref-void-1"), "lost_item_settled")
 	if got := f.counterRefunds(t); got != 1 {
 		t.Fatalf("the second resolve booked another refund: %d", got)
 	}
@@ -565,9 +553,7 @@ func TestResolveAuthorizedSettlesAStrandedReturnClaim(t *testing.T) {
 	if got := f.accountBalance("1010"); got != 0 {
 		t.Fatalf("the cash and card account holds %d after the return, wanted 0", got)
 	}
-	if r2 := f.resolveItem(itemID, "authorized", "refund-ref-return-1"); r2.status != http.StatusConflict {
-		t.Fatalf("the second resolve = %d, wanted 409", r2.status)
-	}
+	requireBlocker(t, f.resolveItem(itemID, "authorized", "refund-ref-return-1"), "lost_item_settled")
 	if got := f.counterReturns(t); got != 1 {
 		t.Fatalf("the second resolve posted another return: %d", got)
 	}
