@@ -23,6 +23,14 @@ import type {
     DayClose,
     CounterCustomer,
     CounterRegister,
+    CounterStanding,
+    CounterOverride,
+    SealedSignature,
+    ReturnReason,
+    ReturnReasonCode,
+    Exchange,
+    ExchangeFigures,
+    IdType,
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
@@ -88,6 +96,29 @@ export interface TenderIn {
     amount_cents: number;
     reference?: string;
     token_id?: string;
+    /** The cashier looked at the payer's ID (a check or a charge); the number is never taken. */
+    id_checked?: boolean;
+    id_type?: IdType;
+}
+
+/** One returned line of a return or an exchange. */
+export interface ReturnLineIn {
+    line_id: string;
+    quantity: string;
+    restock?: boolean;
+    reason_code?: ReturnReasonCode;
+}
+
+/** The request of an exchange, and of its preview (which takes no tenders). */
+export interface ExchangeIn {
+    register_id?: string;
+    original_sale_id?: string;
+    customer_id?: string;
+    refund_method?: 'cash' | 'account';
+    reason?: string;
+    returned_lines: ReturnLineIn[];
+    sale_lines: Array<{ product_id: string; quantity: string }>;
+    tenders?: TenderIn[];
 }
 
 export const posService = {
@@ -117,8 +148,22 @@ export const posService = {
      * opened during the click. A blocked tab answers the url for a download link;
      * a refusal closes the tab and throws the server's words.
      */
-    async printReceipt(saleId: string): Promise<{ url: string; blocked: boolean }> {
-        return openAuthedPdf(`/api/v1/pos/transactions/${saleId}/receipt`, 'Failed to read the receipt');
+    async printReceipt(saleId: string, layout?: 'thermal80'): Promise<{ url: string; blocked: boolean }> {
+        const query = layout ? `?layout=${layout}` : '';
+        return openAuthedPdf(`/api/v1/pos/transactions/${saleId}/receipt${query}`, 'Failed to read the receipt');
+    },
+
+    /** Seals the signer's typed name and drawn PNG (standard base64 or a data URL) to the completed sale. */
+    async captureSignature(saleId: string, signerName: string, imagePngBase64: string): Promise<SealedSignature> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/signature`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ signer_name: signerName, image_png_base64: imagePngBase64 }),
+            }),
+            'Failed to seal the signature',
+        );
+        return response.json();
     },
 
     /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */
@@ -248,10 +293,38 @@ export const posService = {
         return response.json();
     },
 
-    /** Names the sale's customer (before the first line), purchase order and job. */
+    /**
+     * Can a sale of amountCents go on this account? The verdict, its reason in
+     * words and the ways forward; the sale makes the read count the sale's
+     * live manager override.
+     */
+    async standing(customerId: string, amountCents = 0, saleId?: string): Promise<CounterStanding> {
+        const params = new URLSearchParams({ amount_cents: String(Math.max(0, Math.trunc(amountCents))) });
+        if (saleId) params.append('sale_id', saleId);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/customers/${customerId}/standing?${params.toString()}`),
+            'Failed to read the account\u2019s standing',
+        );
+        return response.json();
+    },
+
+    /** A manager approves one sale (kind account or check), with a reason and a cap in cents. */
+    async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number): Promise<CounterOverride> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/overrides`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ kind, reason, cap_cents: capCents }),
+            }),
+            'Failed to record the approval',
+        );
+        return response.json();
+    },
+
+    /** Names the sale's customer (before the first line), purchase order, job and buyer. */
     async attachCustomer(
         saleId: string,
-        input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null },
+        input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null; buyer_contact_id?: string | null },
     ): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/customer`, {
@@ -271,8 +344,8 @@ export const posService = {
         original_sale_id?: string;
         customer_id?: string;
         refund_method: RefundMethod;
-        reason: string;
-        lines: Array<{ line_id: string; quantity: string; restock?: boolean }>;
+        reason?: string;
+        lines: ReturnLineIn[];
     }): Promise<CounterReturn> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/returns`, {
@@ -281,6 +354,43 @@ export const posService = {
                 body: JSON.stringify(input),
             }),
             'Failed to take the return',
+        );
+        return response.json();
+    },
+
+    /** The closed list of return reasons, each with the restocking fee its returns carry. */
+    async returnReasons(): Promise<ReturnReason[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/return-reasons`),
+            'Failed to read the return reasons',
+        );
+        const page: { items: ReturnReason[] } = await response.json();
+        return page.items;
+    },
+
+    // --- The exchange: goods back and goods out in one act ---
+
+    /** What an exchange comes to, stated by the server; nothing is written. */
+    async previewExchange(input: ExchangeIn): Promise<ExchangeFigures> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/exchanges/preview`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to price the exchange',
+        );
+        return response.json();
+    },
+
+    async createExchange(input: ExchangeIn): Promise<Exchange> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/exchanges`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to take the exchange',
         );
         return response.json();
     },

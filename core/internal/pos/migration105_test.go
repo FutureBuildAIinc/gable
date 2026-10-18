@@ -474,6 +474,8 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	// its lines and the invoice; the database stops at 105 for the legacy rows only
 	mig105Apply(t, conn, "../../migrations/114_pos_sale_account_refs.sql")
 	mig105Apply(t, conn, "../../migrations/123_sales_line_units.sql")
+	// and the counter's account sale columns of migration 126
+	mig105Apply(t, conn, "../../migrations/126_counter_buyers_returns_and_receipts.sql")
 	// and the till columns and tables 127 added (the session reads name them)
 	mig105Apply(t, conn, "../../migrations/127_till_movements_and_eod.sql")
 	conn.Close(context.Background())

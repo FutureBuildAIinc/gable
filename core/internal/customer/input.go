@@ -94,7 +94,12 @@ type Request struct {
 	Currency         *string         `json:"currency"`
 	PaymentTermsID   *string         `json:"payment_terms_id"`
 	POrequired       *bool           `json:"po_required"`
-	Revision         json.RawMessage `json:"revision"`
+	// NamedBuyerRequired and CheckLimitCents are the counter's account
+	// controls; left out on a PUT they keep their value (an explicit null
+	// check limit defers to the database wide default).
+	NamedBuyerRequired *bool           `json:"named_buyer_required"`
+	CheckLimitCents    json.RawMessage `json:"check_limit_cents"`
+	Revision           json.RawMessage `json:"revision"`
 }
 
 // Draft is a validated customer header.
@@ -113,6 +118,12 @@ type Draft struct {
 	PaymentTermsID   *uuid.UUID // nil: the default terms on create
 	POrequired       bool
 	Revision         *int64
+	// NamedBuyerRequired nil: unchanged on a PUT, false on create.
+	NamedBuyerRequired *bool
+	// CheckLimitSet reports the request named the check limit (null
+	// included); CheckLimitCents nil with it set is the database default.
+	CheckLimitSet   bool
+	CheckLimitCents *httpx.Cents
 }
 
 func (req *Request) Parse() (*Draft, error)       { return req.parse(false) }
@@ -133,6 +144,15 @@ func (req *Request) parse(update bool) (*Draft, error) {
 	}
 	if req.POrequired != nil {
 		d.POrequired = *req.POrequired
+	}
+	d.NamedBuyerRequired = req.NamedBuyerRequired
+	if len(bytes.TrimSpace(req.CheckLimitCents)) > 0 {
+		d.CheckLimitSet = true
+		if n, ok := v.Int("check_limit_cents", req.CheckLimitCents, false); ok {
+			v.Check(n >= 0, "check_limit_cents", "must not be negative; send null to defer to the database wide limit")
+			c := httpx.Cents(n)
+			d.CheckLimitCents = &c
+		}
 	}
 
 	if update {
@@ -282,7 +302,11 @@ type ContactRequest struct {
 	IsActive        *bool           `json:"is_active"`
 	CanPlaceOrders  *bool           `json:"can_place_orders"`
 	OrderLimitCents json.RawMessage `json:"order_limit_cents"`
-	Revision        json.RawMessage `json:"revision"`
+	// AuthorizedBuyer and BuyerSaleCapCents are the counter's roster flag and
+	// per sale cap; left out on a PUT they keep their value.
+	AuthorizedBuyer   *bool           `json:"authorized_buyer"`
+	BuyerSaleCapCents json.RawMessage `json:"buyer_sale_cap_cents"`
+	Revision          json.RawMessage `json:"revision"`
 }
 
 // ContactDraft is a validated contact.
@@ -298,6 +322,11 @@ type ContactDraft struct {
 	CanPlaceOrders  bool
 	OrderLimitCents *httpx.Cents
 	Revision        *int64
+	// AuthorizedBuyer nil: unchanged on a PUT, false on create.
+	AuthorizedBuyer *bool
+	// BuyerCapSet reports the request named the cap (null included).
+	BuyerCapSet       bool
+	BuyerSaleCapCents *httpx.Cents
 }
 
 func (req *ContactRequest) Parse(update bool) (*ContactDraft, error) {
@@ -332,6 +361,15 @@ func (req *ContactRequest) Parse(update bool) (*ContactDraft, error) {
 		v.Check(n >= 0, "order_limit_cents", "must not be negative; send null for no limit of the contact's own")
 		c := httpx.Cents(n)
 		d.OrderLimitCents = &c
+	}
+	d.AuthorizedBuyer = req.AuthorizedBuyer
+	if len(bytes.TrimSpace(req.BuyerSaleCapCents)) > 0 {
+		d.BuyerCapSet = true
+		if n, ok := v.Int("buyer_sale_cap_cents", req.BuyerSaleCapCents, false); ok {
+			v.Check(n > 0, "buyer_sale_cap_cents", "must be greater than zero; send null for no cap of the buyer's own")
+			c := httpx.Cents(n)
+			d.BuyerSaleCapCents = &c
+		}
 	}
 	if update {
 		d.Revision = optRevision(v, req.Revision)

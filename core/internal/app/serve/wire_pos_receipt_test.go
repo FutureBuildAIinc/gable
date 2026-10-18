@@ -210,6 +210,35 @@ func TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice(t *testing.T) {
 			}
 		}
 	})
+	t.Run("each print is counted across invoice and 80mm thermal layouts", func(t *testing.T) {
+		var before int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		for _, layout := range []string{"", "?layout=invoice", "?layout=thermal80"} {
+			status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+sale.String()+"/receipt"+layout, "", hdr)
+			if status != http.StatusOK || !strings.HasPrefix(string(buf), "%PDF") {
+				t.Fatalf("print %q: %d %.40q, want PDF document", layout, status, buf)
+			}
+		}
+		var after int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before+3 {
+			t.Errorf("print_count %d then %d, want three more prints counted", before, after)
+		}
+		if status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+sale.String()+"/receipt?layout=wide", "", hdr); status != http.StatusBadRequest {
+			t.Errorf("an unknown layout: %d %s, want 400", status, buf)
+		}
+		var final int64
+		if err := f.db.Pool.QueryRow(ctx, `SELECT print_count FROM pos_transactions WHERE id = $1`, sale).Scan(&final); err != nil {
+			t.Fatal(err)
+		}
+		if final != after {
+			t.Errorf("print_count %d then %d: a refused layout must count nothing", after, final)
+		}
+	})
 	t.Run("the cashier emails it to the account's contact once", func(t *testing.T) {
 		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+sale.String()+"/receipt/email", "", hdr)
 		if status != http.StatusAccepted || !strings.Contains(string(buf), `"status":"queued"`) {

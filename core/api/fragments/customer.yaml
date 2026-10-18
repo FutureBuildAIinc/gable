@@ -940,7 +940,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1002,6 +1002,13 @@ components:
         po_required:
           type: boolean
           description: "Whether an order of this customer must carry a purchase order number."
+        named_buyer_required:
+          type: boolean
+          description: "Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer."
+        check_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          description: "The largest check the counter takes from this customer; null defers to the database wide default (none set is no limit)."
         revision:
           type: integer
           description: "Starts at 1 and moves on every write to the customer row; send it back as If-Match."
@@ -1074,6 +1081,14 @@ components:
           description: Active payment terms; the default NET30 when left out on create.
         po_required:
           type: boolean
+        named_buyer_required:
+          type: boolean
+          description: Optional; left out keeps the value on a PUT (false on create).
+        check_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+          description: Optional; left out keeps the value on a PUT, null defers to the database wide check limit.
         revision:
           type: integer
           format: int64
@@ -1083,8 +1098,9 @@ components:
       required: [account_number, name, payment_terms_id, po_required]
       description: >-
         The body of PUT. A PUT replaces the header: a field left out takes its default (null for an
-        optional one, retail, true), except the two controls, payment_terms_id and po_required, which
-        are required so a left out field cannot reset them. primary_branch_id is refused.
+        optional one, retail, true), except the two required controls (payment_terms_id and po_required)
+        and the two optional counter controls (named_buyer_required and check_limit_cents, which keep
+        their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
       properties:
         account_number:
           type: string
@@ -1122,6 +1138,14 @@ components:
           description: Active payment terms, or terms the customer already holds.
         po_required:
           type: boolean
+        named_buyer_required:
+          type: boolean
+          description: Optional; left out keeps the value on a PUT (false on create).
+        check_limit_cents:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+          description: Optional; left out keeps the value on a PUT, null defers to the database wide check limit.
         revision:
           type: integer
           format: int64
@@ -1282,7 +1306,7 @@ components:
           description: PUT only, beside If-Match.
     Contact:
       type: object
-      required: [id, customer_id, first_name, last_name, title, email, phone, role, is_primary, is_active, can_place_orders, order_limit_cents, revision, created_at, updated_at]
+      required: [id, customer_id, first_name, last_name, title, email, phone, role, is_primary, is_active, can_place_orders, order_limit_cents, authorized_buyer, buyer_sale_cap_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1314,6 +1338,13 @@ components:
           type: [integer, "null"]
           description: "The largest order this contact may place; null is no limit of their own."
           format: int64
+        authorized_buyer:
+          type: boolean
+          description: "On the account's buyer roster at the counter."
+        buyer_sale_cap_cents:
+          type: [integer, "null"]
+          format: int64
+          description: "The most this buyer may put on the account in one sale; null is no cap of their own."
         revision:
           type: integer
           format: int64
@@ -1367,6 +1398,14 @@ components:
         order_limit_cents:
           type: [integer, "null"]
           format: int64
+        authorized_buyer:
+          type: boolean
+          description: Optional; false on create, kept when left out on a PUT.
+        buyer_sale_cap_cents:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+          description: Optional; kept when left out on a PUT, null is no cap of the buyer's own.
         revision:
           type: integer
           format: int64
@@ -1374,6 +1413,10 @@ components:
     ContactUpdateRequest:
       type: object
       required: [first_name, last_name, can_place_orders, order_limit_cents]
+      description: >-
+        The body of PUT. Order authority controls (can_place_orders and order_limit_cents) are required,
+        while counter buyer controls (authorized_buyer and buyer_sale_cap_cents) are optional and keep
+        their stored value when omitted so a left out field cannot reset them.
       properties:
         first_name:
           type: string
@@ -1399,6 +1442,14 @@ components:
           type: [integer, "null"]
           format: int64
           description: Required on a PUT; null is an explicit no limit of the contact's own.
+        authorized_buyer:
+          type: boolean
+          description: Optional; left out keeps the value.
+        buyer_sale_cap_cents:
+          type: [integer, "null"]
+          format: int64
+          minimum: 1
+          description: Optional; left out keeps the value, null is no cap of the buyer's own.
         revision:
           type: integer
           format: int64

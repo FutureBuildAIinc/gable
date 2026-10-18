@@ -219,6 +219,29 @@ type Repository interface {
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
 	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	// The counter's account sale reads and writes (migration 126): the open
+	// store credit, the database wide check limit, the buyer roster and the
+	// sale's buyer, and the manager override (one live per sale and kind,
+	// spent by a single statement).
+	OpenCreditMemoCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	LockOpenCreditMemos(ctx context.Context, customerID uuid.UUID, currency string) ([]openMemo, error)
+	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
+	LockCustomer(ctx context.Context, customerID uuid.UUID) error
+	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
+	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
+	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
+	InsertSignature(ctx context.Context, sig *storedSignature) error
+	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)
+	BumpPrintCount(ctx context.Context, saleID uuid.UUID) (int, error)
+	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
+	ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error)
+	RestockingFeeBps(ctx context.Context) (map[string]int, error)
+	LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error
+	LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error
+	InsertOverride(ctx context.Context, o *AccountOverride) error
+	LiveOverride(ctx context.Context, saleID uuid.UUID, kind string) (*AccountOverride, error)
+	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
 
@@ -235,6 +258,15 @@ type CustomerFacts struct {
 	Name             string
 	Currency         string
 	PORequired       bool
+	// TermsKind is the terms master's kind of the customer's payment terms
+	// (NET_DAYS, DAY_OF_MONTH, DUE_ON_RECEIPT), read from the master and never
+	// from a text.
+	TermsKind string
+	// NamedBuyerRequired asks every on account sale to name a roster buyer.
+	NamedBuyerRequired bool
+	// CheckLimitCents is the customer's own check limit; null defers to the
+	// database wide setting.
+	CheckLimitCents *int64
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -404,14 +436,14 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 
 // saleCols is the full sale's columns: the list item's head and the purchase
 // order and job a charge sale names.
-const saleCols = saleHeadCols + `, t.customer_po, t.job_id`
+const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
 	var created time.Time
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
-		&completed, &created, &s.CustomerPO, &s.JobID); err != nil {
+		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID); err != nil {
 		return err
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -699,11 +731,12 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 	var created time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_tenders (id, transaction_id, method, amount, payment_id, reference, card_last4, card_brand,
-			gateway_tx_id, auth_code, created_at)
-		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NOW())
+			gateway_tx_id, auth_code, id_checked, id_type, created_at)
+		VALUES ($1, $2, $3, $4::numeric / 100, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''),
+			$11, $12, NOW())
 		RETURNING created_at`,
 		t.ID, t.SaleID, string(t.Method), int64(t.AmountCents), t.PaymentID, t.Reference, t.CardLast4, t.CardBrand,
-		t.GatewayTxID, t.AuthCode).Scan(&created)
+		t.GatewayTxID, t.AuthCode, t.IDChecked, t.IDType).Scan(&created)
 	t.CreatedAt = httpx.TimestampOf(created)
 	if err != nil {
 		return fmt.Errorf("failed to record the tender: %w", mapWriteError(err))
@@ -714,7 +747,7 @@ func (r *PostgresRepository) AddTender(ctx context.Context, t *Tender) error {
 func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) ([]Tender, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, method, ROUND(amount * 100)::bigint, payment_id, reference, card_last4, card_brand, gateway_tx_id,
-			auth_code, created_at
+			auth_code, id_checked, id_type, created_at
 		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, method, id`, saleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the tenders: %w", err)
@@ -726,7 +759,7 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) (
 		var method string
 		var createdAt time.Time
 		if err := rows.Scan(&t.ID, &method, &t.AmountCents, &t.PaymentID, &t.Reference, &t.CardLast4, &t.CardBrand,
-			&t.GatewayTxID, &t.AuthCode, &createdAt); err != nil {
+			&t.GatewayTxID, &t.AuthCode, &t.IDChecked, &t.IDType, &createdAt); err != nil {
 			return nil, err
 		}
 		t.Method = TenderMethod(method)
@@ -749,13 +782,14 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 	var createdAt time.Time
 	err = r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_returns (id, number, register_id, till_session_id, original_transaction_id, customer_id, branch_id,
-			cashier_id, currency, subtotal, tax_amount, total, refund_method, reason, status, credit_memo_id, created_at, updated_at, revision)
+			cashier_id, currency, subtotal, tax_amount, total, refund_method, reason, status, credit_memo_id, restocking_fee,
+			created_at, updated_at, revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric / 100, $11::numeric / 100, $12::numeric / 100, $13, $14,
-			'COMPLETED', $15, NOW(), NOW(), 1)
+			'COMPLETED', $15, $16::numeric / 100, NOW(), NOW(), 1)
 		RETURNING created_at`,
 		ret.ID, ret.Number, ret.RegisterID, ret.TillSessionID, ret.OriginalSaleID, ret.CustomerID, ret.BranchID,
 		ret.CashierID, ret.Currency, int64(ret.SubtotalCents), int64(ret.TaxCents), int64(ret.TotalCents),
-		string(ret.RefundMethod), ret.Reason, ret.CreditMemoID).Scan(&createdAt)
+		string(ret.RefundMethod), ret.Reason, ret.CreditMemoID, int64(ret.RestockingFeeCents)).Scan(&createdAt)
 	ret.CreatedAt = httpx.TimestampOf(createdAt)
 	if err != nil {
 		return fmt.Errorf("failed to record the return: %w", mapWriteError(err))
@@ -771,10 +805,11 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, created_at)
-			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
+				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee, created_at)
+			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11,
+				$15, $16::numeric / 100, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity))
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity), reasonOf(l.ReasonCode), int64(l.RestockingFeeCents))
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
@@ -1488,11 +1523,11 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
 			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
-			refund_method, reason, credit_memo_id, created_at
+			refund_method, reason, credit_memo_id, created_at, ROUND(restocking_fee * 100)::bigint, exchange_sale_id
 		FROM pos_returns WHERE id = $1 AND `+middleware.Wall("", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
 		Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID, &ret.OriginalSaleID,
 			&ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents, &ret.TotalCents,
-			&method, &ret.Reason, &ret.CreditMemoID, &createdAt)
+			&method, &ret.Reason, &ret.CreditMemoID, &createdAt, &ret.RestockingFeeCents, &ret.ExchangeSaleID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("return not found")
 	}
@@ -1503,7 +1538,8 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	ret.RefundMethod = RefundMethod(method)
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, position, product_id, description, ROUND(-quantity * 10000)::bigint, uom,
-			ROUND(unit_price * 10000)::bigint, ROUND(-line_total * 100)::bigint, restock
+			ROUND(unit_price * 10000)::bigint, ROUND(-line_total * 100)::bigint, restock, reason_code,
+			ROUND(restocking_fee * 100)::bigint
 		FROM pos_return_lines WHERE return_id = $1 ORDER BY position, id`, id)
 	if err != nil {
 		return nil, err
@@ -1512,7 +1548,7 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 	for rows.Next() {
 		var l ReturnLine
 		if err := rows.Scan(&l.ID, &l.Position, &l.ProductID, &l.Description, &l.Quantity, &l.UOM, &l.UnitPrice,
-			&l.LineTotal, &l.Restock); err != nil {
+			&l.LineTotal, &l.Restock, &l.ReasonCode, &l.RestockingFeeCents); err != nil {
 			return nil, err
 		}
 		ret.Lines = append(ret.Lines, l)
@@ -1525,7 +1561,7 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
 			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
-			refund_method, reason, credit_memo_id, created_at
+			refund_method, reason, credit_memo_id, created_at, ROUND(restocking_fee * 100)::bigint, exchange_sale_id
 		FROM pos_returns
 		WHERE ($1 = '' OR register_id = $1)
 			AND created_at >= $2 AND created_at < $3
@@ -1543,7 +1579,7 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 		var createdAt time.Time
 		if err := rows.Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID,
 			&ret.OriginalSaleID, &ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents,
-			&ret.TotalCents, &method, &ret.Reason, &ret.CreditMemoID, &createdAt); err != nil {
+			&ret.TotalCents, &method, &ret.Reason, &ret.CreditMemoID, &createdAt, &ret.RestockingFeeCents, &ret.ExchangeSaleID); err != nil {
 			return nil, err
 		}
 		ret.CreatedAt = httpx.TimestampOf(createdAt)
@@ -1928,10 +1964,13 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	var f CustomerFacts
 	var limit *int64
 	err := r.ex(ctx).QueryRow(ctx, `
-		SELECT name, ROUND(credit_limit * 100)::bigint,
-			COALESCE(currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-			COALESCE(po_required, FALSE)
-		FROM customers WHERE id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired)
+		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
+			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
+			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
+			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END
+		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
+		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
+		&f.NamedBuyerRequired, &f.CheckLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}

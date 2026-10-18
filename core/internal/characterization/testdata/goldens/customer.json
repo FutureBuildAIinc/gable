@@ -24,6 +24,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -32,6 +33,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Harness Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -65,6 +67,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -73,6 +76,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Harness Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -112,6 +116,7 @@
             "branch_ids": [
               "<id-1>"
             ],
+            "check_limit_cents": null,
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
@@ -120,6 +125,7 @@
             "id": "<id-2>",
             "is_active": true,
             "name": "Golden Harness Co",
+            "named_buyer_required": false,
             "payment_terms": {
               "code": "NET30",
               "id": "<id-3>",
@@ -142,6 +148,7 @@
             "branch_ids": [
               "<id-5>"
             ],
+            "check_limit_cents": null,
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
@@ -150,6 +157,7 @@
             "id": "<id-6>",
             "is_active": true,
             "name": "Quillfield Formwork Ltd",
+            "named_buyer_required": false,
             "payment_terms": {
               "code": "NET30",
               "id": "<id-3>",
@@ -172,6 +180,7 @@
             "branch_ids": [
               "<id-8>"
             ],
+            "check_limit_cents": null,
             "created_at": "<ts+0d>",
             "credit_limit_cents": 999999,
             "currency": null,
@@ -180,6 +189,7 @@
             "id": "<id-9>",
             "is_active": true,
             "name": "Okanagan DIY Owner",
+            "named_buyer_required": false,
             "payment_terms": {
               "code": "COD",
               "id": "<id-10>",
@@ -219,6 +229,7 @@
             "branch_ids": [
               "<id-1>"
             ],
+            "check_limit_cents": null,
             "created_at": "<ts+0d>",
             "credit_limit_cents": 10000000,
             "currency": null,
@@ -227,6 +238,7 @@
             "id": "<id-2>",
             "is_active": true,
             "name": "Golden Harness Co",
+            "named_buyer_required": false,
             "payment_terms": {
               "code": "NET30",
               "id": "<id-3>",
@@ -585,6 +597,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -593,6 +606,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Harness Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -776,6 +790,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 10000000,
         "currency": null,
@@ -784,6 +799,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Harness Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",

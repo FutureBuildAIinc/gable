@@ -35,13 +35,24 @@ func (h *Handler) RegisterReceiptRoutes(mux *http.ServeMux, guard func(http.Hand
 }
 
 // HandlePrintSaleReceipt is GET /pos/transactions/{id}/receipt: the sale's
-// invoice document, rendered by the documents print route's own function.
+// invoice document, rendered by the documents print route's own function, or
+// the 80mm till receipt with ?layout=thermal80. Each print is counted against
+// the sale: the second and later say REPRINT with their number.
 func (h *Handler) HandlePrintSaleReceipt(w http.ResponseWriter, r *http.Request) {
+	layout, ok := receiptLayout(w, r)
+	if !ok {
+		return
+	}
 	invoiceID, _, ok := h.saleInvoice(w, r)
 	if !ok {
 		return
 	}
-	h.printInvoice(w, r, invoiceID)
+	saleID, err := pathUUID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	h.printSaleReceipt(w, r, saleID, invoiceID, layout)
 }
 
 // HandleEmailSaleReceipt is POST /pos/transactions/{id}/receipt/email: the

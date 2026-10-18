@@ -1850,6 +1850,33 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.allow(t, "bound", "PUT", "/api/v1/pos/transactions/"+f.txnA.String()+"/customer",
 		`{"customer_id":null}`, nil, http.StatusOK)
 
+	// The account standing names a customer in the path, and the counter's
+	// one customer rule holds the pin: the foreign customer is missing, the
+	// pin's own is read. The signature reads the foreign sale through the sale
+	// wall (missing, nothing written) and the exchange refuses a machine key
+	// as a cashier.
+	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/customers/"+f.custB.String()+"/standing", "", nil); sB != http.StatusNotFound {
+		t.Errorf("bound key standing of the foreign customer: %d, want 404", sB)
+	}
+	f.twinLeg("GET", "/api/v1/pos/customers/"+f.custB.String()+"/standing")
+	f.allow(t, "bound", "GET", "/api/v1/pos/customers/"+f.custID.String()+"/standing", "", nil, http.StatusOK)
+	if sB, _ := f.key(t, f.bound, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/signature",
+		`{"signer_name":"Pat","image_png_base64":"iVBORw0KGgo="}`, nil); sB != http.StatusNotFound {
+		t.Errorf("bound key signature on the foreign sale: %d, want 404", sB)
+	}
+	f.twinLeg("POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/signature")
+	for _, tail := range []string{"", "/preview"} {
+		if sB, _ := f.key(t, f.bound, "POST", "/api/v1/pos/exchanges"+tail, fmt.Sprintf(
+			`{"register_id":%q,"original_sale_id":%q,"returned_lines":[{"line_id":%q,"quantity":"1","restock":true}],"sale_lines":[{"product_id":%q,"quantity":"1"}],"reason":"x"}`,
+			f.regA, f.txnB.String(), f.lineB.String(), f.posProd.String()), nil); sB != http.StatusForbidden {
+			// the exchange resolves a cashier like a return does: a machine
+			// key is refused before the foreign sale is read, so nothing is
+			// written either way
+			t.Errorf("bound key exchange%s of the foreign sale: %d, want 403 (a cashier must be a user)", tail, sB)
+		}
+		f.twinLeg("POST", "/api/v1/pos/exchanges"+tail)
+	}
+
 	// The account routes name a customer in the path: the foreign customer is
 	// refused with the audit row, the pin's own answers, and the
 	// reconciliation (every branch's books) is refused outright.

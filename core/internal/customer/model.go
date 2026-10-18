@@ -54,6 +54,13 @@ type Customer struct {
 	PaymentTerms   PaymentTermsRef `json:"payment_terms"`
 	POrequired     bool            `json:"po_required"`
 
+	// NamedBuyerRequired asks every sale on account at the counter to name a
+	// buyer from the contacts flagged as authorized buyers. CheckLimitCents
+	// is the largest check the counter takes from this customer; null defers
+	// to the database wide default.
+	NamedBuyerRequired bool         `json:"named_buyer_required"`
+	CheckLimitCents    *httpx.Cents `json:"check_limit_cents"`
+
 	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`
 	UpdatedAt httpx.Timestamp `json:"updated_at"`
@@ -137,6 +144,12 @@ type Contact struct {
 	IsActive        bool         `json:"is_active"`
 	CanPlaceOrders  bool         `json:"can_place_orders"`
 	OrderLimitCents *httpx.Cents `json:"order_limit_cents"`
+
+	// AuthorizedBuyer puts the contact on the account's buyer roster at the
+	// counter; BuyerSaleCapCents is the most this buyer may put on the
+	// account in one sale (null: no cap of their own).
+	AuthorizedBuyer   bool         `json:"authorized_buyer"`
+	BuyerSaleCapCents *httpx.Cents `json:"buyer_sale_cap_cents"`
 
 	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`

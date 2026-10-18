@@ -294,7 +294,11 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Customer, error) {
 			Email: d.Email, Phone: d.Phone, Address: d.Address,
 			IsActive: d.IsActive, PriceProfileID: d.PriceProfileID, SalespersonID: d.SalespersonID,
 			CreditLimitCents: d.CreditLimitCents, Currency: d.Currency, POrequired: d.POrequired,
-			Revision: 1, CreatedAt: now, UpdatedAt: now,
+			CheckLimitCents: d.CheckLimitCents,
+			Revision:        1, CreatedAt: now, UpdatedAt: now,
+		}
+		if d.NamedBuyerRequired != nil {
+			c.NamedBuyerRequired = *d.NamedBuyerRequired
 		}
 		if d.PaymentTermsID != nil {
 			c.PaymentTermsID = *d.PaymentTermsID
@@ -368,6 +372,13 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 			next.PriceProfileID = d.PriceProfileID
 		}
 		next.CreditLimitCents, next.Currency, next.POrequired = d.CreditLimitCents, d.Currency, d.POrequired
+		// the counter's account controls keep their value when left out
+		if d.NamedBuyerRequired != nil {
+			next.NamedBuyerRequired = *d.NamedBuyerRequired
+		}
+		if d.CheckLimitSet {
+			next.CheckLimitCents = d.CheckLimitCents
+		}
 		if d.PaymentTermsID != nil {
 			next.PaymentTermsID = *d.PaymentTermsID
 		} else {
@@ -486,6 +497,9 @@ func diffCustomer(a, b *Customer) []string {
 	add(!eqStr(a.Currency, b.Currency), "currency")
 	add(a.PaymentTermsID != b.PaymentTermsID, "payment_terms_id")
 	add(a.POrequired != b.POrequired, "po_required")
+	add(a.NamedBuyerRequired != b.NamedBuyerRequired, "named_buyer_required")
+	add((a.CheckLimitCents == nil) != (b.CheckLimitCents == nil) ||
+		(a.CheckLimitCents != nil && *a.CheckLimitCents != *b.CheckLimitCents), "check_limit_cents")
 	return out
 }
 
@@ -637,6 +651,10 @@ func (s *Service) auditControls(ctx context.Context, cur, next *Customer, change
 			changes[field] = map[string]any{"from": cur.PaymentTermsID, "to": next.PaymentTermsID}
 		case "po_required":
 			changes[field] = map[string]any{"from": cur.POrequired, "to": next.POrequired}
+		case "named_buyer_required":
+			changes[field] = map[string]any{"from": cur.NamedBuyerRequired, "to": next.NamedBuyerRequired}
+		case "check_limit_cents":
+			changes[field] = map[string]any{"from": centsPtrValue(cur.CheckLimitCents), "to": centsPtrValue(next.CheckLimitCents)}
 		}
 	}
 	if len(changes) == 0 {
@@ -692,6 +710,10 @@ func headerValue(c *Customer, field string) any {
 		return c.PaymentTermsID
 	case "po_required":
 		return c.POrequired
+	case "named_buyer_required":
+		return c.NamedBuyerRequired
+	case "check_limit_cents":
+		return centsPtrValue(c.CheckLimitCents)
 	}
 	return nil
 }

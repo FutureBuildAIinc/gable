@@ -24,6 +24,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -32,6 +33,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Contacts Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -87,6 +89,8 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "authorized_buyer": false,
+        "buyer_sale_cap_cents": null,
         "can_place_orders": true,
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -122,6 +126,8 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "authorized_buyer": false,
+        "buyer_sale_cap_cents": null,
         "can_place_orders": false,
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -271,6 +277,8 @@
       "body": {
         "items": [
           {
+            "authorized_buyer": false,
+            "buyer_sale_cap_cents": null,
             "can_place_orders": false,
             "created_at": "<ts+0d>",
             "customer_id": "<id-2>",
@@ -288,6 +296,8 @@
             "updated_at": "<ts+0d>"
           },
           {
+            "authorized_buyer": false,
+            "buyer_sale_cap_cents": null,
             "can_place_orders": true,
             "created_at": "<ts+0d>",
             "customer_id": "<id-2>",
@@ -373,6 +383,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "authorized_buyer": false,
+        "buyer_sale_cap_cents": null,
         "can_place_orders": true,
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -488,6 +500,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "authorized_buyer": false,
+        "buyer_sale_cap_cents": null,
         "can_place_orders": true,
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -583,6 +597,8 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "authorized_buyer": false,
+        "buyer_sale_cap_cents": null,
         "can_place_orders": true,
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
@@ -1048,6 +1064,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -1056,6 +1073,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Contacts Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -1095,6 +1113,7 @@
         "branch_ids": [
           "<id-1>"
         ],
+        "check_limit_cents": null,
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -1103,6 +1122,7 @@
         "id": "<id-2>",
         "is_active": true,
         "name": "Golden Contacts Co",
+        "named_buyer_required": false,
         "payment_terms": {
           "code": "NET30",
           "id": "<id-3>",
@@ -1390,6 +1410,8 @@
       "body": {
         "items": [
           {
+            "authorized_buyer": false,
+            "buyer_sale_cap_cents": null,
             "can_place_orders": false,
             "created_at": "<ts+0d>",
             "customer_id": "<id-2>",
