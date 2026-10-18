@@ -12,9 +12,50 @@
  */
 
 export { cn } from './cn.ts';
-export { icon, googleGlyph, microsoftGlyph } from './icons.ts';
+export { icon, googleGlyph, microsoftGlyph, appIcon, type AppIconId } from './icons.ts';
 export { GableBrandLogo } from './brand-logo.ts';
 export { GableThemeToggle } from './theme-toggle.ts';
+export {
+  FRAMED_PARAM,
+  FRAMED_BY_WORK_SHELL,
+  CHROME_ACTION_MESSAGE,
+  CHROME_CONTROLS_MESSAGE,
+  CHROME_TITLE_MESSAGE,
+  FRAME_ACTION_MESSAGE,
+  YARD_CHANGED_MESSAGE,
+  SIGN_OUT_REQUEST_MESSAGE,
+  SIGNED_OUT_MESSAGE,
+  MAX_SIGN_OUT_NONCE_LENGTH,
+  framedFlagFromSearch,
+  readFramedByShell,
+  framedByShell,
+  framedAddress,
+  chromeActionFrom,
+  announceChromeControls,
+  acceptChromeControls,
+  announceChromeTitle,
+  acceptChromeTitle,
+  announceFrameAction,
+  frameActionFrom,
+  announceYardChanged,
+  yardChangedFrom,
+  SWITCH_ROLE_MESSAGE,
+  announceChromeAction,
+  announceSwitchRole,
+  acceptSwitchRole,
+  isFramedWindow,
+  orphanedFrame,
+  announceSignOut,
+  announceSignedOut,
+  signOutRequestFrom,
+  signedOutFrom,
+  listenForHostSignOut,
+  type ChromeAction,
+  type ChromeTitleFeed,
+  type FrameAction,
+  type FramedWindow,
+  type FramedListenWindow,
+} from './framed.ts';
 export {
   currentTheme,
   setTheme,
