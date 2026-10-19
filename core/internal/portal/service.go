@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
@@ -66,15 +67,14 @@ func NewService(
 	productSvc *product.Service,
 ) *Service {
 	return &Service{
-		repo:           repo,
-		jwtSecret:      []byte(jwtSecret),
-		logger:         logger,
-		pricingSvc:     pricingSvc,
-		customerSvc:    customerSvc,
-		inventorySvc:   inventorySvc,
-		orderSvc:       orderSvc,
-		productSvc:     productSvc,
-		paymentGateway: defaultPortalPaymentGateway(),
+		repo:         repo,
+		jwtSecret:    []byte(jwtSecret),
+		logger:       logger,
+		pricingSvc:   pricingSvc,
+		customerSvc:  customerSvc,
+		inventorySvc: inventorySvc,
+		orderSvc:     orderSvc,
+		productSvc:   productSvc,
 	}
 }
 
@@ -143,6 +143,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, er
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		s.logger.Warn("Portal login: invalid password", "email", req.Email)
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	// An Inactive user is refused with the same answer as a bad password; the
+	// bcrypt compare above runs first so the response time does not leak status.
+	if !strings.EqualFold(user.Status, "Active") {
+		s.logger.Warn("Portal login: user is not active", "email", req.Email)
 		return nil, fmt.Errorf("invalid credentials")
 	}
 

@@ -1008,6 +1008,18 @@ func Run() {
 		WithAccountService(accountSvc).
 		WithInvoiceService(invoiceSvc).
 		WithDocumentService(docSvc)
+	// Online payment gateway: the Run Payments dynamic gateway when it was
+	// built, the stub only in dev mode, and none otherwise so the portal's
+	// pay routes fail closed with 503 instead of settling through a stub.
+	switch {
+	case rpGateway != nil:
+		portalSvc.WithPaymentGateway(rpGateway)
+	case strings.EqualFold(cfg.AuthMode, "dev"):
+		logger.Warn("AUTH_MODE=dev: portal online payment wired to the stub gateway")
+		portalSvc.WithPaymentGateway(portal.NewStubPaymentGateway())
+	default:
+		logger.Warn("no payment gateway configured: portal online payment is disabled (503)")
+	}
 	portalHandler := portal.NewHandler(portalSvc).
 		WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 

@@ -33,22 +33,30 @@ func NewStubPaymentGateway() payment.PaymentGateway {
 	return &stubPaymentGateway{}
 }
 
-func defaultPortalPaymentGateway() payment.PaymentGateway {
-	return NewStubPaymentGateway()
-}
-
-// WithPaymentGateway overrides the portal's PaymentGateway (for tests or
-// custom stub wiring).
+// WithPaymentGateway wires the portal's PaymentGateway. There is no default:
+// a service built without one fails closed on online payment with
+// ErrPaymentGatewayNotConfigured (serve.go wires the Run Payments gateway, or
+// the stub in dev mode).
 func (s *Service) WithPaymentGateway(gw payment.PaymentGateway) *Service {
 	s.paymentGateway = gw
 	return s
 }
 
+// gateway returns the wired PaymentGateway, or nil when none is configured.
 func (s *Service) gateway() payment.PaymentGateway {
 	if gw, ok := s.paymentGateway.(payment.PaymentGateway); ok && gw != nil {
 		return gw
 	}
-	return NewStubPaymentGateway()
+	return nil
+}
+
+// gatewayName is the gateway label persisted on saved payment methods and
+// payment intents, so a live gateway is no longer recorded as 'stub'.
+func (s *Service) gatewayName() string {
+	if _, ok := s.gateway().(*stubPaymentGateway); ok {
+		return "stub"
+	}
+	return "run_payments"
 }
 
 func (g *stubPaymentGateway) Charge(_ context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
@@ -282,6 +290,9 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 	if err := validateGatewayToken(req.GatewayToken); err != nil {
 		return nil, err
 	}
+	if s.gateway() == nil {
+		return nil, ErrPaymentGatewayNotConfigured
+	}
 	last4 := strings.TrimSpace(req.Last4)
 	if len(last4) < 1 || len(last4) > 4 {
 		return nil, fmt.Errorf("%w: last4 must be 1 to 4 characters", ErrInvalidRequest)
@@ -330,10 +341,10 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 			INSERT INTO portal_payment_methods (
 				customer_id, created_by, gateway, gateway_token, method_type,
 				brand, last4, exp_month, exp_year, is_default, status
-			) VALUES ($1, $2, 'stub', $3, $4, $5, $6, $7, $8, $9, 'ACTIVE')
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE')
 			RETURNING id, customer_id, gateway, method_type, COALESCE(brand, ''), last4,
 			          exp_month, exp_year, is_default, status, created_at
-		`, customerID, creator, strings.TrimSpace(req.GatewayToken), mType,
+		`, customerID, creator, s.gatewayName(), strings.TrimSpace(req.GatewayToken), mType,
 			strings.TrimSpace(req.Brand), last4, req.ExpMonth, req.ExpYear, makeDefault).Scan(
 			&out.ID, &out.CustomerID, &out.Gateway, &out.MethodType,
 			&out.Brand, &out.Last4, &out.ExpMonth, &out.ExpYear,
@@ -438,6 +449,9 @@ func computePaymentIntentKey(customerID uuid.UUID, invoiceIDs []uuid.UUID, metho
 // portal_payment_intents so concurrent retries or unknown gateway outcomes
 // never charge twice.
 func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor string, rawBody []byte, req CreatePortalPaymentRequest) (*PortalPaymentDTO, bool, error) {
+	if s.gateway() == nil {
+		return nil, false, ErrPaymentGatewayNotConfigured
+	}
 	if err := rejectRawCardOrBankJSON(rawBody); err != nil {
 		return nil, false, err
 	}
@@ -630,14 +644,14 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 		err = txExec.QueryRow(txCtx, `
 			INSERT INTO portal_payment_intents (
 				idempotency_key, customer_id, amount_cents, invoice_ids, status, gateway, attempts
-			) VALUES ($1, $2, $3, $4, 'CHARGING', 'stub', 1)
+			) VALUES ($1, $2, $3, $4, 'CHARGING', $5, 1)
 			ON CONFLICT (idempotency_key) DO UPDATE
 			SET status = 'CHARGING',
 			    attempts = portal_payment_intents.attempts + 1,
 			    updated_at = NOW()
 			WHERE portal_payment_intents.status IN ('FAILED', 'ABANDONED')
 			RETURNING id
-		`, idemKey, customerID, totalCents, req.InvoiceIDs).Scan(&intentID)
+		`, idemKey, customerID, totalCents, req.InvoiceIDs, s.gatewayName()).Scan(&intentID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrPaymentInFlight
 		}
