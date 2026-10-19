@@ -37,6 +37,7 @@ func (q quoteOrders) PlaceOrder(ctx context.Context, p customerquote.OrderPlacem
 		if l.DealerQuoteUnitCost != nil {
 			up := httpx.Price(*l.DealerQuoteUnitCost)
 			pl.UnitPrice = &up
+			pl.PriceUOM = l.DealerQuotePriceUOM
 			pl.OverrideReason = "dealer quote"
 		}
 		lines = append(lines, pl)

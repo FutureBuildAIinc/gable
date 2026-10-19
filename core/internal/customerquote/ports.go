@@ -25,6 +25,10 @@ type CatalogItem struct {
 	UOM                    string
 	CategoryID             *uuid.UUID
 	UnitCostTenThousandths int64
+	// CostCents is the line's extended cost at the asked quantity, exact
+	// through the price's conversion pair, rounded once. Nil when the source
+	// priced in the sale unit itself; the caller then extends the unit cost.
+	CostCents *int64
 }
 
 // SourceQuoteLine is a line of the dealer's own quote to the contractor.
@@ -38,6 +42,10 @@ type SourceQuoteLine struct {
 	Quantity               httpx.Quantity
 	UnitCostTenThousandths int64
 	LineTotalCents         int64
+	// UnitPriceTenThousandths and PriceUOM are the dealer quote line's own
+	// price and the unit it is per (empty PriceUOM: the line's own unit).
+	UnitPriceTenThousandths int64
+	PriceUOM                string
 }
 
 // SourceQuote is the dealer's quote the contractor builds from.
@@ -65,6 +73,9 @@ type OrderLine struct {
 	Quantity            httpx.Quantity
 	UOM                 string
 	DealerQuoteUnitCost *int64
+	// DealerQuotePriceUOM is the unit the dealer quote's unit cost is per;
+	// empty takes the line's own unit.
+	DealerQuotePriceUOM string
 }
 
 // OrderPlacement is what a confirmation asks the dealer's order path for.
