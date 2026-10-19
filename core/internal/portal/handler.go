@@ -149,37 +149,58 @@ func (h *Handler) WithEmailPasswordGuard(fn func(ctx context.Context) bool) *Han
 	return h
 }
 
-// withLiveSessionUser wraps the auth middleware with a live re-read of the
-// caller's customer_users row. After the token is validated, the row's role
-// and status win over the claims frozen at sign in: a user whose row is
-// missing or no longer Active is refused with 401, and a demoted user's
-// capabilities shrink on the very next request. Requests that carry no user
-// id (synthetic claims in tests, the dev bypass) pass through unchanged.
+// liveSessionVerifiedCtxKey marks a request whose customer_users row has
+// already been re-read on this request, so the middleware is idempotent when
+// a caller wires LiveUserMiddleware into a shared chain and RegisterRoutes
+// wraps that chain again: the second pass passes through without a second
+// database read.
+type liveSessionVerifiedCtxKey struct{}
+
+// LiveUserMiddleware re-reads the caller's customer_users row after the
+// portal auth middleware has validated the token. The row's role and status
+// win over the claims frozen at sign in: a user whose row is missing or no
+// longer Active is refused with 401, and a demoted user's capabilities
+// shrink on the very next request. Requests that carry no user id (synthetic
+// claims in tests, the dev bypass) pass through unchanged. serve.go wires
+// this on the shared portal chain so every portal route set (portal,
+// project, customer quotes) enforces it, ahead of the idempotency layer.
+func (h *Handler) LiveUserMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ok, _ := r.Context().Value(liveSessionVerifiedCtxKey{}).(bool); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		claims := portalClaims(r)
+		if claims == nil {
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
+			return
+		}
+		if claims.CustomerUserID == uuid.Nil || h.svc == nil || h.svc.repo == nil {
+			ctx := context.WithValue(r.Context(), liveSessionVerifiedCtxKey{}, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		user, err := h.svc.repo.GetCustomerUserByID(r.Context(), claims.CustomerUserID, claims.CustomerID)
+		if err != nil || user == nil || !strings.EqualFold(user.Status, "Active") {
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
+			return
+		}
+		liveClaims := *claims
+		liveClaims.Role = user.Role
+		liveClaims.Email = user.Email
+		liveClaims.Name = user.Name
+		ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, &liveClaims)
+		ctx = context.WithValue(ctx, liveSessionVerifiedCtxKey{}, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// withLiveSessionUser wraps the auth middleware with the live re-read above.
+// It is idempotent: when the chain the caller passes in already ran
+// LiveUserMiddleware, its context marker short-circuits the inner pass.
 func (h *Handler) withLiveSessionUser(authMw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims := portalClaims(r)
-			if claims == nil {
-				httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
-				return
-			}
-			if claims.CustomerUserID == uuid.Nil || h.svc == nil || h.svc.repo == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			user, err := h.svc.repo.GetCustomerUserByID(r.Context(), claims.CustomerUserID, claims.CustomerID)
-			if err != nil || user == nil || !strings.EqualFold(user.Status, "Active") {
-				httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
-				return
-			}
-			liveClaims := *claims
-			liveClaims.Role = user.Role
-			liveClaims.Email = user.Email
-			liveClaims.Name = user.Name
-			ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, &liveClaims)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-		return authMw(inner)
+		return authMw(h.LiveUserMiddleware(next))
 	}
 }
 

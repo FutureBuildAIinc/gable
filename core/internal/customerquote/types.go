@@ -5,6 +5,7 @@ package customerquote
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -307,15 +308,21 @@ type Capabilities interface {
 	Has(a Actor, c Capability) bool
 }
 
-// RoleCapabilities is the rule at this base: the Admin and Buyer roles hold
-// both capabilities, View-Only holds neither.
+// RoleCapabilities is the rule at this base: the roles migration 130 moved
+// the portal onto (owner, admin, estimator, purchaser, accounting, viewer,
+// site_super) decide, case insensitively. owner, admin, estimator and
+// purchaser hold both capabilities, accounting sees money only, and viewer
+// and site_super hold neither. The pre migration names Admin and Buyer
+// still resolve so existing callers keep working.
 type RoleCapabilities struct{}
 
 // Has implements Capabilities.
 func (RoleCapabilities) Has(a Actor, c Capability) bool {
-	switch a.Role {
-	case "Admin", "Buyer":
+	switch strings.ToLower(strings.TrimSpace(a.Role)) {
+	case "owner", "admin", "estimator", "purchaser", "buyer":
 		return c == CapQuoteCustomers || c == CapSeeMoney
+	case "accounting":
+		return c == CapSeeMoney
 	}
 	return false
 }

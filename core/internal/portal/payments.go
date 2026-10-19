@@ -42,8 +42,20 @@ func (s *Service) WithPaymentGateway(gw payment.PaymentGateway) *Service {
 	return s
 }
 
+// WithPaymentGatewayResolver wires a dynamic resolver that returns the active
+// PaymentGateway per call, or nil when no gateway is configured. When set it
+// takes precedence over a static WithPaymentGateway wiring, because the Run
+// Payments keys are runtime settable and the decision cannot be made at boot.
+func (s *Service) WithPaymentGatewayResolver(fn func() payment.PaymentGateway) *Service {
+	s.paymentGatewayResolver = fn
+	return s
+}
+
 // gateway returns the wired PaymentGateway, or nil when none is configured.
 func (s *Service) gateway() payment.PaymentGateway {
+	if s.paymentGatewayResolver != nil {
+		return s.paymentGatewayResolver()
+	}
 	if gw, ok := s.paymentGateway.(payment.PaymentGateway); ok && gw != nil {
 		return gw
 	}

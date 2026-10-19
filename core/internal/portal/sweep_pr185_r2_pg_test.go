@@ -111,8 +111,8 @@ func sweepR2ChainMux(f *proFixture, userID uuid.UUID) *http.ServeMux {
 
 // TestSweepPR185R2_P2_2_LiveSessionEnforcedAcrossAllPortalRouteSets proves
 // the project and customer quote routes resolve identity from the database on
-// every request: an owner keeps them, a demotion to viewer takes the customer
-// quote routes away immediately despite the token's role claim, and a
+// every request: an owner keeps them, a demotion to site_super takes the
+// customer quote routes away immediately despite the token's role claim, and a
 // deactivation revokes every route set including a replay of the caller's own
 // earlier idempotent write.
 func TestSweepPR185R2_P2_2_LiveSessionEnforcedAcrossAllPortalRouteSets(t *testing.T) {
@@ -142,11 +142,12 @@ func TestSweepPR185R2_P2_2_LiveSessionEnforcedAcrossAllPortalRouteSets(t *testin
 		t.Fatalf("owner POST /projects answered %d, want 201: %s", rec.Code, rec.Body.String())
 	}
 
-	// Demote the row to viewer; the token still says owner.
-	sweepExec(t, f, `UPDATE customer_users SET role = 'viewer' WHERE id = $1`, owner)
+	// Demote the row to site_super (a role the customer quote capabilities
+	// deny); the token still says owner.
+	sweepExec(t, f, `UPDATE customer_users SET role = 'site_super' WHERE id = $1`, owner)
 	rec = sweepCall(mux, http.MethodGet, "/api/portal/v1/customer-quotes", "", "")
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("GET /customer-quotes after demotion to viewer answered %d, want 403: %s", rec.Code, rec.Body.String())
+		t.Fatalf("GET /customer-quotes after demotion to site_super answered %d, want 403: %s", rec.Code, rec.Body.String())
 	}
 
 	// Deactivate the row; every route set refuses, and the earlier

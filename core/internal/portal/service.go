@@ -17,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -52,6 +53,11 @@ type Service struct {
 	invoiceSvc     *invoice.Service
 	docSvc         *document.Service
 	paymentGateway any
+
+	// paymentGatewayResolver, when wired, decides per call which gateway is
+	// active (Run Payments when its keys are configured, the dev stub in
+	// dev mode, none otherwise); see payments.go.
+	paymentGatewayResolver func() payment.PaymentGateway
 }
 
 // NewService creates a new portal service.
