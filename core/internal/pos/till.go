@@ -41,12 +41,16 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 	return expected
 }
 
-// overShortTotal sums counted less expected across the methods that were
-// counted. Methods not counted are skipped (a dealer may only count cash).
+// overShortTotal is the drawer's variance: counted less expected over the
+// methods that are money in the drawer, CASH and CHECK. CARD never joins the
+// sum (cards are not counted into the drawer), so a card figure can never
+// offset a cash or check shortage (CP-08).
 func overShortTotal(expected, counted map[string]int64) int64 {
-	var total int64
-	for method, c := range counted {
-		total += c - expected[method]
+	total := counted["CASH"] - expected["CASH"]
+	if _, ok := counted["CHECK"]; ok {
+		total += counted["CHECK"] - expected["CHECK"]
+	} else if expected["CHECK"] != 0 {
+		total -= expected["CHECK"]
 	}
 	return total
 }
@@ -208,6 +212,31 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 						strings.Join(ids, ", ")))
 			}
 		}
+		// The count is complete and honest before anything is computed (CP-08):
+		// cash is always counted, checks are counted when checks were tendered,
+		// and a card figure, informational and not money in the drawer, is
+		// refused unless it names exactly what the session collected (so it can
+		// never hide or offset a drawer variance).
+		if _, hasCash := countedByMethod[string(TenderCash)]; !hasCash {
+			return httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "counted_by_method.cash", Message: "is required: cash in the drawer must be counted"})
+		}
+		if report.ExpectedByMethod[string(TenderCheck)] > 0 {
+			if _, hasCheck := countedByMethod[string(TenderCheck)]; !hasCheck {
+				return httpx.BadRequest("one or more fields failed validation",
+					httpx.FieldError{Field: "counted_by_method.check", Message: "is required when checks were tendered in the session"})
+			}
+		}
+		if cardCounted, hasCard := countedByMethod[string(TenderCard)]; hasCard {
+			if report.ExpectedByMethod[string(TenderCard)] == 0 {
+				return httpx.BadRequest("one or more fields failed validation",
+					httpx.FieldError{Field: "counted_by_method.card", Message: "no card tenders were collected in this session"})
+			}
+			if cardCounted != report.ExpectedByMethod[string(TenderCard)] {
+				return httpx.BadRequest("one or more fields failed validation",
+					httpx.FieldError{Field: "counted_by_method.card", Message: "must equal the card the session collected: cards are not money in the drawer"})
+			}
+		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
 		// A count whose over or short passes the branch's variance threshold
 		// is held for a manager (CP-08): the drawer is counted and out of
@@ -217,7 +246,21 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		if err != nil {
 			return err
 		}
+		// The hold is per method as well as on the net: a shortage on cash
+		// offset by an overage on checks is still a variance a manager must
+		// sign off, never a clean net close (CP-08).
 		hold := thresholdSet && abs64(overShort) > threshold
+		if thresholdSet {
+			for _, m := range []string{string(TenderCash), string(TenderCheck)} {
+				exp := report.ExpectedByMethod[m]
+				cnt, ok := countedByMethod[m]
+				if ok || exp != 0 {
+					if abs64(cnt-exp) > threshold {
+						hold = true
+					}
+				}
+			}
+		}
 		now := time.Now()
 		session := report.Session
 		session.Status = TillClosed

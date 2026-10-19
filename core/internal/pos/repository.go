@@ -93,6 +93,9 @@ type Repository interface {
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
 	// The till's movements (CP-08).
 	CreateTillMovement(ctx context.Context, m *TillMovement) error
+	// A pickup's taker confirms under their own login (CP-08, PR 178 sweep).
+	RecordPickupApproval(ctx context.Context, sessionID uuid.UUID, amountCents int64, takenBy string) error
+	ConsumePickupApproval(ctx context.Context, sessionID uuid.UUID, amountCents int64, taker string) (string, bool, error)
 	ListTillMovements(ctx context.Context, sessionID uuid.UUID) ([]TillMovement, error)
 	ListTillMovementsPage(ctx context.Context, sessionID uuid.UUID, after *time.Time, afterID *uuid.UUID, limit int) ([]TillMovement, bool, error)
 	TillMovementTotals(ctx context.Context, sessionID uuid.UUID) (map[string]int64, error)

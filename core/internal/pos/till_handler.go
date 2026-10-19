@@ -89,9 +89,21 @@ func (h *Handler) CreateMovement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	m, err := h.service.RecordMovement(r.Context(), id, in, actorFrom(r))
+	m, confirmed, err := h.service.RecordMovement(r.Context(), id, in, actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
+		return
+	}
+	if confirmed {
+		// the taker's own confirmation of a pickup: nothing moved yet, the
+		// cashier's record of it is the movement
+		takenBy := ""
+		if m.TakenBy != nil {
+			takenBy = *m.TakenBy
+		}
+		w.Header().Set("Location", "/api/v1/pos/till/"+id.String()+"/movements")
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status": "pending_pickup_confirmation", "taken_by": takenBy, "amount_cents": int64(m.AmountCents)})
 		return
 	}
 	w.Header().Set("Location", "/api/v1/pos/till/"+id.String()+"/movements")

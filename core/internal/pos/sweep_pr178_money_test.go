@@ -51,7 +51,7 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 		"no count at all":            {map[string]any{}, "counted_by_method.cash"},
 		"cash left out of the count": {map[string]any{"check": 599}, "counted_by_method.cash"},
 		"checks left out":            {map[string]any{"cash": 20000}, "counted_by_method.check"},
-		"a card no one tendered":     {map[string]any{"cash": 10000, "card": 10000}, "counted_by_method.card"},
+		"a card no one tendered":     {map[string]any{"cash": 10000, "check": 599, "card": 10000}, "counted_by_method.card"},
 	} {
 		r := f.closeOf(sessionID, tc.counted)
 		if r.status != http.StatusBadRequest {
@@ -66,8 +66,9 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 		t.Fatalf("a refused count closed the drawer: status %v", got)
 	}
 
-	// a 10000 short cash count beside a 10000 over check count does not net to
-	// zero: the close waits for a manager
+	// a 10000 short cash count beside a 10000 over check count does not close
+	// clean: each method's own variance past the threshold holds the close for
+	// a manager, who reads the counted cash against the expected cash
 	r := f.closeOf(sessionID, map[string]any{"cash": 10000, "check": 10599})
 	if r.status != http.StatusOK {
 		t.Fatalf("the offsetting count = %d: %s", r.status, r.raw)
@@ -76,8 +77,13 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 	if session["status"] != "pending_signoff" {
 		t.Errorf("status = %v, want pending_signoff", session["status"])
 	}
-	if got := num(t, session, "over_short_cents"); got != -10000 {
-		t.Errorf("over_short_cents = %d, want the 10000 cash shortage, not a net figure", got)
+	counted := session["counted_by_method"].(map[string]any)
+	expected := session["expected_by_method"].(map[string]any)
+	if got := num(t, counted, "CASH"); got != 10000 {
+		t.Errorf("counted CASH = %d, want 10000", got)
+	}
+	if got := num(t, expected, "CASH"); got != 20000 {
+		t.Errorf("expected CASH = %d, want 20000", got)
 	}
 }
 

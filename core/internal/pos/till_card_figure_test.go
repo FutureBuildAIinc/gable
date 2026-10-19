@@ -141,7 +141,7 @@ func TestTheTillReportCarriesNoCardFigureForACashOnlySession(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	sessionID := f.openTill(10000)
 	f.saleOf("1", tender("cash", 599))
-	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusOK {
 		t.Fatalf("the till report = %d: %s", r.status, r.raw)
 	}

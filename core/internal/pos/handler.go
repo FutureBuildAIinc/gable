@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -717,6 +718,16 @@ func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	// The close is blind (CP-08): while the drawer is open a cashier reads the
+	// live report without the expected drawer target, so the count cannot be
+	// written to match it. A manager (or any caller past the close, when the
+	// count is already recorded) reads the figures in full.
+	if report.Session.Status == TillOpen {
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && strings.EqualFold(claims.Role, "cashier") {
+			report.ExpectedByMethod = map[string]int64{}
+			report.Session.ExpectedByMethod = map[string]int64{}
+		}
 	}
 	writeJSON(w, http.StatusOK, report)
 }

@@ -82,7 +82,7 @@ func TestTheCloseRefusesWhileAVoidIsParkedAtTheGateway(t *testing.T) {
 	}
 	// the void completed: the drawer closes over it
 	r = f.do("POST", "/api/v1/pos/till/"+sessionID+"/close",
-		map[string]any{"counted_by_method": map[string]any{"cash": 0, "card": 599}},
+		map[string]any{"counted_by_method": map[string]any{"cash": 0}},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusOK {
 		t.Fatalf("the close after the void completed = %d: %s", r.status, r.raw)

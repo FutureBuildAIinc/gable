@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -56,6 +57,41 @@ func (r *PostgresRepository) CreateTillMovement(ctx context.Context, m *TillMove
 	}
 	m.CreatedAt = httpx.TimestampOf(created)
 	return nil
+}
+
+// RecordPickupApproval writes the signed-in taker's own confirmation of a
+// pickup: an unconsumed row the cashier's later record consumes. Nothing
+// moves and nothing posts; the cash is still in the drawer.
+func (r *PostgresRepository) RecordPickupApproval(ctx context.Context, sessionID uuid.UUID, amountCents int64, takenBy string) error {
+	if _, err := r.ex(ctx).Exec(ctx, `
+		INSERT INTO till_pickup_approvals (till_session_id, amount_cents, taken_by) VALUES ($1, $2, $3)`,
+		sessionID, amountCents, takenBy); err != nil {
+		return fmt.Errorf("failed to record the pickup approval: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// ConsumePickupApproval takes the unconsumed confirmation of this session,
+// amount and taker, and answers the taker's authenticated subject. Nothing
+// waits when no such row exists (found false): the cashier cannot record the
+// pickup alone.
+func (r *PostgresRepository) ConsumePickupApproval(ctx context.Context, sessionID uuid.UUID, amountCents int64, taker string) (string, bool, error) {
+	var approved string
+	err := r.ex(ctx).QueryRow(ctx, `
+		UPDATE till_pickup_approvals SET consumed_at = NOW()
+		WHERE id = (
+			SELECT id FROM till_pickup_approvals
+			WHERE till_session_id = $1 AND amount_cents = $2 AND LOWER(taken_by) = LOWER($3) AND consumed_at IS NULL
+			ORDER BY created_at
+			LIMIT 1)
+		RETURNING taken_by`, sessionID, amountCents, taker).Scan(&approved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("failed to consume the pickup approval: %w", err)
+	}
+	return approved, true, nil
 }
 
 // ListTillMovements reads every movement of a session, oldest first, through

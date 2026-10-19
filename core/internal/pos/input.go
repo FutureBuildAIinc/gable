@@ -428,6 +428,11 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 			counted[string(method)] = n
 		}
 	}
+	// the drawer is counted blind and whole (CP-08): a close without a cash
+	// count would carry no variance at all, so the count never starts
+	if _, hasCash := counted[string(TenderCash)]; !hasCash {
+		v.Check(false, "counted_by_method.cash", "is required: cash in the drawer must be counted")
+	}
 	if err := v.Err(); err != nil {
 		return nil, "", err
 	}

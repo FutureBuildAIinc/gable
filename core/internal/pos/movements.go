@@ -142,11 +142,19 @@ func movementLegs(m *TillMovement) []gl.Leg {
 // till session: the row, its journal entry, the audit row and the event in
 // one transaction. The session is held FOR SHARE against the close's FOR
 // UPDATE, so a movement lands in the count or is refused, never after it.
-func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in MovementIn, actor string) (*TillMovement, error) {
+//
+// A pickup is different (CP-08, PR 178 sweep P2-2): the taker, a second
+// signed-in person, confirms under their own subject first (confirmed true,
+// nothing moves yet), and the cashier's later record of that confirmed
+// session, amount and taker is the movement: its stored taken_by is the
+// taker's authenticated subject, never a name the cashier typed. A cashier
+// recording a pickup no taker confirmed is refused and nothing is written.
+func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in MovementIn, actor string) (*TillMovement, bool, error) {
 	if err := s.holdTillBranch(ctx, sessionID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out *TillMovement
+	var confirmed bool
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockTillSession(ctx, sessionID, false); err != nil {
 			return err
@@ -162,12 +170,37 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 		if session.BranchID == nil {
 			return conflict("register_without_branch", "the session's register belongs to no branch")
 		}
+		takenBy := ""
 		if in.Kind == MovementPickup {
 			taker := strings.TrimSpace(in.TakenBy)
-			if strings.EqualFold(taker, actor) || strings.EqualFold(taker, session.CashierID.String()) {
+			cashier := session.CashierID.String()
+			if actor == "" || taker == "" || strings.EqualFold(taker, cashier) {
 				return conflict("pickup_needs_second_person",
 					"a pickup is cash taken by a second person: the cashier cannot take it alone")
 			}
+			if strings.EqualFold(actor, taker) {
+				// the signed-in taker confirms taking the cash: the approval
+				// waits, unconsumed, for the cashier's record
+				if err := s.repo.RecordPickupApproval(ctx, sessionID, int64(in.AmountCents), actor); err != nil {
+					return err
+				}
+				taker = actor
+				out = &TillMovement{TillSessionID: sessionID, RegisterID: session.RegisterID, BranchID: *session.BranchID,
+					Kind: in.Kind, AmountCents: in.AmountCents, Actor: actor, TakenBy: &taker}
+				confirmed = true
+				return nil
+			}
+			// the cashier (or anyone) records it: only the taker's own
+			// confirmation of this session and amount lets the cash go
+			approved, ok, err := s.repo.ConsumePickupApproval(ctx, sessionID, int64(in.AmountCents), taker)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return conflict("pickup_needs_second_person",
+					"a pickup is cash taken by a second signed-in person: the taker must confirm the pickup under their own login before the movement is recorded")
+			}
+			takenBy = approved
 		}
 		m := &TillMovement{ID: uuid.New(), TillSessionID: sessionID, RegisterID: session.RegisterID,
 			BranchID: *session.BranchID, Kind: in.Kind, AmountCents: in.AmountCents, Note: strings.TrimSpace(in.Note), Actor: actor}
@@ -176,8 +209,7 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 			m.ReasonCode = &code
 		}
 		if in.Kind == MovementPickup {
-			taker := strings.TrimSpace(in.TakenBy)
-			m.TakenBy = &taker
+			m.TakenBy = &takenBy
 		}
 		if s.ledger != nil {
 			day, err := s.repo.BranchToday(ctx, m.BranchID)
@@ -224,9 +256,9 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return out, nil
+	return out, confirmed, nil
 }
 
 // actorOrSystem names the poster on the ledger line: the person, or the

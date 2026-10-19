@@ -292,6 +292,7 @@ func (f *fixture) cleanup() {
 	// the entries the drawer's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
 	exec(`DELETE FROM till_movements`)
+	exec(`DELETE FROM till_pickup_approvals`)
 	exec(`DELETE FROM till_day_closes`)
 	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
 	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE gl_entry_id IS NOT NULL`)
