@@ -2029,11 +2029,11 @@ func TestWire_VoidReversalKeepsTheEntryCurrency(t *testing.T) {
 }
 
 // RULE (review r4 P3-1, the race r3 P3-1 read): an AP void racing a GL
-// reverse of the linked entry must never answer 500. Whichever side loses
-// the insert meets the one reversal index (ux_gl_entry_single_reversal), and
-// that loss maps to the same 409 reversal_not_posted as the belt, with
-// nothing written: every round leaves exactly one reversal of the entry, the
-// bill either voided or still voidable, and the tie holding.
+// reverse of the linked entry must never answer 500. The GL reverse route
+// refuses subledger-owned VENDOR_INVOICE entries outright (400, never a 500
+// whatever the void does beside it), so the AP void wins every round: each
+// round leaves exactly one reversal of the entry (the void's), the bill
+// voided, and the tie holding.
 func TestWire_VoidReverseRaceNever500(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -2046,33 +2046,25 @@ func TestWire_VoidReverseRaceNever500(t *testing.T) {
 		apRes, glRes := make(chan resp, 1), make(chan resp, 1)
 		start := make(chan struct{})
 		go func() { <-start; apRes <- f.void(id, 2, "race round") }()
-		go func() { <-start; glRes <- f.glReverse(entry) }()
+		// The route is called directly here, never through f.glReverse: its
+		// SQL fallback calls t.Fatal, which a goroutine must never do.
+		go func() {
+			<-start
+			glRes <- f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "race round"})
+		}()
 		close(start)
 		ap, gl := <-apRes, <-glRes
-		if ap.status >= 500 {
-			t.Errorf("round %d: the AP void answered %d in the race: %s", round, ap.status, ap.raw)
+		if gl.status != http.StatusBadRequest {
+			t.Errorf("round %d: the GL reverse answered %d in the race, want 400 refusing the subledger-owned entry: %s", round, gl.status, gl.raw)
 		}
-		if gl.status >= 500 {
-			t.Errorf("round %d: the GL reverse answered %d in the race: %s", round, gl.status, gl.raw)
+		if ap.status != http.StatusOK {
+			t.Errorf("round %d: the AP void answered %d, want 200 winning every round: %s", round, ap.status, ap.raw)
 		}
 		if n := f.count(`SELECT count(*) FROM gl_journal_entries WHERE reverses_entry_id = $1`, entry); n != 1 {
-			t.Fatalf("round %d: %d reversals of the entry stand, want exactly one winner", round, n)
+			t.Fatalf("round %d: %d reversals of the entry stand, want exactly the void's one", round, n)
 		}
-		if voided := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id); voided == 0 {
-			// The GL side won the reversal: the void refused (or landed too
-			// late to reverse anything), and its retry must now void with
-			// nothing to reverse, closing the gap the GL act made.
-			if ap.status != http.StatusConflict && ap.status != http.StatusOK {
-				t.Errorf("round %d: the AP void answered %d with the bill not voided: %s", round, ap.status, ap.raw)
-			}
-			before := f.count(`SELECT count(*) FROM gl_journal_entries`)
-			retry := f.void(id, 2, "race round retry")
-			if retry.status != http.StatusOK {
-				t.Errorf("round %d: the retry void after the GL reversal = %d, want 200: %s", round, retry.status, retry.raw)
-			}
-			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
-				t.Errorf("round %d: %d entries were written by the retry void with nothing to reverse", round, after-before)
-			}
+		if voided := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id); voided != 1 {
+			t.Fatalf("round %d: %d voided bills stand, want 1", round, voided)
 		}
 		if !f.balanced() {
 			t.Errorf("round %d: an entry does not balance after the race", round)

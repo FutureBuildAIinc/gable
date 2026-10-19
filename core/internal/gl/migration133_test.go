@@ -171,11 +171,11 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	// stamped by 125's backfill, the payment application's DR 2200 / CR
 	// 1020 entry whole on the invoice's branch, and no transfer entry for
 	// the memo application.
-	entry := func(source string, ref uuid.UUID, lines [][3]any) uuid.UUID {
+	entryDesc := func(source string, ref uuid.UUID, memo, desc string, reverses *uuid.UUID, lines [][4]any) uuid.UUID {
 		t.Helper()
 		id := uuid.New()
-		if _, err := base.Exec(ctx, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, currency)
-			VALUES ($1, CURRENT_DATE, 'm133 mig', $2, $3, $4, 'POSTED', 't', 'USD')`, id, source, ref, other); err != nil {
+		if _, err := base.Exec(ctx, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, branch_id, status, posted_by, currency, reverses_entry_id)
+			VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, 'POSTED', 't', 'USD', $6)`, id, memo, source, ref, other, reverses); err != nil {
 			t.Fatalf("seed entry %s: %v", source, err)
 		}
 		for _, l := range lines {
@@ -184,16 +184,42 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := base.Exec(ctx, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit, branch_id)
-				VALUES ($1, $2, $3, 'm133', $4, $5, $6)`, uuid.New(), id, lineID, l[1], l[2], other); err != nil {
+				VALUES ($1, $2, $3, $4, $5, $6, $7)`, uuid.New(), id, lineID, desc, l[1], l[2], l[3]); err != nil {
 				t.Fatalf("seed line: %v", err)
 			}
 		}
 		return id
 	}
-	_ = entry("INVOICE", invCM, [][3]any{{"1020", 100.00, 0}, {"4010", 0, 100.00}})
-	_ = entry("INVOICE", invPay, [][3]any{{"1020", 150.00, 0}, {"4010", 0, 150.00}})
-	_ = entry("CREDIT_MEMO", cm, [][3]any{{"4010", 100.00, 0}, {"1020", 0, 100.00}})
-	payEntry := entry("PAYMENT", payApp, [][3]any{{"2200", 150.00, 0}, {"1020", 0, 150.00}})
+	entry := func(source string, ref uuid.UUID, lines [][4]any) uuid.UUID {
+		t.Helper()
+		return entryDesc(source, ref, "m133 mig", "m133", nil, lines)
+	}
+	_ = entry("INVOICE", invCM, [][4]any{{"1020", 100.00, 0, other}, {"4010", 0, 100.00, other}})
+	_ = entry("INVOICE", invPay, [][4]any{{"1020", 150.00, 0, other}, {"4010", 0, 150.00, other}})
+	_ = entry("CREDIT_MEMO", cm, [][4]any{{"4010", 100.00, 0, other}, {"1020", 0, 100.00, other}})
+	payEntry := entry("PAYMENT", payApp, [][4]any{{"2200", 150.00, 0, other}, {"1020", 0, 150.00, other}})
+
+	// The four leg cross-branch entries the code between 125 and 133 wrote:
+	// cross-branch payment and credit memo applications and their reversals
+	// carried their inter-branch transfer legs on 1010 Cash with the three
+	// settlement descriptions, each balanced per branch (the payment pair's
+	// 1020 legs and subledger rows net to zero, the memo entry's 1020 legs
+	// net to zero on their own), so migration 133 must move those 1010 legs
+	// to 1095 by account and description: its two line and link guards skip
+	// these four line entries on their own.
+	ibPayRef := uuid.New()
+	ibEntry := entryDesc("PAYMENT", ibPayRef, "m133 mig", "Inter-branch cash settlement", nil, [][4]any{
+		{"2200", 150.00, 0, def}, {"1010", 0, 150.00, def},
+		{"1010", 150.00, 0, other}, {"1020", 0, 150.00, other},
+	})
+	_ = entryDesc("CREDIT_MEMO", uuid.New(), "m133 mig", "Inter-branch AR settlement", nil, [][4]any{
+		{"1020", 100.00, 0, def}, {"1010", 0, 100.00, def},
+		{"1010", 100.00, 0, other}, {"1020", 0, 100.00, other},
+	})
+	_ = entryDesc("REVERSAL", ibPayRef, "m133 mig", "Inter-branch cash settlement reversal", &ibEntry, [][4]any{
+		{"1020", 150.00, 0, other}, {"1010", 0, 150.00, other},
+		{"1010", 150.00, 0, def}, {"2200", 0, 150.00, def},
+	})
 
 	// The customer transactions the subledger reads.
 	tx := func(amount int64, ref uuid.UUID, typ string) {
@@ -207,6 +233,10 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	tx(15000, invPay, "INVOICE")
 	tx(-10000, cm, "CREDIT_MEMO")
 	tx(-15000, payApp, "PAYMENT")
+	// The inter-branch payment entry and its reversal net to zero on 1020
+	// together; their subledger rows mirror them so the tie out holds.
+	tx(-15000, ibPayRef, "PAYMENT")
+	tx(15000, ibPayRef, "PAYMENT")
 
 	// The upgraded database before 133 exists holds no clearing account.
 	var seeded int
@@ -236,6 +266,26 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	}
 	if seeded != 1 {
 		t.Fatalf("migration 133 seeded %d 1095 accounts, want 1", seeded)
+	}
+
+	// The settlement legs the code between 125 and 133 wrote on 1010 Cash
+	// moved to 1095 Inter-Branch Clearing by account and description.
+	legsOn := func(code, descList string) int {
+		t.Helper()
+		var n int
+		if err := base.QueryRow(ctx, `SELECT count(*) FROM gl_journal_lines l
+			JOIN gl_accounts a ON a.id = l.account_id
+			WHERE a.code = $1 AND l.description IN (`+descList+`)`, code).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	settlementDescs := `'Inter-branch cash settlement', 'Inter-branch AR settlement', 'Inter-branch cash settlement reversal'`
+	if got := legsOn("1010", settlementDescs); got != 0 {
+		t.Errorf("%d settlement legs remain on 1010 Cash after migration 133, want 0", got)
+	}
+	if got := legsOn("1095", settlementDescs); got != 6 {
+		t.Errorf("%d settlement legs on 1095 after migration 133, want the 6 moved legs", got)
 	}
 
 	legsOf := func(entryID uuid.UUID) map[string]map[uuid.UUID][2]float64 {
@@ -383,6 +433,14 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	if pay2200Branch != other {
 		t.Errorf("payment entry 2200 leg on branch %v after the down migration, want the entry's branch %v", pay2200Branch, other)
 	}
+	// The settlement legs the up migration moved return to 1010 Cash, so
+	// nothing references 1095 and the account deletes cleanly.
+	if got := legsOn("1095", settlementDescs); got != 0 {
+		t.Errorf("%d settlement legs still on 1095 after the down migration, want 0", got)
+	}
+	if got := legsOn("1010", settlementDescs); got != 6 {
+		t.Errorf("%d settlement legs back on 1010 after the down migration, want the 6 original legs", got)
+	}
 	// A second up lands on the same state as the first.
 	up, err := os.ReadFile("../../migrations/133_gl_interbranch_clearing_and_ar_tieout.sql")
 	if err != nil {
@@ -397,5 +455,12 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	}
 	if legs, ok := legsOf(redone)["1095"][other]; !ok || legs[0] != 100.00 {
 		t.Errorf("second up 1095 leg on the invoice branch = %v, want DR 100.00", legsOf(redone)["1095"][other])
+	}
+	// The second up moves the settlement legs to 1095 again.
+	if got := legsOn("1010", settlementDescs); got != 0 {
+		t.Errorf("%d settlement legs back on 1010 after the second up, want 0", got)
+	}
+	if got := legsOn("1095", settlementDescs); got != 6 {
+		t.Errorf("%d settlement legs on 1095 after the second up, want the 6 moved legs", got)
 	}
 }

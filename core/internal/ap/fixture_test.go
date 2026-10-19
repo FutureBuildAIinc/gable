@@ -313,7 +313,11 @@ func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string
 // glReverse runs the GL reverse route on an entry. The route refuses
 // non-MANUAL entries (an entry a subledger document owns is undone through
 // its document), and these chains need a bill's entry reversed anyway, so
-// the refusal falls back to writing the same reversal by hand.
+// the refusal falls back to writing the same reversal by hand. That fallback
+// calls t.Fatal on failure, so glReverse is for sequential main goroutine
+// setup only: never call it from a child goroutine, whose Fatal would exit
+// the goroutine without unwinding the test (call the HTTP route directly
+// there instead). glVoidEntry's fallback holds the same rule.
 func (f *fixture) glReverse(entry string) resp {
 	f.t.Helper()
 	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
