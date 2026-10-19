@@ -62,13 +62,20 @@ func (s *Service) gateway() payment.PaymentGateway {
 	return nil
 }
 
-// gatewayName is the gateway label persisted on saved payment methods and
-// payment intents, so a live gateway is no longer recorded as 'stub'.
-func (s *Service) gatewayName() string {
-	if _, ok := s.gateway().(*stubPaymentGateway); ok {
+// gatewayNameFor is the gateway label persisted on saved payment methods and
+// payment intents, so a live gateway is no longer recorded as 'stub'. It takes
+// the gateway instance so a call that already resolved its gateway labels the
+// one it resolved, not whatever a later resolution would return.
+func gatewayNameFor(gw payment.PaymentGateway) string {
+	if _, ok := gw.(*stubPaymentGateway); ok {
 		return "stub"
 	}
 	return "run_payments"
+}
+
+// gatewayName resolves the gateway and labels it.
+func (s *Service) gatewayName() string {
+	return gatewayNameFor(s.gateway())
 }
 
 func (g *stubPaymentGateway) Charge(_ context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
@@ -302,9 +309,13 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 	if err := validateGatewayToken(req.GatewayToken); err != nil {
 		return nil, err
 	}
-	if s.gateway() == nil {
+	// Resolve the gateway once: a method saved against a gateway must be
+	// charged through the same gateway, even if the keys change mid call.
+	gw := s.gateway()
+	if gw == nil {
 		return nil, ErrPaymentGatewayNotConfigured
 	}
+	gwName := gatewayNameFor(gw)
 	last4 := strings.TrimSpace(req.Last4)
 	if len(last4) < 1 || len(last4) > 4 {
 		return nil, fmt.Errorf("%w: last4 must be 1 to 4 characters", ErrInvalidRequest)
@@ -356,7 +367,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, customerID uuid.UUID,
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE')
 			RETURNING id, customer_id, gateway, method_type, COALESCE(brand, ''), last4,
 			          exp_month, exp_year, is_default, status, created_at
-		`, customerID, creator, s.gatewayName(), strings.TrimSpace(req.GatewayToken), mType,
+		`, customerID, creator, gwName, strings.TrimSpace(req.GatewayToken), mType,
 			strings.TrimSpace(req.Brand), last4, req.ExpMonth, req.ExpYear, makeDefault).Scan(
 			&out.ID, &out.CustomerID, &out.Gateway, &out.MethodType,
 			&out.Brand, &out.Last4, &out.ExpMonth, &out.ExpYear,
@@ -461,9 +472,15 @@ func computePaymentIntentKey(customerID uuid.UUID, invoiceIDs []uuid.UUID, metho
 // portal_payment_intents so concurrent retries or unknown gateway outcomes
 // never charge twice.
 func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor string, rawBody []byte, req CreatePortalPaymentRequest) (*PortalPaymentDTO, bool, error) {
-	if s.gateway() == nil {
+	// Resolve the gateway once and use it for the whole call: the readiness
+	// check, the intent's gateway label and the charge all see the same
+	// gateway, so keys cleared mid call cannot leave a claimed CHARGING
+	// intent stranded next to a nil gateway panic.
+	gw := s.gateway()
+	if gw == nil {
 		return nil, false, ErrPaymentGatewayNotConfigured
 	}
+	gwName := gatewayNameFor(gw)
 	if err := rejectRawCardOrBankJSON(rawBody); err != nil {
 		return nil, false, err
 	}
@@ -663,7 +680,7 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 			    updated_at = NOW()
 			WHERE portal_payment_intents.status IN ('FAILED', 'ABANDONED')
 			RETURNING id
-		`, idemKey, customerID, totalCents, req.InvoiceIDs, s.gatewayName()).Scan(&intentID)
+		`, idemKey, customerID, totalCents, req.InvoiceIDs, gwName).Scan(&intentID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrPaymentInFlight
 		}
@@ -680,7 +697,7 @@ func (s *Service) PayInvoices(ctx context.Context, customerID uuid.UUID, actor s
 	}
 
 	// Charge the gateway outside the DB transaction.
-	gwRes, gwErr := s.gateway().Charge(ctx, payment.ChargeRequest{
+	gwRes, gwErr := gw.Charge(ctx, payment.ChargeRequest{
 		TokenID:     token,
 		AmountCents: totalCents,
 		Currency:    currency,

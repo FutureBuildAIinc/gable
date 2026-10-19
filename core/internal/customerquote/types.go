@@ -308,21 +308,20 @@ type Capabilities interface {
 	Has(a Actor, c Capability) bool
 }
 
-// RoleCapabilities is the rule at this base: the roles migration 130 moved
-// the portal onto (owner, admin, estimator, purchaser, accounting, viewer,
-// site_super) decide, case insensitively. owner, admin, estimator and
-// purchaser hold both capabilities, accounting sees money only, and viewer
-// and site_super hold neither. The pre migration names Admin and Buyer
-// still resolve so existing callers keep working.
+// RoleCapabilities is the rule at this base: the five roles migration 130
+// moved the portal onto (owner, estimator, project_manager, site_super,
+// ap_clerk) decide, case insensitively, matching the portal's own capability
+// model. owner, estimator and project_manager hold both capabilities (the
+// estimator builds customer quotes without the portal's account money
+// surfaces), site_super and ap_clerk hold neither, and any other name,
+// including the removed legacy roles, grants nothing.
 type RoleCapabilities struct{}
 
 // Has implements Capabilities.
 func (RoleCapabilities) Has(a Actor, c Capability) bool {
 	switch strings.ToLower(strings.TrimSpace(a.Role)) {
-	case "owner", "admin", "estimator", "purchaser", "buyer":
+	case "owner", "estimator", "project_manager":
 		return c == CapQuoteCustomers || c == CapSeeMoney
-	case "accounting":
-		return c == CapSeeMoney
 	}
 	return false
 }

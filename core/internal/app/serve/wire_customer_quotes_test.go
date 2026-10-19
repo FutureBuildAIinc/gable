@@ -203,7 +203,7 @@ func newCQStack(t *testing.T, multiBranch ...bool) *cqStack {
 	chain := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			who := r.Header.Get("X-Test-Contractor")
-			claims := &middleware.PortalClaims{Role: "Buyer", Name: "Buyer " + who, Email: who + "@contractor.example", CustomerUserID: uuid.New()}
+			claims := &middleware.PortalClaims{Role: "owner", Name: "Buyer " + who, Email: who + "@contractor.example", CustomerUserID: uuid.New()}
 			switch who {
 			case "a":
 				claims.CustomerID = s.custA

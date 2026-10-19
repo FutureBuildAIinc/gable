@@ -15,6 +15,7 @@ function capabilities(overrides: Partial<PortalCapabilities> = {}): PortalCapabi
     approve_quotes: false,
     schedule: false,
     edit_delivery_instructions: false,
+    quote_customers: false,
     ...overrides,
   }
 }
