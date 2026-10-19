@@ -774,8 +774,9 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 		}
 
 		var events []outbox.Event
-		// The payment's entry belongs to the first named bill's branch, the
-		// branch the money leaves (a payment has no branch of its own).
+		// The payment's entry header carries the first named bill's branch
+		// (a payment has no branch of its own), while its 2010 and 1010 legs
+		// carry each bill's own branch, so every branch's 2010 ties out.
 		paymentBranch := locked[lockedIDs[0]].BranchID
 		appliedByBranch := make(map[uuid.UUID]int64)
 		var branchOrder []uuid.UUID

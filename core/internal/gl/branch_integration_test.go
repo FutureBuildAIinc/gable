@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -289,8 +290,15 @@ func scratchDatabase(t *testing.T, prefix string) (string, string) {
 		_, _ = admin.Exec(context.Background(), fmt.Sprintf(`DROP DATABASE %q WITH (FORCE)`, name))
 		admin.Close(context.Background())
 	})
-	scratch := strings.Replace(base, "/gable_test", "/"+name, 1)
-	return scratch, name
+	// The scratch name goes on the URL's path alone: swapping the first
+	// substring match would eat a user or host that shares the database's
+	// name.
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + name
+	return u.String(), name
 }
 
 // TestStatementsByBranchAndConsolidated: two branches post their own entries;

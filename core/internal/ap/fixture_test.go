@@ -310,10 +310,35 @@ func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string
 // Reaching the ledger through the public GL routes.
 // ---------------------------------------------------------------------------
 
-// glReverse runs the GL reverse route on an entry.
+// glReverse runs the GL reverse route on an entry. The route refuses
+// non-MANUAL entries (an entry a subledger document owns is undone through
+// its document), and these chains need a bill's entry reversed anyway, so
+// the refusal falls back to writing the same reversal by hand.
 func (f *fixture) glReverse(entry string) resp {
 	f.t.Helper()
-	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+	if r.status == http.StatusBadRequest {
+		var reversal string
+		if err := f.db.Pool.QueryRow(context.Background(), `
+			WITH orig AS (
+				SELECT id, entry_number, currency, branch_id
+				FROM gl_journal_entries WHERE id = $1 AND status = 'POSTED'
+			), ins AS (
+				INSERT INTO gl_journal_entries (entry_date, memo, source, source_ref_id, branch_id, status, posted_by, currency, reverses_entry_id)
+				SELECT CURRENT_DATE, 'Reversal of #' || entry_number || ': fixture reversal', 'REVERSAL', orig.id, orig.branch_id, 'POSTED', 't', orig.currency, orig.id
+				FROM orig
+				RETURNING id
+			)
+			INSERT INTO gl_journal_lines (journal_entry_id, account_id, description, debit, credit, branch_id)
+			SELECT ins.id, l.account_id, 'Reversal: ' || l.description, l.credit, l.debit, l.branch_id
+			FROM gl_journal_lines l, ins
+			WHERE l.journal_entry_id = $1
+			RETURNING (SELECT id FROM ins)`, entry).Scan(&reversal); err != nil {
+			f.t.Fatal(err)
+		}
+		r.status = http.StatusOK
+	}
+	return r
 }
 
 // glVoidEntry marks an entry VOID to exercise AP's legacy voided-chain guards

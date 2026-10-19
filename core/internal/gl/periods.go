@@ -99,13 +99,32 @@ func (s *Service) runTx(ctx context.Context, fn func(ctx context.Context) error)
 
 // filterFor composes the branch arm of a statement read: the named branch
 // (nil reads consolidated) beside the caller's reach as the branch middleware
-// settled it on the request.
+// settled it on the request, and the inter-branch arm the caller asked for.
 func filterFor(ctx context.Context, branch *uuid.UUID) branchFilter {
 	b := branch
 	if b == nil {
 		b = middleware.BranchIDForQuery(ctx)
 	}
-	return branchFilter{Branch: b, Grants: middleware.GrantsSubForQuery(ctx)}
+	return branchFilter{Branch: b, Grants: middleware.GrantsSubForQuery(ctx), IncludeInterBranch: IncludeInterBranchFromContext(ctx)}
+}
+
+// includeInterBranchKey is the context key of the consolidated statements'
+// inter-branch arm: with it the 1095 Inter-Branch Clearing account stays on
+// the face instead of being eliminated.
+type includeInterBranchKey struct{}
+
+// WithIncludeInterBranch returns a context whose consolidated statement reads
+// keep the 1095 Inter-Branch Clearing account (a single branch read always
+// shows it; only the consolidated one eliminates it by default).
+func WithIncludeInterBranch(ctx context.Context, include bool) context.Context {
+	return context.WithValue(ctx, includeInterBranchKey{}, include)
+}
+
+// IncludeInterBranchFromContext answers the inter-branch arm a context
+// carries, false when it carries none.
+func IncludeInterBranchFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(includeInterBranchKey{}).(bool)
+	return v
 }
 
 // --- Statements by branch ---

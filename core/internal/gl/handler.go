@@ -4,6 +4,7 @@
 package gl
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -508,6 +509,16 @@ func (h *Handler) HandleVoidJournalEntry(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]string{"status": "voided"})
 }
 
+// includeInterBranchCtx answers the request's context with the
+// include_inter_branch arm settled on it: true or 1 keeps the 1095
+// Inter-Branch Clearing account on a consolidated statement.
+func includeInterBranchCtx(r *http.Request) context.Context {
+	if v := r.URL.Query().Get("include_inter_branch"); v == "true" || v == "1" {
+		return WithIncludeInterBranch(r.Context(), true)
+	}
+	return r.Context()
+}
+
 // --- Trial Balance ---
 
 func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +540,7 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.svc.GetTrialBalanceFor(r.Context(), asOf, currency, branch)
+	rows, err := h.svc.GetTrialBalanceFor(includeInterBranchCtx(r), asOf, currency, branch)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get trial balance", http.StatusInternalServerError, err)
 		return
@@ -596,7 +607,7 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	report, err := h.svc.GetProfitAndLossFor(r.Context(), startStr, endStr, currency, branch, compareStart, compareEnd)
+	report, err := h.svc.GetProfitAndLossFor(includeInterBranchCtx(r), startStr, endStr, currency, branch, compareStart, compareEnd)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
 		return
@@ -631,7 +642,7 @@ func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	report, err := h.svc.GetBalanceSheetFor(r.Context(), asOfStr, currency, branch)
+	report, err := h.svc.GetBalanceSheetFor(includeInterBranchCtx(r), asOfStr, currency, branch)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
 		return
