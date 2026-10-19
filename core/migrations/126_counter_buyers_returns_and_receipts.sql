@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS pos_account_overrides (
     cap          NUMERIC(12, 2) NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     consumed_at  TIMESTAMPTZ NULL,
-    CONSTRAINT pos_account_overrides_kind_check CHECK (kind IN ('account', 'check')),
+    CONSTRAINT pos_account_overrides_kind_check CHECK (kind IN ('account', 'check', 'refund_method')),
     CONSTRAINT pos_account_overrides_approver_named CHECK (approved_by <> ''),
     CONSTRAINT pos_account_overrides_reason_given CHECK (btrim(reason) <> ''),
     CONSTRAINT pos_account_overrides_cap_positive CHECK (cap > 0)
@@ -95,13 +95,20 @@ CREATE TABLE IF NOT EXISTS pos_signatures (
     CONSTRAINT pos_signatures_hashes_hex CHECK (image_sha256 ~ '^[0-9a-f]{64}$' AND seal ~ '^[0-9a-f]{64}$')
 );
 
+-- A sealed signature is refused both an update and a delete of its own row.
+-- The delete the sale's own foreign key cascade makes is let through: by the
+-- time the cascade reaches the signature the sale row is already gone, so a
+-- delete that still finds the sale standing is a delete of the seal itself.
 CREATE OR REPLACE FUNCTION pos_signatures_sealed() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM pos_transactions t WHERE t.id = OLD.sale_id) THEN
+        RETURN OLD;
+    END IF;
     RAISE EXCEPTION 'a sealed signature never changes' USING ERRCODE = 'integrity_constraint_violation';
 END $$;
 DROP TRIGGER IF EXISTS pos_signatures_sealed_trg ON pos_signatures;
-CREATE TRIGGER pos_signatures_sealed_trg BEFORE UPDATE ON pos_signatures
+CREATE TRIGGER pos_signatures_sealed_trg BEFORE UPDATE OR DELETE ON pos_signatures
     FOR EACH ROW EXECUTE FUNCTION pos_signatures_sealed();
 
 -- 5. Returns: reason code, restocking fee, the memo line that carries the

@@ -71,6 +71,12 @@ type Repository interface {
 	RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error)
+	// CashRefundableCents answers the cash or check the sale itself kept,
+	// less every cash refund and exchange surplus already paid against it:
+	// the bound a drawer refund of a named sale is held to. The boolean
+	// tells whether the bound holds at all (a legacy sale the migrations
+	// carried refunds as it always did).
+	CashRefundableCents(ctx context.Context, saleID uuid.UUID) (int64, bool, error)
 	LegacyReturnedQtyByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
 	LegacyRefundedCentsByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
@@ -905,6 +911,35 @@ func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.
 		return 0, fmt.Errorf("failed to read the sale's card refunds: %w", err)
 	}
 	return cents, nil
+}
+
+// CashRefundableCents answers what a drawer refund of the sale may pay: the
+// net cents its CASH, CHECK and CARD tenders kept (a tender that walked out
+// whole as change holds no payment, so it kept nothing) less the cash already
+// paid back, the plain cash returns and the cash surpluses of its exchanges.
+// The boolean tells whether the bound holds at all: a sale the contract
+// completed carries a payment on its money tenders or an ACCOUNT or
+// STORE_CREDIT leg, while a legacy one the migrations carried holds its old
+// paymentless tender rows and refunds as it always did.
+func (r *PostgresRepository) CashRefundableCents(ctx context.Context, saleID uuid.UUID) (int64, bool, error) {
+	var cents int64
+	var bound bool
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT
+		  (SELECT COALESCE(SUM(ROUND(t.amount * 100)::bigint), 0) FROM pos_tenders t
+		   WHERE t.transaction_id = $1 AND t.method IN ('CASH', 'CHECK', 'CARD') AND t.payment_id IS NOT NULL)
+		- (SELECT COALESCE(SUM(ABS(ROUND(r.total * 100)::bigint)), 0) FROM pos_returns r
+		   WHERE r.original_transaction_id = $1 AND r.refund_method = 'CASH' AND r.exchange_sale_id IS NULL)
+		- (SELECT COALESCE(SUM(ABS(ROUND(rf.amount * 100)::bigint)), 0) FROM pos_returns r
+		   JOIN payment_refunds rf ON rf.credit_memo_id = r.credit_memo_id
+		   WHERE r.original_transaction_id = $1 AND r.exchange_sale_id IS NOT NULL AND rf.method = 'CASH'),
+		  EXISTS (SELECT 1 FROM pos_tenders t WHERE t.transaction_id = $1
+		   AND (t.payment_id IS NOT NULL OR t.method IN ('ACCOUNT', 'STORE_CREDIT')))`,
+		saleID).Scan(&cents, &bound)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to read the sale's refundable cash: %w", err)
+	}
+	return cents, bound, nil
 }
 
 // LegacyReturnedQtyByProduct sums, per product, the quantity the sale's
