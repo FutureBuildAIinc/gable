@@ -428,6 +428,11 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 			counted[string(method)] = n
 		}
 	}
+	// The count's completeness (cash always, checks when checks were
+	// tendered) is enforced inside the close's transaction, after the session
+	// is found and held behind the branch wall (SEC-NOHEADER-1): a parse
+	// level refusal here would answer a close of a missing or out of branch
+	// session before the wall's 404.
 	if err := v.Err(); err != nil {
 		return nil, "", err
 	}

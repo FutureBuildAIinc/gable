@@ -68,6 +68,10 @@ func TestEachMovementKindChangesExpectedCashAndPostsABalancedEntry(t *testing.T)
 	if got := expectedCash(t, f.reportOf(sessionID)); got != 8599 {
 		t.Errorf("expected cash after a drop = %d, want 8599", got)
 	}
+	// a pickup is the taker's own confirmation plus the cashier's record
+	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": manager}, manager); r.status != http.StatusAccepted {
+		t.Fatalf("the taker's confirmation = %d: %s", r.status, r.raw)
+	}
 	pickup := f.mustMovement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": manager}, cashier)
 	if got := expectedCash(t, f.reportOf(sessionID)); got != 7599 {
 		t.Errorf("expected cash after a pickup = %d, want 7599", got)
@@ -147,26 +151,31 @@ func TestEachMovementKindChangesExpectedCashAndPostsABalancedEntry(t *testing.T)
 	}
 }
 
-// RULE: a pickup is cash taken by a second person; the cashier alone is
-// refused, and nothing is written or posted.
+// RULE: a pickup is cash taken by a second signed-in person; the cashier
+// alone, naming anyone, is refused, and nothing is written or posted until
+// the taker has confirmed under their own login.
 func TestAPickupByTheCashierAloneIsRefused(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	sessionID := f.openTill(5000)
 	cashier := mustUUID(t)
+	var opener string
+	if err := f.db.Pool.QueryRow(contextB(), `SELECT cashier_id::text FROM till_sessions WHERE id = $1`, sessionID).Scan(&opener); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range map[string]map[string]any{
 		"no second person":      {"kind": "pickup", "amount_cents": 1000},
 		"blank second person":   {"kind": "pickup", "amount_cents": 1000, "taken_by": "  "},
-		"the acting cashier":    {"kind": "pickup", "amount_cents": 1000, "taken_by": cashier},
+		"the acting cashier":    {"kind": "pickup", "amount_cents": 1000, "taken_by": opener},
 		"a drop naming a taker": {"kind": "safe_drop", "amount_cents": 1000, "taken_by": mustUUID(t)},
 	} {
-		r := f.movement(sessionID, body, cashier)
+		r := f.movement(sessionID, body, opener)
 		if r.status < 400 || r.status >= 500 {
 			t.Errorf("%s = %d, want a refusal: %s", name, r.status, r.raw)
 		}
 	}
 	// the same person under another spelling is still the cashier
-	r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": upper(cashier)}, cashier)
+	r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": upper(opener)}, opener)
 	if r.status != http.StatusConflict {
 		t.Fatalf("the cashier under capitals = %d, want 409: %s", r.status, r.raw)
 	}
@@ -174,19 +183,24 @@ func TestAPickupByTheCashierAloneIsRefused(t *testing.T) {
 		t.Errorf("blockers = %v, want pickup_needs_second_person", blockers)
 	}
 	// the session's own cashier, acting through another login, is no second person
-	var opener string
-	if err := f.db.Pool.QueryRow(contextB(), `SELECT cashier_id::text FROM till_sessions WHERE id = $1`, sessionID).Scan(&opener); err != nil {
-		t.Fatal(err)
-	}
 	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": opener}, mustUUID(t)); r.status != http.StatusConflict {
 		t.Errorf("the session's cashier as the taker = %d, want 409: %s", r.status, r.raw)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM till_movements WHERE till_session_id = $1`, sessionID); got != 0 {
 		t.Errorf("%d movements written by refused requests, want none", got)
 	}
-	// a second person is accepted
-	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": mustUUID(t)}, cashier); r.status != http.StatusCreated {
-		t.Errorf("pickup by a second person = %d: %s", r.status, r.raw)
+	// the cashier alone naming a taker no login confirmed is refused the same
+	// way, and nothing is written
+	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": mustUUID(t)}, cashier); r.status != http.StatusConflict {
+		t.Errorf("pickup by an unconfirmed taker = %d, want 409: %s", r.status, r.raw)
+	}
+	// a second person confirms under their own login, and the cashier records
+	manager := mustUUID(t)
+	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": manager}, manager); r.status != http.StatusAccepted {
+		t.Errorf("the taker's confirmation = %d, want 202: %s", r.status, r.raw)
+	}
+	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": manager}, cashier); r.status != http.StatusCreated {
+		t.Errorf("pickup by a confirmed second person = %d: %s", r.status, r.raw)
 	}
 }
 
