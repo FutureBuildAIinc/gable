@@ -473,13 +473,17 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 	if err := txCust.QueryRow(ctx, `SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, f.customerID).Scan(&lockedID); err != nil {
 		t.Fatalf("lock customer: %v", err)
 	}
+	var custHoldPID int32
+	if err := txCust.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&custHoldPID); err != nil {
+		t.Fatalf("read txCust backend pid: %v", err)
+	}
 
 	retDone := make(chan resp, 1)
 	go func() {
 		retDone <- f.returnLines(t, sale1, "", lineOf(line1, "1", "defective"))
 	}()
 
-	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('tuple', 'transactionid')`)
+	waitForWaiter(`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, custHoldPID)
 
 	// While the return is blocked waiting on the customer row (step 7),
 	// document_counters for credit_memo (step 8) must NOT be locked yet.
@@ -512,6 +516,10 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 	if _, err := txAdv.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, f.customerID.String()); err != nil {
 		t.Fatalf("lock advisory: %v", err)
 	}
+	var advHoldPID int32
+	if err := txAdv.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&advHoldPID); err != nil {
+		t.Fatalf("read txAdv backend pid: %v", err)
+	}
 
 	exDone := make(chan resp, 1)
 	go func() {
@@ -522,7 +530,7 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 		})
 	}()
 
-	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'advisory'`)
+	waitForWaiter(`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, advHoldPID)
 
 	txInvProbe, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -558,6 +566,10 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 	if err := txCustEx.QueryRow(ctx, `SELECT id FROM customers WHERE id = $1 FOR NO KEY UPDATE`, f.customerID).Scan(&lockedID); err != nil {
 		t.Fatalf("lock customer for exchange: %v", err)
 	}
+	var custExHoldPID int32
+	if err := txCustEx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&custExHoldPID); err != nil {
+		t.Fatalf("read txCustEx backend pid: %v", err)
+	}
 
 	exCustDone := make(chan resp, 1)
 	go func() {
@@ -568,7 +580,7 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 		})
 	}()
 
-	waitForWaiter(`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('tuple', 'transactionid')`)
+	waitForWaiter(`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, custExHoldPID)
 
 	txProbeEx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -612,8 +624,10 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 
 	balBefore := f.scalar(`SELECT ROUND(balance_due * 100)::bigint FROM customers WHERE id = $1`, f.customerID).(int64)
 	qtyBefore := f.scalar(`SELECT ROUND(SUM(quantity) * 10000)::bigint FROM inventory WHERE product_id = $1`, f.productID).(int64)
-	cmBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64)
-	inBefore := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64)
+	cmBefore := f.scalar(`SELECT count(*) FROM credit_memos WHERE customer_id = $1`, f.customerID).(int64)
+	cmDistinctBefore := f.scalar(`SELECT count(DISTINCT number) FROM credit_memos WHERE customer_id = $1 AND number <> ''`, f.customerID).(int64)
+	inBefore := f.scalar(`SELECT count(*) FROM invoices WHERE customer_id = $1`, f.customerID).(int64)
+	inDistinctBefore := f.scalar(`SELECT count(DISTINCT number) FROM invoices WHERE customer_id = $1 AND number <> ''`, f.customerID).(int64)
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -675,12 +689,25 @@ func TestExchangeAndReturnRespectSection11LockOrderAndCrossTableConcurrency(t *t
 	if gotQty != wantQty {
 		t.Errorf("qty_on_hand = %d, want %d", gotQty, wantQty)
 	}
-	// Gapless counters: 2 credit memos (exchange + return) and 2 invoices (exchange + saleB).
-	if gotCM := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'credit_memo'`).(int64); gotCM != cmBefore+2 {
-		t.Errorf("credit_memo counter = %d, want %d", gotCM, cmBefore+2)
+	// Gapless documents: 2 credit memos (exchange + return) and 2 invoices
+	// (exchange + saleB), each with its own distinct non-empty number. Counting
+	// this customer's documents, not the database-wide counter, keeps the
+	// assertion stable when a parallel package issues its own documents.
+	gotCM := f.scalar(`SELECT count(*) FROM credit_memos WHERE customer_id = $1`, f.customerID).(int64)
+	if gotCM != cmBefore+2 {
+		t.Errorf("credit_memos for customer = %d, want %d", gotCM, cmBefore+2)
 	}
-	if gotIN := f.scalar(`SELECT next_value FROM document_counters WHERE series = 'invoice'`).(int64); gotIN != inBefore+2 {
-		t.Errorf("invoice counter = %d, want %d", gotIN, inBefore+2)
+	gotCMDistinct := f.scalar(`SELECT count(DISTINCT number) FROM credit_memos WHERE customer_id = $1 AND number <> ''`, f.customerID).(int64)
+	if gotCMDistinct != cmDistinctBefore+2 {
+		t.Errorf("distinct credit_memo numbers for customer = %d, want %d", gotCMDistinct, cmDistinctBefore+2)
+	}
+	gotIN := f.scalar(`SELECT count(*) FROM invoices WHERE customer_id = $1`, f.customerID).(int64)
+	if gotIN != inBefore+2 {
+		t.Errorf("invoices for customer = %d, want %d", gotIN, inBefore+2)
+	}
+	gotINDistinct := f.scalar(`SELECT count(DISTINCT number) FROM invoices WHERE customer_id = $1 AND number <> ''`, f.customerID).(int64)
+	if gotINDistinct != inDistinctBefore+2 {
+		t.Errorf("distinct invoice numbers for customer = %d, want %d", gotINDistinct, inDistinctBefore+2)
 	}
 	f.assertARInvariants(t)
 }

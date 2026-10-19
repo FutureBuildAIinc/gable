@@ -452,6 +452,10 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 	if _, err := txHold.Exec(ctx, `SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, inv2); err != nil {
 		t.Fatalf("lock invoice: %v", err)
 	}
+	var holdPID int32
+	if err := txHold.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holdPID); err != nil {
+		t.Fatalf("read txHold backend pid: %v", err)
+	}
 
 	voidCh := make(chan resp, 1)
 	go func() {
@@ -460,14 +464,19 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	}()
 
-	// Wait until VoidSale has locked pos_transactions and is waiting on invoices.
-	for range 50 {
-		var waiting int64
-		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&waiting)
-		if waiting >= 1 {
+	// Wait until VoidSale has locked pos_transactions and is blocked on our
+	// held invoice row: waiting on this backend's blockers, not on any
+	// ungranted lock in the database, which another parallel package can add.
+	var voidPID int32
+	for range 400 {
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, holdPID).Scan(&voidPID); err == nil {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if voidPID == 0 {
+		t.Fatal("timed out waiting for VoidSale to block on the held invoice")
 	}
 
 	printCh := make(chan resp, 1)
@@ -475,14 +484,20 @@ func TestReceiptPrintPreservesRevisionUnbumpsFailedInvoiceAndRejectsVoidedSale(t
 		printCh <- f.printReceipt(sale2, "layout=thermal80")
 	}()
 
-	// Wait until PrintReceipt has passed GetSale and is waiting on pos_transactions.
-	for range 50 {
+	// Wait until PrintReceipt has passed GetSale and is blocked on
+	// pos_transactions behind VoidSale.
+	printBlocked := false
+	for range 400 {
 		var waiting int64
-		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted`).Scan(&waiting)
-		if waiting >= 2 {
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, voidPID).Scan(&waiting); err == nil && waiting >= 1 {
+			printBlocked = true
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if !printBlocked {
+		t.Fatal("timed out waiting for PrintReceipt to block on the voiding sale")
 	}
 
 	_ = txHold.Rollback(ctx)
