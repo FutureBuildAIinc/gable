@@ -339,7 +339,7 @@ func TestTheDayCloseIsRefusedWithATillOpenAndAcceptedAfter(t *testing.T) {
 		}
 	}
 	closer := mustUUID(t)
-	r = d.do("POST", "/api/v1/pos/end-of-day/close", map[string]any{"branch_id": a.id.String(), "date": day, "deposit_slip_ref": " SLIP-1 "},
+	r = d.do("POST", "/api/v1/pos/end-of-day/close", map[string]any{"branch_id": a.id.String(), "date": day, "deposit_slip_ref": " SLIP-1 ", "bank_account_id": d.defaultBank().String()},
 		"X-Test-Role", "finance", "X-Test-Sub", closer)
 	if r.status != http.StatusCreated {
 		t.Fatalf("close after every drawer settled = %d: %s", r.status, r.raw)
@@ -348,9 +348,10 @@ func TestTheDayCloseIsRefusedWithATillOpenAndAcceptedAfter(t *testing.T) {
 	if c["closed_by"] != closer || c["deposit_slip_ref"] != "SLIP-1" || c["business_date"] != day || c["closed_at"] == nil || c["deposit_match"] != nil {
 		t.Errorf("the close record = %v, want who, when, the trimmed slip, the date, no match yet", c)
 	}
-	// 1599-1000 = 599 from register 1, 400-1000+0 = -600 from register 2 (its count short 600, signed off)
-	if num(t, c, "cash_to_deposit_cents") != 599-600 {
-		t.Errorf("cash_to_deposit_cents = %v, want -1", c["cash_to_deposit_cents"])
+	// 1599-1000 = 599 from register 1; register 2 counted 400 against a 1000
+	// float (short 600, signed off) and deposits no cash, floored at 0
+	if num(t, c, "cash_to_deposit_cents") != 599 {
+		t.Errorf("cash_to_deposit_cents = %v, want 599", c["cash_to_deposit_cents"])
 	}
 	snap := obj(t, c, "totals")
 	if num(t, obj(t, snap, "totals"), "sales_total_cents") != 599 || snap["close"] != nil {
