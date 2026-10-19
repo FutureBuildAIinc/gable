@@ -216,7 +216,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		if err := s.checkBuyer(ctx, realCustomerID, facts, pre.BuyerContactID, accountPortion); err != nil {
 			return nil, err
 		}
-		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, false, actor); err != nil {
+		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, sums.storeCredit, false, actor); err != nil {
 			return nil, err
 		}
 	}
@@ -466,6 +466,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// The verdict is the one the standing read states; a manager override
 		// the sale holds is spent here, once.
 		if accountPortion > 0 {
+			// every caller meets the rule, the exchange and the offline sync
+			// included: the walk-in customer buys on the barrelhead
+			if sale.CustomerID == nil {
+				return conflict("walk_in_account",
+					"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
+			}
 			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
 				return err
 			}
@@ -480,7 +486,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
 				return err
 			}
-			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, true, actor); err != nil {
+			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, sums.storeCredit+credit, true, actor); err != nil {
 				return err
 			}
 		}

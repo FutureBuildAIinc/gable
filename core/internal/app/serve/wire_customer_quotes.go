@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customerquote"
@@ -37,11 +38,27 @@ func (q quoteOrders) PlaceOrder(ctx context.Context, p customerquote.OrderPlacem
 		if l.DealerQuoteUnitCost != nil {
 			up := httpx.Price(*l.DealerQuoteUnitCost)
 			pl.UnitPrice = &up
+			pl.PriceUOM = l.DealerQuotePriceUOM
 			pl.OverrideReason = "dealer quote"
 		}
 		lines = append(lines, pl)
 	}
 	return q.portal.PlaceOrderFromLines(ctx, p.CustomerID, p.ProjectID, p.Reference, lines)
+}
+
+// portalQuoteCapabilities derives the customer quote module's capabilities
+// from the portal's own role model, so the module never imports the portal
+// and the two gates can never disagree: quote_customers and see_money here
+// both follow the portal's quote_customers answer for the caller's role.
+type portalQuoteCapabilities struct{}
+
+func (portalQuoteCapabilities) Has(a customerquote.Actor, c customerquote.Capability) bool {
+	caps := portal.CapabilitiesFor(strings.ToLower(strings.TrimSpace(a.Role)))
+	switch c {
+	case customerquote.CapQuoteCustomers, customerquote.CapSeeMoney:
+		return caps.QuoteCustomers
+	}
+	return false
 }
 
 // customerQuoteDeps is what the customer quote surface is built from.
@@ -74,6 +91,7 @@ func wireCustomerQuotes(mux *http.ServeMux, d customerQuoteDeps, portalChain fun
 	svc := customerquote.NewService(d.DB, store, &customerquote.PortalCostSource{
 		Pricing: d.Pricing, Customers: d.Customers, Products: d.Products, DB: d.DB,
 	}, d.Logger).
+		WithCapabilities(portalQuoteCapabilities{}).
 		WithOrders(quoteOrders{portal: d.Portal}).
 		// There is no live SMS: the stub takes the message and sends nothing.
 		WithNotifier(customerquote.NewMailNotifier(d.Email, customerquote.NewStubSMS(d.Logger), d.Logger)).

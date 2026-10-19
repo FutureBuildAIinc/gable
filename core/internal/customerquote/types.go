@@ -5,6 +5,7 @@ package customerquote
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -86,9 +87,13 @@ type OptionGroup struct {
 // Line is a material line with its captured cost, the tier that applied and
 // the customer's decision. Everything but the decision is frozen at send.
 type Line struct {
-	ID                     uuid.UUID      `json:"id"`
-	Position               int            `json:"position"`
-	ProductID              uuid.UUID      `json:"product_id"`
+	ID        uuid.UUID `json:"id"`
+	Position  int       `json:"position"`
+	ProductID uuid.UUID `json:"product_id"`
+	// SourceLineID is the dealer quote line the line was built from, when it
+	// was; it lets confirm find the exact source line instead of guessing
+	// among lines of one product.
+	SourceLineID           *uuid.UUID     `json:"source_line_id,omitempty"`
 	CategoryID             *uuid.UUID     `json:"category_id"`
 	SKU                    string         `json:"sku"`
 	Description            string         `json:"description"`
@@ -307,14 +312,19 @@ type Capabilities interface {
 	Has(a Actor, c Capability) bool
 }
 
-// RoleCapabilities is the rule at this base: the Admin and Buyer roles hold
-// both capabilities, View-Only holds neither.
+// RoleCapabilities is the rule at this base: the five roles migration 130
+// moved the portal onto (owner, estimator, project_manager, site_super,
+// ap_clerk) decide, case insensitively, matching the portal's own capability
+// model. owner, estimator and project_manager hold both capabilities (the
+// estimator builds customer quotes without the portal's account money
+// surfaces), site_super and ap_clerk hold neither, and any other name,
+// including the removed legacy roles, grants nothing.
 type RoleCapabilities struct{}
 
 // Has implements Capabilities.
 func (RoleCapabilities) Has(a Actor, c Capability) bool {
-	switch a.Role {
-	case "Admin", "Buyer":
+	switch strings.ToLower(strings.TrimSpace(a.Role)) {
+	case "owner", "estimator", "project_manager":
 		return c == CapQuoteCustomers || c == CapSeeMoney
 	}
 	return false

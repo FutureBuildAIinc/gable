@@ -35,6 +35,7 @@ import (
 type proFixture struct {
 	db                                    *database.DB
 	aCustomer, bCustomer                  uuid.UUID
+	bUser                                 uuid.UUID
 	aYard, bYard                          uuid.UUID
 	users                                 map[string]uuid.UUID // role -> user id (customer A)
 	aDraft, aConfirmed, aFulfilled, bOrder uuid.UUID
@@ -134,6 +135,13 @@ func setupPro(t *testing.T) *proFixture {
 			VALUES ($1, $2, $3, 'x', $4, $5, 'Active')`,
 			id, f.aCustomer, "pro-"+role+"-"+id.String()[:8]+"@example.test", role, role)
 	}
+
+	// An active owner row on account B, so tenant tests that mount B's mux
+	// with a user id pass the live-session status re-read.
+	f.bUser = uuid.New()
+	exec(`INSERT INTO customer_users (id, customer_id, email, password_hash, name, role, status)
+		VALUES ($1, $2, $3, 'x', 'Pro B Owner', 'owner', 'Active')`,
+		f.bUser, f.bCustomer, "pro-b-owner-"+f.bUser.String()[:8]+"@example.test")
 
 	mkOrder := func(id, cust, yard uuid.UUID, status, deliveryType string) {
 		exec(`INSERT INTO orders (id, customer_id, status, total_amount, branch_id, created_at, updated_at, delivery_type, currency)
@@ -984,7 +992,7 @@ func TestSchedule_TenancyRefusals(t *testing.T) {
 	aHoldID, _ := aHoldBody["id"].(string)
 
 	// B holding A's window: the yard is not B's.
-	muxB := muxFor(repo, f.bCustomer, uuid.New(), RoleOwner)
+	muxB := muxFor(repo, f.bCustomer, f.bUser, RoleOwner)
 	rec, _ = call(muxB, "POST", "/api/portal/v1/schedule/holds", fmt.Sprintf(
 		`{"window_id":"%s","date":"%s"}`, f.winPickup, f.winDate), nil)
 	if rec.Code != http.StatusNotFound {
@@ -1265,7 +1273,7 @@ func TestChangeFeed_InvoicesQuotesDeliveriesToday(t *testing.T) {
 	}
 
 	// Every change feed is scoped to the customer even with a since cursor.
-	muxB := muxFor(repo, f.bCustomer, uuid.New(), RoleOwner)
+	muxB := muxFor(repo, f.bCustomer, f.bUser, RoleOwner)
 	for _, feedPath := range []string{
 		"/api/portal/v1/invoices?since=2000-01-01T00:00:00Z",
 		"/api/portal/v1/quotes?since=2000-01-01T00:00:00Z",

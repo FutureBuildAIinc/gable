@@ -65,6 +65,7 @@ export const meFixture: PortalMe = {
     approve_quotes: true,
     schedule: true,
     edit_delivery_instructions: true,
+    quote_customers: true,
   },
 }
 

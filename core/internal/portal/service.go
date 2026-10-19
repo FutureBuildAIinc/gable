@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
@@ -16,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -51,6 +53,11 @@ type Service struct {
 	invoiceSvc     *invoice.Service
 	docSvc         *document.Service
 	paymentGateway any
+
+	// paymentGatewayResolver, when wired, decides per call which gateway is
+	// active (Run Payments when its keys are configured, the dev stub in
+	// dev mode, none otherwise); see payments.go.
+	paymentGatewayResolver func() payment.PaymentGateway
 }
 
 // NewService creates a new portal service.
@@ -66,15 +73,14 @@ func NewService(
 	productSvc *product.Service,
 ) *Service {
 	return &Service{
-		repo:           repo,
-		jwtSecret:      []byte(jwtSecret),
-		logger:         logger,
-		pricingSvc:     pricingSvc,
-		customerSvc:    customerSvc,
-		inventorySvc:   inventorySvc,
-		orderSvc:       orderSvc,
-		productSvc:     productSvc,
-		paymentGateway: defaultPortalPaymentGateway(),
+		repo:         repo,
+		jwtSecret:    []byte(jwtSecret),
+		logger:       logger,
+		pricingSvc:   pricingSvc,
+		customerSvc:  customerSvc,
+		inventorySvc: inventorySvc,
+		orderSvc:     orderSvc,
+		productSvc:   productSvc,
 	}
 }
 
@@ -143,6 +149,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, er
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		s.logger.Warn("Portal login: invalid password", "email", req.Email)
+		return nil, fmt.Errorf("invalid credentials")
+	}
+
+	// An Inactive user is refused with the same answer as a bad password; the
+	// bcrypt compare above runs first so the response time does not leak status.
+	if !strings.EqualFold(user.Status, "Active") {
+		s.logger.Warn("Portal login: user is not active", "email", req.Email)
 		return nil, fmt.Errorf("invalid credentials")
 	}
 

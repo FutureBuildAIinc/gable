@@ -277,7 +277,11 @@ func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if in.CashierID == uuid.Nil {
+	// The cashier is the authenticated caller: a body cashier_id the caller
+	// named for another is not recorded, so the separation of duties the
+	// override holds (the caller who started the sale cannot approve it) rests
+	// on a subject the caller cannot choose.
+	if cashierID != uuid.Nil {
 		in.CashierID = cashierID
 	}
 	sale, err := h.service.StartSale(r.Context(), in, in.CashierID.String())

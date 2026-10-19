@@ -174,3 +174,112 @@ func TestMigration126_ASealedSignatureRefusesAnUpdate(t *testing.T) {
 		t.Error("an image past the cap was admitted")
 	}
 }
+
+// mig132File answers the 132 up and down files, or fails the test when the
+// upgrade migration is not there.
+func mig132Files(t *testing.T) (up, down string) {
+	t.Helper()
+	ups, err := filepath.Glob("../../migrations/132_*.sql")
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("migration 132 not found: %v", err)
+	}
+	downs, err := filepath.Glob("../../migrations/down/132_*_down.sql")
+	if err != nil || len(downs) != 1 {
+		t.Fatalf("migration 132 down not found: %v", err)
+	}
+	return ups[0], downs[0]
+}
+
+// RULE (R2 P1-1): a database that already applied 126 at its original
+// definition (the live demos and CI's upgrade check hold that shape) reaches
+// the widened override kind and the sealed signature's delete wall only by
+// applying 132 on top, and 132's down puts both back.
+func TestMigration132_UpgradeFromOriginal126SealsDeletesAndWidensOverrideKind(t *testing.T) {
+	c, _ := mig105ScratchDB(t)
+	before, target, _ := mig126Files(t)
+	for _, f := range before {
+		mig105Apply(t, c, f)
+	}
+	mig105Apply(t, c, target) // 126 as origin/refactor/v1 holds it
+	up, down := mig132Files(t)
+	mig105Apply(t, c, up)
+	ctx := context.Background()
+	hash := strings.Repeat("a", 64)
+
+	// the sale, its sealed signature and a refund_method override row
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status)
+		VALUES ('00000000-0000-0000-0000-000000001264', 'REG-01', '00000000-0000-0000-0000-0000000000e1',
+			(SELECT id FROM locations LIMIT 1), 'USD', 'COMPLETED')`); err != nil {
+		t.Fatalf("seed the sale: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_signatures (sale_id, signer_name, image, image_sha256, total_cents, signed_at, seal)
+		VALUES ('00000000-0000-0000-0000-000000001264', 'A Signer', '\x89504e47', $1, 100, NOW(), $1)`, hash); err != nil {
+		t.Fatalf("seal a signature: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_account_overrides (sale_id, kind, approved_by, reason, cap)
+		VALUES ('00000000-0000-0000-0000-000000001264', 'refund_method', 'a-manager', 'cash payout approved', 59.99)`); err != nil {
+		t.Fatalf("a refund_method override row was refused after 132: %v", err)
+	}
+
+	// a direct delete of the seal is refused while the sale stands
+	if _, err := c.Exec(ctx, `DELETE FROM pos_signatures WHERE sale_id = '00000000-0000-0000-0000-000000001264'`); err == nil {
+		t.Error("a sealed signature accepted a direct delete after 132")
+	}
+	// the sale's own cascade cleanup goes through
+	if _, err := c.Exec(ctx, `DELETE FROM pos_transactions WHERE id = '00000000-0000-0000-0000-000000001264'`); err != nil {
+		t.Fatalf("the parent sale's cascade cleanup was refused after 132: %v", err)
+	}
+	if n := mig105Scalar[int](t, c, `SELECT count(*) FROM pos_signatures`); n != 0 {
+		t.Errorf("%d signatures remain after the sale's cascade, want 0", n)
+	}
+	if n := mig105Scalar[int](t, c, `SELECT count(*) FROM pos_account_overrides`); n != 0 {
+		t.Errorf("%d overrides remain after the sale's cascade, want 0", n)
+	}
+
+	// a second sale and seal for the down's shape
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status)
+		VALUES ('00000000-0000-0000-0000-000000001265', 'REG-01', '00000000-0000-0000-0000-0000000000e1',
+			(SELECT id FROM locations LIMIT 1), 'USD', 'COMPLETED')`); err != nil {
+		t.Fatalf("seed the second sale: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_signatures (sale_id, signer_name, image, image_sha256, total_cents, signed_at, seal)
+		VALUES ('00000000-0000-0000-0000-000000001265', 'A Signer', '\x89504e47', $1, 100, NOW(), $1)`, hash); err != nil {
+		t.Fatalf("seal the second signature: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_account_overrides (sale_id, kind, approved_by, reason, cap)
+		VALUES ('00000000-0000-0000-0000-000000001265', 'refund_method', 'a-manager', 'cash payout approved', 59.99)`); err != nil {
+		t.Fatalf("a refund_method override row was refused before the down: %v", err)
+	}
+
+	// the down puts the kind and the trigger back
+	mig105Apply(t, c, down)
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_account_overrides (sale_id, kind, approved_by, reason, cap)
+		VALUES ('00000000-0000-0000-0000-000000001265', 'refund_method', 'a-manager', 'refused', 59.99)`); err == nil {
+		t.Error("a refund_method override row was admitted after the 132 down")
+	}
+	if _, err := c.Exec(ctx, `DELETE FROM pos_signatures WHERE sale_id = '00000000-0000-0000-0000-000000001265'`); err != nil {
+		t.Errorf("a direct delete was refused after the 132 down (the wall was update only): %v", err)
+	}
+	// the update wall 126 originally set still stands after the down
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, currency, status)
+		VALUES ('00000000-0000-0000-0000-000000001266', 'REG-01', '00000000-0000-0000-0000-0000000000e1',
+			(SELECT id FROM locations LIMIT 1), 'USD', 'COMPLETED')`); err != nil {
+		t.Fatalf("seed the third sale: %v", err)
+	}
+	if _, err := c.Exec(ctx, `
+		INSERT INTO pos_signatures (sale_id, signer_name, image, image_sha256, total_cents, signed_at, seal)
+		VALUES ('00000000-0000-0000-0000-000000001266', 'A Signer', '\x89504e47', $1, 100, NOW(), $1)`, hash); err != nil {
+		t.Fatalf("seal the third signature: %v", err)
+	}
+	if _, err := c.Exec(ctx, `UPDATE pos_signatures SET signer_name = 'Someone Else' WHERE sale_id = '00000000-0000-0000-0000-000000001266'`); err == nil {
+		t.Error("a sealed signature accepted an update after the 132 down")
+	}
+}

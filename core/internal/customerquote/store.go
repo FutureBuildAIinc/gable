@@ -177,11 +177,11 @@ func (s *Store) insertChildren(ctx context.Context, q *Quote) error {
 		if _, err := ex.Exec(ctx, `
 			INSERT INTO pro_customer_quote_lines (id, quote_id, position, product_id, category_id, sku, description, uom, quantity,
 				unit_cost_ten_thousandths, cost_cents, price_basis, priced_at, option_group_id, override_kind, override_bps,
-				applied_tier, applied_kind, applied_bps, sell_cents, note)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric / 10000,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+				applied_tier, applied_kind, applied_bps, sell_cents, note, source_line_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric / 10000,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 			l.ID, q.ID, l.Position, l.ProductID, l.CategoryID, l.SKU, l.Description, l.UOM, qtyArg(l.Quantity),
 			l.UnitCostTenThousandths, l.CostCents, l.PriceBasis, l.PricedAt, l.GroupID, ok, obps,
-			string(l.Applied.Tier), string(l.Applied.Kind), l.Applied.BPS, l.SellCents, l.Note); err != nil {
+			string(l.Applied.Tier), string(l.Applied.Kind), l.Applied.BPS, l.SellCents, l.Note, l.SourceLineID); err != nil {
 			return fmt.Errorf("insert quote line: %w", err)
 		}
 		state := string(l.Selection)
@@ -346,7 +346,7 @@ func (s *Store) loadChildren(ctx context.Context, q *Quote) error {
 	rows, err = ex.Query(ctx, `
 		SELECT l.id, l.position, l.product_id, l.category_id, l.sku, l.description, l.uom, ROUND(l.quantity * 10000)::bigint,
 			l.unit_cost_ten_thousandths, l.cost_cents, l.price_basis, l.priced_at, l.option_group_id, l.override_kind, l.override_bps,
-			l.applied_tier, l.applied_kind, l.applied_bps, l.sell_cents, l.note, COALESCE(s.state, 'pending')
+			l.applied_tier, l.applied_kind, l.applied_bps, l.sell_cents, l.note, l.source_line_id, COALESCE(s.state, 'pending')
 		FROM pro_customer_quote_lines l LEFT JOIN pro_customer_quote_selections s ON s.line_id = l.id
 		WHERE l.quote_id = $1 ORDER BY l.position, l.id`, q.ID)
 	if err != nil {
@@ -360,7 +360,7 @@ func (s *Store) loadChildren(ctx context.Context, q *Quote) error {
 		var tier, kind, state string
 		if err := rows.Scan(&l.ID, &l.Position, &l.ProductID, &l.CategoryID, &l.SKU, &l.Description, &l.UOM, &qty,
 			&l.UnitCostTenThousandths, &l.CostCents, &l.PriceBasis, &l.PricedAt, &l.GroupID, &okind, &obps,
-			&tier, &kind, &l.Applied.BPS, &l.SellCents, &l.Note, &state); err != nil {
+			&tier, &kind, &l.Applied.BPS, &l.SellCents, &l.Note, &l.SourceLineID, &state); err != nil {
 			rows.Close()
 			return err
 		}

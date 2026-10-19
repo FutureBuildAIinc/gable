@@ -15,6 +15,7 @@ function capabilities(overrides: Partial<PortalCapabilities> = {}): PortalCapabi
     approve_quotes: false,
     schedule: false,
     edit_delivery_instructions: false,
+    quote_customers: false,
     ...overrides,
   }
 }
@@ -62,6 +63,7 @@ describe('capability gating', () => {
     expect(roleCapabilities('ap_bookkeeper').pay).toBe(true)
     expect(roleCapabilities('ap_bookkeeper').order).toBe(false)
     expect(roleCapabilities('site_super').see_money).toBe(false)
+    expect(roleCapabilities('site_super').quote_customers).toBe(false)
     expect(roleCapabilities('unknown_role')).toEqual(capabilities())
   })
 })
