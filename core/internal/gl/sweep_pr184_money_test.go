@@ -397,13 +397,14 @@ func TestSweepPR184_P2_1_HistoricCrossBranchApplicationsTieOut(t *testing.T) {
 	}
 }
 
-// TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource: on a
-// database migrated to just before 125, a historic cross-branch credit memo
-// application (no entry) and a historic cross-branch payment application
+// TestSweepPR184_P2_1_Migrations125Then133BackfillHistoricCrossBranchSources:
+// on a database migrated to just before 125, a historic cross-branch credit
+// memo application (no entry) and a historic cross-branch payment application
 // (a two line DR 2200 / CR 1020 entry) are backfilled with balanced 1095
-// Inter-Branch Clearing legs, both branches balance per entry and tie out,
-// and the down then up cycle lands on the same state.
-func TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource(t *testing.T) {
+// Inter-Branch Clearing legs by migration 133 (125 still stamps the branches),
+// both branches balance per entry and tie out, and the down then up cycle
+// lands on the same state.
+func TestSweepPR184_P2_1_Migrations125Then133BackfillHistoricCrossBranchSources(t *testing.T) {
 	scratchURL := sweepScratchDatabase(t, "gv1_sw184mig")
 	base, err := pgx.Connect(context.Background(), scratchURL)
 	if err != nil {
@@ -418,7 +419,7 @@ func TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource(t *t
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		if strings.HasPrefix(filepath.Base(f), "125_") {
+		if strings.HasPrefix(filepath.Base(f), "125_") || strings.HasPrefix(filepath.Base(f), "133_") {
 			continue
 		}
 		sql, err := os.ReadFile(f)
@@ -529,6 +530,7 @@ func TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource(t *t
 		}
 	}
 	apply("125_gl_branch_and_finstmt.sql")
+	apply("133_gl_interbranch_clearing_and_ar_tieout.sql")
 
 	legsOf := func(entryID uuid.UUID) map[string]map[uuid.UUID][2]float64 {
 		t.Helper()
@@ -635,7 +637,7 @@ func TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource(t *t
 
 	// The down migration undoes the backfill and the account, and a second up
 	// lands on the same state.
-	apply("down/125_gl_branch_and_finstmt_down.sql")
+	apply("down/133_gl_interbranch_clearing_and_ar_tieout_down.sql")
 	var gone int
 	if err := base.QueryRow(ctx, `SELECT count(*) FROM gl_accounts WHERE code = '1095'`).Scan(&gone); err != nil {
 		t.Fatal(err)
@@ -643,7 +645,7 @@ func TestSweepPR184_P2_1_Migration125BackfillsEachHistoricCrossBranchSource(t *t
 	if gone != 0 {
 		t.Errorf("1095 still seeded after the down migration")
 	}
-	apply("125_gl_branch_and_finstmt.sql")
+	apply("133_gl_interbranch_clearing_and_ar_tieout.sql")
 	var cmEntries int
 	if err := base.QueryRow(ctx, `SELECT count(*) FROM gl_journal_entries e
 		JOIN ar_applications a ON a.gl_entry_id = e.id WHERE a.id = $1`, cmApp).Scan(&cmEntries); err != nil {

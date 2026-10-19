@@ -1,42 +1,8 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- Down for 125: undo the inter-branch backfills and the 1095 account, then
--- drop the branch dimension, the statement indexes and the period reopen
--- columns the migration added. Nothing else in between.
-
--- The credit memo application transfer entries the up migration backfilled
--- go, and their links with them. Only the backfill's own entries (its memo)
--- are touched: a live cross-branch application's entry keeps its legs.
-UPDATE ar_applications a
-SET gl_entry_id = NULL
-WHERE a.gl_entry_id IN (
-    SELECT e.id FROM gl_journal_entries e
-    WHERE e.source = 'CREDIT_MEMO' AND e.memo = 'Inter-branch credit memo application backfill');
-
-DELETE FROM gl_journal_lines WHERE journal_entry_id IN (
-    SELECT e.id FROM gl_journal_entries e
-    WHERE e.source = 'CREDIT_MEMO' AND e.memo = 'Inter-branch credit memo application backfill');
-
-DELETE FROM gl_journal_entries
-WHERE source = 'CREDIT_MEMO' AND memo = 'Inter-branch credit memo application backfill';
-
--- The payment applications' 2200 legs return to the entry's branch, then
--- their backfilled 1095 legs go.
-UPDATE gl_journal_lines l
-SET branch_id = e.branch_id
-FROM gl_journal_entries e, gl_accounts a
-WHERE e.id = l.journal_entry_id AND e.source = 'PAYMENT'
-  AND a.id = l.account_id
-  AND a.code = '2200'
-  AND EXISTS (SELECT 1 FROM gl_journal_lines lb
-              WHERE lb.journal_entry_id = e.id AND lb.description = 'Inter-branch clearing backfill');
-
-DELETE FROM gl_journal_lines l
-USING gl_journal_entries e
-WHERE e.id = l.journal_entry_id
-  AND e.source = 'PAYMENT'
-  AND l.description = 'Inter-branch clearing backfill';
+-- Down for 125: drop the branch dimension, the statement indexes and the
+-- period reopen columns the migration added. Nothing else in between.
 
 DROP INDEX IF EXISTS idx_gl_lines_account_branch;
 DROP INDEX IF EXISTS idx_gl_entries_branch_date;
@@ -49,5 +15,3 @@ ALTER TABLE gl_fiscal_periods DROP COLUMN IF EXISTS revision;
 ALTER TABLE gl_fiscal_periods DROP COLUMN IF EXISTS reopen_reason;
 ALTER TABLE gl_fiscal_periods DROP COLUMN IF EXISTS reopened_by;
 ALTER TABLE gl_fiscal_periods DROP COLUMN IF EXISTS reopened_at;
-
-DELETE FROM gl_accounts WHERE code = '1095' AND NOT EXISTS (SELECT 1 FROM gl_journal_lines l WHERE l.account_id = gl_accounts.id);

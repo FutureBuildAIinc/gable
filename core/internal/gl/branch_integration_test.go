@@ -98,7 +98,7 @@ func TestMigration125BackfillsEachSource(t *testing.T) {
 	sort.Strings(files)
 	var before []string
 	for _, f := range files {
-		if strings.HasPrefix(filepath.Base(f), "125_") {
+		if strings.HasPrefix(filepath.Base(f), "125_") || strings.HasPrefix(filepath.Base(f), "133_") {
 			continue
 		}
 		before = append(before, f)
