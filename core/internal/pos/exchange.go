@@ -29,6 +29,10 @@ type ExchangeIn struct {
 	// than the replacement: cash out of the drawer, or left as store credit on
 	// the account.
 	RefundMethod RefundMethod
+	// RefundMethodGiven tells whether the caller named the refund method: an
+	// omitted one on a sale that kept no cash leaves the surplus on the
+	// account, while a named cash one is refused as any cash refund is.
+	RefundMethodGiven bool
 	Reason       string
 	Returned     []ReturnLineIn
 	Items        []salesdoc.ParsedLine
@@ -207,6 +211,33 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		method := in.RefundMethod
 		var refunded int64
 		if surplus > 0 {
+			if method == RefundCash {
+				// the drawer pays the surplus only of what the original sale
+				// kept in cash or check itself (a refund_method manager
+				// override excepts it, consumed once); a caller who named no
+				// refund method against a sale that kept no cash leaves the
+				// surplus on the account
+				if in.OriginalSaleID != nil {
+					refundableCash, bound, err := s.repo.CashRefundableCents(ctx, *in.OriginalSaleID)
+					if err != nil {
+						return err
+					}
+					if bound && surplus > refundableCash {
+						spent, err := s.consumeOverride(ctx, *in.OriginalSaleID, OverrideRefundMethod, surplus, actor)
+						if err != nil {
+							return err
+						}
+						if !spent {
+							if in.RefundMethodGiven || isWalkIn {
+								return conflict("exceeds_cash_tender", fmt.Sprintf(
+									"the sale kept %d cents in cash or check less earlier cash refunds: leave the surplus on the account, or approve a refund_method override",
+									refundableCash))
+							}
+							method = RefundAccount
+						}
+					}
+				}
+			}
 			if method == RefundCash {
 				fx, err := s.refundSurplus(ctx, st, *ret.CreditMemoID, surplus, in.Reason, actor)
 				if err != nil {
@@ -413,6 +444,7 @@ func (r *exchangeRequest) parse() (*ExchangeIn, error) {
 		out.RegisterID, out.OriginalSaleID, out.CustomerID = ri.RegisterID, ri.OriginalSaleID, ri.CustomerID
 		out.RefundMethod, out.Reason, out.Returned = ri.RefundMethod, ri.Reason, ri.Lines
 	}
+	out.RefundMethodGiven = r.RefundMethod != ""
 	v.Check(len(r.SaleLines) > 0, "sale_lines", "name at least one replacement line")
 	out.Items = salesdoc.ParseLines(v, r.SaleLines)
 	out.Tenders = parseTenders(v, "tenders", r.Tenders)

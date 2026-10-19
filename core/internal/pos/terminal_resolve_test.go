@@ -106,6 +106,27 @@ func (f *fixture) resolveItem(itemID uuid.UUID, outcome, reference string) resp 
 		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(f.t))
 }
 
+// recordedRefOf reads the device's own recorded reference of a lost item's
+// leg: the manager reads the terminal's tape and submits what it shows.
+func (f *fixture) recordedRefOf(t *testing.T, intentID, itemID uuid.UUID) string {
+	t.Helper()
+	var lateRef, answerRef, providerRef, itemRef string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(i.late_provider_ref, ''), COALESCE(p.answer_provider_ref, ''),
+		 COALESCE(p.provider_ref, ''), COALESCE(i.provider_ref, '')
+		 FROM payment_terminal_lost_items i JOIN payment_terminal_intents p ON p.id = i.intent_id
+		 WHERE i.id = $1`, itemID).Scan(&lateRef, &answerRef, &providerRef, &itemRef); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []string{lateRef, answerRef, providerRef, itemRef} {
+		if r != "" {
+			return r
+		}
+	}
+	t.Fatalf("the lost item of intent %s carries no recorded reference", intentID)
+	return ""
+}
+
 // intentFacts reads where an intent stands.
 func (f *fixture) intentFacts(t *testing.T, id uuid.UUID) (state string, spent bool, answerRef string) {
 	t.Helper()
@@ -175,14 +196,15 @@ func TestResolveAuthorizedOnOpenSaleKeepsTheLegForTheCompletion(t *testing.T) {
 	f := terminalFixture(t, payment.SimNoAnswer, nil)
 	saleID := f.openSale(t, nil)
 	intentID, itemID := f.lostLegOf(t, saleID)
+	recorded := f.recordedRefOf(t, intentID, itemID)
 
-	r := f.resolveItem(itemID, "authorized", "devref-open-1")
+	r := f.resolveItem(itemID, "authorized", recorded)
 	if r.status != http.StatusOK || str(t, r.body, "state") != "resolved_authorized" {
 		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
 	}
 	state, spent, ref := f.intentFacts(t, intentID)
-	if state != "authorized" || spent || ref != "devref-open-1" {
-		t.Fatalf("the leg is %s spent=%t ref %q, wanted authorized, unspent, the manager's reference", state, spent, ref)
+	if state != "authorized" || spent || ref != recorded {
+		t.Fatalf("the leg is %s spent=%t ref %q, wanted authorized, unspent, the terminal's recorded reference", state, spent, ref)
 	}
 	if got := f.saleStatus(t, saleID); got != "OPEN" {
 		t.Fatalf("the sale is %s, wanted it still OPEN", got)
@@ -191,7 +213,7 @@ func TestResolveAuthorizedOnOpenSaleKeepsTheLegForTheCompletion(t *testing.T) {
 		t.Fatalf("%d payments booked before the completion, wanted 0", got)
 	}
 	// a second resolve is refused and moves nothing
-	requireBlocker(t, f.resolveItem(itemID, "authorized", "devref-open-1"), "lost_item_settled")
+	requireBlocker(t, f.resolveItem(itemID, "authorized", recorded), "lost_item_settled")
 	// completing with cash would leave the authorized card leg behind: refused
 	requireBlocker(t, f.completeSale(saleID, f.cashAll(t, saleID)), "authorized_leg_unused")
 	// the completion with the card tender uses the leg
@@ -207,8 +229,8 @@ func TestResolveAuthorizedOnOpenSaleKeepsTheLegForTheCompletion(t *testing.T) {
 	}
 	var gwRef string
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT gateway_tx_id FROM pos_tenders WHERE transaction_id = $1 AND method = 'CARD'`, saleID).Scan(&gwRef); err != nil || gwRef != "devref-open-1" {
-		t.Fatalf("the card tender carries gateway ref %q (%v), wanted the manager's reference", gwRef, err)
+		`SELECT gateway_tx_id FROM pos_tenders WHERE transaction_id = $1 AND method = 'CARD'`, saleID).Scan(&gwRef); err != nil || gwRef != recorded {
+		t.Fatalf("the card tender carries gateway ref %q (%v), wanted the terminal's recorded reference", gwRef, err)
 	}
 	if state, spent, _ := f.intentFacts(t, intentID); state != "authorized" || !spent {
 		t.Fatalf("the leg after the completion is %s spent=%t, wanted authorized and spent", state, spent)
@@ -237,12 +259,13 @@ func TestResolveAuthorizedOnSalePaidInFullReversesTheWholeCharge(t *testing.T) {
 	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
 		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
 	}
-	r := f.resolveItem(itemID, "authorized", "devref-full-1")
+	recorded := f.recordedRefOf(t, intentID, itemID)
+	r := f.resolveItem(itemID, "authorized", recorded)
 	if r.status != http.StatusOK || str(t, r.body, "state") != "resolved_authorized" {
 		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
 	}
-	if len(gw.voids) != 1 || gw.voids[0] != "devref-full-1" || len(gw.refunds) != 0 {
-		t.Fatalf("the charge went back through voids %v refunds %v, wanted one void of the manager's reference", gw.voids, gw.refunds)
+	if len(gw.voids) != 1 || gw.voids[0] != recorded || len(gw.refunds) != 0 {
+		t.Fatalf("the charge went back through voids %v refunds %v, wanted one void of the terminal's recorded reference", gw.voids, gw.refunds)
 	}
 	if got := f.cardTendersOf(t, saleID); got != 0 {
 		t.Fatalf("%d card tenders booked on a sale paid in cash", got)
@@ -254,7 +277,7 @@ func TestResolveAuthorizedOnSalePaidInFullReversesTheWholeCharge(t *testing.T) {
 		t.Fatalf("the leg is %s spent=%t, wanted authorized and spent (put back)", state, spent)
 	}
 	// a second resolve is a conflict and the gateway is not called again
-	requireBlocker(t, f.resolveItem(itemID, "authorized", "devref-full-1"), "lost_item_settled")
+	requireBlocker(t, f.resolveItem(itemID, "authorized", recorded), "lost_item_settled")
 	if len(gw.voids) != 1 {
 		t.Fatalf("the second resolve called the gateway: voids %v", gw.voids)
 	}
@@ -271,11 +294,11 @@ func TestResolveAuthorizedFallsBackToRefundWhenTheVoidIsRefused(t *testing.T) {
 	gw := &fakeGateway{voidErrs: []error{fmt.Errorf("cannot void a settled capture")}}
 	f := terminalFixture(t, payment.SimNoAnswer, gw)
 	saleID := f.openSale(t, nil)
-	_, itemID := f.lostLegOf(t, saleID)
+	intentID, itemID := f.lostLegOf(t, saleID)
 	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
 		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
 	}
-	if r := f.resolveItem(itemID, "authorized", "devref-fb-1"); r.status != http.StatusOK {
+	if r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID)); r.status != http.StatusOK {
 		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
 	}
 	if len(gw.refunds) != 1 || gw.refundCents[0] != f.totalOf(t, saleID) {
@@ -294,7 +317,8 @@ func TestResolveAuthorizedWhenTheReversalFailsReleasesTheItem(t *testing.T) {
 	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
 		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
 	}
-	r := f.resolveItem(itemID, "authorized", "devref-502")
+	recorded := f.recordedRefOf(t, intentID, itemID)
+	r := f.resolveItem(itemID, "authorized", recorded)
 	if r.status != http.StatusBadGateway {
 		t.Fatalf("the failed reversal = %d, wanted 502: %s", r.status, r.raw)
 	}
@@ -304,7 +328,7 @@ func TestResolveAuthorizedWhenTheReversalFailsReleasesTheItem(t *testing.T) {
 	if state, spent, _ := f.intentFacts(t, intentID); state != "authorized" || spent {
 		t.Fatalf("the intent is %s spent=%t after the failed reversal, wanted authorized and unspent", state, spent)
 	}
-	if r2 := f.resolveItem(itemID, "authorized", "devref-502"); r2.status != http.StatusOK {
+	if r2 := f.resolveItem(itemID, "authorized", recorded); r2.status != http.StatusOK {
 		t.Fatalf("the retry after the gateway recovered = %d: %s", r2.status, r2.raw)
 	}
 	if state, spent, _ := f.intentFacts(t, intentID); state != "authorized" || !spent {
@@ -320,7 +344,7 @@ func TestResolveAuthorizedAppliesUpToTheOpenAmountAndReversesTheRest(t *testing.
 	f := terminalFixture(t, payment.SimNoAnswer, gw)
 	customer := f.customerID
 	saleID := f.openSale(t, &customer)
-	_, itemID := f.lostLegOf(t, saleID)
+	intentID, itemID := f.lostLegOf(t, saleID)
 	total := f.totalOf(t, saleID)
 	if r := f.completeSale(saleID, tender("cash", 100), tender("account", total-100)); r.status != http.StatusOK {
 		t.Fatalf("the cash and account completion = %d: %s", r.status, r.raw)
@@ -328,7 +352,7 @@ func TestResolveAuthorizedAppliesUpToTheOpenAmountAndReversesTheRest(t *testing.
 	if got := f.saleInvoiceOpen(t, saleID); got != total-100 {
 		t.Fatalf("the invoice owes %d, wanted %d", got, total-100)
 	}
-	r := f.resolveItem(itemID, "authorized", "devref-part-1")
+	r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID))
 	if r.status != http.StatusOK {
 		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
 	}
@@ -352,7 +376,7 @@ func TestResolveAuthorizedOnVoidedSaleReversesTheWholeCharge(t *testing.T) {
 	gw := &fakeGateway{}
 	f := terminalFixture(t, payment.SimNoAnswer, gw)
 	saleID := f.openSale(t, nil)
-	_, itemID := f.lostLegOf(t, saleID)
+	intentID, itemID := f.lostLegOf(t, saleID)
 	done := f.completeSale(saleID, f.cashAll(t, saleID))
 	if done.status != http.StatusOK {
 		t.Fatalf("the cash completion = %d: %s", done.status, done.raw)
@@ -362,7 +386,7 @@ func TestResolveAuthorizedOnVoidedSaleReversesTheWholeCharge(t *testing.T) {
 	if v.status != http.StatusOK {
 		t.Fatalf("the void = %d: %s", v.status, v.raw)
 	}
-	if r := f.resolveItem(itemID, "authorized", "devref-void-1"); r.status != http.StatusOK {
+	if r := f.resolveItem(itemID, "authorized", f.recordedRefOf(t, intentID, itemID)); r.status != http.StatusOK {
 		t.Fatalf("the resolve = %d: %s", r.status, r.raw)
 	}
 	if len(gw.voids) != 1 || f.cardTendersOf(t, saleID) != 0 {
@@ -406,17 +430,18 @@ func TestRacingResolvesCallTheGatewayOnce(t *testing.T) {
 	})
 	f.openTill(0)
 	saleID := f.openSale(t, nil)
-	_, itemID := f.lostLegOf(t, saleID)
+	intentID, itemID := f.lostLegOf(t, saleID)
 	if r := f.completeSale(saleID, f.cashAll(t, saleID)); r.status != http.StatusOK {
 		t.Fatalf("the cash completion = %d: %s", r.status, r.raw)
 	}
+	recorded := f.recordedRefOf(t, intentID, itemID)
 	var wg sync.WaitGroup
 	statuses := make([]int, 3)
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			statuses[i] = f.resolveItem(itemID, "authorized", "devref-race-1").status
+			statuses[i] = f.resolveItem(itemID, "authorized", recorded).status
 		}(i)
 	}
 	wg.Wait()

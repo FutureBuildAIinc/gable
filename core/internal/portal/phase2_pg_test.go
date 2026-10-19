@@ -94,9 +94,12 @@ func muxForPhase2(f *proFixture, customerID, userID uuid.UUID, role string, gw p
 		WithAccountService(accountSvc).
 		WithInvoiceService(invoiceSvc).
 		WithDocumentService(docSvc)
-	if gw != nil {
-		svc.WithPaymentGateway(gw)
+	if gw == nil {
+		// The service has no default gateway any more; the Phase 2 suite
+		// exercises the stub flow, so a nil gateway here means the stub.
+		gw = NewStubPaymentGateway()
 	}
+	svc.WithPaymentGateway(gw)
 
 	h := NewHandler(svc)
 	mux := http.NewServeMux()
@@ -266,7 +269,7 @@ func TestPhase2_Part2_QuoteIntakeAndConvert(t *testing.T) {
 	}
 
 	// Customer B cannot convert Customer A's quote -> 404.
-	bMux, _ := muxForPhase2(f, f.bCustomer, uuid.New(), RoleOwner, nil)
+	bMux, _ := muxForPhase2(f, f.bCustomer, f.bUser, RoleOwner, nil)
 	rec, _ = call(bMux, http.MethodPost, "/api/portal/v1/quotes/"+f.aQuote.String()+"/convert", `{}`, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant convert quote status = %d, want 404", rec.Code)
@@ -493,7 +496,7 @@ func TestPhase2_Part3_CatalogYardStockReorderPreviewAndProcurement(t *testing.T)
 	}
 
 	// Other tenant gets 404.
-	bMux, _ := muxForPhase2(f, f.bCustomer, uuid.New(), RoleOwner, nil)
+	bMux, _ := muxForPhase2(f, f.bCustomer, f.bUser, RoleOwner, nil)
 	rec, _ = call(bMux, http.MethodGet, "/api/portal/v1/procurement/projects/"+procID, "", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant get procurement project status = %d, want 404", rec.Code)
@@ -786,7 +789,7 @@ func TestPhase2_Part5_BillingStatementAgingJobSummariesAndPDFs(t *testing.T) {
 	}
 
 	// 4. Tenancy: Customer B gets 404 on Customer A's invoice PDF.
-	bMux, _ := muxForPhase2(f, f.bCustomer, uuid.New(), RoleOwner, nil)
+	bMux, _ := muxForPhase2(f, f.bCustomer, f.bUser, RoleOwner, nil)
 	rec, _ = call(bMux, http.MethodGet, "/api/portal/v1/invoices/"+f.aInvoice.String()+"/pdf", "", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("other tenant invoice PDF status = %d, want 404", rec.Code)

@@ -82,6 +82,8 @@ var (
 	ErrPaymentInFlight             = errors.New("a payment for these invoices is already in progress")
 	ErrPaymentDeclined             = errors.New("payment was declined by the gateway")
 	ErrPaymentGatewayUnavailable   = errors.New("payment gateway outcome unknown; manual reconciliation required before retry")
+	ErrPaymentGatewayNotConfigured = errors.New("online payment is not configured")
+	ErrQuoteApprovalRequired       = errors.New("converting a quote that is not yet accepted requires the approve_quotes capability")
 )
 
 // refusalReasons maps a sentinel onto a short, customer-safe explanation.
@@ -213,6 +215,10 @@ func statusForPortalError(err error, fallback int) int {
 		return http.StatusPaymentRequired
 	case errors.Is(err, ErrPaymentGatewayUnavailable):
 		return http.StatusBadGateway
+	case errors.Is(err, ErrPaymentGatewayNotConfigured):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, ErrQuoteApprovalRequired):
+		return http.StatusForbidden
 	default:
 		return fallback
 	}

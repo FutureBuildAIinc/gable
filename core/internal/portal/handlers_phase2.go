@@ -135,7 +135,7 @@ func (h *Handler) HandleConvertQuote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.svc.ConvertPortalQuote(r.Context(), quoteID, customerID)
+	resp, err := h.svc.ConvertPortalQuote(r.Context(), quoteID, customerID, CapabilitiesFor(getPortalUserRole(r)))
 	if err != nil {
 		portalWriteError(w, r, err.Error(), err, statusForPortalError(err, http.StatusInternalServerError))
 		return

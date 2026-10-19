@@ -313,6 +313,8 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 				return nil, httpx.BadRequest("a source line was not found", httpx.FieldError{Field: fmt.Sprintf("lines[%d].source_line_id", i), Message: "is not a line of the source quote for this product"})
 			}
 			line.SKU, line.Description, line.UOM, line.CategoryID = sl.SKU, sl.Description, sl.UOM, sl.CategoryID
+			id := *dl.SourceLineID
+			line.SourceLineID = &id
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = sl.UnitCostTenThousandths, "dealer_quote", now
 			cost, err = SourceLineCostCents(line.Quantity, sl.Quantity, sl.LineTotalCents, line.UnitCostTenThousandths)
 		case dl.ExistingID != nil && prior[*dl.ExistingID].ID != uuid.Nil &&
@@ -322,6 +324,7 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			line.ID = p.ID
 			line.SKU, line.Description, line.UOM, line.CategoryID = p.SKU, p.Description, p.UOM, p.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = p.UnitCostTenThousandths, p.PriceBasis, p.PricedAt
+			line.SourceLineID = p.SourceLineID
 			cost = p.CostCents
 		default:
 			if dl.ExistingID != nil && prior[*dl.ExistingID].ID != uuid.Nil &&
@@ -337,7 +340,11 @@ func (s *Service) build(ctx context.Context, a Actor, existing *Quote, d *Draft)
 			}
 			line.SKU, line.Description, line.UOM, line.CategoryID = item.SKU, item.Description, item.UOM, item.CategoryID
 			line.UnitCostTenThousandths, line.PriceBasis, line.PricedAt = item.UnitCostTenThousandths, "catalog", now
-			cost, err = ExtendedCostCents(line.Quantity, line.UnitCostTenThousandths)
+			if item.CostCents != nil {
+				cost = *item.CostCents
+			} else {
+				cost, err = ExtendedCostCents(line.Quantity, line.UnitCostTenThousandths)
+			}
 		}
 		if err != nil {
 			return nil, httpx.BadRequest("a line cannot be priced", httpx.FieldError{Field: fmt.Sprintf("lines[%d]", i), Message: err.Error()})
@@ -871,8 +878,10 @@ func (s *Service) confirmPreviewOf(ctx context.Context, q *Quote, now time.Time)
 		return nil, nil, nil, err
 	}
 	srcValid := false
+	var src *SourceQuote
 	if q.SourceQuoteID != nil {
-		src, err := s.costs.DealerQuote(ctx, q.CustomerID, *q.SourceQuoteID)
+		var err error
+		src, err = s.costs.DealerQuote(ctx, q.CustomerID, *q.SourceQuoteID)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -893,11 +902,29 @@ func (s *Service) confirmPreviewOf(ctx context.Context, q *Quote, now time.Time)
 			}
 			var curUnit, curCost int64
 			var protected *int64
+			priceUOM := ql.UOM
 			if ql.PriceBasis == "dealer_quote" && srcValid {
 				curUnit = ql.UnitCostTenThousandths
 				curCost = ql.CostCents
 				u := curUnit
 				protected = &u
+				// The protected price is the dealer quote line's own price
+				// in its own unit, never the rounded per sale unit figure,
+				// so the order extends through the same conversion the
+				// dealer quoted.
+				sl, slErr := srcLineOf(src, ql)
+				if slErr != nil {
+					return nil, nil, nil, slErr
+				}
+				if sl != nil {
+					if sl.UnitPriceTenThousandths > 0 {
+						p := sl.UnitPriceTenThousandths
+						protected = &p
+					}
+					if sl.PriceUOM != "" {
+						priceUOM = sl.PriceUOM
+					}
+				}
 			} else {
 				item, err := s.costs.CatalogCost(ctx, q.CustomerID, ql.ProductID, ql.Quantity)
 				if err != nil {
@@ -907,9 +934,13 @@ func (s *Service) confirmPreviewOf(ctx context.Context, q *Quote, now time.Time)
 					return nil, nil, nil, httpx.BadRequest("an approved product is no longer available")
 				}
 				curUnit = item.UnitCostTenThousandths
-				curCost, err = ExtendedCostCents(ql.Quantity, curUnit)
-				if err != nil {
-					return nil, nil, nil, err
+				if item.CostCents != nil {
+					curCost = *item.CostCents
+				} else {
+					curCost, err = ExtendedCostCents(ql.Quantity, curUnit)
+					if err != nil {
+						return nil, nil, nil, err
+					}
 				}
 			}
 			delta := curCost - ql.CostCents
@@ -935,12 +966,43 @@ func (s *Service) confirmPreviewOf(ctx context.Context, q *Quote, now time.Time)
 				Quantity:            ql.Quantity,
 				UOM:                 ql.UOM,
 				DealerQuoteUnitCost: protected,
+				DealerQuotePriceUOM: priceUOM,
 			})
 		}
 	}
 	prev.DeltaCents = prev.CurrentMaterialCostCents - prev.CapturedMaterialCostCents
 	prev.ProjectedMarginCents = tot.MarginCents - prev.DeltaCents
 	return prev, unitCosts, orderLines, nil
+}
+
+// srcLineOf finds the source quote's line a quote line was built from: by
+// the stored source line id, or, for a row written before that id was kept,
+// by product, unit and unit cost. Two candidate lines of one product, unit
+// and unit cost cannot be told apart, so it refuses instead of guessing.
+func srcLineOf(src *SourceQuote, ql Line) (*SourceQuoteLine, error) {
+	if src == nil {
+		return nil, nil
+	}
+	if ql.SourceLineID != nil {
+		for i := range src.Lines {
+			if sl := &src.Lines[i]; sl.ID == *ql.SourceLineID {
+				return sl, nil
+			}
+		}
+		return nil, nil
+	}
+	var match *SourceQuoteLine
+	for i := range src.Lines {
+		sl := &src.Lines[i]
+		if sl.ProductID != ql.ProductID || sl.UOM != ql.UOM || sl.UnitCostTenThousandths != ql.UnitCostTenThousandths {
+			continue
+		}
+		if match != nil {
+			return nil, httpx.Conflict("multiple source quote lines match this product, unit, and unit cost")
+		}
+		match = sl
+	}
+	return match, nil
 }
 
 // ConfirmPreview checks whether the dealer's material prices have moved since

@@ -859,6 +859,28 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			if err := s.resolveReturnMoney(ctx, st); err != nil {
 				return err
 			}
+			// The drawer pays a named sale only what the sale itself kept in
+			// cash or check, less every cash refund already made against it
+			// (a card, store credit or account sale's goods go back to the
+			// card, the memo or the account): the bound holds unless a
+			// refund_method manager override is consumed here, once.
+			if !in.Exchange && in.RefundMethod == RefundCash {
+				refundableCash, bound, err := s.repo.CashRefundableCents(ctx, sale.ID)
+				if err != nil {
+					return err
+				}
+				if bound && -st.total > refundableCash {
+					spent, err := s.consumeOverride(ctx, sale.ID, OverrideRefundMethod, -st.total, st.actor)
+					if err != nil {
+						return err
+					}
+					if !spent {
+						return conflict("exceeds_cash_tender", fmt.Sprintf(
+							"the sale kept %d cents in cash or check less earlier cash refunds: refund to the account or card, or approve a refund_method override",
+							refundableCash))
+					}
+				}
+			}
 			// The return touches the sale: its revision moves, in process, so
 			// a void built on the earlier revision is refused stale.
 			if err := s.repo.BumpSaleRevision(ctx, sale.ID); err != nil {

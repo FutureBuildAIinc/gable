@@ -67,6 +67,11 @@ func portalWriteJSONStatus(w http.ResponseWriter, status int, data interface{}) 
 // Protected routes are wrapped with portal auth middleware.
 // An optional loginLimiter can be provided to apply stricter rate limiting to the login endpoint.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) http.Handler, loginLimiter ...func(http.Handler) http.Handler) {
+	// Capabilities come from the live user row, not the token: the wrapper
+	// below re-reads role and status on every request so a demotion or a
+	// deactivation takes effect immediately, cookie or not.
+	authMw = h.withLiveSessionUser(authMw)
+
 	// Public endpoints
 	if len(loginLimiter) > 0 && loginLimiter[0] != nil {
 		mux.Handle("POST /api/portal/v1/login", loginLimiter[0](http.HandlerFunc(h.HandleLogin)))
@@ -142,6 +147,61 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) h
 func (h *Handler) WithEmailPasswordGuard(fn func(ctx context.Context) bool) *Handler {
 	h.emailPasswordAllowed = fn
 	return h
+}
+
+// liveSessionVerifiedCtxKey marks a request whose customer_users row has
+// already been re-read on this request, so the middleware is idempotent when
+// a caller wires LiveUserMiddleware into a shared chain and RegisterRoutes
+// wraps that chain again: the second pass passes through without a second
+// database read.
+type liveSessionVerifiedCtxKey struct{}
+
+// LiveUserMiddleware re-reads the caller's customer_users row after the
+// portal auth middleware has validated the token. The row's role and status
+// win over the claims frozen at sign in: a user whose row is missing or no
+// longer Active is refused with 401, and a demoted user's capabilities
+// shrink on the very next request. Requests that carry no user id (synthetic
+// claims in tests, the dev bypass) pass through unchanged. serve.go wires
+// this on the shared portal chain so every portal route set (portal,
+// project, customer quotes) enforces it, ahead of the idempotency layer.
+func (h *Handler) LiveUserMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ok, _ := r.Context().Value(liveSessionVerifiedCtxKey{}).(bool); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		claims := portalClaims(r)
+		if claims == nil {
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
+			return
+		}
+		if claims.CustomerUserID == uuid.Nil || h.svc == nil || h.svc.repo == nil {
+			ctx := context.WithValue(r.Context(), liveSessionVerifiedCtxKey{}, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		user, err := h.svc.repo.GetCustomerUserByID(r.Context(), claims.CustomerUserID, claims.CustomerID)
+		if err != nil || user == nil || !strings.EqualFold(user.Status, "Active") {
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
+			return
+		}
+		liveClaims := *claims
+		liveClaims.Role = user.Role
+		liveClaims.Email = user.Email
+		liveClaims.Name = user.Name
+		ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, &liveClaims)
+		ctx = context.WithValue(ctx, liveSessionVerifiedCtxKey{}, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// withLiveSessionUser wraps the auth middleware with the live re-read above.
+// It is idempotent: when the chain the caller passes in already ran
+// LiveUserMiddleware, its context marker short-circuits the inner pass.
+func (h *Handler) withLiveSessionUser(authMw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return authMw(h.LiveUserMiddleware(next))
+	}
 }
 
 // HandleLogin authenticates a contractor and returns JWT + config.
@@ -925,6 +985,10 @@ func (h *Handler) HandleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "Invalid user ID", http.StatusBadRequest, err)
 		return
 	}
+	if callerID := getPortalUserID(r); callerID != nil && *callerID == userID {
+		httputil.RespondError(w, r, "Cannot change your own role or status", http.StatusForbidden, nil)
+		return
+	}
 
 	var req UpdateUserRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -950,6 +1014,10 @@ func (h *Handler) HandleUpdateUserStatus(w http.ResponseWriter, r *http.Request)
 	userID, err := uuid.Parse(idStr)
 	if err != nil {
 		httputil.RespondError(w, r, "Invalid user ID", http.StatusBadRequest, err)
+		return
+	}
+	if callerID := getPortalUserID(r); callerID != nil && *callerID == userID {
+		httputil.RespondError(w, r, "Cannot change your own role or status", http.StatusForbidden, nil)
 		return
 	}
 

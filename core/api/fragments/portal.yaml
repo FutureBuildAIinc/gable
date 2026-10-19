@@ -3383,7 +3383,7 @@ components:
           enum: [Active, Inactive]
     PortalCapabilities:
       type: object
-      required: [manage_team, see_money, pay, order, request_quotes, approve_quotes, schedule, edit_delivery_instructions]
+      required: [manage_team, see_money, pay, order, request_quotes, approve_quotes, schedule, edit_delivery_instructions, quote_customers]
       description: >-
         The server resolved answer to what this user may do. A route NEVER
         checks a role string: it names one of these capabilities and the
@@ -3405,6 +3405,8 @@ components:
         schedule:
           type: boolean
         edit_delivery_instructions:
+          type: boolean
+        quote_customers:
           type: boolean
     PortalAccount:
       type: object

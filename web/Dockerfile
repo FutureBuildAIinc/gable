@@ -26,6 +26,7 @@ COPY web/apps/desk/package.json apps/desk/
 COPY web/apps/front-door/package.json apps/front-door/
 COPY web/apps/work-shell/package.json apps/work-shell/
 COPY web/apps/field-shell/package.json apps/field-shell/
+COPY web/apps/pro-portal/package.json apps/pro-portal/
 COPY web/packages/api-client/package.json packages/api-client/
 COPY web/packages/auth/package.json packages/auth/
 COPY web/packages/design-system/package.json packages/design-system/
@@ -53,6 +54,7 @@ COPY --from=builder /app/web/apps/front-door/dist /usr/share/nginx/html/front-do
 COPY --from=builder /app/web/apps/desk/dist /usr/share/nginx/html/desk
 COPY --from=builder /app/web/apps/work-shell/dist /usr/share/nginx/html/work-shell
 COPY --from=builder /app/web/apps/field-shell/dist /usr/share/nginx/html/field-shell
+COPY --from=builder /app/web/apps/pro-portal/dist /usr/share/nginx/html/pro-portal
 
 # nginx's official image runs the master as root and the workers as `nginx`;
 # that is kept because a custom non-root user broke the pid and cache paths on

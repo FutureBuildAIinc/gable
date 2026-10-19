@@ -53,6 +53,24 @@ func (p *PortalCostSource) CatalogCost(ctx context.Context, customerID, productI
 		ProductID: productID, SKU: prod.SKU, Description: prod.Description, UOM: string(prod.UOMPrimary),
 		UnitCostTenThousandths: int64(res.UnitPrice),
 	}
+	// A price answered per another unit than the sale unit (lumber per MBF)
+	// carries its conversion pair: the per sale unit cost is the one rational
+	// price x price_uom_qty / uom_qty rounded once, and the line's exact cost
+	// extends through the pair, rounded once at the total, never the rounded
+	// per unit figure multiplied back out.
+	if res.UOMQty > 0 && res.PriceUOMQty > 0 {
+		unit, err := mulDivHalfUp(int64(res.UnitPrice), int64(res.PriceUOMQty), int64(res.UOMQty))
+		if err != nil {
+			return nil, fmt.Errorf("price product for the account: %w", err)
+		}
+		c, err := httpx.Extend(qty, res.UOMQty, res.PriceUOMQty, res.UnitPrice)
+		if err != nil {
+			return nil, fmt.Errorf("price product for the account: %w", err)
+		}
+		item.UnitCostTenThousandths = unit
+		cost := int64(c)
+		item.CostCents = &cost
+	}
 	var cat *uuid.UUID
 	if err := p.DB.GetExecutor(ctx).QueryRow(ctx, `SELECT category_id FROM products WHERE id = $1`, productID).Scan(&cat); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("read product category: %w", err)
@@ -76,7 +94,8 @@ func (p *PortalCostSource) DealerQuote(ctx context.Context, customerID, quoteID 
 	}
 	rows, err := ex.Query(ctx, `
 		SELECT ql.id, ql.product_id, ql.sku, ql.description, ql.uom::text, p.category_id, ROUND(ql.quantity * 10000)::bigint,
-			ROUND(ql.line_total * 10000 / ql.quantity)::bigint, ROUND(ql.line_total * 100)::bigint
+			ROUND(ql.line_total * 10000 / ql.quantity)::bigint, ROUND(ql.line_total * 100)::bigint,
+			ROUND(ql.unit_price * 10000)::bigint, COALESCE(ql.price_uom::text, ql.uom::text)
 		FROM quote_lines ql JOIN products p ON p.id = ql.product_id
 		WHERE ql.quote_id = $1 AND ql.quantity > 0 ORDER BY ql.position, ql.id`, quoteID)
 	if err != nil {
@@ -86,7 +105,8 @@ func (p *PortalCostSource) DealerQuote(ctx context.Context, customerID, quoteID 
 	for rows.Next() {
 		var l SourceQuoteLine
 		var qty int64
-		if err := rows.Scan(&l.ID, &l.ProductID, &l.SKU, &l.Description, &l.UOM, &l.CategoryID, &qty, &l.UnitCostTenThousandths, &l.LineTotalCents); err != nil {
+		if err := rows.Scan(&l.ID, &l.ProductID, &l.SKU, &l.Description, &l.UOM, &l.CategoryID, &qty, &l.UnitCostTenThousandths, &l.LineTotalCents,
+			&l.UnitPriceTenThousandths, &l.PriceUOM); err != nil {
 			return nil, err
 		}
 		l.Quantity = httpx.Quantity(qty)

@@ -1008,6 +1008,25 @@ func Run() {
 		WithAccountService(accountSvc).
 		WithInvoiceService(invoiceSvc).
 		WithDocumentService(docSvc)
+	// Online payment gateway, decided per call rather than at boot: the Run
+	// Payments keys are runtime settable, so the gateway resolves on every
+	// request. With keys configured the Run gateway runs; in dev mode without
+	// keys the stub gateway keeps the flow demoable; otherwise the resolver
+	// returns nil and the portal's pay routes fail closed with 503 before any
+	// payment intent is claimed, instead of stranding an invoice in CHARGING.
+	var devStubGateway payment.PaymentGateway
+	if strings.EqualFold(cfg.AuthMode, "dev") {
+		logger.Warn("AUTH_MODE=dev: portal online payment falls back to the stub gateway when Run Payments keys are not configured")
+		devStubGateway = portal.NewStubPaymentGateway()
+	} else if !paymentKeys.Configured() {
+		logger.Warn("no payment gateway configured: portal online payment is disabled (503) until Run Payments keys are configured")
+	}
+	portalSvc.WithPaymentGatewayResolver(func() payment.PaymentGateway {
+		if paymentKeys.Configured() {
+			return rpGateway
+		}
+		return devStubGateway
+	})
 	portalHandler := portal.NewHandler(portalSvc).
 		WithEmailPasswordGuard(func(ctx context.Context) bool { return signinSvc.Allowed(ctx, signinmethods.MethodEmailPassword) })
 
@@ -1051,8 +1070,15 @@ func Run() {
 	// scoped on the customer and user the portal auth chain establishes,
 	// which the global layer (already inside the JWT auth middleware) cannot
 	// see. The global layer skips the portal prefix, so nothing runs twice.
+	// The live customer_users re-read runs on the shared chain, ahead of the
+	// idempotency layer, so every route set mounted on portalChain (the
+	// portal handler, the project routes, the customer quote routes) refuses
+	// a deactivated user with 401 and shrinks a demoted user's role before
+	// any handler or cached response replay runs.
 	portalIdem := middleware.IdempotencyForPortalAuth(db)
-	portalChain := func(next http.Handler) http.Handler { return portalMw(portalIdem(next)) }
+	portalChain := func(next http.Handler) http.Handler {
+		return portalMw(portalHandler.LiveUserMiddleware(portalIdem(next)))
+	}
 	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10, cfg.TrustedProxies))
 
 	// Project Module: the portal's job dashboard on the wire contract, its
