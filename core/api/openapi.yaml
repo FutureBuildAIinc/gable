@@ -32705,6 +32705,10 @@ components:
         counted_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
+        over_short_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The signed variance cents per lowercase method; present once the drawer is counted."
         over_short_cents: {type: [integer, "null"], format: int64, description: "Set by the close."}
         gl_entry_id: {type: [string, "null"], format: uuid, description: "The 5030 over/short entry the close (or the sign off) booked."}
         notes: {type: string}
@@ -32971,6 +32975,10 @@ components:
         expected_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
+        over_short_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The signed variance cents per lowercase method; present once the drawer is counted."
     PosRegister:
       type: object
       required: [id, name, branch_id, branch_code, branch_name]

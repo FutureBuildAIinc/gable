@@ -16741,6 +16741,10 @@ export interface components {
             counted_by_method: {
                 [key: string]: number;
             };
+            /** @description The signed variance cents per lowercase method; present once the drawer is counted. */
+            over_short_by_method?: {
+                [key: string]: number;
+            };
             /**
              * Format: int64
              * @description Set by the close.
@@ -17025,6 +17029,10 @@ export interface components {
                 [key: string]: number;
             };
             expected_by_method: {
+                [key: string]: number;
+            };
+            /** @description The signed variance cents per lowercase method; present once the drawer is counted. */
+            over_short_by_method?: {
                 [key: string]: number;
             };
         };
