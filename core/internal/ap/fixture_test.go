@@ -305,6 +305,13 @@ func (f *fixture) void(id string, revision int64, reason string) resp {
 		map[string]any{"to": "voided", "revision": revision, "reason": reason})
 }
 
+// voidSafe is void without t.Fatal, for child goroutines: a transport fault
+// is answered in resp.err, which the test goroutine checks.
+func (f *fixture) voidSafe(id string, revision int64, reason string) resp {
+	return f.doSafe("POST", "/api/v1/ap/invoices/"+id+"/transitions",
+		map[string]any{"to": "voided", "revision": revision, "reason": reason})
+}
+
 // pay pays cents against the invoices.
 func (f *fixture) pay(cents int64, invoiceIDs ...string) resp {
 	f.t.Helper()
@@ -363,11 +370,25 @@ func (f *fixture) glReverse(entry string) resp {
 // now that the GL void route refuses non-MANUAL and already-reversed entries.
 func (f *fixture) glVoidEntry(entry string) resp {
 	f.t.Helper()
-	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	r := f.glVoidEntrySafe(entry)
+	if r.err != nil {
+		f.t.Fatal(r.err)
+	}
+	return r
+}
+
+// glVoidEntrySafe is glVoidEntry without t.Fatal, for child goroutines: the
+// SQL fallback's fault is answered in resp.err, which the test goroutine
+// checks.
+func (f *fixture) glVoidEntrySafe(entry string) resp {
+	r := f.doSafe("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	if r.err != nil {
+		return r
+	}
 	if r.status == http.StatusBadRequest {
 		if _, err := f.db.Pool.Exec(context.Background(),
 			`UPDATE gl_journal_entries SET status = 'VOID', updated_at = NOW() WHERE id = $1 AND status = 'POSTED'`, entry); err != nil {
-			f.t.Fatal(err)
+			return resp{err: err}
 		}
 		r.status = http.StatusOK
 	}

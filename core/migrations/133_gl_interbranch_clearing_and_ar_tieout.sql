@@ -106,13 +106,30 @@ WHERE e.source_ref_id = a.id AND e.source = 'CREDIT_MEMO'
 -- 1095: only legs of cross-branch PAYMENT, CREDIT_MEMO and REVERSAL entries
 -- (the two line guard of the other steps cannot help here, these entries
 -- carry four legs each) with a settlement description, the PostReversal
--- 'Reversal: ...' wordings included. A MANUAL entry described the same way
--- is a real cash move between drawers and keeps its 1010 legs.
+-- 'Reversal: ...' wordings included. A REVERSAL entry moves only when what
+-- it reverses is a PAYMENT or CREDIT_MEMO entry, or when its line carries
+-- the unlinked fallback description: reversing a MANUAL cash move through
+-- ReverseJournalEntry is a real cash move undone, and both the MANUAL entry
+-- and its reversal keep their 1010 legs, as does any MANUAL entry described
+-- the same way.
 UPDATE gl_journal_lines l
 SET account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
 FROM gl_journal_entries e
 WHERE e.id = l.journal_entry_id
-  AND e.source IN ('PAYMENT', 'CREDIT_MEMO', 'REVERSAL')
+  AND (
+      e.source IN ('PAYMENT', 'CREDIT_MEMO')
+      OR (
+          e.source = 'REVERSAL'
+          AND (
+              EXISTS (
+                  SELECT 1 FROM gl_journal_entries o
+                  WHERE o.id = e.reverses_entry_id
+                    AND o.source IN ('PAYMENT', 'CREDIT_MEMO')
+              )
+              OR l.description = 'Inter-branch cash settlement reversal'
+          )
+      )
+  )
   AND (SELECT count(DISTINCT l2.branch_id) FROM gl_journal_lines l2
        WHERE l2.journal_entry_id = e.id) >= 2
   AND l.account_id = (SELECT id FROM gl_accounts WHERE code = '1010')

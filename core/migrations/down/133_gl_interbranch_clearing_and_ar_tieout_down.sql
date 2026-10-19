@@ -39,13 +39,28 @@ WHERE e.id = l.journal_entry_id
 
 -- Cross-branch settlement legs moved from 1010 to 1095 return to 1010,
 -- under the same predicate the up migration moved them by: cross-branch
--- PAYMENT, CREDIT_MEMO and REVERSAL entries with a settlement description,
--- never a MANUAL entry's legs.
+-- PAYMENT and CREDIT_MEMO entries with a settlement description, a REVERSAL
+-- entry whose original is a PAYMENT or CREDIT_MEMO entry or whose line
+-- carries the unlinked fallback description, and never a MANUAL entry's or
+-- a MANUAL entry's reversal's legs.
 UPDATE gl_journal_lines l
 SET account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
 FROM gl_journal_entries e
 WHERE e.id = l.journal_entry_id
-  AND e.source IN ('PAYMENT', 'CREDIT_MEMO', 'REVERSAL')
+  AND (
+      e.source IN ('PAYMENT', 'CREDIT_MEMO')
+      OR (
+          e.source = 'REVERSAL'
+          AND (
+              EXISTS (
+                  SELECT 1 FROM gl_journal_entries o
+                  WHERE o.id = e.reverses_entry_id
+                    AND o.source IN ('PAYMENT', 'CREDIT_MEMO')
+              )
+              OR l.description = 'Inter-branch cash settlement reversal'
+          )
+      )
+  )
   AND (SELECT count(DISTINCT l2.branch_id) FROM gl_journal_lines l2
        WHERE l2.journal_entry_id = e.id) >= 2
   AND l.account_id = (SELECT id FROM gl_accounts WHERE code = '1095')

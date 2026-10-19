@@ -2275,10 +2275,16 @@ func TestWire_VoidVoidRaceNever500(t *testing.T) {
 		controlBefore, openBefore := f.controlBalanceIn("USD"), f.openSumIn("USD")
 		apRes, glRes := make(chan resp, 1), make(chan resp, 1)
 		start := make(chan struct{})
-		go func() { <-start; apRes <- f.void(id, 2, "race round") }()
-		go func() { <-start; glRes <- f.glVoidEntry(entry) }()
+		go func() { <-start; apRes <- f.voidSafe(id, 2, "race round") }()
+		go func() { <-start; glRes <- f.glVoidEntrySafe(entry) }()
 		close(start)
 		ap, gl := <-apRes, <-glRes
+		if ap.err != nil {
+			t.Fatalf("round %d: AP void request failed: %v", round, ap.err)
+		}
+		if gl.err != nil {
+			t.Fatalf("round %d: GL void request failed: %v", round, gl.err)
+		}
 		if ap.status >= 500 {
 			t.Errorf("round %d: the AP void answered %d in the race: %s", round, ap.status, ap.raw)
 		}
