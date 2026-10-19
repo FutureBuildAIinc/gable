@@ -466,6 +466,14 @@ func TestCrossBranchSubledgerTieOutAndSettlements(t *testing.T) {
 		if got := acctBalance(b, gl.AccountCodeAR); got != 0 {
 			t.Errorf("branch %s account 1020 after cross-branch payment apply = %d, want 0", b, got)
 		}
+		want := map[uuid.UUID]int64{branchA: 10000, branchB: 0}
+		if got := acctBalance(b, gl.AccountCodeCash); got != want[b] {
+			t.Errorf("branch %s account 1010 after cross-branch payment apply = %d, want %d (only the cash branchA took)", b, got, want[b])
+		}
+		wantIB := map[uuid.UUID]int64{branchA: -10000, branchB: 10000}
+		if got := acctBalance(b, gl.AccountCodeInterBranch); got != wantIB[b] {
+			t.Errorf("branch %s account 1095 after cross-branch payment apply = %d, want %d (the settlement rides the clearing account)", b, got, wantIB[b])
+		}
 		tie, err := glSvc.TieOut(ctx, today, "USD", &b)
 		if err != nil {
 			t.Fatal(err)
@@ -527,6 +535,13 @@ func TestCrossBranchSubledgerTieOutAndSettlements(t *testing.T) {
 	for _, b := range []uuid.UUID{branchA, branchB} {
 		if got := acctBalance(b, gl.AccountCodeAR); got != 0 {
 			t.Errorf("branch %s account 1020 after cross-branch credit-memo apply = %d, want 0", b, got)
+		}
+		if got := acctBalance(b, gl.AccountCodeCash); got != 0 {
+			t.Errorf("branch %s account 1010 after cross-branch credit-memo apply = %d, want 0 (a memo moves no cash)", b, got)
+		}
+		wantIB := map[uuid.UUID]int64{branchA: -10000, branchB: 10000}
+		if got := acctBalance(b, gl.AccountCodeInterBranch); got != wantIB[b] {
+			t.Errorf("branch %s account 1095 after cross-branch credit-memo apply = %d, want %d (the settlement rides the clearing account)", b, got, wantIB[b])
 		}
 		tie, err := glSvc.TieOut(ctx, today, "USD", &b)
 		if err != nil {

@@ -313,6 +313,9 @@ func (s *Service) reverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 	if orig.Status != StatusPosted {
 		return uuid.Nil, fmt.Errorf("can only reverse POSTED entries (current: %s)", orig.Status)
 	}
+	if orig.Source != SourceManual {
+		return uuid.Nil, fmt.Errorf("can only reverse MANUAL journal entries (source: %s)", orig.Source)
+	}
 	if reversed, err := s.repo.IsReversed(ctx, id); err != nil {
 		return uuid.Nil, err
 	} else if reversed {

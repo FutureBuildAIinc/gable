@@ -18,6 +18,7 @@ import (
 // Account codes the sales postings name (ADR 0005 section 8.1), beside the
 // codes above.
 const (
+	AccountCodeInterBranch    = "1095" // Due to and due from branches on cross-branch settlements
 	AccountCodeInventory      = "1030"
 	AccountCodeSalesTax       = "2020"
 	AccountCodeAP             = "2010" // Accounts Payable: what vendors are owed (C4-1b, ADR 0008 7.4)

@@ -279,8 +279,8 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 		if payBranch != invBranch {
 			legs = []gl.Leg{
 				{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: l.AmountCents, BranchID: &payBranch},
-				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Credit: l.AmountCents, BranchID: &payBranch},
-				{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement", Debit: l.AmountCents, BranchID: &invBranch},
+				{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing", Credit: l.AmountCents, BranchID: &payBranch},
+				{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing", Debit: l.AmountCents, BranchID: &invBranch},
 				{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
 			}
 		}
@@ -429,8 +429,8 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 				Source: gl.SourceCreditMemo, SourceRefID: &appID, BranchID: inv.BranchID, Currency: m.Currency, PostedBy: in.Actor,
 				Legs: []gl.Leg{
 					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: l.AmountCents, BranchID: &memoBranch},
-					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Credit: l.AmountCents, BranchID: &memoBranch},
-					{AccountCode: gl.AccountCodeCash, Description: "Inter-branch AR settlement", Debit: l.AmountCents, BranchID: &invBranch},
+					{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing", Credit: l.AmountCents, BranchID: &memoBranch},
+					{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing", Debit: l.AmountCents, BranchID: &invBranch},
 					{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: l.AmountCents, BranchID: &invBranch},
 				},
 			})
@@ -669,8 +669,8 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 					invBranch := inv.BranchID
 					legs = []gl.Leg{
 						{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: a.Amount, BranchID: &invBranch},
-						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Credit: a.Amount, BranchID: &invBranch},
-						{AccountCode: gl.AccountCodeCash, Description: "Inter-branch cash settlement reversal", Debit: a.Amount, BranchID: &payBranch},
+						{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing reversal", Credit: a.Amount, BranchID: &invBranch},
+						{AccountCode: gl.AccountCodeInterBranch, Description: "Inter-branch clearing reversal", Debit: a.Amount, BranchID: &payBranch},
 						{AccountCode: contra, Description: "Reversal", Credit: a.Amount, BranchID: &payBranch},
 					}
 				}

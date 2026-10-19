@@ -79,6 +79,11 @@ type branchFilter struct {
 	Branch   *uuid.UUID
 	Grants   *string
 	Currency string
+	// IncludeInterBranch keeps the 1095 Inter-Branch Clearing account on a
+	// consolidated read, which eliminates it by default: the clearing legs
+	// net to zero across branches, and the consolidated statement answers
+	// what the company as a whole holds.
+	IncludeInterBranch bool
 }
 
 func (f branchFilter) args() []any { return []any{f.Branch, f.Grants} }
@@ -116,12 +121,13 @@ func (r *PostgresRepository) GetTrialBalanceFor(ctx context.Context, asOfDate ti
 		JOIN gl_journal_lines l ON l.account_id = a.id
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED' AND e.entry_date <= $1
 		WHERE a.is_active = TRUE AND ($2 = '' OR e.currency = $2)
+		  AND ($5 OR a.code <> '1095')
 		  AND ` + middleware.Wall("l", 3, 4) + `
 		GROUP BY a.id, a.code, a.name, a.type, e.currency, l.branch_id
 		HAVING SUM(l.debit) > 0 OR SUM(l.credit) > 0
 		ORDER BY e.currency, a.code, (SELECT b.code FROM locations b WHERE b.id = l.branch_id)
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency, f.Branch, f.Grants)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency, f.Branch, f.Grants, f.Branch != nil || f.IncludeInterBranch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trial balance: %w", err)
 	}
@@ -155,11 +161,12 @@ func (r *PostgresRepository) GetAccountActivityFor(ctx context.Context, start *t
 		  AND a.type = ANY($3)
 		  AND ($2::date IS NULL OR e.source <> 'CLOSING')
 		  AND e.currency = $4
+		  AND ($7 OR a.code <> '1095')
 		  AND ` + middleware.Wall("l", 5, 6) + `
 		GROUP BY a.id, a.code, a.name, a.type, a.subtype
 		ORDER BY a.code
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes, currency, f.Branch, f.Grants)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes, currency, f.Branch, f.Grants, f.Branch != nil || f.IncludeInterBranch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account activity: %w", err)
 	}
@@ -310,7 +317,7 @@ func (r *PostgresRepository) ARSubledgerCents(ctx context.Context, f branchFilte
 			FROM ar_applications a
 			JOIN credit_memos cm ON cm.id = a.credit_memo_id
 			JOIN invoices inv ON inv.id = a.invoice_id
-			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND cm.branch_id <> inv.branch_id
+			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND a.gl_entry_id IS NOT NULL AND cm.branch_id <> inv.branch_id
 			UNION ALL
 			SELECT -ROUND(a.amount * 100)::bigint AS amount_cents,
 			       a.currency AS currency,
@@ -318,7 +325,7 @@ func (r *PostgresRepository) ARSubledgerCents(ctx context.Context, f branchFilte
 			FROM ar_applications a
 			JOIN credit_memos cm ON cm.id = a.credit_memo_id
 			JOIN invoices inv ON inv.id = a.invoice_id
-			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND cm.branch_id <> inv.branch_id
+			WHERE a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND a.gl_entry_id IS NOT NULL AND cm.branch_id <> inv.branch_id
 		) sub
 		WHERE sub.currency = $1
 		  AND ` + middleware.Wall("sub", 2, 3) + `

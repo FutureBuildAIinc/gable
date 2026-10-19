@@ -159,10 +159,15 @@ type resp struct {
 	header http.Header
 	body   map[string]any
 	raw    []byte
+	// err carries a transport level fault (marshal, request build, do) so a
+	// goroutine can return it to its test instead of calling t.Fatal there.
+	err error
 }
 
-func (f *fixture) do(method, path string, body any, headers ...string) resp {
-	f.t.Helper()
+// doSafe is do without t.Fatal: a transport fault is answered in resp.err
+// for the caller (a goroutine must never call t.Fatal itself) to fail the
+// test with on its own goroutine.
+func (f *fixture) doSafe(method, path string, body any, headers ...string) resp {
 	var rdr io.Reader
 	switch b := body.(type) {
 	case nil:
@@ -171,13 +176,13 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	default:
 		raw, err := json.Marshal(body)
 		if err != nil {
-			f.t.Fatal(err)
+			return resp{err: err}
 		}
 		rdr = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequest(method, f.srv.URL+path, rdr)
 	if err != nil {
-		f.t.Fatal(err)
+		return resp{err: err}
 	}
 	if rdr != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -188,7 +193,7 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		f.t.Fatal(err)
+		return resp{err: err}
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
@@ -197,6 +202,15 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	dec.UseNumber()
 	_ = dec.Decode(&out.body)
 	return out
+}
+
+func (f *fixture) do(method, path string, body any, headers ...string) resp {
+	f.t.Helper()
+	r := f.doSafe(method, path, body, headers...)
+	if r.err != nil {
+		f.t.Fatal(r.err)
+	}
+	return r
 }
 
 func str(t *testing.T, m map[string]any, key string) string {
@@ -291,6 +305,13 @@ func (f *fixture) void(id string, revision int64, reason string) resp {
 		map[string]any{"to": "voided", "revision": revision, "reason": reason})
 }
 
+// voidSafe is void without t.Fatal, for child goroutines: a transport fault
+// is answered in resp.err, which the test goroutine checks.
+func (f *fixture) voidSafe(id string, revision int64, reason string) resp {
+	return f.doSafe("POST", "/api/v1/ap/invoices/"+id+"/transitions",
+		map[string]any{"to": "voided", "revision": revision, "reason": reason})
+}
+
 // pay pays cents against the invoices.
 func (f *fixture) pay(cents int64, invoiceIDs ...string) resp {
 	f.t.Helper()
@@ -310,21 +331,64 @@ func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string
 // Reaching the ledger through the public GL routes.
 // ---------------------------------------------------------------------------
 
-// glReverse runs the GL reverse route on an entry.
+// glReverse runs the GL reverse route on an entry. The route refuses
+// non-MANUAL entries (an entry a subledger document owns is undone through
+// its document), and these chains need a bill's entry reversed anyway, so
+// the refusal falls back to writing the same reversal by hand. That fallback
+// calls t.Fatal on failure, so glReverse is for sequential main goroutine
+// setup only: never call it from a child goroutine, whose Fatal would exit
+// the goroutine without unwinding the test (call the HTTP route directly
+// there instead). glVoidEntry's fallback holds the same rule.
 func (f *fixture) glReverse(entry string) resp {
 	f.t.Helper()
-	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+	if r.status == http.StatusBadRequest {
+		var reversal string
+		if err := f.db.Pool.QueryRow(context.Background(), `
+			WITH orig AS (
+				SELECT id, entry_number, currency, branch_id
+				FROM gl_journal_entries WHERE id = $1 AND status = 'POSTED'
+			), ins AS (
+				INSERT INTO gl_journal_entries (entry_date, memo, source, source_ref_id, branch_id, status, posted_by, currency, reverses_entry_id)
+				SELECT CURRENT_DATE, 'Reversal of #' || entry_number || ': fixture reversal', 'REVERSAL', orig.id, orig.branch_id, 'POSTED', 't', orig.currency, orig.id
+				FROM orig
+				RETURNING id
+			)
+			INSERT INTO gl_journal_lines (journal_entry_id, account_id, description, debit, credit, branch_id)
+			SELECT ins.id, l.account_id, 'Reversal: ' || l.description, l.credit, l.debit, l.branch_id
+			FROM gl_journal_lines l, ins
+			WHERE l.journal_entry_id = $1
+			RETURNING (SELECT id FROM ins)`, entry).Scan(&reversal); err != nil {
+			f.t.Fatal(err)
+		}
+		r.status = http.StatusOK
+	}
+	return r
 }
 
 // glVoidEntry marks an entry VOID to exercise AP's legacy voided-chain guards
 // now that the GL void route refuses non-MANUAL and already-reversed entries.
 func (f *fixture) glVoidEntry(entry string) resp {
 	f.t.Helper()
-	r := f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	r := f.glVoidEntrySafe(entry)
+	if r.err != nil {
+		f.t.Fatal(r.err)
+	}
+	return r
+}
+
+// glVoidEntrySafe is glVoidEntry without t.Fatal, for child goroutines: the
+// SQL fallback's fault is answered in resp.err, which the test goroutine
+// checks.
+func (f *fixture) glVoidEntrySafe(entry string) resp {
+	r := f.doSafe("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+	if r.err != nil {
+		return r
+	}
 	if r.status == http.StatusBadRequest {
 		if _, err := f.db.Pool.Exec(context.Background(),
 			`UPDATE gl_journal_entries SET status = 'VOID', updated_at = NOW() WHERE id = $1 AND status = 'POSTED'`, entry); err != nil {
-			f.t.Fatal(err)
+			return resp{err: err}
 		}
 		r.status = http.StatusOK
 	}
