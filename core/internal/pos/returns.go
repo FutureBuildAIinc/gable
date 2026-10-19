@@ -861,9 +861,9 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 			}
 			// The drawer pays a named sale only what the sale itself kept in
 			// cash or check, less every cash refund already made against it
-			// (a store credit or account sale's goods go back to the account
-			// or the card): the bound holds unless a refund_method manager
-			// override is consumed here, once.
+			// (a card, store credit or account sale's goods go back to the
+			// card, the memo or the account): the bound holds unless a
+			// refund_method manager override is consumed here, once.
 			if !in.Exchange && in.RefundMethod == RefundCash {
 				refundableCash, bound, err := s.repo.CashRefundableCents(ctx, sale.ID)
 				if err != nil {

@@ -252,16 +252,17 @@ func TestTheCardReturnBooksWhatTheGatewayTook(t *testing.T) {
 		t.Errorf("card balance = %d, want 598 (2393 charged, 1795 refunded once to the card)", got)
 	}
 	f.assertARInvariants(t)
-	// the last unit still returns: the drawer pays it
-	r := f.returnOn(t, saleID, lineID, "1")
+	// the last unit still returns: the card sale's own tender pays it (the
+	// drawer no longer refunds a card tender without a refund_method override)
+	r := f.cardReturnOn(t, saleID, lineID, "1")
 	if r.status != http.StatusCreated {
-		t.Fatalf("the cash return after the card return = %d: %s", r.status, r.raw)
+		t.Fatalf("the card return of the last unit = %d: %s", r.status, r.raw)
 	}
 	if got := num(t, r.body, "total_cents"); got != -598 {
-		t.Errorf("the completing cash return total = %d, want -598 (the line's remainder 549 and the tax's remainder 49)", got)
+		t.Errorf("the completing card return total = %d, want -598 (the line's remainder 549 and the tax's remainder 49)", got)
 	}
 	if got := f.accountBalance("1010"); got != 0 {
-		t.Errorf("card balance = %d, want 0 (2393 in, 1795 to the card and 598 from the drawer)", got)
+		t.Errorf("card balance = %d, want 0 (2393 in, 1795 and 598 out to the card)", got)
 	}
 	f.assertARInvariants(t)
 }

@@ -145,6 +145,12 @@ func (s *Service) consumeOverride(ctx context.Context, saleID uuid.UUID, kind st
 	if err != nil || !ok {
 		return false, err
 	}
+	// two persons spend a refund_method override: the manager who approved it
+	// cannot also be the one whose return or exchange consumes it. The error
+	// rolls the consumption back with the caller's transaction.
+	if kind == OverrideRefundMethod && actor != "" && actor != devApprover && strings.EqualFold(actor, o.ApprovedBy) {
+		return false, httpx.Forbidden("a manager who approved a refund_method override cannot also make the cash return")
+	}
 	if s.auditLog != nil {
 		if err := s.auditLog.Log(ctx, audit.Entry{
 			Action: "pos.override.consumed", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,

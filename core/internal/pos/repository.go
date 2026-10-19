@@ -914,20 +914,23 @@ func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.
 }
 
 // CashRefundableCents answers what a drawer refund of the sale may pay: the
-// net cents its CASH, CHECK and CARD tenders kept (a tender that walked out
-// whole as change holds no payment, so it kept nothing) less the cash already
+// net cents its CASH and CHECK tenders kept (a tender that walked out whole
+// as change holds no payment, so it kept nothing) less the cash already
 // paid back, the plain cash returns and the cash surpluses of its exchanges.
-// The boolean tells whether the bound holds at all: a sale the contract
-// completed carries a payment on its money tenders or an ACCOUNT or
-// STORE_CREDIT leg, while a legacy one the migrations carried holds its old
-// paymentless tender rows and refunds as it always did.
+// Only CASH and CHECK tenders count: a CARD, ACCOUNT or STORE_CREDIT sale
+// keeps nothing refundable in cash unless a refund_method manager override
+// is approved. The boolean tells whether the bound holds at all: a sale the
+// contract completed carries a payment on its money tenders (a card tender
+// binds through its payment) or an ACCOUNT or STORE_CREDIT leg, while a
+// legacy one the migrations carried holds its old paymentless tender rows
+// and refunds as it always did.
 func (r *PostgresRepository) CashRefundableCents(ctx context.Context, saleID uuid.UUID) (int64, bool, error) {
 	var cents int64
 	var bound bool
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT
 		  (SELECT COALESCE(SUM(ROUND(t.amount * 100)::bigint), 0) FROM pos_tenders t
-		   WHERE t.transaction_id = $1 AND t.method IN ('CASH', 'CHECK', 'CARD') AND t.payment_id IS NOT NULL)
+		   WHERE t.transaction_id = $1 AND t.method IN ('CASH', 'CHECK') AND t.payment_id IS NOT NULL)
 		- (SELECT COALESCE(SUM(ABS(ROUND(r.total * 100)::bigint)), 0) FROM pos_returns r
 		   WHERE r.original_transaction_id = $1 AND r.refund_method = 'CASH' AND r.exchange_sale_id IS NULL)
 		- (SELECT COALESCE(SUM(ABS(ROUND(rf.amount * 100)::bigint)), 0) FROM pos_returns r
