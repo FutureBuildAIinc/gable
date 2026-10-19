@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -183,6 +184,112 @@ func TestSweepPR181_P1_2b_AccountSaleReturnAndExchangeSurplusRefuseCashWithoutOv
 	memoID := str(t, r.body["return"].(map[string]any), "credit_memo_id")
 	if got := f.memoState(memoID); got != "PARTIAL:-1796" {
 		t.Errorf("memo = %s, want PARTIAL:-1796", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (R2 P1-2): a card tender is not drawer cash: a card sale's goods come
+// back to the card or the account, and the drawer pays them only under a
+// refund_method manager override.
+func TestSweepPR181R2_CardSaleCashReturnAndExchangeSurplusRefusedWithoutOverride(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+
+	// the sale: 4 units, wholly on the card, a named customer
+	sale, total := f.cartOf("4", &f.customerID)
+	if r := f.completeSale(sale, withToken(tender("card", total))); r.status != http.StatusOK {
+		t.Fatalf("card sale = %d: %s", r.status, r.raw)
+	}
+	line := f.firstLineOf(t, sale)
+
+	// a cash return of 1 unit (599) is refused and pays no cash
+	blockerOf(t, f.postReturn(t, sale, "cash", lineOf(line, "1", "defective")), "exceeds_cash_tender")
+	if got := f.cashRefundedCents(t); got != 0 {
+		t.Errorf("cash refunded = %d after the refused return, want 0", got)
+	}
+
+	// an exchange of the 4 units for 1 (surplus 1796) refuses an explicit
+	// cash refund method
+	blockerOf(t, f.exchange("", map[string]any{
+		"original_sale_id": sale, "reason": "downsized", "refund_method": "cash",
+		"returned_lines": []map[string]any{lineOf(line, "4", "overbought")},
+		"sale_lines":     f.replaceWith("1"),
+	}), "exceeds_cash_tender")
+	if got := f.cashRefundedCents(t); got != 0 {
+		t.Errorf("cash refunded = %d after the refused exchange, want 0", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (R2 P2-1): two persons spend a refund_method override: the manager
+// who approved it cannot also make the cash return or the exchange that
+// consumes it, while the sale's cashier (or any other user) can.
+func TestSweepPR181R2_RefundMethodOverrideNeedsASecondHand(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+
+	cashierC1, managerM1 := uuid.NewString(), uuid.NewString()
+	sale := f.startSaleBy(cashierC1, &f.customerID)
+	if r := f.addLine(sale, f.productLine("2")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(sale, withToken(tender("card", 1198))); r.status != http.StatusOK {
+		t.Fatalf("card sale = %d: %s", r.status, r.raw)
+	}
+	if r := f.override(sale, "refund_method", "manager approved cash payout", 1198, "admin", managerM1); r.status != http.StatusCreated {
+		t.Fatalf("refund_method override = %d: %s", r.status, r.raw)
+	}
+	line := f.firstLineOf(t, sale)
+	f.ensureOpenTill(t)
+
+	// the approver's own cash return is refused and spends nothing
+	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "original_sale_id": sale, "refund_method": "cash",
+		"reason": "same hand", "lines": []map[string]any{lineOf(line, "1", "defective")},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", managerM1)
+	if r.status != http.StatusForbidden {
+		t.Fatalf("the approver's own cash return = %d: %s, want 403", r.status, r.raw)
+	}
+	if got := f.scalar(`SELECT count(*) FROM pos_account_overrides WHERE sale_id = $1 AND consumed_at IS NULL`,
+		uuid.MustParse(sale)).(int64); got != 1 {
+		t.Errorf("live overrides = %d after the approver's refused return, want 1", got)
+	}
+
+	// the approver's own cash exchange is refused the same way: 2 units back
+	// for 1 leaves a 599 surplus the cash method would pay
+	r = f.do("POST", "/api/v1/pos/exchanges", map[string]any{
+		"register_id": f.register, "original_sale_id": sale, "reason": "same hand",
+		"refund_method": "cash",
+		"returned_lines": []map[string]any{lineOf(line, "2", "defective")},
+		"sale_lines":     f.replaceWith("1"),
+	}, "X-Test-Role", "cashier", "X-Test-Sub", managerM1)
+	if r.status != http.StatusForbidden {
+		t.Fatalf("the approver's own cash exchange = %d: %s, want 403", r.status, r.raw)
+	}
+	if got := f.scalar(`SELECT count(*) FROM pos_account_overrides WHERE sale_id = $1 AND consumed_at IS NULL`,
+		uuid.MustParse(sale)).(int64); got != 1 {
+		t.Errorf("live overrides = %d after the approver's refused exchange, want 1", got)
+	}
+
+	// the cashier's cash return spends the override and succeeds
+	r = f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "original_sale_id": sale, "refund_method": "cash",
+		"reason": "second hand", "lines": []map[string]any{lineOf(line, "1", "defective")},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", cashierC1)
+	if r.status != http.StatusCreated {
+		t.Fatalf("the cashier's cash return = %d: %s", r.status, r.raw)
+	}
+	if got := f.scalar(`SELECT count(*) FROM pos_account_overrides WHERE sale_id = $1 AND consumed_at IS NOT NULL`,
+		uuid.MustParse(sale)).(int64); got != 1 {
+		t.Errorf("consumed overrides = %d, want 1", got)
 	}
 	f.assertARInvariants(t)
 }
