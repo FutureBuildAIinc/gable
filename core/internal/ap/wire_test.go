@@ -2045,15 +2045,28 @@ func TestWire_VoidReverseRaceNever500(t *testing.T) {
 		entry := f.glEntryOf(id)
 		apRes, glRes := make(chan resp, 1), make(chan resp, 1)
 		start := make(chan struct{})
-		go func() { <-start; apRes <- f.void(id, 2, "race round") }()
-		// The route is called directly here, never through f.glReverse: its
-		// SQL fallback calls t.Fatal, which a goroutine must never do.
+		// Both goroutines go through doSafe, never f.do or f.void: a
+		// transport fault must come back in resp.err for this goroutine to
+		// fail the test with, never a t.Fatal inside the goroutine.
 		go func() {
 			<-start
-			glRes <- f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "race round"})
+			apRes <- f.doSafe("POST", "/api/v1/ap/invoices/"+id+"/transitions",
+				map[string]any{"to": "voided", "revision": 2, "reason": "race round"})
+		}()
+		// The GL route is called directly here, never through f.glReverse:
+		// its SQL fallback calls t.Fatal, which a goroutine must never do.
+		go func() {
+			<-start
+			glRes <- f.doSafe("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "race round"})
 		}()
 		close(start)
 		ap, gl := <-apRes, <-glRes
+		if ap.err != nil {
+			t.Fatal(ap.err)
+		}
+		if gl.err != nil {
+			t.Fatal(gl.err)
+		}
 		if gl.status != http.StatusBadRequest {
 			t.Errorf("round %d: the GL reverse answered %d in the race, want 400 refusing the subledger-owned entry: %s", round, gl.status, gl.raw)
 		}

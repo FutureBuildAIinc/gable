@@ -159,10 +159,15 @@ type resp struct {
 	header http.Header
 	body   map[string]any
 	raw    []byte
+	// err carries a transport level fault (marshal, request build, do) so a
+	// goroutine can return it to its test instead of calling t.Fatal there.
+	err error
 }
 
-func (f *fixture) do(method, path string, body any, headers ...string) resp {
-	f.t.Helper()
+// doSafe is do without t.Fatal: a transport fault is answered in resp.err
+// for the caller (a goroutine must never call t.Fatal itself) to fail the
+// test with on its own goroutine.
+func (f *fixture) doSafe(method, path string, body any, headers ...string) resp {
 	var rdr io.Reader
 	switch b := body.(type) {
 	case nil:
@@ -171,13 +176,13 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	default:
 		raw, err := json.Marshal(body)
 		if err != nil {
-			f.t.Fatal(err)
+			return resp{err: err}
 		}
 		rdr = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequest(method, f.srv.URL+path, rdr)
 	if err != nil {
-		f.t.Fatal(err)
+		return resp{err: err}
 	}
 	if rdr != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -188,7 +193,7 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		f.t.Fatal(err)
+		return resp{err: err}
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)
@@ -197,6 +202,15 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	dec.UseNumber()
 	_ = dec.Decode(&out.body)
 	return out
+}
+
+func (f *fixture) do(method, path string, body any, headers ...string) resp {
+	f.t.Helper()
+	r := f.doSafe(method, path, body, headers...)
+	if r.err != nil {
+		f.t.Fatal(r.err)
+	}
+	return r
 }
 
 func str(t *testing.T, m map[string]any, key string) string {

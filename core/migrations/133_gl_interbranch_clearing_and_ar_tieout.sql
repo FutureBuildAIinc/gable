@@ -102,13 +102,24 @@ WHERE e.source_ref_id = a.id AND e.source = 'CREDIT_MEMO'
 
 -- 4. Cross-branch payment and credit memo applications (and their reversals)
 -- posted by code between 125 and 133 wrote their inter-branch transfer legs
--- to 1010 Cash instead of 1095 Inter-Branch Clearing. Move those legs to 1095
--- by account and description.
-UPDATE gl_journal_lines
+-- to 1010 Cash instead of 1095 Inter-Branch Clearing. Move those legs to
+-- 1095: only legs of cross-branch PAYMENT, CREDIT_MEMO and REVERSAL entries
+-- (the two line guard of the other steps cannot help here, these entries
+-- carry four legs each) with a settlement description, the PostReversal
+-- 'Reversal: ...' wordings included. A MANUAL entry described the same way
+-- is a real cash move between drawers and keeps its 1010 legs.
+UPDATE gl_journal_lines l
 SET account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
-WHERE account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
-  AND description IN (
+FROM gl_journal_entries e
+WHERE e.id = l.journal_entry_id
+  AND e.source IN ('PAYMENT', 'CREDIT_MEMO', 'REVERSAL')
+  AND (SELECT count(DISTINCT l2.branch_id) FROM gl_journal_lines l2
+       WHERE l2.journal_entry_id = e.id) >= 2
+  AND l.account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
+  AND l.description IN (
       'Inter-branch cash settlement',
       'Inter-branch AR settlement',
-      'Inter-branch cash settlement reversal'
+      'Inter-branch cash settlement reversal',
+      'Reversal: Inter-branch cash settlement',
+      'Reversal: Inter-branch AR settlement'
   );

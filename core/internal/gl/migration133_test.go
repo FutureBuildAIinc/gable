@@ -360,8 +360,9 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 
 	// Per-branch 1010 Cash and 1095 Clearing balances: only the manual
 	// drawer move's legs stay on 1010 (a 50.00 credit on def and a 50.00
-	// debit on other), and every settlement pair's clearing legs net to
-	// zero per branch.
+	// debit on other), the six settlement entries' own clearing legs net
+	// to zero per branch, and 1095 carries the step 2 backfill pair
+	// (150.00) and the step 3 memo transfer pair (100.00) on top.
 	balanceOn := func(code string) map[uuid.UUID]float64 {
 		t.Helper()
 		out := map[uuid.UUID]float64{}
@@ -388,8 +389,8 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	if bal := balanceOn("1010"); bal[def] != -50.00 || bal[other] != 50.00 {
 		t.Errorf("1010 Cash balances after migration 133 = def %v other %v, want def -50 other 50 (the manual move alone)", bal[def], bal[other])
 	}
-	if bal := balanceOn("1095"); bal[def] != 0 || bal[other] != 0 {
-		t.Errorf("1095 Clearing balances after migration 133 = def %v other %v, want both 0", bal[def], bal[other])
+	if bal := balanceOn("1095"); bal[def] != -250.00 || bal[other] != 250.00 {
+		t.Errorf("1095 Clearing balances after migration 133 = def %v other %v, want def -250 other 250", bal[def], bal[other])
 	}
 
 	legsOf := func(entryID uuid.UUID) map[string]map[uuid.UUID][2]float64 {
@@ -459,9 +460,13 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 		t.Errorf("payment entry 1095 leg on the invoice branch = %v, want DR 150.00", payLegs["1095"][other])
 	}
 
-	// Every entry balances per branch.
+	// Every entry balances in total, and every code-written settlement
+	// entry balances per branch (each branch carries a paired leg set).
+	// The manual drawer move is the one exception by nature: one leg per
+	// branch, balanced only across the two branches together.
 	rows, err := base.Query(ctx, `SELECT e.id, l.branch_id, SUM(l.debit), SUM(l.credit)
 		FROM gl_journal_entries e JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+		WHERE e.source <> 'MANUAL'
 		GROUP BY e.id, l.branch_id HAVING SUM(l.debit) <> SUM(l.credit)`)
 	if err != nil {
 		t.Fatal(err)

@@ -37,14 +37,24 @@ WHERE e.id = l.journal_entry_id
   AND e.source = 'PAYMENT'
   AND l.description = 'Inter-branch clearing backfill';
 
--- Cross-branch settlement legs moved from 1010 to 1095 return to 1010.
-UPDATE gl_journal_lines
+-- Cross-branch settlement legs moved from 1010 to 1095 return to 1010,
+-- under the same predicate the up migration moved them by: cross-branch
+-- PAYMENT, CREDIT_MEMO and REVERSAL entries with a settlement description,
+-- never a MANUAL entry's legs.
+UPDATE gl_journal_lines l
 SET account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
-WHERE account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
-  AND description IN (
+FROM gl_journal_entries e
+WHERE e.id = l.journal_entry_id
+  AND e.source IN ('PAYMENT', 'CREDIT_MEMO', 'REVERSAL')
+  AND (SELECT count(DISTINCT l2.branch_id) FROM gl_journal_lines l2
+       WHERE l2.journal_entry_id = e.id) >= 2
+  AND l.account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
+  AND l.description IN (
       'Inter-branch cash settlement',
       'Inter-branch AR settlement',
-      'Inter-branch cash settlement reversal'
+      'Inter-branch cash settlement reversal',
+      'Reversal: Inter-branch cash settlement',
+      'Reversal: Inter-branch AR settlement'
   );
 
 -- The account itself goes only while nothing references it.
