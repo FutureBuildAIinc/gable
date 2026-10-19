@@ -6,9 +6,12 @@
 //! here where the tests can hold it. The profile crates' commands are thin
 //! wrappers.
 //!
-//! - The tokens live **only** in the OS keychain, one entry per token under
-//!   the profile's own service. Never in the webview's storage, never in a
-//!   file, never in a log line.
+//! - `TokenStore` stores both the access and the refresh token in the OS
+//!   keychain, one entry per token under the profile's own service: never in
+//!   a file, never in a log line. `core_token` exposes only the access token
+//!   across IPC while the refresh token stays in the keychain, and the
+//!   webview's own storage is the web app's affair until its sign in writes
+//!   this store.
 //! - **Store** writes the refresh entry only after the access entry is in,
 //!   and rolls the access entry back if the refresh write fails: a half
 //!   written store is never left behind.
