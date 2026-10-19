@@ -10,6 +10,7 @@ package pos_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -84,6 +85,34 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 	}
 	if got := num(t, expected, "CASH"); got != 20000 {
 		t.Errorf("expected CASH = %d, want 20000", got)
+	}
+	// the offsetting count records the cash shortage, never a clean net: a
+	// check overage does not cancel a cash shortage (CP-08)
+	if got := num(t, session, "over_short_cents"); got != -10000 {
+		t.Errorf("over_short_cents = %d, want -10000", got)
+	}
+	// the manager's sign off posts that variance: the shortage reaches the
+	// ledger instead of a drawer the books say was right
+	r = f.signOff(sessionID, "cash short beside checks over", "finance", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("the sign off = %d: %s", r.status, r.raw)
+	}
+	session = sessionOf(t, r)
+	if got := num(t, session, "over_short_cents"); got != -10000 {
+		t.Errorf("signed off over_short_cents = %d, want -10000", got)
+	}
+	byMethod, ok := session["over_short_by_method"].(map[string]any)
+	if !ok {
+		t.Fatalf("no over_short_by_method in %s", r.raw)
+	}
+	if got := num(t, byMethod, "CASH"); got != -10000 {
+		t.Errorf("signed off over_short_by_method CASH = %d, want -10000", got)
+	}
+	if got := num(t, byMethod, "CHECK"); got != 10000 {
+		t.Errorf("signed off over_short_by_method CHECK = %d, want 10000", got)
+	}
+	if session["gl_entry_id"] == nil {
+		t.Errorf("no ledger entry posted for the signed off variance: %s", r.raw)
 	}
 }
 
@@ -180,5 +209,127 @@ func TestSweepPR178PickupRequiresAuthenticatedSecondPerson(t *testing.T) {
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM till_movements WHERE till_session_id = $1`, sessionID); got != 1 {
 		t.Errorf("%d movements after the refused amount, want 1", got)
+	}
+}
+
+// RULE (P1-1, race): one taker confirmation backs exactly one recorded
+// pickup. Concurrent records of the same confirmed amount cannot consume the
+// same approval twice: exactly one lands (201) and the rest are refused
+// (409), and only one pickup movement exists.
+func TestSweepPR178OneConfirmationBacksExactlyOnePickupUnderRace(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	sessionID := f.openTill(5000)
+	cashier := mustUUID(t)
+	taker := mustUUID(t)
+
+	if r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": taker}, taker); r.status != http.StatusAccepted {
+		t.Fatalf("the taker's confirmation = %d: %s", r.status, r.raw)
+	}
+
+	const contenders = 3
+	statuses := make([]int, contenders)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			statuses[i] = f.movement(sessionID,
+				map[string]any{"kind": "pickup", "amount_cents": 1000, "taken_by": taker}, cashier).status
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	created, refused := 0, 0
+	for _, s := range statuses {
+		switch s {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			refused++
+		default:
+			t.Errorf("a contender answered %d, want 201 or 409", s)
+		}
+	}
+	if created != 1 || refused != contenders-1 {
+		t.Errorf("contender statuses = %v, want exactly one 201 and %d 409", statuses, contenders-1)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM till_movements WHERE till_session_id = $1 AND kind = 'pickup'`, sessionID); got != 1 {
+		t.Errorf("%d pickup movements recorded, want 1", got)
+	}
+}
+
+// RULE (P2-1): while the drawer is open a caller whose roles are cashier
+// only (a token with roles ["cashier"] and no single role) reads no money
+// figure from which the expected drawer can be rebuilt: not the expected
+// figures, not the float, not the tendered cash or the movement totals.
+func TestSweepPR178OpenTillFiguresBlindForRolesOnlyCashier(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	sessionID := f.openTill(10000)
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, f.cashFor("1")); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	f.mustMovement(sessionID, map[string]any{"kind": "safe_drop", "amount_cents": 700}, mustUUID(t))
+
+	rolesCashier := []string{"X-Test-Roles", "cashier", "X-Test-Sub", mustUUID(t)}
+	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, rolesCashier...)
+	if r.status != http.StatusOK {
+		t.Fatalf("cashier report = %d: %s", r.status, r.raw)
+	}
+	if m, ok := r.body["expected_by_method"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("cashier expected_by_method = %v, want it empty while the drawer is open", r.body["expected_by_method"])
+	}
+	session, ok := r.body["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("no session in %s", r.raw)
+	}
+	if m, ok := session["expected_by_method"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("cashier session expected_by_method = %v, want it empty", session["expected_by_method"])
+	}
+	if got := num(t, session, "opening_float_cents"); got != 0 {
+		t.Errorf("cashier opening_float_cents = %d, want 0", got)
+	}
+	if m, ok := r.body["tendered_by_method"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("cashier tendered_by_method = %v, want it empty", r.body["tendered_by_method"])
+	}
+	if m, ok := r.body["movement_totals_by_kind"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("cashier movement_totals_by_kind = %v, want it empty", r.body["movement_totals_by_kind"])
+	}
+	if m, ok := r.body["movements"].([]any); !ok || len(m) != 0 {
+		t.Errorf("cashier movements = %v, want it empty", r.body["movements"])
+	}
+	if got := num(t, r.body, "sales_total_cents"); got != 0 {
+		t.Errorf("cashier sales_total_cents = %d, want 0", got)
+	}
+	if got := num(t, r.body, "change_cents"); got != 0 {
+		t.Errorf("cashier change_cents = %d, want 0", got)
+	}
+
+	r = f.do("GET", "/api/v1/pos/till/current?register_id="+f.register, nil, rolesCashier...)
+	if r.status != http.StatusOK {
+		t.Fatalf("cashier current = %d: %s", r.status, r.raw)
+	}
+	if m, ok := r.body["expected_by_method"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("cashier current expected_by_method = %v, want it empty", r.body["expected_by_method"])
+	}
+	if got := num(t, r.body, "opening_float_cents"); got != 0 {
+		t.Errorf("cashier current opening_float_cents = %d, want 0", got)
+	}
+
+	// a manager still reads the figures in full
+	r = f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("finance report = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, sessionOf(t, r), "opening_float_cents"); got != 10000 {
+		t.Errorf("finance session opening_float_cents = %d, want 10000", got)
 	}
 }

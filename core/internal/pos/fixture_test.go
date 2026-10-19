@@ -203,11 +203,16 @@ func mustExec(t *testing.T, db *database.DB, sql string, args ...any) {
 }
 
 // roleClaims stands in for authentication: X-Test-Role becomes the claims a
-// JWT would carry; X-Test-Sub its subject.
+// JWT would carry, X-Test-Roles a roles-only token (no single role field),
+// and X-Test-Sub its subject.
 func roleClaims(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if role := r.Header.Get("X-Test-Role"); role != "" {
 			claims := &middleware.UserClaims{Role: role, Roles: []string{role}}
+			claims.Subject = r.Header.Get("X-Test-Sub")
+			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
+		} else if roles := r.Header.Get("X-Test-Roles"); roles != "" {
+			claims := &middleware.UserClaims{Roles: strings.Split(roles, ",")}
 			claims.Subject = r.Header.Get("X-Test-Sub")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		}
