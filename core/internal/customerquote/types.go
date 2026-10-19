@@ -86,9 +86,13 @@ type OptionGroup struct {
 // Line is a material line with its captured cost, the tier that applied and
 // the customer's decision. Everything but the decision is frozen at send.
 type Line struct {
-	ID                     uuid.UUID      `json:"id"`
-	Position               int            `json:"position"`
-	ProductID              uuid.UUID      `json:"product_id"`
+	ID        uuid.UUID `json:"id"`
+	Position  int       `json:"position"`
+	ProductID uuid.UUID `json:"product_id"`
+	// SourceLineID is the dealer quote line the line was built from, when it
+	// was; it lets confirm find the exact source line instead of guessing
+	// among lines of one product.
+	SourceLineID           *uuid.UUID     `json:"source_line_id,omitempty"`
 	CategoryID             *uuid.UUID     `json:"category_id"`
 	SKU                    string         `json:"sku"`
 	Description            string         `json:"description"`

@@ -962,6 +962,339 @@ func TestWire_Logo_TheContractorsMarkReachesTheCustomersPageAndPDF(t *testing.T)
 	}
 }
 
+// TestR2CatalogCostHonoursThePriceUnit pins the two halves of the R2 pair
+// rule on the customer quote loop: a catalog line whose product is priced
+// per a different unit (485.00 per MBF on a product sold in PCS) extends
+// through the conversion pair once, exactly, and a line built from a dealer
+// quote line keeps that line's own unit price and price unit when the
+// confirmation places the dealer's order.
+func TestR2CatalogCostHonoursThePriceUnit(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+
+	// The lumber product: sold in PCS, priced per MBF, 187.5 PCS to 1 MBF.
+	prod := uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `
+		WITH p AS (INSERT INTO products (id, sku, description, uom_primary, base_price, price_uom, category_id)
+			VALUES ($1, $2, '2x4x8 KD stud', 'PCS', 485.0000, 'MBF', $3) RETURNING id)
+		INSERT INTO product_units (product_id, uom, unit_qty, stock_qty) SELECT id, 'MBF', 1, 187.5 FROM p`,
+		prod, "CQW-MBF-"+prod.String()[:8], s.catLum); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM quote_lines WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM product_units WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, prod)
+	})
+
+	// Part A: a catalog line of 299 PCS at 485.00 per MBF costs 773.41
+	// (299 x 485 / 187.5 = 773.4133...), never 299 x 485.
+	body := s.quoteBody(false, false)
+	body["lines"] = []any{map[string]any{"product_id": prod.String(), "quantity": "299"}}
+	body["labour"] = nil
+	body["overhead"] = nil
+	r := s.do("POST", "/api/portal/v1/customer-quotes", asA, body)
+	if r.status != 201 {
+		t.Fatalf("create: %d %s", r.status, r.body)
+	}
+	q := jsonOf(t, r.body)
+	id := q["id"].(string)
+	if c := q["lines"].([]any)[0].(map[string]any)["cost_cents"].(float64); c != 77341 {
+		t.Errorf("the draft captured a material cost of %d cents, want 77341 (773.41)", int64(c))
+	}
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/send", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("send: %d %s", r.status, r.body)
+	}
+	token := strings.TrimPrefix(jsonOf(t, r.body)["link"].(map[string]any)["path"].(string), "/q/")
+	var lines []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		lines = append(lines, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	if r := s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": lines}); r.status != 200 {
+		t.Fatalf("selections: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}); r.status != 200 {
+		t.Fatalf("accept: %d %s", r.status, r.body)
+	}
+	r = s.do("GET", "/api/portal/v1/customer-quotes/"+id+"/confirm-preview", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm-preview: %d %s", r.status, r.body)
+	}
+	prev := jsonOf(t, r.body)
+	if prev["price_changed"] == true ||
+		int64(prev["captured_material_cost_cents"].(float64)) != 77341 || int64(prev["current_material_cost_cents"].(float64)) != 77341 {
+		t.Errorf("confirm-preview carries %s, want 77341 cents captured and current, no change", truncate(r.body))
+	}
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm: %d %s", r.status, r.body)
+	}
+	orderID := jsonOf(t, r.body)["order"].(map[string]any)["id"].(string)
+	var cents int64
+	if err := s.db.Pool.QueryRow(ctx, `SELECT ROUND(line_total * 100)::bigint FROM order_lines WHERE order_id = $1 AND product_id = $2`, orderID, prod).Scan(&cents); err != nil {
+		t.Fatal(err)
+	}
+	if cents != 77341 {
+		t.Errorf("the placed order line totals %d cents, want 77341 (773.41)", cents)
+	}
+
+	// Part B: the same lumber on a SENT dealer quote line, 299 PCS at
+	// 485.00 per MBF totalling 773.41. The order the confirmation places
+	// keeps the dealer quote's own unit price and price unit.
+	srcQuote := uuid.New()
+	srcLine := uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quotes (id, customer_id, state, total_amount, freight_amount, margin_total, expires_at, branch_id, delivery_type, source)
+		VALUES ($1, $2, 'SENT'::quote_state, 773.41, 0, 111.11, now() + interval '10 days', $3, 'PICKUP', 'manual')`, srcQuote, s.custA, s.branch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, price_uom, uom_qty, price_uom_qty, line_total, position)
+		VALUES ($1, $2, $3, $4, '2x4x8 KD stud', 299, 'PCS', 485.0000, 'MBF', 187.5, 1, 773.41, 0)`, srcLine, srcQuote, prod, "CQW-MBF-"+prod.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	fromSrc := s.quoteBody(false, false)
+	fromSrc["source_quote_id"] = srcQuote.String()
+	fromSrc["lines"] = []any{map[string]any{"product_id": prod.String(), "quantity": "299", "source_line_id": srcLine.String()}}
+	fromSrc["labour"] = nil
+	fromSrc["overhead"] = nil
+	r = s.do("POST", "/api/portal/v1/customer-quotes", asA, fromSrc)
+	if r.status != 201 {
+		t.Fatalf("create from the dealer quote: %d %s", r.status, r.body)
+	}
+	idB := jsonOf(t, r.body)["id"].(string)
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+idB+"/send", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("send B: %d %s", r.status, r.body)
+	}
+	tokenB := strings.TrimPrefix(jsonOf(t, r.body)["link"].(map[string]any)["path"].(string), "/q/")
+	var linesB []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(tokenB), nil, nil).body)["lines"].([]any) {
+		linesB = append(linesB, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	if r := s.do("PUT", s.pub(tokenB)+"/selections", nil, map[string]any{"choices": linesB}); r.status != 200 {
+		t.Fatalf("selections B: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", s.pub(tokenB)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}); r.status != 200 {
+		t.Fatalf("accept B: %d %s", r.status, r.body)
+	}
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+idB+"/confirm", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm B: %d %s", r.status, r.body)
+	}
+	orderB := jsonOf(t, r.body)["order"].(map[string]any)["id"].(string)
+	var centsB int64
+	var unit, priceUOM string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT ROUND(line_total * 100)::bigint, unit_price::text, price_uom::text
+		FROM order_lines WHERE order_id = $1 AND product_id = $2`, orderB, prod).Scan(&centsB, &unit, &priceUOM); err != nil {
+		t.Fatal(err)
+	}
+	if centsB != 77341 {
+		t.Errorf("the dealer quote's order line totals %d cents, want the dealer quote's 77341 (773.41)", centsB)
+	}
+	if unit != "485.0000" || priceUOM != "MBF" {
+		t.Errorf("the order line carries %s per %s, want the dealer quote's 485.0000 per MBF", unit, priceUOM)
+	}
+}
+
+// cqApproveFromLink sends a draft quote, approves every line and signs it
+// off as the homeowner, leaving the quote ready to confirm.
+func (s *cqStack) cqApproveFromLink(t *testing.T, id string) {
+	t.Helper()
+	r := s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/send", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("send: %d %s", r.status, r.body)
+	}
+	token := strings.TrimPrefix(jsonOf(t, r.body)["link"].(map[string]any)["path"].(string), "/q/")
+	var choices []any
+	for _, l := range jsonOf(t, s.do("GET", s.pub(token), nil, nil).body)["lines"].([]any) {
+		choices = append(choices, map[string]any{"line_id": l.(map[string]any)["id"], "state": "approved"})
+	}
+	if r := s.do("PUT", s.pub(token)+"/selections", nil, map[string]any{"choices": choices}); r.status != 200 {
+		t.Fatalf("selections: %d %s", r.status, r.body)
+	}
+	if r := s.do("POST", s.pub(token)+"/accept", nil, map[string]any{"full_name": "Pat Homeowner", "phone": "555 010 2020",
+		"signature": map[string]any{"kind": "typed", "text": "Pat Homeowner"}, "selections_version": 2}); r.status != 200 {
+		t.Fatalf("accept: %d %s", r.status, r.body)
+	}
+}
+
+// TestR2SourceLineOfTwoLinesOfOneProduct pins that a customer quote line
+// built from the second of two dealer quote lines of one product keeps that
+// exact source line through confirmation: 100 PCS taken from the line at
+// 400.00 per MBF orders at 21333 cents and 400.0000 per MBF, never at the
+// first line's 485.00 per MBF.
+func TestR2SourceLineOfTwoLinesOfOneProduct(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+
+	prod := uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `
+		WITH p AS (INSERT INTO products (id, sku, description, uom_primary, base_price, price_uom, category_id)
+			VALUES ($1, $2, '2x4x8 KD stud', 'PCS', 485.0000, 'MBF', $3) RETURNING id)
+		INSERT INTO product_units (product_id, uom, unit_qty, stock_qty) SELECT id, 'MBF', 1, 187.5 FROM p`,
+		prod, "CQW-R2-"+prod.String()[:8], s.catLum); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM quote_lines WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM product_units WHERE product_id = $1`, prod)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, prod)
+	})
+
+	srcQuote := uuid.New()
+	lineOne, lineTwo := uuid.New(), uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quotes (id, customer_id, state, total_amount, freight_amount, margin_total, expires_at, branch_id, delivery_type, source)
+		VALUES ($1, $2, 'SENT'::quote_state, 986.74, 0, 111.11, now() + interval '10 days', $3, 'PICKUP', 'manual')`, srcQuote, s.custA, s.branch); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []struct {
+		id    uuid.UUID
+		qty   string
+		price string
+		puom  string
+		total string
+		pos   int
+	}{{lineOne, "299", "485.0000", "MBF", "773.41", 0}, {lineTwo, "100", "400.0000", "MBF", "213.33", 1}} {
+		if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, price_uom, uom_qty, price_uom_qty, line_total, position)
+			VALUES ($1, $2, $3, $4, '2x4x8 KD stud', $5, 'PCS', $6, $7, 187.5, 1, $8, $9)`,
+			l.id, srcQuote, prod, "CQW-R2-"+prod.String()[:8], l.qty, l.price, l.puom, l.total, l.pos); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := s.quoteBody(false, false)
+	body["source_quote_id"] = srcQuote.String()
+	body["lines"] = []any{map[string]any{"product_id": prod.String(), "quantity": "100", "source_line_id": lineTwo.String()}}
+	body["labour"] = nil
+	body["overhead"] = nil
+	r := s.do("POST", "/api/portal/v1/customer-quotes", asA, body)
+	if r.status != 201 {
+		t.Fatalf("create from the dealer quote: %d %s", r.status, r.body)
+	}
+	q := jsonOf(t, r.body)
+	if c := q["lines"].([]any)[0].(map[string]any)["cost_cents"].(float64); int64(c) != 21333 {
+		t.Errorf("the draft captured a material cost of %d cents, want 21333 (213.33 from the 400.00 per MBF line)", int64(c))
+	}
+	id := q["id"].(string)
+
+	s.cqApproveFromLink(t, id)
+	r = s.do("POST", "/api/portal/v1/customer-quotes/"+id+"/confirm", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm: %d %s", r.status, r.body)
+	}
+	orderID := jsonOf(t, r.body)["order"].(map[string]any)["id"].(string)
+	var cents int64
+	var unit, priceUOM string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT ROUND(line_total * 100)::bigint, unit_price::text, price_uom::text
+		FROM order_lines WHERE order_id = $1 AND product_id = $2`, orderID, prod).Scan(&cents, &unit, &priceUOM); err != nil {
+		t.Fatal(err)
+	}
+	if cents != 21333 {
+		t.Errorf("the placed order line totals %d cents, want 21333 (100 PCS at 400.00 per MBF)", cents)
+	}
+	if unit != "400.0000" || priceUOM != "MBF" {
+		t.Errorf("the order line carries %s per %s, want the source line's 400.0000 per MBF", unit, priceUOM)
+	}
+
+	var stored *string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT source_line_id::text FROM pro_customer_quote_lines WHERE quote_id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read the stored source_line_id: %v", err)
+	}
+	if stored == nil || *stored != lineTwo.String() {
+		t.Errorf("the stored source_line_id is %v, want the dealer quote's second line", stored)
+	}
+}
+
+// TestR2SourceLineFallbackMatchesCostElseRefuses pins the pre-135 fallback
+// for rows with no stored source_line_id: when two source lines share the
+// product, unit and unit cost, confirmation refuses with 409 instead of
+// guessing; when their unit costs differ, the fallback picks the one that
+// matches the captured cost.
+func TestR2SourceLineFallbackMatchesCostElseRefuses(t *testing.T) {
+	s := newCQStack(t)
+	ctx := context.Background()
+
+	// Two dealer quotes, each with two lines of the one stud product.
+	ambiguous, distinct := uuid.New(), uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quotes (id, customer_id, state, total_amount, freight_amount, margin_total, expires_at, branch_id, delivery_type, source)
+		VALUES ($1, $2, 'SENT'::quote_state, 3000.00, 0, 111.11, now() + interval '10 days', $3, 'PICKUP', 'manual'),
+		($4, $2, 'SENT'::quote_state, 1300.00, 0, 111.11, now() + interval '10 days', $3, 'PICKUP', 'manual')`,
+		ambiguous, s.custA, s.branch, distinct); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []struct {
+		quote uuid.UUID
+		id    uuid.UUID
+		qty   string
+		price string
+		total string
+		pos   int
+	}{
+		{ambiguous, uuid.New(), "100", "6.0000", "600.00", 0},
+		{ambiguous, uuid.New(), "400", "6.0000", "2400.00", 1},
+		{distinct, uuid.New(), "100", "6.0000", "600.00", 0},
+		{distinct, uuid.New(), "100", "7.0000", "700.00", 1},
+	} {
+		if _, err := s.db.Pool.Exec(ctx, `INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, position)
+			VALUES ($1, $2, $3, 'CQW-SKU', '2x4 stud', $4, 'EA', $5, $6, $7)`,
+			l.id, l.quote, s.stud, l.qty, l.price, l.total, l.pos); err != nil {
+			t.Fatal(err)
+		}
+		if l.pos == 1 {
+			// The customer quote is built from this second line.
+			body := s.quoteBody(false, false)
+			body["source_quote_id"] = l.quote.String()
+			body["lines"] = []any{map[string]any{"product_id": s.stud.String(), "quantity": "100", "source_line_id": l.id.String()}}
+			body["labour"] = nil
+			body["overhead"] = nil
+			r := s.do("POST", "/api/portal/v1/customer-quotes", asA, body)
+			if r.status != 201 {
+				t.Fatalf("create from dealer quote %s: %d %s", l.quote, r.status, r.body)
+			}
+			// A row written before migration 135 carries no source_line_id.
+			if _, err := s.db.Pool.Exec(ctx, `UPDATE pro_customer_quote_lines SET source_line_id = NULL WHERE quote_id = $1`,
+				jsonOf(t, r.body)["id"].(string)); err != nil {
+				t.Fatal(err)
+			}
+			s.cqApproveFromLink(t, jsonOf(t, r.body)["id"].(string))
+		}
+	}
+
+	// The ambiguous pair: two source lines at the same 60000 ten thousandths
+	// per EA. Confirmation must refuse with 409 rather than guess a line.
+	var ambiguousID, distinctID string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT q.id::text FROM pro_customer_quotes q WHERE q.source_quote_id = $1`, ambiguous).Scan(&ambiguousID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Pool.QueryRow(ctx, `SELECT q.id::text FROM pro_customer_quotes q WHERE q.source_quote_id = $1`, distinct).Scan(&distinctID); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.do("POST", "/api/portal/v1/customer-quotes/"+ambiguousID+"/confirm", asA, nil); r.status != 409 {
+		t.Errorf("confirming a line two source lines match answered %d %s, want 409", r.status, truncate(r.body))
+	}
+
+	// The distinct pair: the captured 70000 ten thousandths per EA matches
+	// only the 7.0000 line, so the order extends at that price.
+	r := s.do("POST", "/api/portal/v1/customer-quotes/"+distinctID+"/confirm", asA, nil)
+	if r.status != 200 {
+		t.Fatalf("confirm the distinct pair: %d %s", r.status, r.body)
+	}
+	orderID := jsonOf(t, r.body)["order"].(map[string]any)["id"].(string)
+	var cents int64
+	var unit string
+	if err := s.db.Pool.QueryRow(ctx, `SELECT ROUND(line_total * 100)::bigint, unit_price::text
+		FROM order_lines WHERE order_id = $1 AND product_id = $2`, orderID, s.stud).Scan(&cents, &unit); err != nil {
+		t.Fatal(err)
+	}
+	if cents != 70000 || unit != "7.0000" {
+		t.Errorf("the order line carries %d cents at %s per EA, want 70000 at 7.0000 (the matching source line)", cents, unit)
+	}
+}
+
 // dealerQuote seeds a sent dealer quote to contractor A with a margin the
 // contractor must never see.
 func (s *cqStack) dealerQuote(state string) uuid.UUID {
