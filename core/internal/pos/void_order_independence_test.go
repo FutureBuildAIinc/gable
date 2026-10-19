@@ -149,7 +149,7 @@ func (f *fixture) walkInBalance(t *testing.T) int64 {
 // method through the report route.
 func (f *fixture) expectedOf(t *testing.T, sessionID, method string) int64 {
 	t.Helper()
-	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusOK {
 		t.Fatalf("the till report = %d: %s", r.status, r.raw)
 	}

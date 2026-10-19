@@ -303,6 +303,9 @@
         },
         "movement_totals_by_kind": {},
         "movements": [],
+        "over_short_by_method": {
+          "CASH": 11232
+        },
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
@@ -321,6 +324,9 @@
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
+          "over_short_by_method": {
+            "CASH": 11232
+          },
           "over_short_cents": 11232,
           "register_id": "REG-01",
           "sign_off": null,
@@ -994,6 +1000,9 @@
         },
         "movement_totals_by_kind": {},
         "movements": [],
+        "over_short_by_method": {
+          "CASH": 11232
+        },
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
@@ -1012,6 +1021,9 @@
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
+          "over_short_by_method": {
+            "CASH": 11232
+          },
           "over_short_cents": 11232,
           "register_id": "REG-01",
           "sign_off": null,
@@ -1046,6 +1058,9 @@
           },
           "movement_totals_by_kind": {},
           "movements": [],
+          "over_short_by_method": {
+            "CASH": 11232
+          },
           "sale_count": 1,
           "sales_total_cents": 1568,
           "session": {
@@ -1064,6 +1079,9 @@
             "notes": "r1b c close count",
             "opened_at": "<ts+0d>",
             "opening_float_cents": 10000,
+            "over_short_by_method": {
+              "CASH": 11232
+            },
             "over_short_cents": 11232,
             "register_id": "REG-01",
             "sign_off": null,
@@ -1122,6 +1140,9 @@
             },
             "movement_totals_by_kind": {},
             "movements": [],
+            "over_short_by_method": {
+              "CASH": 11232
+            },
             "sale_count": 1,
             "sales_total_cents": 1568,
             "session": {
@@ -1140,6 +1161,9 @@
               "notes": "r1b c close count",
               "opened_at": "<ts+0d>",
               "opening_float_cents": 10000,
+              "over_short_by_method": {
+                "CASH": 11232
+              },
               "over_short_cents": 11232,
               "register_id": "REG-01",
               "sign_off": null,

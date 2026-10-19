@@ -707,7 +707,30 @@ func (h *Handler) CurrentTill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.NotFound("no open till session for this register"))
 		return
 	}
+	// The open session's expected drawer is blind to a cashier (CP-08): the
+	// float and the expected figures wait for the close, when the count is
+	// already recorded.
+	if session.Status == TillOpen && !canViewOpenTillExpectation(r.Context()) {
+		session.ExpectedByMethod = map[string]int64{}
+		session.OpeningFloat = 0
+	}
 	writeJSON(w, http.StatusOK, session)
+}
+
+// canViewOpenTillExpectation reports whether the caller may read the money
+// figures an open drawer still keeps blind (CP-08): the roles that can sign
+// a held count off. No claims at all (an unauthenticated dev mode harness,
+// or a test request that named a subject but no role) carries nothing to
+// hide from and reads them.
+func canViewOpenTillExpectation(ctx context.Context) bool {
+	claims := middleware.ClaimsFromContext(ctx)
+	if claims == nil {
+		return true
+	}
+	if claims.Role == "" && len(claims.Roles) == 0 {
+		return true
+	}
+	return middleware.ClaimsHaveAnyRole(claims, "finance", "owner", "admin")
 }
 
 // TillReportHandler is GET /pos/till/{id}/report.
@@ -721,6 +744,22 @@ func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	// The close is blind (CP-08): while the drawer is open a cashier reads the
+	// live report without the figures the expected drawer is built from (the
+	// target itself, the float, the tendered cash, the movement net), so the
+	// count cannot be written to match them. A manager (or any caller past
+	// the close, when the count is already recorded) reads the figures in
+	// full.
+	if report.Session.Status == TillOpen && !canViewOpenTillExpectation(r.Context()) {
+		report.ExpectedByMethod = map[string]int64{}
+		report.Session.ExpectedByMethod = map[string]int64{}
+		report.Session.OpeningFloat = 0
+		report.TenderedByMethod = map[string]int64{}
+		report.SalesTotalCents = 0
+		report.ChangeCents = 0
+		report.MovementTotalsByKind = map[string]int64{}
+		report.Movements = []TillMovement{}
 	}
 	writeJSON(w, http.StatusOK, report)
 }
