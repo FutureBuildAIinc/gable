@@ -44,15 +44,36 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 // overShortTotal is the drawer's variance: counted less expected over the
 // methods that are money in the drawer, CASH and CHECK. CARD never joins the
 // sum (cards are not counted into the drawer), so a card figure can never
-// offset a cash or check shortage (CP-08).
+// offset a cash or check shortage (CP-08). Opposite-sign variances never
+// net either: a cash shortage beside a check overage records the cash
+// shortage, never a clean zero, so the count cannot hide behind an overage
+// on another method.
 func overShortTotal(expected, counted map[string]int64) int64 {
-	total := counted["CASH"] - expected["CASH"]
+	cashVar := counted["CASH"] - expected["CASH"]
+	var checkVar int64
 	if _, ok := counted["CHECK"]; ok {
-		total += counted["CHECK"] - expected["CHECK"]
+		checkVar = counted["CHECK"] - expected["CHECK"]
 	} else if expected["CHECK"] != 0 {
-		total -= expected["CHECK"]
+		checkVar = -expected["CHECK"]
 	}
-	return total
+	if (cashVar < 0 && checkVar > 0) || (cashVar > 0 && checkVar < 0) {
+		return cashVar
+	}
+	return cashVar + checkVar
+}
+
+// overShortByMethod is the variance per drawer method (CP-08): what the
+// count compared, method by method, so a report or sign off can show the
+// cash shortage beside the check overage the net alone would hide. CHECK
+// appears only when the session counted checks or expected them.
+func overShortByMethod(expected, counted map[string]int64) map[string]int64 {
+	out := map[string]int64{
+		"CASH": counted["CASH"] - expected["CASH"],
+	}
+	if _, ok := counted["CHECK"]; ok || expected["CHECK"] != 0 {
+		out["CHECK"] = counted["CHECK"] - expected["CHECK"]
+	}
+	return out
 }
 
 // OpenTill opens a drawer session on a register.
@@ -125,6 +146,11 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 	if err != nil {
 		return nil, err
 	}
+	// A counted session carries its variance per method (CP-08): the report
+	// shows what the count compared, method by method.
+	if session.Status != TillOpen {
+		session.OverShortByMethod = overShortByMethod(session.ExpectedByMethod, session.CountedByMethod)
+	}
 	agg, err := s.repo.AggregateTillSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -134,14 +160,14 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		return nil, err
 	}
 	return &TillReport{
-		Session:          *session,
-		SaleCount:        agg.SaleCount,
-		SalesTotalCents:  httpx.Cents(agg.SalesTotalCents),
-		TaxTotalCents:    httpx.Cents(agg.TaxTotalCents),
-		ChangeCents:      httpx.Cents(agg.ChangeCents),
-		TenderedByMethod: agg.TenderedByMethod,
-		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents,
-			movementNetCash(agg.MovementTotals)),
+		Session:              *session,
+		SaleCount:            agg.SaleCount,
+		SalesTotalCents:      httpx.Cents(agg.SalesTotalCents),
+		TaxTotalCents:        httpx.Cents(agg.TaxTotalCents),
+		ChangeCents:          httpx.Cents(agg.ChangeCents),
+		TenderedByMethod:     agg.TenderedByMethod,
+		ExpectedByMethod:     expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)),
+		OverShortByMethod:    session.OverShortByMethod,
 		Movements:            movements,
 		MovementTotalsByKind: agg.MovementTotals,
 	}, nil
@@ -277,6 +303,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		session.CountedByMethod = countedByMethod
 		cents := httpx.Cents(overShort)
 		session.OverShort = &cents
+		session.OverShortByMethod = overShortByMethod(report.ExpectedByMethod, countedByMethod)
 		session.Notes = notes
 		// The over/short entry, inside the close's transaction, linked back
 		// onto the session.
@@ -296,6 +323,7 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 			return err
 		}
 		report.Session = session
+		report.OverShortByMethod = session.OverShortByMethod
 		if hold {
 			// the Z snapshot waits for the sign off, which freezes it
 			if err := s.recordHeldClose(ctx, report, overShort, threshold, actor); err != nil {

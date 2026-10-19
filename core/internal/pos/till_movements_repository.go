@@ -74,7 +74,10 @@ func (r *PostgresRepository) RecordPickupApproval(ctx context.Context, sessionID
 // ConsumePickupApproval takes the unconsumed confirmation of this session,
 // amount and taker, and answers the taker's authenticated subject. Nothing
 // waits when no such row exists (found false): the cashier cannot record the
-// pickup alone.
+// pickup alone. The subquery locks the row it picks FOR UPDATE SKIP LOCKED
+// and the outer WHERE tests consumed_at again, so concurrent records of one
+// confirmation cannot all consume it: under READ COMMITTED a contender either
+// skips the locked row or finds it already consumed.
 func (r *PostgresRepository) ConsumePickupApproval(ctx context.Context, sessionID uuid.UUID, amountCents int64, taker string) (string, bool, error) {
 	var approved string
 	err := r.ex(ctx).QueryRow(ctx, `
@@ -83,7 +86,9 @@ func (r *PostgresRepository) ConsumePickupApproval(ctx context.Context, sessionI
 			SELECT id FROM till_pickup_approvals
 			WHERE till_session_id = $1 AND amount_cents = $2 AND LOWER(taken_by) = LOWER($3) AND consumed_at IS NULL
 			ORDER BY created_at
-			LIMIT 1)
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED)
+			AND consumed_at IS NULL
 		RETURNING taken_by`, sessionID, amountCents, taker).Scan(&approved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil

@@ -428,11 +428,11 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 			counted[string(method)] = n
 		}
 	}
-	// the drawer is counted blind and whole (CP-08): a close without a cash
-	// count would carry no variance at all, so the count never starts
-	if _, hasCash := counted[string(TenderCash)]; !hasCash {
-		v.Check(false, "counted_by_method.cash", "is required: cash in the drawer must be counted")
-	}
+	// The count's completeness (cash always, checks when checks were
+	// tendered) is enforced inside the close's transaction, after the session
+	// is found and held behind the branch wall (SEC-NOHEADER-1): a parse
+	// level refusal here would answer a close of a missing or out of branch
+	// session before the wall's 404.
 	if err := v.Err(); err != nil {
 		return nil, "", err
 	}

@@ -270,8 +270,12 @@ type TillSession struct {
 	ExpectedByMethod map[string]int64 `json:"expected_by_method"`
 	CountedByMethod  map[string]int64 `json:"counted_by_method"`
 	OverShort        *httpx.Cents     `json:"over_short_cents"`
-	GLEntryID        *uuid.UUID       `json:"gl_entry_id"`
-	Notes            string           `json:"notes"`
+	// OverShortByMethod is the variance per counted method once the drawer
+	// is counted (CP-08): the methods never net into one another, so a check
+	// overage cannot hide a cash shortage.
+	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
+	GLEntryID         *uuid.UUID       `json:"gl_entry_id"`
+	Notes             string           `json:"notes"`
 
 	// ClosedBy is who counted the drawer; VarianceThreshold the branch's
 	// threshold in force at that count; SignOff the manager's release of a
@@ -291,13 +295,14 @@ type TillSignOff struct {
 
 // TillReport is the live (X) or closing (Z) summary for a session.
 type TillReport struct {
-	Session          TillSession      `json:"session"`
-	SaleCount        int              `json:"sale_count"`
-	SalesTotalCents  httpx.Cents      `json:"sales_total_cents"`
-	TaxTotalCents    httpx.Cents      `json:"tax_total_cents"`
-	ChangeCents      httpx.Cents      `json:"change_cents"`
-	TenderedByMethod map[string]int64 `json:"tendered_by_method"`
-	ExpectedByMethod map[string]int64 `json:"expected_by_method"`
+	Session           TillSession      `json:"session"`
+	SaleCount         int              `json:"sale_count"`
+	SalesTotalCents   httpx.Cents      `json:"sales_total_cents"`
+	TaxTotalCents     httpx.Cents      `json:"tax_total_cents"`
+	ChangeCents       httpx.Cents      `json:"change_cents"`
+	TenderedByMethod  map[string]int64 `json:"tendered_by_method"`
+	ExpectedByMethod  map[string]int64 `json:"expected_by_method"`
+	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
 
 	// Movements are the drops, pickups, paid in and paid out of the session,
 	// oldest first, with their totals by kind; the expected cash carries them.

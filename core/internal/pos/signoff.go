@@ -73,6 +73,10 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 		if session.Status != TillPendingSignoff {
 			return httpx.InvalidStateTransition("the till session is not waiting for sign off")
 		}
+		// the variance the manager releases, method by method (CP-08): the
+		// books keep the cash shortage beside the check overage, never the
+		// clean net an overage would give
+		session.OverShortByMethod = overShortByMethod(session.ExpectedByMethod, session.CountedByMethod)
 		if actor != "" {
 			closer := ""
 			if session.ClosedBy != nil {
