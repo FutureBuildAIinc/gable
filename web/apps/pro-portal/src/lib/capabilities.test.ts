@@ -63,6 +63,7 @@ describe('capability gating', () => {
     expect(roleCapabilities('ap_bookkeeper').pay).toBe(true)
     expect(roleCapabilities('ap_bookkeeper').order).toBe(false)
     expect(roleCapabilities('site_super').see_money).toBe(false)
+    expect(roleCapabilities('site_super').quote_customers).toBe(false)
     expect(roleCapabilities('unknown_role')).toEqual(capabilities())
   })
 })

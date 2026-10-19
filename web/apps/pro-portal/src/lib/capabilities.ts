@@ -105,7 +105,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: false,
         schedule: true,
         edit_delivery_instructions: true,
-        quote_customers: true,
+        quote_customers: false,
       }
     case 'ap_clerk':
     case 'ap_bookkeeper':
