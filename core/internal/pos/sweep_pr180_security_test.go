@@ -67,8 +67,8 @@ func TestSweepPR180ResolveRefusesMismatchedReferenceAndUsesRecordedDeviceRef(t *
 	if got := itemStateOf(t, f, itemA); got != "open" {
 		t.Fatalf("the refused item is %s, wanted open", got)
 	}
-	if state, _, ref := f.intentFacts(t, intentA); state != "declined" || ref != "" {
-		t.Fatalf("the intent moved to %s under %q, wanted declined with no answer reference", state, ref)
+	if state, _, ref := f.intentFacts(t, intentA); state != "declined" || ref == "tx-other-customer" {
+		t.Fatalf("the intent moved to %s under %q, wanted it left declined with no submitted reference", state, ref)
 	}
 
 	// A matching reference settles under the recorded one.

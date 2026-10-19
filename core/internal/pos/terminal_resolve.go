@@ -77,7 +77,15 @@ func (s *Service) ResolveTerminalLostItem(ctx context.Context, itemID uuid.UUID,
 	if in.Outcome == "declined" {
 		return s.resolveDeclined(ctx, item, entry)
 	}
-	ref := firstNonEmpty(in.Reference, item.LateProviderRef, intent.AnswerProviderRef, intent.ProviderRef, item.ProviderRef)
+	// the terminal's own record is the authority: a manager's typed reference
+	// may repeat it or name nothing, never replace it
+	recordedRef := firstNonEmpty(item.LateProviderRef, intent.AnswerProviderRef, intent.ProviderRef, item.ProviderRef)
+	inRef := strings.TrimSpace(in.Reference)
+	if recordedRef != "" && inRef != "" && inRef != recordedRef {
+		return nil, conflict("reference_mismatch",
+			fmt.Sprintf("the terminal recorded reference %s on this leg, which does not match the submitted reference %s", recordedRef, inRef))
+	}
+	ref := firstNonEmpty(recordedRef, inRef)
 	switch intent.Kind {
 	case payment.TerminalKindSale:
 		return s.resolveSaleAuthorized(ctx, item, intent, in, ref, entry)
@@ -238,11 +246,20 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 			return err
 		}
 		*intent = *fresh
+		inRef := strings.TrimSpace(in.Reference)
 		intent.AnswerBrand = firstNonEmpty(intent.AnswerBrand, item.LateBrand)
 		intent.AnswerLast4 = firstNonEmpty(intent.AnswerLast4, item.LateLast4)
 		intent.AnswerAuthCode = firstNonEmpty(intent.AnswerAuthCode, item.LateAuthCode)
+		// the leg may have moved while the resolution ran: the fresh record's
+		// reference wins over the submitted one the same way
+		freshRecorded := firstNonEmpty(item.LateProviderRef, intent.AnswerProviderRef, intent.ProviderRef, item.ProviderRef)
+		if freshRecorded != "" && inRef != "" && inRef != freshRecorded {
+			return conflict("reference_mismatch",
+				fmt.Sprintf("the terminal recorded reference %s on this leg, which does not match the submitted reference %s", freshRecorded, inRef))
+		}
+		ref = firstNonEmpty(freshRecorded, inRef)
 		if intent.State == payment.TerminalAuthorized && intent.SpentAt != nil {
-			ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
+			ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, ref)
 			if err != nil {
 				return err
 			}
@@ -288,7 +305,7 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 			}
 			return nil
 		}
-		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
+		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, ref)
 		if err != nil {
 			return err
 		}
@@ -338,7 +355,7 @@ func (s *Service) resolveSaleAuthorized(ctx context.Context, item *payment.Termi
 		if err != nil {
 			return err
 		}
-		ok, err := s.terminalLedger.FinishReversal(ctx, item.ID, entry.UserID, in.Reference)
+		ok, err := s.terminalLedger.FinishReversal(ctx, item.ID, entry.UserID, ref)
 		if err != nil {
 			return err
 		}
@@ -424,7 +441,7 @@ func (s *Service) settleSaleLeg(ctx context.Context, sale *Sale, intent *payment
 		}
 		payID, pfx, err := s.ar.RecordPayment(ctx, account.RecordPaymentIn{
 			CustomerID: customerID, BranchID: sale.BranchID, Currency: sale.Currency,
-			Method: "CARD", AmountCents: plan.applyC, Reference: in.Reference, ReceivedOn: date,
+			Method: "CARD", AmountCents: plan.applyC, Reference: ref, ReceivedOn: date,
 			Actor: entry.UserID, Card: &account.CardFacts{GatewayTxID: ref, GatewayStatus: "SETTLED",
 				Last4: intent.AnswerLast4, Brand: intent.AnswerBrand, AuthCode: intent.AnswerAuthCode},
 			Applications: applications,
@@ -475,7 +492,16 @@ func (s *Service) resolveRefundAuthorized(ctx context.Context, item *payment.Ter
 			return err
 		}
 		*intent = *fresh
-		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, in.Reference)
+		// the leg may have moved while the resolution ran: the fresh record's
+		// reference wins over the submitted one the same way
+		inRef := strings.TrimSpace(in.Reference)
+		freshRecorded := firstNonEmpty(item.LateProviderRef, intent.AnswerProviderRef, intent.ProviderRef, item.ProviderRef)
+		if freshRecorded != "" && inRef != "" && inRef != freshRecorded {
+			return conflict("reference_mismatch",
+				fmt.Sprintf("the terminal recorded reference %s on this leg, which does not match the submitted reference %s", freshRecorded, inRef))
+		}
+		ref = firstNonEmpty(freshRecorded, inRef)
+		ok, err := s.terminalLedger.ResolveLostItemAuthorized(ctx, item.ID, entry.UserID, ref)
 		if err != nil {
 			return err
 		}
