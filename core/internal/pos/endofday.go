@@ -170,7 +170,15 @@ func (f *DayFigures) add(d *DaySession, drawerOpen bool) {
 	if !ok || drawerOpen {
 		cash = d.ExpectedByMethod["CASH"]
 	}
-	f.CashToDepositCents += httpx.Cents(cash - int64(d.OpeningFloatCents) + d.MovementTotalsByKind[string(MovementSafeDrop)] + d.MovementTotalsByKind[string(MovementPickup)])
+	// A drawer short of its float deposits no cash: what it holds below the
+	// float stays in the drawer, and the over/short entry already carries the
+	// shortage. Without the floor the negative nets against the checks (or
+	// another register's cash) and under-books the deposit.
+	cashToDeposit := cash - int64(d.OpeningFloatCents) + d.MovementTotalsByKind[string(MovementSafeDrop)] + d.MovementTotalsByKind[string(MovementPickup)]
+	if cashToDeposit < 0 {
+		cashToDeposit = 0
+	}
+	f.CashToDepositCents += httpx.Cents(cashToDeposit)
 	check, ok := d.CountedByMethod["CHECK"]
 	if !ok || drawerOpen {
 		check = d.ExpectedByMethod["CHECK"]
