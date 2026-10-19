@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- 132: Till pickup approvals (CP-08, PR 178 sweep P2-2).
+-- 134: Till pickup approvals (CP-08, PR 178 sweep P2-2).
 --
 -- A pickup is cash taken by a second person. The taker confirms under their
 -- own signed-in subject (an unconsumed row here, nothing moves yet), and the
