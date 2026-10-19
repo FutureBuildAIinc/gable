@@ -9,12 +9,43 @@ package pos_test
 // who confirmed under their own login.
 
 import (
+	"context"
+	"math"
 	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
 )
+
+// glLegs reads an entry's journal lines per account code: each code's lines
+// as debit and credit sums in cents (the columns hold dollars), and the line
+// count.
+func glLegs(t *testing.T, f *fixture, entryID string) (map[string][2]int64, int) {
+	t.Helper()
+	rows, err := f.db.Pool.Query(context.Background(), `SELECT a.code, l.debit, l.credit
+		FROM gl_journal_lines l JOIN gl_accounts a ON a.id = l.account_id
+		WHERE l.journal_entry_id = $1 ORDER BY l.description`, entryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	legs := map[string][2]int64{}
+	lines := 0
+	for rows.Next() {
+		var code string
+		var debit, credit float64
+		if err := rows.Scan(&code, &debit, &credit); err != nil {
+			t.Fatal(err)
+		}
+		legs[code] = [2]int64{legs[code][0] + int64(math.Round(debit*100)), legs[code][1] + int64(math.Round(credit*100))}
+		lines++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return legs, lines
+}
 
 // closeOf closes a session counting the methods given, as a cashier.
 func (f *fixture) closeOf(sessionID string, counted map[string]any) resp {
@@ -86,20 +117,20 @@ func TestSweepPR178CountRequiresExpectedDrawerMethodsAndDoesNotNetAcrossMethods(
 	if got := num(t, expected, "CASH"); got != 20000 {
 		t.Errorf("expected CASH = %d, want 20000", got)
 	}
-	// the offsetting count records the cash shortage, never a clean net: a
-	// check overage does not cancel a cash shortage (CP-08)
-	if got := num(t, session, "over_short_cents"); got != -10000 {
-		t.Errorf("over_short_cents = %d, want -10000", got)
+	// the offsetting count records the net its per-method lines post: the cash
+	// shortage beside the check overage, never a clean zero on the methods
+	if got := num(t, session, "over_short_cents"); got != 0 {
+		t.Errorf("over_short_cents = %d, want 0 (the net of CASH -10000 and CHECK 10000)", got)
 	}
-	// the manager's sign off posts that variance: the shortage reaches the
-	// ledger instead of a drawer the books say was right
+	// the manager's sign off posts each method's variance as its own pair of
+	// ledger lines: the shortage and the overage both reach the books
 	r = f.signOff(sessionID, "cash short beside checks over", "finance", mustUUID(t))
 	if r.status != http.StatusOK {
 		t.Fatalf("the sign off = %d: %s", r.status, r.raw)
 	}
 	session = sessionOf(t, r)
-	if got := num(t, session, "over_short_cents"); got != -10000 {
-		t.Errorf("signed off over_short_cents = %d, want -10000", got)
+	if got := num(t, session, "over_short_cents"); got != 0 {
+		t.Errorf("signed off over_short_cents = %d, want 0 (the net of CASH -10000 and CHECK 10000)", got)
 	}
 	byMethod, ok := session["over_short_by_method"].(map[string]any)
 	if !ok {
@@ -259,6 +290,88 @@ func TestSweepPR178OneConfirmationBacksExactlyOnePickupUnderRace(t *testing.T) {
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM till_movements WHERE till_session_id = $1 AND kind = 'pickup'`, sessionID); got != 1 {
 		t.Errorf("%d pickup movements recorded, want 1", got)
+	}
+}
+
+// RULE (P2-2, round 3): each drawer method's variance posts as its own pair of
+// ledger lines in one entry, so the books move by what every method counted,
+// never by the cash variance alone when cash and check sit on opposite sides.
+func TestSweepPR178OffsettingAndMixedMethodVariancesPostBothMethodPairsToGL(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mustExec(t, f.db, `INSERT INTO till_variance_policy (branch_id, threshold_cents) VALUES ($1, 500)
+		ON CONFLICT (branch_id) DO UPDATE SET threshold_cents = EXCLUDED.threshold_cents`, f.branchID)
+
+	for name, tc := range map[string]struct {
+		counted   map[string]any
+		overShort int64
+		cashVar   int64
+		checkVar  int64
+		lines     int
+		cashLegs  [2]int64 // 1010: debits, credits
+		overLegs  [2]int64 // 5030: debits, credits
+	}{
+		"cash short beside a check over": {
+			counted:   map[string]any{"cash": 10000, "check": 10599},
+			overShort: 0, cashVar: -10000, checkVar: 10000, lines: 4,
+			cashLegs: [2]int64{10000, 10000}, overLegs: [2]int64{10000, 10000},
+		},
+		"cash over beside a check short": {
+			counted:   map[string]any{"cash": 30000, "check": 0},
+			overShort: 9401, cashVar: 10000, checkVar: -599, lines: 4,
+			cashLegs: [2]int64{10000, 599}, overLegs: [2]int64{599, 10000},
+		},
+	} {
+		sessionID := f.openTill(20000)
+		// a sale tendered by check, so the session expects CASH 20000 and CHECK 599
+		saleID := f.startSale(nil)
+		if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+			t.Fatalf("%s: add line = %d: %s", name, r.status, r.raw)
+		}
+		checkTender := f.cashFor("1")
+		checkTender["method"] = "check"
+		if r := f.completeSale(saleID, checkTender); r.status != http.StatusOK {
+			t.Fatalf("%s: complete = %d: %s", name, r.status, r.raw)
+		}
+
+		r := f.closeOf(sessionID, tc.counted)
+		if r.status != http.StatusOK {
+			t.Fatalf("%s: the count = %d: %s", name, r.status, r.raw)
+		}
+		session := sessionOf(t, r)
+		if session["status"] != "pending_signoff" {
+			t.Errorf("%s: status = %v, want pending_signoff", name, session["status"])
+		}
+		if got := num(t, session, "over_short_cents"); got != tc.overShort {
+			t.Errorf("%s: over_short_cents = %d, want %d (the net its lines post)", name, got, tc.overShort)
+		}
+		byMethod := session["over_short_by_method"].(map[string]any)
+		if got := num(t, byMethod, "CASH"); got != tc.cashVar {
+			t.Errorf("%s: over_short_by_method CASH = %d, want %d", name, got, tc.cashVar)
+		}
+		if got := num(t, byMethod, "CHECK"); got != tc.checkVar {
+			t.Errorf("%s: over_short_by_method CHECK = %d, want %d", name, got, tc.checkVar)
+		}
+
+		r = f.signOff(sessionID, "variance accepted", "finance", mustUUID(t))
+		if r.status != http.StatusOK {
+			t.Fatalf("%s: the sign off = %d: %s", name, r.status, r.raw)
+		}
+		session = sessionOf(t, r)
+		entryID, ok := session["gl_entry_id"].(string)
+		if !ok || entryID == "" {
+			t.Fatalf("%s: no ledger entry posted for the signed off variance: %s", name, r.raw)
+		}
+		legs, lines := glLegs(t, f, entryID)
+		if lines != tc.lines {
+			t.Errorf("%s: %d journal lines, want %d (a pair per method)", name, lines, tc.lines)
+		}
+		if got := legs["1010"]; got != tc.cashLegs {
+			t.Errorf("%s: 1010 Cash legs = debit %d credit %d, want debit %d credit %d", name, got[0], got[1], tc.cashLegs[0], tc.cashLegs[1])
+		}
+		if got := legs["5030"]; got != tc.overLegs {
+			t.Errorf("%s: 5030 Over/Short legs = debit %d credit %d, want debit %d credit %d", name, got[0], got[1], tc.overLegs[0], tc.overLegs[1])
+		}
 	}
 }
 
