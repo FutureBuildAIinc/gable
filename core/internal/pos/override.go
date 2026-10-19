@@ -18,8 +18,9 @@ import (
 
 // The kinds of manager override: what the manager waives for the one sale.
 const (
-	OverrideAccount = "account" // an on account sale the verdict blocks
-	OverrideCheck   = "check"   // a check over the customer's check limit
+	OverrideAccount      = "account"       // an on account sale the verdict blocks
+	OverrideCheck        = "check"         // a check over the customer's check limit
+	OverrideRefundMethod = "refund_method" // cash refunded against a sale that kept none
 )
 
 // devApprover names the approver of a request that carries no claims at all
@@ -64,7 +65,8 @@ func (r *overrideRequest) parse() (*OverrideIn, error) {
 	if r.Kind != nil {
 		out.Kind = *r.Kind
 	}
-	v.Check(out.Kind == OverrideAccount || out.Kind == OverrideCheck, "kind", "must be account or check")
+	v.Check(out.Kind == OverrideAccount || out.Kind == OverrideCheck || out.Kind == OverrideRefundMethod,
+		"kind", "must be account, check or refund_method")
 	if r.Reason != nil {
 		out.Reason = strings.TrimSpace(*r.Reason)
 	}
@@ -99,10 +101,16 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 		if err != nil {
 			return err
 		}
-		if sale.Status != StatusOpen && sale.Status != StatusHeld {
+		// an account or check override rides an open sale to its completion; a
+		// refund_method override rides a completed one to its returns
+		if in.Kind == OverrideRefundMethod {
+			if sale.Status != StatusCompleted {
+				return httpx.InvalidStateTransition(fmt.Sprintf("cannot approve a refund_method override on a %s sale: returns happen against a completed one", sale.Status.Status()))
+			}
+		} else if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot approve an override on a %s sale", sale.Status.Status()))
 		}
-		if sale.CashierID.String() == approver {
+		if strings.EqualFold(sale.CashierID.String(), approver) {
 			return httpx.Forbidden("a manager other than the sale's own cashier approves an override")
 		}
 		if in.Kind == OverrideAccount && sale.CustomerID == nil {
@@ -137,6 +145,12 @@ func (s *Service) consumeOverride(ctx context.Context, saleID uuid.UUID, kind st
 	if err != nil || !ok {
 		return false, err
 	}
+	// two persons spend a refund_method override: the manager who approved it
+	// cannot also be the one whose return or exchange consumes it. The error
+	// rolls the consumption back with the caller's transaction.
+	if kind == OverrideRefundMethod && actor != "" && actor != devApprover && strings.EqualFold(actor, o.ApprovedBy) {
+		return false, httpx.Forbidden("a manager who approved a refund_method override cannot also make the cash return")
+	}
 	if s.auditLog != nil {
 		if err := s.auditLog.Log(ctx, audit.Entry{
 			Action: "pos.override.consumed", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
@@ -152,11 +166,16 @@ func (s *Service) consumeOverride(ctx context.Context, saleID uuid.UUID, kind st
 // verdict. consume false is the read before any card is charged (a live
 // override that covers the amount passes); consume true runs under the
 // customer's credit lock inside the transaction and spends the override.
-func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UUID, facts CustomerFacts, amount int64, consume bool, actor string) error {
+// storeCredit is the credit memo cents the same sale spends (its own store
+// credit leg, and an exchange's returned credit leg): those memos are open
+// now and will not be once it completes, so they are added back before the
+// verdict, to the exact cent the account ends owing.
+func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UUID, facts CustomerFacts, amount, storeCredit int64, consume bool, actor string) error {
 	open, err := s.repo.OpenReceivableCents(ctx, customerID)
 	if err != nil {
 		return err
 	}
+	open += storeCredit
 	v := onAccountVerdict(verdictIn{currency: facts.Currency, creditLimit: facts.CreditLimitCents, open: open,
 		termsKind: facts.TermsKind, amount: amount})
 	if v.Verdict == VerdictAllowed {

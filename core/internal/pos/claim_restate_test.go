@@ -36,10 +36,12 @@ func TestTheCardClaimIsAskedForAndBooksTheRestatedRemainder(t *testing.T) {
 		"discount_cents": 2, "discount_reason": "two off"}); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	if r := f.completeSale(saleID, withToken(tender("card", 2393))); r.status != http.StatusOK {
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// the sale keeps 599 in the drawer (the cash the return takes) and 1794
+	// on the card
+	if r := f.completeSale(saleID, tender("cash", 599), withToken(tender("card", 1794))); r.status != http.StatusOK {
 		t.Fatalf("complete = %d: %s", r.status, r.raw)
 	}
-	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
 	if r := f.returnOn(t, saleID, lineID, "1"); r.status != http.StatusCreated {
 		t.Fatalf("the cash return of one unit = %d: %s", r.status, r.raw)
 	}
