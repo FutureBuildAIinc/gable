@@ -37,6 +37,16 @@ WHERE e.id = l.journal_entry_id
   AND e.source = 'PAYMENT'
   AND l.description = 'Inter-branch clearing backfill';
 
+-- Cross-branch settlement legs moved from 1010 to 1095 return to 1010.
+UPDATE gl_journal_lines
+SET account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
+WHERE account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
+  AND description IN (
+      'Inter-branch cash settlement',
+      'Inter-branch AR settlement',
+      'Inter-branch cash settlement reversal'
+  );
+
 -- The account itself goes only while nothing references it.
 DELETE FROM gl_accounts WHERE code = '1095'
   AND NOT EXISTS (SELECT 1 FROM gl_journal_lines l WHERE l.account_id = gl_accounts.id);

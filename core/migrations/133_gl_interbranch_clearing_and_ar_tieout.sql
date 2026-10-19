@@ -5,6 +5,12 @@
 -- settlement backfill. The runner records migrations by file name and never
 -- rereads an applied file, so a database that already applied 125 at its
 -- merged state must receive these here rather than through an edit of 125.
+-- Closed periods are no bar to this backfill: the newly created credit memo
+-- transfer entries are dated in their original (a.applied_on) periods and
+-- the existing cross-branch journal lines are updated in place even when
+-- those fiscal periods are already closed. Consolidated figures are
+-- unchanged (1095 is eliminated and the 1020 legs net to zero), while the
+-- per-branch statements in those periods are corrected.
 
 -- 1. The inter-branch clearing account: cross-branch settlements move value
 -- between branches over it (due to and due from, ADR 0010 section 9's
@@ -93,3 +99,16 @@ SET gl_entry_id = e.id
 FROM gl_journal_entries e
 WHERE e.source_ref_id = a.id AND e.source = 'CREDIT_MEMO'
   AND a.kind = 'CREDIT_MEMO' AND a.reversed_at IS NULL AND a.gl_entry_id IS NULL;
+
+-- 4. Cross-branch payment and credit memo applications (and their reversals)
+-- posted by code between 125 and 133 wrote their inter-branch transfer legs
+-- to 1010 Cash instead of 1095 Inter-Branch Clearing. Move those legs to 1095
+-- by account and description.
+UPDATE gl_journal_lines
+SET account_id = (SELECT id FROM gl_accounts WHERE code = '1095')
+WHERE account_id = (SELECT id FROM gl_accounts WHERE code = '1010')
+  AND description IN (
+      'Inter-branch cash settlement',
+      'Inter-branch AR settlement',
+      'Inter-branch cash settlement reversal'
+  );
