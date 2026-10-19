@@ -105,8 +105,9 @@ func runPendingMigrations(t *testing.T, conn *pgx.Conn, skipPrefixes ...string) 
 // credit memo applications, tie both branches' AR out, and move exactly the
 // cross-branch PAYMENT, CREDIT_MEMO and REVERSAL settlement legs (the
 // PostReversal 'Reversal: ...' wordings included) from 1010 to 1095 while a
-// MANUAL entry described the same way keeps its 1010 legs; the down
-// migration reverses the backfill and removes 1095 when nothing uses it.
+// MANUAL entry described the same way and that entry's own REVERSAL keep
+// their 1010 legs; the down migration reverses the backfill and removes
+// 1095 when nothing uses it.
 func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	scratchURL := sweepScratchDatabase(t, "gv1_m133mig")
 	base, err := pgx.Connect(context.Background(), scratchURL)
@@ -264,6 +265,16 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	_ = entryDesc("MANUAL", uuid.New(), other, "m133 mig", "Inter-branch cash settlement", nil, [][4]any{
 		{"1010", 50.00, 0, other}, {"1010", 0, 50.00, def},
 	})
+	// The same manual move later reversed through ReverseJournalEntry: the
+	// REVERSAL entry is no code-written settlement either, so its 1010 legs
+	// must stay beside the original's, not move to 1095.
+	manRevRef := uuid.New()
+	manRevOrig := entryDesc("MANUAL", manRevRef, other, "m133 mig", "Inter-branch cash settlement", nil, [][4]any{
+		{"1010", 70.00, 0, other}, {"1010", 0, 70.00, def},
+	})
+	_ = entryDesc("REVERSAL", manRevRef, other, "m133 mig", "Reversal: Inter-branch cash settlement", &manRevOrig, [][4]any{
+		{"1010", 0, 70.00, other}, {"1010", 70.00, 0, def},
+	})
 
 	// The customer transactions the subledger reads. The inter-branch
 	// pairs' rows mirror their 1020 legs, so each pair nets to zero on the
@@ -320,7 +331,8 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	// moved to 1095 Inter-Branch Clearing: exactly the 12 legs of the 6
 	// cross-branch PAYMENT, CREDIT_MEMO and REVERSAL entries (the
 	// PostReversal 'Reversal: ...' wordings included), and never a MANUAL
-	// entry's legs, whatever its description says.
+	// entry's legs or a MANUAL entry's reversal's legs, whatever their
+	// descriptions say.
 	legsOnSource := func(code, source, descList string) int {
 		t.Helper()
 		var n int
@@ -328,6 +340,19 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 			JOIN gl_accounts a ON a.id = l.account_id
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 			WHERE a.code = $1 AND e.source = $2 AND l.description IN (`+descList+`)`, code, source).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	manualRevLegs := func(code string) int {
+		t.Helper()
+		var n int
+		if err := base.QueryRow(ctx, `SELECT count(*) FROM gl_journal_lines l
+			JOIN gl_accounts a ON a.id = l.account_id
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+			WHERE a.code = $1 AND e.source = 'REVERSAL'
+			  AND EXISTS (SELECT 1 FROM gl_journal_entries o
+			              WHERE o.id = e.reverses_entry_id AND o.source = 'MANUAL')`, code).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -340,7 +365,9 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 		if err := base.QueryRow(ctx, `SELECT count(*) FROM gl_journal_lines l
 			JOIN gl_accounts a ON a.id = l.account_id
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id
-			WHERE a.code = $1 AND e.source IN (`+movedSources+`) AND l.description IN (`+settlementDescs+`)`, code).Scan(&n); err != nil {
+			WHERE a.code = $1 AND e.source IN (`+movedSources+`) AND l.description IN (`+settlementDescs+`)
+			  AND NOT (e.source = 'REVERSAL' AND EXISTS (SELECT 1 FROM gl_journal_entries o
+			              WHERE o.id = e.reverses_entry_id AND o.source = 'MANUAL'))`, code).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -351,18 +378,25 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 	if got := movedLegs("1095"); got != 12 {
 		t.Errorf("%d cross-branch settlement legs on 1095 after migration 133, want the 12 moved legs", got)
 	}
-	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 2 {
-		t.Errorf("%d MANUAL entry legs on 1010 Cash after migration 133, want the manual move's 2", got)
+	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 4 {
+		t.Errorf("%d MANUAL entry legs on 1010 Cash after migration 133, want the two manual moves' 4", got)
 	}
 	if got := legsOnSource("1095", "MANUAL", `'Inter-branch cash settlement'`); got != 0 {
 		t.Errorf("%d MANUAL entry legs on 1095 after migration 133, want 0: a manual drawer move is no settlement", got)
 	}
+	if got := manualRevLegs("1010"); got != 2 {
+		t.Errorf("%d manual entry reversal legs on 1010 Cash after migration 133, want the reversed manual move's 2", got)
+	}
+	if got := manualRevLegs("1095"); got != 0 {
+		t.Errorf("%d manual entry reversal legs on 1095 after migration 133, want 0: a manual drawer move's reversal is no settlement", got)
+	}
 
 	// Per-branch 1010 Cash and 1095 Clearing balances: only the manual
-	// drawer move's legs stay on 1010 (a 50.00 credit on def and a 50.00
-	// debit on other), the six settlement entries' own clearing legs net
-	// to zero per branch, and 1095 carries the step 2 backfill pair
-	// (150.00) and the step 3 memo transfer pair (100.00) on top.
+	// drawer moves' legs stay on 1010 (the 50.00 pair alone moves a branch
+	// balance; the 70.00 pair and its reversal net to zero), the six
+	// settlement entries' own clearing legs net to zero per branch, and
+	// 1095 carries the step 2 backfill pair (150.00) and the step 3 memo
+	// transfer pair (100.00) on top.
 	balanceOn := func(code string) map[uuid.UUID]float64 {
 		t.Helper()
 		out := map[uuid.UUID]float64{}
@@ -462,11 +496,14 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 
 	// Every entry balances in total, and every code-written settlement
 	// entry balances per branch (each branch carries a paired leg set).
-	// The manual drawer move is the one exception by nature: one leg per
-	// branch, balanced only across the two branches together.
+	// The manual drawer moves and the manual move's reversal are the
+	// exceptions by nature: one leg per branch, balanced only across the
+	// two branches together.
 	rows, err := base.Query(ctx, `SELECT e.id, l.branch_id, SUM(l.debit), SUM(l.credit)
 		FROM gl_journal_entries e JOIN gl_journal_lines l ON l.journal_entry_id = e.id
 		WHERE e.source <> 'MANUAL'
+		  AND NOT (e.source = 'REVERSAL' AND EXISTS (SELECT 1 FROM gl_journal_entries o
+		              WHERE o.id = e.reverses_entry_id AND o.source = 'MANUAL'))
 		GROUP BY e.id, l.branch_id HAVING SUM(l.debit) <> SUM(l.credit)`)
 	if err != nil {
 		t.Fatal(err)
@@ -552,16 +589,19 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 		t.Errorf("payment entry 2200 leg on branch %v after the down migration, want the entry's branch %v", pay2200Branch, other)
 	}
 	// The 12 settlement legs the up migration moved return to 1010 Cash,
-	// and the manual move's 2 legs never left it, so nothing references
-	// 1095 and the account deletes cleanly.
+	// and the manual moves' 4 legs and their reversal's 2 legs never left
+	// it, so nothing references 1095 and the account deletes cleanly.
 	if got := movedLegs("1095"); got != 0 {
 		t.Errorf("%d settlement legs still on 1095 after the down migration, want 0", got)
 	}
 	if got := movedLegs("1010"); got != 12 {
 		t.Errorf("%d settlement legs back on 1010 after the down migration, want the 12 original legs", got)
 	}
-	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 2 {
-		t.Errorf("%d MANUAL entry legs on 1010 Cash after the down migration, want the manual move's 2", got)
+	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 4 {
+		t.Errorf("%d MANUAL entry legs on 1010 Cash after the down migration, want the two manual moves' 4", got)
+	}
+	if got := manualRevLegs("1010"); got != 2 {
+		t.Errorf("%d manual entry reversal legs on 1010 Cash after the down migration, want 2", got)
 	}
 	// A second up lands on the same state as the first.
 	up, err := os.ReadFile("../../migrations/133_gl_interbranch_clearing_and_ar_tieout.sql")
@@ -579,15 +619,18 @@ func TestMigration133SeedsInterBranchClearingOnUpgradedDatabase(t *testing.T) {
 		t.Errorf("second up 1095 leg on the invoice branch = %v, want DR 100.00", legsOf(redone)["1095"][other])
 	}
 	// The second up moves the settlement legs to 1095 again and still
-	// leaves the manual move on 1010 Cash.
+	// leaves the manual moves and their reversal on 1010 Cash.
 	if got := movedLegs("1010"); got != 0 {
 		t.Errorf("%d settlement legs back on 1010 after the second up, want 0", got)
 	}
 	if got := movedLegs("1095"); got != 12 {
 		t.Errorf("%d settlement legs on 1095 after the second up, want the 12 moved legs", got)
 	}
-	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 2 {
-		t.Errorf("%d MANUAL entry legs on 1010 Cash after the second up, want the manual move's 2", got)
+	if got := legsOnSource("1010", "MANUAL", `'Inter-branch cash settlement'`); got != 4 {
+		t.Errorf("%d MANUAL entry legs on 1010 Cash after the second up, want the two manual moves' 4", got)
+	}
+	if got := manualRevLegs("1010"); got != 2 {
+		t.Errorf("%d manual entry reversal legs on 1010 Cash after the second up, want 2", got)
 	}
 	if bal := balanceOn("1010"); bal[def] != -50.00 || bal[other] != 50.00 {
 		t.Errorf("1010 Cash balances after the second up = def %v other %v, want def -50 other 50", bal[def], bal[other])
