@@ -52,7 +52,11 @@ func NewEscalatorRepository(db *database.DB) *PostgresEscalatorRepository {
 }
 
 func (r *PostgresEscalatorRepository) ListMarketIndices(ctx context.Context) ([]MarketIndex, error) {
-	query := `SELECT ` + marketIndexColumns + ` FROM market_indices ORDER BY name ASC`
+	// COLLATE "C" pins byte order: the seeded names share the prefix
+	// "Random Lengths S" and diverge on case at character 17, where the
+	// server's default collation (glibc en_US.utf8 vs musl C) orders them
+	// differently and the API list order becomes image dependent.
+	query := `SELECT ` + marketIndexColumns + ` FROM market_indices ORDER BY name COLLATE "C" ASC`
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
