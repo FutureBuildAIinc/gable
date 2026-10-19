@@ -69,6 +69,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: true,
         schedule: true,
         edit_delivery_instructions: true,
+        quote_customers: true,
       }
     case 'estimator':
       return {
@@ -80,6 +81,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: true,
         schedule: true,
         edit_delivery_instructions: true,
+        quote_customers: true,
       }
     case 'project_manager':
       return {
@@ -91,6 +93,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: true,
         schedule: true,
         edit_delivery_instructions: true,
+        quote_customers: true,
       }
     case 'site_super':
       return {
@@ -102,6 +105,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: false,
         schedule: true,
         edit_delivery_instructions: true,
+        quote_customers: false,
       }
     case 'ap_clerk':
     case 'ap_bookkeeper':
@@ -114,6 +118,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: false,
         schedule: false,
         edit_delivery_instructions: false,
+        quote_customers: false,
       }
     default:
       return {
@@ -125,6 +130,7 @@ export function roleCapabilities(role: string): PortalCapabilities {
         approve_quotes: false,
         schedule: false,
         edit_delivery_instructions: false,
+        quote_customers: false,
       }
   }
 }

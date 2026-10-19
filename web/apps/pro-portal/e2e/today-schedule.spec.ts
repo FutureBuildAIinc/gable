@@ -65,6 +65,7 @@ test('site_super with see_money false sees zero dollar amounts on today and orde
     approve_quotes: false,
     schedule: true,
     edit_delivery_instructions: true,
+    quote_customers: false,
   }
   await installPortalMocks(page, { me: siteSuper })
   await page.goto('/today')

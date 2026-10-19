@@ -194,7 +194,11 @@ func (s *Service) IntakeQuote(ctx context.Context, customerID uuid.UUID, req Quo
 // ConvertPortalQuote converts a priced (SENT) or ACCEPTED quote belonging to
 // customerID into a live ERP order via quote.Service.ConvertInProcess inside a
 // single transaction, preserving any portal project_id linked to the quote.
-func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID) (*ConvertPortalQuoteResponse, error) {
+//
+// Converting a SENT quote accepts it as a side effect, so the caller must hold
+// CapApproveQuotes as well as CapOrder; an already ACCEPTED quote needs only
+// CapOrder to become an order.
+func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uuid.UUID, caps Capabilities) (*ConvertPortalQuoteResponse, error) {
 	if s.quoteSvc == nil {
 		return nil, fmt.Errorf("quote lifecycle service is not configured")
 	}
@@ -213,6 +217,9 @@ func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uu
 		erpState := quote.QuoteState(current.ERPState)
 		if erpState != quote.QuoteStateSent && erpState != quote.QuoteStateAccepted {
 			return fmt.Errorf("%w: quote state is %s", ErrQuoteNotConvertible, current.Status)
+		}
+		if erpState == quote.QuoteStateSent && !caps.Has(CapApproveQuotes) {
+			return ErrQuoteApprovalRequired
 		}
 
 		res, err := s.quoteSvc.ConvertInProcess(branchctx.WithSystem(txCtx), quoteID)

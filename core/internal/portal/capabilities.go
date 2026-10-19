@@ -45,6 +45,7 @@ const (
 	CapApproveQuotes           = "approve_quotes"
 	CapSchedule                = "schedule"
 	CapEditDeliveryInstruction = "edit_delivery_instructions"
+	CapQuoteCustomers          = "quote_customers"
 )
 
 // Capabilities is the server resolved answer to "what may this user do".
@@ -59,6 +60,7 @@ type Capabilities struct {
 	ApproveQuotes           bool `json:"approve_quotes"`
 	Schedule                bool `json:"schedule"`
 	EditDeliveryInstruction bool `json:"edit_delivery_instructions"`
+	QuoteCustomers          bool `json:"quote_customers"`
 }
 
 // CapabilitiesFor resolves a role to its capability set. An unknown role (an
@@ -77,6 +79,7 @@ func CapabilitiesFor(role string) Capabilities {
 			ApproveQuotes:           true,
 			Schedule:                true,
 			EditDeliveryInstruction: true,
+			QuoteCustomers:          true,
 		}
 	case RoleEstimator:
 		// Prices work and asks the dealer for quotes: no money, no team.
@@ -86,6 +89,9 @@ func CapabilitiesFor(role string) Capabilities {
 			ApproveQuotes:           true,
 			Schedule:                true,
 			EditDeliveryInstruction: true,
+			// Builds customer quotes with markups (which show the dealer
+			// costs they are built on) without seeing account money.
+			QuoteCustomers: true,
 		}
 	case RoleProjectManager:
 		// Runs jobs end to end, so sees the money a job commits against.
@@ -96,6 +102,7 @@ func CapabilitiesFor(role string) Capabilities {
 			ApproveQuotes:           true,
 			Schedule:                true,
 			EditDeliveryInstruction: true,
+			QuoteCustomers:          true,
 		}
 	case RoleSiteSuper:
 		// The site: orders materials and books the yard's time. No financials.
@@ -134,6 +141,8 @@ func (c Capabilities) Has(name string) bool {
 		return c.Schedule
 	case CapEditDeliveryInstruction:
 		return c.EditDeliveryInstruction
+	case CapQuoteCustomers:
+		return c.QuoteCustomers
 	}
 	return false
 }

@@ -186,7 +186,7 @@ func newWorldPool(t *testing.T, pool int32) *world {
 		must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`,
 			id, label, "CQT-"+id.String()[:8], w.branch)
 		uid := uuid.New()
-		return customerquote.Actor{CustomerID: id, UserID: &uid, Name: label + " Buyer", Email: "buyer@" + id.String()[:6] + ".example", Role: "Buyer"}, id
+		return customerquote.Actor{CustomerID: id, UserID: &uid, Name: label + " Buyer", Email: "buyer@" + id.String()[:6] + ".example", Role: "owner"}, id
 	}
 	var ca, cb uuid.UUID
 	w.a, ca = mk("Quote Contractor A")

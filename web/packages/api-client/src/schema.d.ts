@@ -15463,6 +15463,7 @@ export interface components {
             approve_quotes: boolean;
             schedule: boolean;
             edit_delivery_instructions: boolean;
+            quote_customers: boolean;
         };
         PortalAccount: {
             /** Format: uuid */
