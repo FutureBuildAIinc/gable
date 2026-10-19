@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
-// FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 package portal
 
