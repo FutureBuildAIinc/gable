@@ -91,11 +91,15 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 		if session.OverShort != nil {
 			overShort = int64(*session.OverShort)
 		}
-		if s.ledger != nil && overShort != 0 {
+		// The manager's release posts each method's variance as its own pair
+		// of lines, so an offsetting count (a cash shortage beside a check
+		// overage that nets to zero) still posts both sides and the ledger
+		// equals the money the drawer holds (CP-08).
+		if s.ledger != nil && hasDrawerVariance(session.OverShortByMethod) {
 			if session.BranchID == nil {
 				return fmt.Errorf("the till session names no branch: its over/short cannot post")
 			}
-			glID, err := s.ledger.PostTillOverShort(ctx, *session.BranchID, sessionID, overShort)
+			glID, err := s.postTillOverShortByMethod(ctx, *session.BranchID, sessionID, session.OverShortByMethod, actor)
 			if err != nil {
 				return ledgerRefusal(err, "failed to post the drawer variance")
 			}

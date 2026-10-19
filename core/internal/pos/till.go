@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -42,12 +43,13 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 }
 
 // overShortTotal is the drawer's variance: counted less expected over the
-// methods that are money in the drawer, CASH and CHECK. CARD never joins the
-// sum (cards are not counted into the drawer), so a card figure can never
-// offset a cash or check shortage (CP-08). Opposite-sign variances never
-// net either: a cash shortage beside a check overage records the cash
-// shortage, never a clean zero, so the count cannot hide behind an overage
-// on another method.
+// methods that are money in the drawer, CASH and CHECK, as the signed net the
+// per-method lines post on the ledger. CARD never joins the sum (cards are
+// not counted into the drawer), so a card figure can never offset a cash or
+// check shortage (CP-08). The methods never hide inside the net either:
+// over_short_by_method carries each method's own variance, and the posting
+// moves the books by each of those figures, so an opposite-sign pair still
+// posts both sides.
 func overShortTotal(expected, counted map[string]int64) int64 {
 	cashVar := counted["CASH"] - expected["CASH"]
 	var checkVar int64
@@ -55,9 +57,6 @@ func overShortTotal(expected, counted map[string]int64) int64 {
 		checkVar = counted["CHECK"] - expected["CHECK"]
 	} else if expected["CHECK"] != 0 {
 		checkVar = -expected["CHECK"]
-	}
-	if (cashVar < 0 && checkVar > 0) || (cashVar > 0 && checkVar < 0) {
-		return cashVar
 	}
 	return cashVar + checkVar
 }
@@ -74,6 +73,70 @@ func overShortByMethod(expected, counted map[string]int64) map[string]int64 {
 		out["CHECK"] = counted["CHECK"] - expected["CHECK"]
 	}
 	return out
+}
+
+// hasDrawerVariance answers whether any drawer method carries a non-zero
+// variance: such a count posts, even when the methods net to zero.
+func hasDrawerVariance(byMethod map[string]int64) bool {
+	for _, m := range []string{string(TenderCash), string(TenderCheck)} {
+		if byMethod[m] != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// postTillOverShortByMethod posts the drawer's variance as one journal entry
+// in which each non-zero drawer method's variance is its own pair of lines
+// (CP-08): cash and check each move 1010 by their own counted figure, never
+// by the net alone, so the ledger equals the money the drawer holds. A count
+// with no variance on any method posts nothing.
+func (s *Service) postTillOverShortByMethod(ctx context.Context, branchID, sessionID uuid.UUID, byMethod map[string]int64, actor string) (uuid.UUID, error) {
+	var legs []gl.Leg
+	for _, m := range []string{string(TenderCash), string(TenderCheck)} {
+		v := byMethod[m]
+		if v == 0 {
+			continue
+		}
+		name := "Cash"
+		if m == string(TenderCheck) {
+			name = "Check"
+		}
+		if v < 0 {
+			mag := -v
+			legs = append(legs,
+				gl.Leg{AccountCode: gl.AccountCodeOverShort, Description: fmt.Sprintf("%s short (%s)", name, m), Debit: mag},
+				gl.Leg{AccountCode: gl.AccountCodeCash, Description: fmt.Sprintf("%s (%s)", name, m), Credit: mag})
+		} else {
+			mag := v
+			legs = append(legs,
+				gl.Leg{AccountCode: gl.AccountCodeCash, Description: fmt.Sprintf("%s (%s)", name, m), Debit: mag},
+				gl.Leg{AccountCode: gl.AccountCodeOverShort, Description: fmt.Sprintf("%s over (%s)", name, m), Credit: mag})
+		}
+	}
+	if len(legs) == 0 {
+		return uuid.Nil, nil
+	}
+	day, err := s.repo.BranchToday(ctx, branchID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if day.IsZero() {
+		day = time.Now().UTC()
+	}
+	entry, err := s.ledger.PostEntry(ctx, gl.PostingInput{
+		EntryDate:   day,
+		Memo:        fmt.Sprintf("Till over/short - session %s", sessionID),
+		Source:      gl.SourceAdjustment,
+		SourceRefID: &sessionID,
+		BranchID:    branchID,
+		PostedBy:    actorOrSystem(actor),
+		Legs:        legs,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return entry.ID, nil
 }
 
 // OpenTill opens a drawer session on a register.
@@ -306,12 +369,13 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		session.OverShortByMethod = overShortByMethod(report.ExpectedByMethod, countedByMethod)
 		session.Notes = notes
 		// The over/short entry, inside the close's transaction, linked back
-		// onto the session.
-		if s.ledger != nil && overShort != 0 && !hold {
+		// onto the session: each method's variance as its own pair of lines,
+		// so the books move by what every drawer method counted.
+		if s.ledger != nil && !hold && hasDrawerVariance(session.OverShortByMethod) {
 			if session.BranchID == nil {
 				return fmt.Errorf("the till session names no branch: its over/short cannot post")
 			}
-			glID, err := s.ledger.PostTillOverShort(ctx, *session.BranchID, sessionID, overShort)
+			glID, err := s.postTillOverShortByMethod(ctx, *session.BranchID, sessionID, session.OverShortByMethod, actor)
 			if err != nil {
 				return ledgerRefusal(err, "failed to post the drawer variance")
 			}
