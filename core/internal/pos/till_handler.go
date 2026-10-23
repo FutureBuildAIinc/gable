@@ -5,9 +5,11 @@ package pos
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -84,12 +86,12 @@ func (h *Handler) CreateMovement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	in, err := req.parse()
+	in, token, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	m, confirmed, err := h.service.RecordMovement(r.Context(), id, in, actorFrom(r))
+	m, confirmed, err := h.service.RecordMovement(r.Context(), id, in, actorFrom(r), token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -132,7 +134,9 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 }
 
 // SignOffTill is POST /pos/till/{id}/signoff: a manager's release of a
-// counted drawer whose variance passed the threshold.
+// counted drawer whose variance passed the threshold, either by a manager
+// signed in themselves or by a manager's step up approval token spent in
+// the release.
 func (h *Handler) SignOffTill(w http.ResponseWriter, r *http.Request) {
 	// a sign off is a person's act, never a machine key's
 	if _, ok := cashierOf(w, r); !ok {
@@ -151,7 +155,20 @@ func (h *Handler) SignOffTill(w http.ResponseWriter, r *http.Request) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	report, err := h.service.SignOffTill(r.Context(), id, reason, actorFrom(r))
+	token := ""
+	if req.ApprovalToken != nil {
+		token = strings.TrimSpace(*req.ApprovalToken)
+	}
+	if token == "" {
+		// the claims path keeps the resolve mount's own role rule: finance
+		// and owner; a token's PIN already spoke for the manager
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil &&
+			!middleware.ClaimsHaveAnyRole(claims, "finance", "owner") {
+			httpx.WriteError(w, r, httpx.Forbidden("a sign off is made by a manager, or with a manager's approval at the counter"))
+			return
+		}
+	}
+	report, err := h.service.SignOffTill(r.Context(), id, reason, actorFrom(r), token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

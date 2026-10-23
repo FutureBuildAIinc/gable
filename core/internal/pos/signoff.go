@@ -52,8 +52,10 @@ func (s *Service) recordHeldClose(ctx context.Context, report *TillReport, overS
 // short posts in this transaction, the session ends CLOSED with who signed
 // off and why, and the Z snapshot freezes. The signer is never the person who
 // closed the drawer nor its cashier. A call with no identity at all (a dev
-// mode caller) carries nothing to compare, so the rule cannot hold it.
-func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, actor string) (*TillReport, error) {
+// mode caller) carries nothing to compare, so the rule cannot hold it. A
+// step up approval token, when sent, is spent in this transaction and its
+// manager is the signer the session records.
+func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, actor, approvalToken string) (*TillReport, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, invalid("reason", "is required: why the variance is accepted")
@@ -63,6 +65,14 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 	}
 	var out *TillReport
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if approvalToken != "" {
+			// the manager's PIN already spoke: one use, this act, this session
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActSignoff, sessionID, nil, approvalToken)
+			if err != nil {
+				return err
+			}
+			actor = manager
+		}
 		if err := s.repo.LockTillSession(ctx, sessionID, true); err != nil {
 			return err
 		}

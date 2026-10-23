@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/staff"
-	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
 )
 

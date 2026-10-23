@@ -52,14 +52,17 @@ type OverrideIn struct {
 	CapCents int64
 }
 
-// overrideRequest is POST /pos/transactions/{id}/overrides.
+// overrideRequest is POST /pos/transactions/{id}/overrides. An
+// approval_token, when sent, is a manager's step up approval spent by this
+// one override.
 type overrideRequest struct {
-	Kind     *string         `json:"kind"`
-	Reason   *string         `json:"reason"`
-	CapCents json.RawMessage `json:"cap_cents"`
+	Kind          *string         `json:"kind"`
+	Reason        *string         `json:"reason"`
+	CapCents      json.RawMessage `json:"cap_cents"`
+	ApprovalToken *string         `json:"approval_token"`
 }
 
-func (r *overrideRequest) parse() (*OverrideIn, error) {
+func (r *overrideRequest) parse() (*OverrideIn, string, error) {
 	v := &httpx.Validator{}
 	out := &OverrideIn{}
 	if r.Kind != nil {
@@ -77,16 +80,22 @@ func (r *overrideRequest) parse() (*OverrideIn, error) {
 		out.CapCents = n
 	}
 	if err := v.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return out, nil
+	token := ""
+	if r.ApprovalToken != nil {
+		token = strings.TrimSpace(*r.ApprovalToken)
+	}
+	return out, token, nil
 }
 
 // ApproveOverride records a manager's approval of one sale. The approver is
 // a person other than the sale's cashier (the handler holds the role); the
 // sale must still be open, and an account override needs a named customer.
-func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *OverrideIn, approver string) (*AccountOverride, error) {
-	if approver == "" {
+// A step up approval token, when sent, is spent here inside this
+// transaction and its manager is the approver the row names.
+func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *OverrideIn, approver, approvalToken string) (*AccountOverride, error) {
+	if approver == "" && approvalToken == "" {
 		return nil, httpx.Forbidden("an override is approved by a signed in manager")
 	}
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
@@ -94,6 +103,14 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 	}
 	var out *AccountOverride
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if approvalToken != "" {
+			// the manager's PIN already spoke: one use, this act, this sale
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActOverride, saleID, nil, approvalToken)
+			if err != nil {
+				return err
+			}
+			approver = manager
+		}
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
 			return err
 		}
@@ -204,26 +221,11 @@ func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UU
 }
 
 // ApproveOverrideHandler is POST /pos/transactions/{id}/overrides: a
-// manager (admin or owner) other than the cashier approves one sale.
+// manager (admin or owner) other than the cashier approves one sale, or a
+// cashier spends a manager's step up approval token, whose PIN already
+// proved the role.
 func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request) {
 	if refuseMachineKey(w, r, "an override is approved by a person, never a machine key") {
-		return
-	}
-	// A configured deployment always carries claims (the auth layer sets them
-	// or answers 401); no claims and no machine key is the dev mode bypass,
-	// which every role guard of the module lets through, so it approves as
-	// "dev-mode": a person other than any cashier, never an empty name.
-	approver := devApprover
-	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
-		if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
-			httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
-			return
-		}
-		approver = claims.Subject
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
 		return
 	}
 	var req overrideRequest
@@ -231,12 +233,32 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, r, err)
 		return
 	}
-	in, err := req.parse()
+	in, token, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	o, err := h.service.ApproveOverride(r.Context(), id, in, approver)
+	// A configured deployment always carries claims (the auth layer sets them
+	// or answers 401); no claims and no machine key is the dev mode bypass,
+	// which every role guard of the module lets through, so it approves as
+	// "dev-mode": a person other than any cashier, never an empty name. A
+	// step up token walks its own path under any auth mode.
+	approver := devApprover
+	if token == "" {
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+			if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
+				httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
+				return
+			}
+			approver = claims.Subject
+		}
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	o, err := h.service.ApproveOverride(r.Context(), id, in, approver, token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -209,4 +209,3 @@ type pinAnswer struct {
 	CounterPinSet bool `json:"counter_pin_set"`
 	Locked        bool `json:"locked"`
 }
-
