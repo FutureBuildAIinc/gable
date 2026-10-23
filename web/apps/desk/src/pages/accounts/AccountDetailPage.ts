@@ -272,6 +272,7 @@ export class GableAccountDetail extends LitElement {
                 ...request,
                 payment_terms_id: request.payment_terms_id ?? this.customer.payment_terms_id,
                 po_required: request.po_required ?? this.customer.po_required,
+                job_required: request.job_required ?? this.customer.job_required,
             };
             this.customer = await CustomerService.updateCustomer(this.customer.id, update, this.customer.revision);
             this.editing = false;
@@ -476,6 +477,7 @@ export class GableAccountDetail extends LitElement {
                             <dl class="flex flex-wrap items-center gap-x-6 gap-y-1 mt-3 text-sm" data-account-facts>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Terms</dt><dd class="text-white" data-fact="terms">${customer.payment_terms.code} - ${customer.payment_terms.name}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">PO required</dt><dd class="text-white" data-fact="po">${customer.po_required ? 'Yes' : 'No'}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Job required</dt><dd class="text-white" data-fact="job">${customer.job_required ? 'Yes' : 'No'}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Currency</dt><dd class="font-mono text-white" data-fact="currency">${customer.effective_currency}${customer.currency === null ? ' (dealer default)' : ''}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Pricing program</dt><dd class="text-white" data-fact="price_profile_id">${customer.price_profile_id ?? ''}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>

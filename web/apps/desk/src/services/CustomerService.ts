@@ -116,6 +116,7 @@ export function customerRequestFromCustomer(c: Customer): CustomerUpdateRequest 
         currency: c.currency,
         payment_terms_id: c.payment_terms_id,
         po_required: c.po_required,
+        job_required: c.job_required,
     };
 }
 

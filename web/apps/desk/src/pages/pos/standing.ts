@@ -46,6 +46,12 @@ export function standingOf(c: CounterCustomer): Standing {
 /** The words for a charge refused only for want of the purchase order. */
 export const PO_REFUSAL = 'This account asks for a purchase order: enter it before charging';
 
+/** The words for a charge refused only for want of the job. */
+export const JOB_REFUSAL = 'This account requires a job on every charge sale: pick the job';
+
+/** The words when the requirement cannot be met at the counter at all. */
+export const JOB_NONE_ON_FILE = 'This account requires a job and has none on file: add one on the account page';
+
 /**
  * Why a charge of totalCents to this account is refused at the counter, in
  * words, or null when it is offered. The server holds the same rules (409
@@ -57,6 +63,7 @@ export function chargeRefusal(
     totalCents: number,
     purchaseOrder: string,
     approved = false,
+    jobId = '',
 ): string | null {
     if (!customer) return 'Name a customer to charge the sale to an account';
     // a manager's approval of this sale waives the credit words, never the PO
@@ -70,6 +77,11 @@ export function chargeRefusal(
     }
     if (customer.po_required && purchaseOrder.trim() === '') {
         return PO_REFUSAL;
+    }
+    // the job rule is the account tender's too, with its own words when the
+    // account holds no job to pick
+    if (customer.job_required && jobId === '') {
+        return customer.jobs.length === 0 ? JOB_NONE_ON_FILE : JOB_REFUSAL;
     }
     return null;
 }

@@ -13,6 +13,7 @@ const base: CounterCustomer = {
     account_number: 'A-100',
     name: 'Smith Builders',
     po_required: false,
+    job_required: false,
     credit_limit_cents: 500000,
     open_receivable_cents: 120050,
     available_credit_cents: 379950,
@@ -63,6 +64,15 @@ describe('chargeRefusal', () => {
         const c = { ...base, po_required: true };
         expect(chargeRefusal(c, 1000, '  ')).toMatch(/purchase order/);
         expect(chargeRefusal(c, 1000, 'PO-9')).toBeNull();
+    });
+    it('asks for the job the account requires, and says when none is on file', () => {
+        const c = { ...base, job_required: true };
+        const withJob = { ...c, jobs: [{ id: 'j1', name: 'Ridge Build' }] };
+        expect(chargeRefusal(withJob, 1000, '')).toMatch(/requires a job on every charge sale/);
+        expect(chargeRefusal(withJob, 1000, '', false, 'j1')).toBeNull();
+        expect(chargeRefusal(c, 1000, '')).toMatch(/none on file/);
+        // a job is never asked of a walk-in style account that does not require one
+        expect(chargeRefusal(base, 1000, '', false, '')).toBeNull();
     });
     it('offers the charge to an account with no limit', () => {
         const c = { ...base, credit_limit_cents: null, available_credit_cents: null, standing: 'no_limit' as const };

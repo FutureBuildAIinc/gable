@@ -599,7 +599,7 @@ export class POSTerminal extends LitElement {
     const st = this._standing;
     // a manager's approval of this sale waives the credit words, never the purchase order
     const approved = st !== null && st.on_account.reason === 'manager_override';
-    const base = chargeRefusal(this._customer, owed, this._poText, approved);
+    const base = chargeRefusal(this._customer, owed, this._poText, approved, this._jobId);
     if (base) return base;
     if (st !== null) {
       // the server's verdict (the same function the completion asks), then the roster
@@ -680,7 +680,7 @@ export class POSTerminal extends LitElement {
           ${this._renderVerdict()}
           ${this._renderBuyerPick(finished)}
           <div class="mt-3 grid grid-cols-2 items-start gap-2">
-            <div class="${c.jobs.length > 0 ? '' : 'col-span-2'}">
+            <div class="${c.jobs.length > 0 || c.job_required ? '' : 'col-span-2'}">
               <label class="block text-xs text-slate-400" for="pos-po">
                 Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
               </label>
@@ -691,9 +691,9 @@ export class POSTerminal extends LitElement {
                 class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40"
                 placeholder="PO number" />
             </div>
-            ${c.jobs.length > 0 ? html`
+            ${c.jobs.length > 0 || c.job_required ? html`
               <div>
-                <label class="block text-xs text-slate-400" for="pos-job">Job</label>
+                <label class="block text-xs text-slate-400" for="pos-job">Job${c.job_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}</label>
                 <div class="mt-1">
                   <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
                     .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}

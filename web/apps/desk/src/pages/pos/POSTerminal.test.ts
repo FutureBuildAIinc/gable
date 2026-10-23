@@ -67,7 +67,7 @@ function sale(over: Partial<Sale> = {}): Sale {
 const account: CounterCustomer = {
   id: 'cu1', name: 'Test Builders', account_number: 'A-100', standing: 'good',
   credit_limit_cents: 500000, available_credit_cents: 400000, open_receivable_cents: 100000,
-  po_required: false, jobs: [],
+  po_required: false, job_required: false, jobs: [],
 } as unknown as CounterCustomer;
 
 async function mount(s: Sale): Promise<POSTerminal> {
@@ -228,13 +228,14 @@ describe('the counter as the Panels layout', () => {
     const onHold = { ...account, standing: 'no_credit', available_credit_cents: 0 } as unknown as CounterCustomer;
     const overLimit = { ...account, standing: 'over_limit', available_credit_cents: -2000 } as unknown as CounterCustomer;
     const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const needsJob = { ...account, job_required: true, jobs: [{ id: 'j1', name: 'Ridge Build' }] } as unknown as CounterCustomer;
     const pay = async (el: POSTerminal) => {
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
     };
 
-    for (const [name, c] of [['on hold', onHold], ['over the limit', overLimit], ['asking for a PO that is empty', needsPO]] as const) {
+    for (const [name, c] of [['on hold', onHold], ['over the limit', overLimit], ['asking for a PO that is empty', needsPO], ['requiring a job that is not picked', needsJob]] as const) {
       it(`refuses the choice of the account for a customer ${name}`, async () => {
         const el = await withCustomer(c);
         expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
@@ -254,6 +255,25 @@ describe('the counter as the Panels layout', () => {
         expect(svc.completeSale).not.toHaveBeenCalled();
       });
     }
+
+    it('marks the Job select as required for a charge and clears the refusal when a job is picked', async () => {
+      const el = await withCustomer(needsJob);
+      const label = el.querySelector('label[for="pos-job"]');
+      expect(label?.textContent).toMatch(/required for a charge/);
+      expect(inner(el)._accountRefusal).toMatch(/requires a job on every charge sale/);
+      expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
+      inner(el)._jobId = 'j1';
+      await el.updateComplete;
+      expect(inner(el)._accountRefusal).toBeNull();
+      expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('says the account has no job on file when the requirement cannot be met', async () => {
+      const noneOnFile = { ...account, job_required: true, jobs: [] } as unknown as CounterCustomer;
+      const el = await withCustomer(noneOnFile);
+      expect(el.querySelector('label[for="pos-job"]')).toBeTruthy();
+      expect(inner(el)._accountRefusal).toMatch(/none on file/);
+    });
 
     it('rechecks at Pay when the customer goes on hold after the account was chosen', async () => {
       const el = await withCustomer(account);
