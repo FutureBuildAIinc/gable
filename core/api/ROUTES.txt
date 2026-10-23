@@ -405,6 +405,8 @@ GET	/api/v1/pos/return-reasons	internal/pos	h.ListReturnReasons
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
+GET	/api/v1/pos/settings	internal/pos	h.GetPosSettingsHandler
+PUT	/api/v1/pos/settings	internal/pos	h.PutPosSettingsHandler
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
 POST	/api/v1/pos/terminal-intents/sweep	internal/pos	h.SweepTerminalIntentsHandler
 GET	/api/v1/pos/terminal-intents/{id}	internal/pos	h.GetTerminalIntentHandler
