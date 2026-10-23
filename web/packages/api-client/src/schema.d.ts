@@ -624,6 +624,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/staff/{id}/counter-pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a staff member's counter PIN
+         * @description Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits, never one repeated digit or a plain run like 1234. Hashed on the server with argon2id and a per PIN salt; the PIN is never logged and the answer says only counter_pin_set and locked. Setting a PIN clears the failures and the lock.
+         */
+        put: operations["adminSetStaffCounterPIN"];
+        post?: never;
+        /**
+         * Clear a staff member's counter PIN
+         * @description Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+         */
+        delete: operations["adminClearStaffCounterPIN"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/counter-pin/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock a staff member's counter PIN
+         * @description Admin or owner. Lifts the lock five wrong tries impose and clears the failures; the hash stands, so the manager's own PIN works again at once.
+         */
+        post: operations["adminUnlockStaffCounterPIN"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/staff/{id}/modules": {
         parameters: {
             query?: never;
@@ -6549,6 +6593,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/step-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A manager approves at the counter with their own PIN
+         * @description The step up (CP-04): any person at the terminal asks, the manager is picked from the roster by staff number or id, and the PIN is the authority, so the caller's own role is never checked. The server verifies the PIN in constant time (five wrong tries in a row lock it until an admin unlocks it; the answer never says which part was wrong), checks the act's approving roles and the act's own person rules (the manager is not the sale's cashier, the drawer's cashier or closer), and mints one single use approval: an opaque token, stored only as its hash, bound to the act, the target and the manager, expiring a few minutes ahead. Never a machine key.
+         */
+        post: operations["posStepUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/step-up/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The managers the picker offers
+         * @description The roster the step up picker shows for one act: active staff with a counter PIN whose role the act admits. Names and staff numbers only, never a hint of the PIN beyond the fact one is set. Never a machine key.
+         */
+        get: operations["posStepUpManagers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/till/policy": {
         parameters: {
             query?: never;
@@ -10112,7 +10196,7 @@ export interface components {
             api_key: string;
             revision?: number;
         };
-        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. */
+        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server. */
         StaffMember: {
             /** Format: uuid */
             id: string;
@@ -10127,6 +10211,17 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             modules: string[];
+            counter_pin_set: boolean;
+            locked: boolean;
+        };
+        /** @description The PIN the admin typed. It rides the request once and never logs. */
+        AdminCounterPINRequest: {
+            pin: string;
+        };
+        /** @description The two facts the staff screen shows of a counter PIN, and nothing else. */
+        CounterPINAnswer: {
+            counter_pin_set: boolean;
+            locked: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         StaffPage: {
@@ -16224,6 +16319,8 @@ export interface components {
              * @description The most the manager approves: the account portion, or the largest check.
              */
             cap_cents: number;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one override: the manager it names is the approver, recorded by name. Absent on the signed in manager's own path. */
+            approval_token?: string;
         };
         PosOverride: {
             /** Format: uuid */
@@ -16775,8 +16872,10 @@ export interface components {
             reason_code?: components["schemas"]["PosTillReasonCode"] | null;
             /** @description Required, not blank, when the reason_code is other. */
             note?: string | null;
-            /** @description A pickup's second person, required there and absent for any other kind. */
+            /** @description A pickup's second person, required there and absent for any other kind. With an approval_token the manager is named by their approval, not typed. */
             taken_by?: string | null;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one pickup: the manager it names is the taker. Only a pickup carries one. */
+            approval_token?: string;
         };
         /** @enum {string} */
         PosTillMovementKind: "safe_drop" | "pickup" | "paid_in" | "paid_out";
@@ -16812,7 +16911,47 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        PosStepUpRequest: {
+            /** @enum {string} */
+            act: "override" | "pickup" | "signoff";
+            /** @description The manager's staff number or staff id. */
+            manager: string;
+            /** @description The manager's counter PIN. Verified in constant time, never logged. */
+            pin: string;
+            /**
+             * Format: uuid
+             * @description The act's target: the sale (an override) or the till session (a pickup, a sign off).
+             */
+            target_id: string;
+            /**
+             * Format: int64
+             * @description The pickup's amount; required for a pickup, absent otherwise. The approval binds it.
+             */
+            amount_cents?: number;
+        };
+        PosStepUpApproval: {
+            /** @description The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash. */
+            token: string;
+            /** @description The manager's name, for the screen to say who approved. */
+            manager_name: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PosStepUpManager: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            staff_no: string;
+            role: string;
+        };
+        PosStepUpManagerPage: {
+            items: components["schemas"]["PosStepUpManager"][];
+            next_cursor: string | null;
+            limit: number;
+        };
         PosTillSignoffRequest: {
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one sign off: the manager it names is the signer. Absent, the signed in caller needs the finance or owner role. */
+            approval_token?: string;
             /** @description Why the variance is accepted; not blank. */
             reason: string;
         };
@@ -21360,6 +21499,98 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminSetStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCounterPINRequest"];
+            };
+        };
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminClearStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminUnlockStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["WireInternalError"];
         };
     };
@@ -33364,6 +33595,72 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posStepUp: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description The approval the one act spends, naming the manager. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpApproval"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posStepUpManagers: {
+        parameters: {
+            query: {
+                /** @description The act the approval is for. */
+                act: "override" | "pickup" | "signoff";
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The managers, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpManagerPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };

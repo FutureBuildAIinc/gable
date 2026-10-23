@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../../components/ui/gable-select';
 import { posService, dollarsToCents } from '../../services/POSService';
+import './StepUpDialog';
 import type { MovementKind, TillMovement } from '../../types/pos';
 import {
     MOVEMENT_KINDS,
@@ -38,6 +39,9 @@ export class TillMovementDialog extends LitElement {
     @state() private refusal: { field: string; message: string } | null = null;
     @state() private failure = '';
     @state() private busy = false;
+    // A pickup's taker may be a manager stepping up with their own counter
+    // PIN at this terminal (CP-04): the approval names the taker.
+    @state() private asking = false;
 
     private choose(kind: MovementKind) {
         this.form = { kind, amount: this.form.amount, reason: '', note: '', takenBy: '' };
@@ -51,7 +55,7 @@ export class TillMovementDialog extends LitElement {
         this.failure = '';
     }
 
-    private async record() {
+    private async record(approvalToken?: string) {
         const plan = planMovement(this.form);
         if (!plan.ok) {
             this.refusal = { field: plan.field, message: plan.message };
@@ -59,15 +63,30 @@ export class TillMovementDialog extends LitElement {
             (this.querySelector(`[data-testid="movement-${plan.field}"]`) as HTMLElement | null)?.focus();
             return;
         }
+        const request = approvalToken === undefined
+            ? plan.request
+            : { kind: plan.request.kind, amount_cents: plan.request.amount_cents, note: plan.request.note, approval_token: approvalToken };
         try {
             this.busy = true;
-            const movement = await posService.recordMovement(this.sessionId, plan.request);
+            const movement = await posService.recordMovement(this.sessionId, request);
             this.dispatchEvent(new CustomEvent<TillMovement>('movement-recorded', { detail: movement, bubbles: true }));
         } catch (err: unknown) {
             this.failure = err instanceof Error ? err.message : 'Failed to record the movement';
         } finally {
             this.busy = false;
         }
+    }
+
+    /** Opens the manager step up for this pickup's amount; the token records it. */
+    private _askTaker() {
+        const cents = dollarsToCents(this.form.amount);
+        if (isNaN(cents) || cents <= 0) {
+            this.refusal = { field: 'amount', message: 'Enter the amount first' };
+            return;
+        }
+        this.refusal = null;
+        this.failure = '';
+        this.asking = true;
     }
 
     /** The Record button's words: the kind, and the amount once it parses. */
@@ -125,9 +144,19 @@ export class TillMovementDialog extends LitElement {
                 <input id="movement-taken-by" type="text" data-testid="movement-taken_by" .value=${this.form.takenBy}
                     @input=${(e: Event) => this.set({ takenBy: (e.target as HTMLInputElement).value })} style=${FIELD} />
                 ${this.error('taken_by')}
+                <p style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-muted))">Or the manager taking it steps up with their own counter PIN:</p>
+                <button type="button" data-testid="movement-ask-manager" @click=${() => this._askTaker()}
+                    style="margin-top:8px;width:100%;padding:12px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;font-weight:600;cursor:pointer">Ask the manager taking it</button>
             ` : nothing}
 
             ${this.failure ? html`<p role="alert" data-testid="movement-failure" style="margin:12px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this.failure}</p>` : nothing}
+            ${this.asking && kind === 'pickup' ? html`
+                <gable-step-up-dialog act="pickup" target-id=${this.sessionId}
+                    .amountCents=${dollarsToCents(this.form.amount)}
+                    heading="A manager takes the pickup"
+                    @step-up-cancel=${() => { this.asking = false; }}
+                    @step-up-approved=${async (e: CustomEvent<{ token: string }>) => { this.asking = false; await this.record(e.detail.token); }}></gable-step-up-dialog>
+            ` : nothing}
             <div style="display:flex;gap:8px;margin-top:20px">
                 <button type="button" data-testid="movement-cancel" @click=${() => this.cancel()}
                     style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>

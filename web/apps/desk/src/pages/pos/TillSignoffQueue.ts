@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { posService } from '../../services/POSService.ts';
+import './StepUpDialog';
 import { ApiError } from '../../services/apiError.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -25,6 +26,9 @@ export class GableTillSignoffQueue extends LitElement {
     @state() private reasons: Record<string, string> = {};
     @state() private failures: Record<string, string> = {};
     @state() private busy = '';
+    // The drawer whose variance a manager is stepping up for with their own
+    // counter PIN (CP-04): the approval signs it off.
+    @state() private asking: TillSession | null = null;
 
     private unsubscribe: (() => void) | null = null;
 
@@ -51,18 +55,24 @@ export class GableTillSignoffQueue extends LitElement {
         }
     }
 
-    private async signOff(s: TillSession) {
+    /** The Sign off button: a reason is asked first, then the manager steps up. */
+    private signOff(s: TillSession) {
         const reason = (this.reasons[s.id] ?? '').trim();
         if (reason === '') {
             this.failures = { ...this.failures, [s.id]: 'Say why the variance is accepted.' };
             return;
         }
+        this.asking = s;
+    }
+
+    private async _signOff(s: TillSession, approvalToken?: string, managerName?: string) {
+        const reason = (this.reasons[s.id] ?? '').trim();
         try {
             this.busy = s.id;
             this.failures = { ...this.failures, [s.id]: '' };
-            await posService.signOffTill(s.id, reason);
+            await posService.signOffTill(s.id, reason, approvalToken);
             this.items = this.items.filter((i) => i.id !== s.id);
-            ToastService.show(`Register ${s.register_id} signed off`, 'success');
+            ToastService.show(managerName ? `Register ${s.register_id} signed off by ${managerName}` : `Register ${s.register_id} signed off`, 'success');
         } catch (err: unknown) {
             this.failures = { ...this.failures, [s.id]: err instanceof Error ? err.message : 'Failed to sign off the till' };
         } finally {
@@ -105,7 +115,18 @@ export class GableTillSignoffQueue extends LitElement {
                                 </div>`;
                         })}
                     </div>`}
-            </div>`;
+            </div>
+            ${this.asking !== null ? html`
+                <gable-step-up-dialog act="signoff" target-id=${this.asking.id}
+                    heading="A manager signs off the variance"
+                    @step-up-cancel=${() => { this.asking = null; }}
+                    @step-up-approved=${async (e: CustomEvent<{ token: string; managerName: string }>) => {
+                        const s = this.asking;
+                        this.asking = null;
+                        if (s) await this._signOff(s, e.detail.token, e.detail.managerName);
+                    }}></gable-step-up-dialog>
+            ` : nothing}
+        `;
     }
 }
 

@@ -142,12 +142,21 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
-	// The variance sign off (CP-08): the queue, the release and the policy are
-	// the managers' (finance and owner, as the resolve route).
-	mux.HandleFunc("GET /api/v1/pos/till/signoffs", resolveMount(h.ListPendingSignoffs))
-	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", resolveMount(h.SignOffTill))
+	// The variance sign off (CP-08): the queue and the release are behind the
+	// counter's own guard, because a manager may step up with their counter
+	// PIN at the terminal (CP-04 slice 3); the claims path keeps the finance
+	// and owner rule in the handler itself, and the policy routes keep the
+	// resolve mount's.
+	mux.HandleFunc("GET /api/v1/pos/till/signoffs", guard(h.ListPendingSignoffs))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", guard(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
+
+	// The manager step up (CP-04 slice 3): the roster the picker shows, and
+	// the PIN verified approval one act spends. Any person at the counter may
+	// ask; the manager's PIN is the authority.
+	mux.HandleFunc("POST /api/v1/pos/step-up", guard(h.StepUpHandler))
+	mux.HandleFunc("GET /api/v1/pos/step-up/managers", guard(h.StepUpManagersHandler))
 
 	// The end of day by branch (CP-09) is the managers' (finance and owner): the
 	// summary, the close and the deposit match.
