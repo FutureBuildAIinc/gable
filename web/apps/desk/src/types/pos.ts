@@ -167,6 +167,24 @@ export interface CounterStanding {
     on_account: OnAccountVerdict;
 }
 
+/** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
+export interface PosRules {
+    check_limit_cents: number | null;
+    check_id_required: CheckIDRule;
+}
+
+/** The counter settings resource: its rules and the revision a write rides. */
+export interface PosSettings {
+    revision: number;
+    rules: PosRules;
+}
+
 export interface SaleSummary {
     id: string;
     number: string;

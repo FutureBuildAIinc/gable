@@ -34,6 +34,8 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    PosRules,
+    PosSettings,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -308,6 +310,32 @@ export const posService = {
         return response.json();
     },
 
+    /**
+     * The dealer's counter rules (GET /api/v1/pos/settings): the database
+     * wide check limit and the check ID rule. The counter reads it to ask
+     * for the ID before Pay.
+     */
+    async settings(): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`),
+            'Failed to read the counter rules',
+        );
+        return response.json();
+    },
+
+    /** Writes the counter rules as one act on the revision (an owner or admin). */
+    async saveSettings(rules: PosRules, revision: number): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ rules, revision }),
+            }),
+            'Failed to save the counter rules',
+        );
+        return response.json();
+    },
+
     /** A manager approves one sale (kind account or check), with a reason and a cap in cents. */
     async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number): Promise<CounterOverride> {
         const response = await expectOk(
@@ -322,8 +350,7 @@ export const posService = {
     },
 
     /** Names the sale's customer (before the first line), purchase order, job and buyer. */
-    async attachCustomer(
-        saleId: string,
+    async attachCustomer(        saleId: string,
         input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null; buyer_contact_id?: string | null },
     ): Promise<Sale> {
         const response = await expectOk(
