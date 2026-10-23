@@ -287,7 +287,10 @@ off unless set**: no row and no default means the sync answers 409
 `money_never_queues` for that branch, so the code keeps its meaning where a
 dealer has not opted in. Writing the policy is an admin act with an audit
 row (the `pos.till.variance_policy` pattern) and a small counter settings
-form.
+form. The form says, beside the per account cap, that the worst case
+exposure on one account is that cap times the number of the branch's
+registers offline at once, and shows that figure for the branch's enrolled
+registers.
 
 The device holds the policy as it was in its snapshot. It stops taking
 offline sales when any cap is reached, and it never sells offline into a
@@ -299,13 +302,17 @@ business day other than its till session's.
 - the banner "Offline: sales are kept on this register and sent when the
   connection returns", the count of waiting sales and their total, and the
   room left under the queue caps;
+- on the cart, a standing line "Offline prices: promotions and quantity
+  breaks are not applied", and each line's price as it will be charged;
 - card and store credit tenders greyed with "needs the connection"; the
   account tender only for cached accounts, with the room left on that
   account; customer search over the cached accounts only;
 - returns, voids, deposits, overrides, the till close and movements
   disabled with the same words;
-- the receipt printed with "OFFLINE SALE", the offline reference, "prices
-  and tax as known on this register", and no invoice number;
+- the receipt printed with "OFFLINE SALE", the offline reference, each
+  line's price charged, "prices and tax as known on this register:
+  promotions and quantity breaks not applied offline", and no invoice
+  number;
 - on reconnect, the sync runs by itself and the strip reads "Sent 12, 1
   needs a manager"; the till close button waits until the queue is empty
   and says why.
@@ -546,3 +553,10 @@ offline, so CP-05 does not gate it.
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
   manager screen. Estimated at 136 to 218 dev hour equivalents.
+
+**Open items** (left for later decisions):
+
+- Per register invoice series, for a jurisdiction that requires an invoice
+  number on the receipt at the moment of sale (ADR 0005 section 4.1).
+- Card offline, if the card processor later documents store and forward.
+- Promotions and quantity breaks offline, if dealers ask for them.
