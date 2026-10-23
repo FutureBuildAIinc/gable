@@ -14,7 +14,7 @@ import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal,
+  storeCreditOffer, tenderMethods, idRefusal, holdStanding,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -660,6 +660,9 @@ export class POSTerminal extends LitElement {
       tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
     if (c) {
       const st = standingOf(c);
+      // a hold record the AR core placed holds the account: the standing line
+      // says so in its own words, the same blocked treatment the zero limit gets
+      const held = holdStanding(this._standing);
       return html`
         <div id="pos-customer" class="rounded-lg bg-deep-space p-3" data-testid="pos-customer">
           <div class="flex items-start justify-between gap-2">
@@ -674,7 +677,7 @@ export class POSTerminal extends LitElement {
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Walk-in sale</button>
           </div>
-          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
+          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(held !== null ? held.tone : st.tone)}" data-testid="pos-customer-standing">${held !== null ? held.text : st.text}</div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}

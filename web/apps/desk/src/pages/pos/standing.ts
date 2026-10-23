@@ -84,6 +84,17 @@ export function verdictLine(s: CounterStanding): Standing {
     return { tone: 'ok', text: 'This sale can go on the account' };
 }
 
+/**
+ * The standing line of an account the AR core holds: the same blocked
+ * treatment the zero limit gets, in the hold's own words (the verdict's line
+ * beneath it carries the hold's reason), or null when the account is not
+ * held by a hold record.
+ */
+export function holdStanding(s: CounterStanding | null): Standing | null {
+    if (s === null || s.on_account.verdict !== 'blocked' || s.on_account.reason !== 'account_hold') return null;
+    return { tone: 'stop', text: 'On credit hold' };
+}
+
 /** What the cashier may do about a blocked verdict: only the ways that are available. */
 export function waysForward(s: CounterStanding | null): WayForward[] {
     if (s === null || s.on_account.verdict !== 'blocked') return [];
