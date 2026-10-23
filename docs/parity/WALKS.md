@@ -393,6 +393,37 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    twice: the second says Reprint with its count (the 80mm layout needs the receipt renderer; without it the screen
    says the layout is not available).
 
+### The manager step up at the counter
+
+Needs the demo seed with at least two yards, at the Point of Sale with the till open, signed in as the yard's cashier
+(Jordan Pike at Kelowna Main Yard). A manager (Morgan Hale, the owner) has a counter PIN: an admin sets it on the
+admin page's Staff tab (Set PIN beside the manager's row; a PIN is 4 to 8 digits, never one repeated digit or a plain
+run), which is the same as
+`curl -X PUT .../api/v1/admin/staff/$MANAGER/counter-pin -d '{"pin":"4481"}'` with `$MANAGER` the manager's staff id.
+The walk proves the approval is the manager's own, whoever is signed in at the terminal.
+
+1. **The manager list.** `curl ".../api/v1/pos/step-up/managers?act=override"` lists only staff with a PIN whose role
+   may approve an override (admin or owner): Morgan is there, Jordan is not.
+2. **A wrong PIN says so, plainly.** Ask a manager to approve (an over limit check or a blocked account sale), type
+   the reason, pick the manager and type a wrong PIN: the dialog says "That PIN is not right" and nothing is
+   recorded. Five wrong tries in a row lock the PIN: the dialog says "This manager's PIN is locked: an admin can
+   unlock it", and the Staff tab shows Locked with an Unlock that clears it.
+3. **The approval names the manager.** With the right PIN the terminal says "Approved by Morgan Hale" and the sale
+   goes through. The sale's override row names the manager by name
+   (`select approved_by from pos_account_overrides order by created_at desc limit 1;`), and so does its audit row.
+   The manager cannot approve their own sale: a sale rung up under the manager's own login is refused with
+   "A manager cannot approve their own sale".
+4. **One approval, one act.** The approval token is spent by its one act: replaying it, spending it on another sale,
+   or after its few minutes have passed is refused ("This approval is used up or expired: ask the manager again").
+5. **A pickup taken by the manager's PIN.** In Drawer Cash pick Pickup, type the amount and press "Ask the manager
+   taking it": the manager picks themselves and types the PIN. The movement records with the manager as the taker
+   (`select taken_by from till_movements where kind='pickup' order by created_at desc limit 1;`), and the same
+   approval cannot take a different amount.
+6. **A held variance signed off by the manager's PIN.** Close the drawer with a count far over the branch's
+   threshold: the count waits for a manager. On the Daily Till page the queue lists it; type why the variance is
+   accepted, press Sign off, and the manager steps up with the same PIN: the session closes signed off by the
+   manager by name, and its over and short posts. The closer and the cashier cannot sign their own drawer off.
+
 ### The card terminal at the counter, from the claim to the manager's queue
 
 Needs the demo seed, two yards, a register each, and the simulated terminal selected by configuration
