@@ -20279,7 +20279,7 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to today, and expiry_date is a YYYY-MM-DD string; any other format of either is a 500. A customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20325,6 +20325,28 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/TaxExemption"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/exemptions/{id}/end:
+    post:
+      operationId: taxExemptionEnd
+      tags: [tax]
+      summary: End a tax exemption
+      description: >-
+        Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, inactive) but exempts no sale. An unknown id answers 404. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The certificate is ended.
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -32534,6 +32556,12 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        tax_exemption:
+          type: [object, "null"]
+          description: "Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day."
+          properties:
+            certificate_number: {type: string, description: "The certificate's number as the counter shows it."}
+            expiry_day: {type: string, description: "The certificate's last day, YYYY-MM-DD; absent when it does not expire."}
         lines:
           type: array
           items:
@@ -36257,6 +36285,10 @@ components:
         exempt_reason: {type: string}
         certificate_number: {type: string}
         issuing_state: {type: string}
+        effective_date:
+          type: string
+          format: date
+          description: The certificate's first day, YYYY-MM-DD; defaults to today.
         expiry_date:
           type: string
           format: date

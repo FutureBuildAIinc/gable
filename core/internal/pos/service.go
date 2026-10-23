@@ -282,6 +282,22 @@ func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents http
 	return int64(salesdoc.TaxAt(taxableCents, scaled))
 }
 
+// exemptOn reads whether the customer's certificate exempts a sale on the
+// branch's business day, through tax.ExemptionCovering: the one window rule
+// (active, effective on or before the day, not yet expired) the running
+// totals, the completion, the returns and the exchanges all read.
+func (s *Service) exemptOn(ctx context.Context, branchID, customerID uuid.UUID) (bool, error) {
+	day, err := s.repo.BranchLocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return false, err
+	}
+	standing, err := s.repo.CustomerExemption(ctx, customerID, day)
+	if err != nil {
+		return false, err
+	}
+	return standing != nil, nil
+}
+
 func (s *Service) recordEvent(ctx context.Context, ev outbox.Event) error {
 	if s.events == nil {
 		return nil
@@ -974,7 +990,10 @@ func (s *Service) RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) (*Sa
 	return out, nil
 }
 
-// GetSale reads a sale with its lines and tenders.
+// GetSale reads a sale with its lines and tenders, and, for a named
+// customer, the exemption standing: the certificate that exempts a sale on
+// the branch's business day, so the counter can say why there is no tax
+// (CP-10). Nil when no certificate covers the day.
 func (s *Service) GetSale(ctx context.Context, saleID uuid.UUID) (*Sale, error) {
 	sale, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
@@ -986,17 +1005,40 @@ func (s *Service) GetSale(ctx context.Context, saleID uuid.UUID) (*Sale, error) 
 	if sale.Tenders, err = s.repo.GetTenders(ctx, saleID); err != nil {
 		return nil, err
 	}
+	if sale.CustomerID != nil {
+		day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+		if err != nil {
+			return nil, err
+		}
+		if sale.TaxExemption, err = s.repo.CustomerExemption(ctx, *sale.CustomerID, day); err != nil {
+			return nil, err
+		}
+	}
 	return sale, nil
 }
 
 // recalcTotals recomputes the cart's subtotal and the live tax estimate.
+// The estimate honours the attached customer's exemption (CP-10): when a
+// certificate covers the branch's business day the tax is zero, so the tax
+// the screen shows equals what completion posts. The standing itself is read
+// by GetSale, so the counter can name the certificate.
 func (s *Service) recalcTotals(ctx context.Context, sale *Sale) error {
 	lines, err := s.repo.GetLines(ctx, sale.ID)
 	if err != nil {
 		return err
 	}
 	totals := salesdoc.SumTotals(lines)
-	return s.repo.UpdateSaleTotals(ctx, sale.ID, int64(totals.SubtotalCents), int64(s.estimateTax(ctx, sale, totals.TaxableCents)), int64(totals.SubtotalCents)+int64(s.estimateTax(ctx, sale, totals.TaxableCents)))
+	tax := s.estimateTax(ctx, sale, totals.TaxableCents)
+	if sale.CustomerID != nil {
+		exempt, err := s.exemptOn(ctx, sale.BranchID, *sale.CustomerID)
+		if err != nil {
+			return err
+		}
+		if exempt {
+			tax = 0
+		}
+	}
+	return s.repo.UpdateSaleTotals(ctx, sale.ID, int64(totals.SubtotalCents), tax, int64(totals.SubtotalCents)+tax)
 }
 
 func invalid(field, message string) *httpx.Error {

@@ -27,6 +27,8 @@ type TaxCalculator interface {
 	SaveExemption(ctx context.Context, req *CreateExemptionRequest) (*TaxExemption, error)
 	// DeleteExemption removes an exemption by ID.
 	DeleteExemption(ctx context.Context, id uuid.UUID) error
+	// EndExemption marks an exemption inactive: it stays on file.
+	EndExemption(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // Service implements TaxCalculator with Avalara or flat-rate fallback.
@@ -125,6 +127,13 @@ func (s *Service) SaveExemption(ctx context.Context, req *CreateExemptionRequest
 		IsActive:          true,
 	}
 
+	if req.EffectiveDate != nil {
+		t, err := time.Parse("2006-01-02", *req.EffectiveDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid effective_date format (expected YYYY-MM-DD): %w", err)
+		}
+		ex.EffectiveDate = t
+	}
 	if req.ExpiryDate != nil {
 		t, err := time.Parse("2006-01-02", *req.ExpiryDate)
 		if err != nil {
@@ -148,6 +157,12 @@ func (s *Service) SaveExemption(ctx context.Context, req *CreateExemptionRequest
 
 func (s *Service) DeleteExemption(ctx context.Context, id uuid.UUID) error {
 	return s.exemptionRepo.Delete(ctx, id)
+}
+
+// EndExemption ends a certificate: it stays on file, inactive, no longer
+// exempting a sale (CP-10). False when no such id exists.
+func (s *Service) EndExemption(ctx context.Context, id uuid.UUID) (bool, error) {
+	return s.exemptionRepo.MarkInactive(ctx, id)
 }
 
 // --- Internal helpers ---

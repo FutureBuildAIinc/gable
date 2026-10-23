@@ -101,9 +101,12 @@ func (s *Service) namedCustomer(ctx context.Context, id uuid.UUID) (*CounterCust
 }
 
 // AttachCustomer names the sale's customer, purchase order and job. The
-// customer is named before the first line, because the lines price for the
-// customer (price level, tax exemption, currency); the purchase order and
-// the job may change while the sale is open.
+// customer may be named or changed while the sale is open, lines rung or not
+// (CP-10: the account is often named at Pay, and an exempt account must be
+// attachable there); the totals are recomputed with each change, so the tax
+// honours the attached customer's exemption and detaching restores it. The
+// counter prices no line by the customer, so a change of customer does not
+// stale a line.
 func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in AttachCustomerIn, actor string) (*Sale, error) {
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
@@ -159,18 +162,6 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot change the customer of a %s sale", sale.Status.Status()))
 		}
-		same := (sale.CustomerID == nil && in.CustomerID == nil) ||
-			(sale.CustomerID != nil && in.CustomerID != nil && *sale.CustomerID == *in.CustomerID)
-		if !same {
-			lines, err := s.repo.GetLines(ctx, saleID)
-			if err != nil {
-				return err
-			}
-			if len(lines) > 0 {
-				return httpx.InvalidStateTransition(
-					"the customer is named before the first line: the lines price for the customer, so start a new sale to change it")
-			}
-		}
 		var po *string
 		if in.CustomerPO != "" {
 			p := in.CustomerPO
@@ -181,6 +172,23 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		}
 		if err := s.repo.SetSaleBuyer(ctx, saleID, in.BuyerContactID); err != nil {
 			return err
+		}
+		// the totals follow the customer now standing on the sale, when the
+		// customer moved on a sale with lines: an exempt account's lines
+		// carry no tax, and walking back to the walk-in customer restores it
+		customerMoved := (sale.CustomerID == nil) != (in.CustomerID == nil) ||
+			(sale.CustomerID != nil && in.CustomerID != nil && *sale.CustomerID != *in.CustomerID)
+		if customerMoved {
+			lines, err := s.repo.GetLines(ctx, saleID)
+			if err != nil {
+				return err
+			}
+			if len(lines) > 0 {
+				sale.CustomerID = in.CustomerID
+				if err := s.recalcTotals(ctx, sale); err != nil {
+					return err
+				}
+			}
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{
