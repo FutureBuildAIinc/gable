@@ -369,10 +369,15 @@ func (h *Handler) GetPosSettingsHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // PutPosSettingsHandler is PUT /pos/settings: an owner or admin writes both
-// rules on the revision (ADR 0001); audited.
+// rules on the revision (ADR 0001); audited. A machine key is refused (a
+// dealer wide configuration write is a person's act); a request that carries
+// no claims at all is the dev mode bypass every role guard lets through.
 func (h *Handler) PutPosSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := httpx.StrictQuery(r); err != nil {
 		httpx.WriteError(w, r, err)
+		return
+	}
+	if refuseMachineKey(w, r, "changing the counter rules needs a signed in manager") {
 		return
 	}
 	in, err := decodePosSettings(r)
@@ -380,12 +385,15 @@ func (h *Handler) PutPosSettingsHandler(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, r, err)
 		return
 	}
-	claims := middleware.ClaimsFromContext(r.Context())
-	if claims == nil || !middleware.ClaimsHaveAnyRole(claims, settingsRoles...) {
-		httpx.WriteError(w, r, httpx.Forbidden("changing the counter rules needs the admin or owner role"))
-		return
+	actor := devApprover
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, settingsRoles...) {
+			httpx.WriteError(w, r, httpx.Forbidden("changing the counter rules needs the admin or owner role"))
+			return
+		}
+		actor = claims.Subject
 	}
-	in.Actor = claims.Subject
+	in.Actor = actor
 	in.IfMatch = r.Header.Get("If-Match")
 	in.Authorized = true
 	out, err := h.service.SavePosSettings(r.Context(), in)
