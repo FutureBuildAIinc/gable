@@ -228,10 +228,13 @@ its Appwrite project:
 | `google` | OAuth2 token flow, provider `google` | start route, then the core's callback |
 | `microsoft` | OAuth2 token flow, provider `microsoft` | start route, then the core's callback |
 | `oidc` | OAuth2 token flow, provider `oidc` (the dealer's own issuer, configured in Appwrite) | start route, then the core's callback |
-| `passkey` | Appwrite passkeys, where the dealer's release ships them | open (question 3) |
+| `passkey` | Appwrite passkeys | deferred: not built by this record |
 
-The start route (`signinmethods.Start`) stops answering `not_implemented` for
-a method as its slice lands. Every callback checks a `state` bound to a cookie
+Order: `email_password` first; then `google` and `microsoft`; then
+`magic_link` and `oidc` on the same start and callback route. **The browser
+never talks to Appwrite directly, for any method**: every exchange with
+Appwrite is the core's. The start route (`signinmethods.Start`) stops
+answering `not_implemented` for a method as its slice lands. Every callback checks a `state` bound to a cookie
 on the core's origin before it exchanges anything, as Appwrite's own guide
 requires. The `oidc` code covers a dealer that wants its own identity
 provider: it is configured in Appwrite, not in Gable.
@@ -287,9 +290,9 @@ provider: it is configured in Appwrite, not in Gable.
   session; it is not a sign in and opens no session. The core checks, at the
   step up, that the manager's own `sub` holds a role the act requires from
   its latest membership read.
-- **The JWKS path stays for now.** A deployment that sets `JWKS_URL` keeps
-  today's behaviour. Its retirement, and the audience check it lacks, are
-  question 4.
+- **The JWKS path retires.** It stays only until slice 1 proves Appwrite end
+  to end (a test issuer for the counter's second person proofs uses it until
+  then); slice 8 then removes it, so Gable has one staff sign in path.
 
 ### 8. Configuration
 
@@ -334,9 +337,11 @@ answering public facts only.
 | 5 | The shells: the system browser, the deep link or loopback return, PKCE redemption, refresh rotation, keychain custody. | 6 to 10 |
 | 6 | Invite and remove from Gable's admin, with branch grants in the same act, and the staff roster link. | 6 to 8 |
 | 7 | The demo people as seeded Appwrite users, and dev mode narrowed. | 3 to 5 |
-| | **Total** | **43 to 67** |
+| 8 | The JWKS path retired (`JWKS_URL`, `AUTH_ISSUER`, its middleware branch and tests), once slice 1 is green. | 2 to 4 |
+| | **Total** | **45 to 71** |
 
-Passkeys wait on question 3 and are not counted.
+Order: slices 1, 2, 3 and 7 first (staff sign in on the web, the demo people), then 8, 4, 5 and 6. Slice 4 builds
+`google` and `microsoft` before `magic_link` and `oidc`. Passkeys are deferred and not counted.
 
 ## Consequences
 
@@ -352,16 +357,10 @@ Passkeys wait on question 3 and are not counted.
   claims.
 - ADR 0004's interim exposure (a token readable by script) ends for staff on
   the web when slice 3 lands.
-- The total exceeds the matrix's re-sized S9 estimate (16 to 24); question 1.
+- The total exceeds the matrix's re-sized S9 estimate (16 to 24).
 
 ## Open questions
 
-1. The plan is 43 to 67 dev hours against the S9 row's 16 to 24. Which slices
-   make the first cut (slices 1 to 3 and 7 are the smallest set that signs
-   staff in for real on the web)?
-2. Passkeys: Appwrite ships them only in recent releases, and a passkey is
-   bound to the origin that registers it. Is `passkey` deferred, or built
-   with the browser talking to Appwrite for that one method?
-3. The JWKS path: retire it once this lands, or keep it (and add the audience
-   check) for a deployment that brings its own issuer instead of Appwrite's
-   `oidc` provider?
+None in this record. Passkeys are deferred to a later record; the hosted
+deployment's Appwrite project and key are an operator's setup, not a design
+choice.
