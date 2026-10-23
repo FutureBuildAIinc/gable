@@ -286,3 +286,19 @@ func (s *Service) checkLimitOf(ctx context.Context, facts CustomerFacts) (*int64
 	}
 	return s.repo.DefaultCheckLimitCents(ctx)
 }
+
+// jobRequiredRefusal is the account's job rule, the purchase order rule's
+// mirror: an account that requires a job is not charged to without one, and
+// an account that requires a job and has none on file is refused with its own
+// words. Cash and the other non account tenders never ask.
+func jobRequiredRefusal(facts CustomerFacts, jobID *uuid.UUID) error {
+	if !facts.JobRequired || jobID != nil {
+		return nil
+	}
+	if !facts.JobsOnFile {
+		return conflict("job_required",
+			"this account requires a job and has none on file: add one on the account page")
+	}
+	return conflict("job_required",
+		"this account requires a job on every charge sale: pick the job")
+}

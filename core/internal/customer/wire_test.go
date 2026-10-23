@@ -845,6 +845,41 @@ func TestWire_POrequiredFlag(t *testing.T) {
 	}
 }
 
+// The job required flag is stored and read, on create and on edit, and a
+// change to it is audited with the other controls.
+func TestWire_JobRequiredFlag(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	c := f.create(map[string]any{"job_required": true}).body
+	if c["job_required"] != true {
+		t.Errorf("job_required = %v, want true", c["job_required"])
+	}
+	id, acct := str(t, c, "id"), str(t, c, "account_number")
+	r := f.do("PUT", "/api/v1/customers/"+id, map[string]any{"account_number": acct, "name": "Wire Test Co", "job_required": false, "po_required": false}, "If-Match", `"1"`)
+	if r.status != 200 || r.body["job_required"] != false {
+		t.Errorf("clearing job_required = %d: %s", r.status, r.raw)
+	}
+	var stored bool
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT job_required FROM customers WHERE id = $1`, id).Scan(&stored); err != nil || stored {
+		t.Errorf("stored job_required = %v (%v), want false", stored, err)
+	}
+	// a read carries it, and a change to it is audited beside the controls
+	if r := f.do("GET", "/api/v1/customers/"+id, nil); r.status != 200 || r.body["job_required"] != false {
+		t.Errorf("the read carries job_required = %v (%d)", r.body["job_required"], r.status)
+	}
+	if r := f.do("PUT", "/api/v1/customers/"+id, map[string]any{"account_number": acct, "name": "Wire Test Co", "po_required": false, "job_required": true}, "If-Match", `"2"`); r.status != 200 {
+		t.Fatal(r.raw)
+	}
+	actions, changes := f.auditRows(id)
+	if len(actions) < 2 || actions[len(actions)-1] != "customer.controls_changed" {
+		t.Fatalf("audit rows = %v, want a customer.controls_changed for each job_required change", actions)
+	}
+	last := changes[len(changes)-1]
+	if ch, ok := last["job_required"].(map[string]any); !ok || ch["from"] != false || ch["to"] != true {
+		t.Errorf("the audit row does not carry the job_required change: %v", last)
+	}
+}
+
 // Payment terms: assigning a customer's terms, the terms event part, and an
 // inactive row that cannot be newly assigned.
 func TestWire_CustomerTerms(t *testing.T) {
