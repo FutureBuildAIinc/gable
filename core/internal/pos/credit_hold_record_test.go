@@ -262,6 +262,10 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 		}
 	}
 	placedAt := make(chan time.Time, 1)
+	f.t.Cleanup(func() {
+		mustExec(f.t, f.db, `DELETE FROM credit_holds WHERE customer_id = $1`, f.customerID)
+		mustExec(f.t, f.db, `UPDATE customers SET credit_hold = FALSE WHERE id = $1`, f.customerID)
+	})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -327,7 +331,7 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 			t.Errorf("sale %s completed at %s, after the hold committed at %s", sales[i], completedAt, at)
 		}
 	}
-	if got := f.balance(); got != 599 {
+	if got := f.balance(); got > 599 {
 		t.Errorf("balance_due = %d, want at most one charge of 599", got)
 	}
 	f.assertARInvariants(t)
