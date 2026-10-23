@@ -18,6 +18,8 @@ type ExemptionRepo interface {
 	GetActiveByCustomer(ctx context.Context, customerID uuid.UUID) ([]TaxExemption, error)
 	Create(ctx context.Context, ex *TaxExemption) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	// MarkInactive ends a certificate: it stays on file, no longer exempt.
+	MarkInactive(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // PostgresExemptionRepo implements ExemptionRepo with PostgreSQL.
@@ -121,4 +123,15 @@ func (r *PostgresExemptionRepo) Delete(ctx context.Context, id uuid.UUID) error 
 		return fmt.Errorf("delete exemption: %w", err)
 	}
 	return nil
+}
+
+// MarkInactive ends a certificate: is_active false, the row kept. False
+// when no such id exists.
+func (r *PostgresExemptionRepo) MarkInactive(ctx context.Context, id uuid.UUID) (bool, error) {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE tax_exemptions SET is_active = false WHERE id = $1 AND is_active`, id)
+	if err != nil {
+		return false, fmt.Errorf("end exemption: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }

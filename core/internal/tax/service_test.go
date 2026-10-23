@@ -53,6 +53,18 @@ func (m *mockExemptionRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (m *mockExemptionRepo) MarkInactive(_ context.Context, id uuid.UUID) (bool, error) {
+	for cid, exs := range m.exemptions {
+		for i := range exs {
+			if exs[i].ID == id && exs[i].IsActive {
+				m.exemptions[cid][i].IsActive = false
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // --- Tests ---
 
 func TestFlatRateCalculation(t *testing.T) {

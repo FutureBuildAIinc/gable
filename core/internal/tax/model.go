@@ -86,5 +86,8 @@ type CreateExemptionRequest struct {
 	ExemptReason      string    `json:"exempt_reason"`
 	CertificateNumber string    `json:"certificate_number"`
 	IssuingState      string    `json:"issuing_state"`
-	ExpiryDate        *string   `json:"expiry_date,omitempty"` // ISO 8601 date
+	// EffectiveDate is the certificate's first day, YYYY-MM-DD; absent
+	// means today (the day the record is made).
+	EffectiveDate *string `json:"effective_date,omitempty"`
+	ExpiryDate    *string `json:"expiry_date,omitempty"` // ISO 8601 date
 }
