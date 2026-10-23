@@ -237,6 +237,14 @@ type Repository interface {
 	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	CheckIDRequiredOverCents(ctx context.Context) (*int64, error)
+	// The settings write half (CP-04): the system_settings rows and the
+	// revision anchor, inside the caller's transaction.
+	writeSetting(ctx context.Context, key, value string) error
+	deleteSetting(ctx context.Context, key string) error
+	readPosSettingsRevision(ctx context.Context) (int64, error)
+	lockPosSettingsRevision(ctx context.Context) (int64, error)
+	bumpPosSettingsRevision(ctx context.Context, to int64) error
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
 	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error

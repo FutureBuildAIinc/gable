@@ -54,7 +54,7 @@ func TestCP04_CheckOverIDThresholdNeedsID(t *testing.T) {
 	over, overTotal := f.cartOf("2", nil) // 1198
 	r := f.completeSale(over, tender("check", overTotal))
 	blockerOf(t, r, "id_required")
-	if want := "A check over $10.00"; !strings.Contains(string(r.raw), want) {
+	if want := "A check over 10.00 USD"; !strings.Contains(string(r.raw), want) {
 		t.Errorf("the refusal %s does not say what the rule asks", r.raw)
 	}
 	stock := f.stock()
@@ -110,6 +110,10 @@ func TestCP04_CashUnaffectedByIDRule(t *testing.T) {
 func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM system_settings WHERE key IN ('pos.check_limit_cents', 'pos.check_id_required_over_cents')`)
+		mustExec(t, f.db, `DELETE FROM admin_revisions WHERE resource = 'pos.settings'`)
+	})
 
 	get := f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if get.status != http.StatusOK {
@@ -136,10 +140,11 @@ func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusForbidden {
 		t.Errorf("a cashier writing the settings = %d, want 403: %s", r.status, r.raw)
 	}
-	// a revision the settings never held is refused
-	if r := f.do("PUT", "/api/v1/pos/settings", body(10000, "over_amount", 5000, rev0+99),
-		"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t)); r.status != http.StatusPreconditionFailed {
-		t.Errorf("a write on a revision the settings never held = %d, want 412: %s", r.status, r.raw)
+	// a revision the settings never held is refused stale
+	r := f.do("PUT", "/api/v1/pos/settings", body(10000, "over_amount", 5000, rev0+99),
+		"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t))
+	if code, blockers, _ := errorOf(t, r); r.status != http.StatusConflict || code != "stale_revision" || len(blockers) != 0 {
+		t.Errorf("a write on a revision the settings never held = %d %s, want 409 stale_revision: %s", r.status, code, r.raw)
 	}
 
 	for _, role := range []string{"admin", "owner"} {
@@ -185,6 +190,10 @@ func TestCP04_SettingsConcurrentWrites(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
 	f := newFixture(t, db)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM system_settings WHERE key IN ('pos.check_limit_cents', 'pos.check_id_required_over_cents')`)
+		mustExec(t, f.db, `DELETE FROM admin_revisions WHERE resource = 'pos.settings'`)
+	})
 	get := f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", "admin", "X-Test-Sub", mustUUID(t))
 	cur := rev(t, get)
 
@@ -202,10 +211,10 @@ func TestCP04_SettingsConcurrentWrites(t *testing.T) {
 				"X-Test-Role", "owner", "X-Test-Sub", mustUUID(t), "If-Match", fmt.Sprintf(`"%d"`, cur))
 			mu.Lock()
 			defer mu.Unlock()
-			switch r.status {
-			case http.StatusOK:
+			switch {
+			case r.status == http.StatusOK:
 				ok++
-			case http.StatusPreconditionFailed:
+			case r.status == http.StatusConflict && staleCode(r):
 				stale++
 			default:
 				t.Errorf("a contender = %d: %s", r.status, r.raw)
@@ -216,6 +225,12 @@ func TestCP04_SettingsConcurrentWrites(t *testing.T) {
 	if ok != 1 || stale != 2 {
 		t.Errorf("winners %d, stale %d, want 1 and 2", ok, stale)
 	}
+}
+
+// staleCode reports a contender's refusal as the stale revision one.
+func staleCode(r resp) bool {
+	e, _ := r.body["error"].(map[string]any)
+	return e != nil && e["code"] == "stale_revision"
 }
 
 // RULE: a customer's own check limit beats the database wide one, whichever
