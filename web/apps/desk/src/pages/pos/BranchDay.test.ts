@@ -246,9 +246,15 @@ describe('the sign off queue', () => {
     q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
     await flush();
     await update(el, {});
+    // the step up dialog opens: the manager's approval completes the sign off
+    const stepUp = el.querySelector('gable-step-up-dialog');
+    expect(stepUp).not.toBeNull();
+    stepUp!.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName: 'E2E Manager' }, bubbles: true }));
+    await flush();
+    await update(el, {});
     const post = requests.find((r) => r.method === 'POST');
     expect(post?.url).toContain('/api/v1/pos/till/s-1/signoff');
-    expect(post?.body).toEqual({ reason: 'recounted, the till roll agrees' });
+    expect(post?.body).toEqual({ reason: 'recounted, the till roll agrees', approval_token: 'tok-1' });
     expect(el.querySelector('[data-testid="signoff-s-1"]')).toBeNull();
     expect(text(q(el, '[data-testid="signoff-empty"]'))).toContain('No counted drawer waits');
   });
@@ -263,6 +269,10 @@ describe('the sign off queue', () => {
     reason.dispatchEvent(new Event('input', { bubbles: true }));
     await update(el, {});
     q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
+    await flush();
+    await update(el, {});
+    el.querySelector('gable-step-up-dialog')!.dispatchEvent(
+      new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName: 'E2E Manager' }, bubbles: true }));
     await flush();
     await update(el, {});
     expect(text(q(el, '[data-testid="signoff-error-s-1"]'))).toContain('cannot sign off');

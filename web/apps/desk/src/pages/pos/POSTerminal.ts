@@ -27,6 +27,7 @@ import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORD
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
+import './StepUpDialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
@@ -77,6 +78,10 @@ export class POSTerminal extends LitElement {
   @state() private _idChecked = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
+
+  // The manager step up waiting on the PIN dialog: the reason and cap are kept
+  // here, the token completes them (CP-04).
+  @state() private _stepUp: { kind: 'account' | 'check'; reason: string; capCents: number } | null = null;
   // The words a check over the limit was refused in (the server's, or the
   // screen's from the customer's own limit), with Ask a manager beside them.
   @state() private _checkOverWords: string | null = null;
@@ -461,9 +466,10 @@ export class POSTerminal extends LitElement {
 
   /**
    * A manager approves this one sale (an account sale the verdict blocks, or a
-   * check over the limit), with a reason and a cap. The server wants a person
-   * with the manager role other than this sale's own cashier, so the manager
-   * signs in at this terminal; a refusal is said in the server's words.
+   * check over the limit), with a reason and a cap. The manager steps up at
+   * this terminal with their own counter PIN (CP-04): the reason is asked
+   * first, then the PIN dialog, and the approval the PIN mints is spent by
+   * this one sale's override.
    */
   private async _askManager(kind: 'account' | 'check', capCents: number) {
     const sale = this._sale;
@@ -473,20 +479,41 @@ export class POSTerminal extends LitElement {
       label: 'Reason', required: true, confirmLabel: 'Approve',
     });
     if (!reason) return;
+    this._error = null;
+    this._stepUp = { kind, reason, capCents };
+  }
+
+  /** The PIN dialog's approval completes the override the cashier asked for. */
+  private async _onStepUpApproved(detail: { token: string; managerName: string }) {
+    const ask = this._stepUp;
+    const sale = this._sale;
+    this._stepUp = null;
+    if (!ask || !sale) return;
     try {
       this._error = null;
-      const approval = await posService.approveOverride(sale.id, kind, reason, capCents);
-      if (kind === 'check') {
+      const approval = await posService.approveOverride(sale.id, ask.kind, ask.reason, ask.capCents, detail.token);
+      if (ask.kind === 'check') {
         this._checkApprovedCents = approval.cap_cents;
         this._checkOverWords = null;
       }
       await this._syncStanding();
-      this._success = 'Approved for this sale';
+      this._success = `Approved by ${detail.managerName}`;
       if (this._errorTimer) clearTimeout(this._errorTimer);
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
     } catch (err: unknown) {
       this._error = apiErrorMessage(err, 'Failed to record the approval');
     }
+  }
+
+  /** The step up dialog, over everything, whatever panel is open. */
+  private _renderStepUp() {
+    if (!this._stepUp || !this._sale) return nothing;
+    return html`
+      <gable-step-up-dialog act="override" target-id=${this._sale.id}
+        heading=${this._stepUp.kind === 'account' ? 'A manager approves this sale on account' : 'A manager approves this check'}
+        @step-up-cancel=${() => { this._stepUp = null; }}
+        @step-up-approved=${(e: CustomEvent<{ token: string; managerName: string }>) => void this._onStepUpApproved(e.detail)}></gable-step-up-dialog>
+    `;
   }
 
   /* ---- The sale's customer ---- */
@@ -2402,6 +2429,7 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderStepUp()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`

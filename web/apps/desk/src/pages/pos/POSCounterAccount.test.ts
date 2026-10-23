@@ -29,6 +29,8 @@ const svc = vi.hoisted(() => ({
   emailReceipt: vi.fn(),
   standing: vi.fn(),
   approveOverride: vi.fn(),
+  stepUpManagers: vi.fn(),
+  stepUp: vi.fn(),
   captureSignature: vi.fn(),
   returnReasons: vi.fn(),
   createReturn: vi.fn(),
@@ -43,6 +45,16 @@ vi.mock('../../services/POSService', async (orig) => {
 
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
+
+/** Completes the step up dialog the terminal opened, as the manager's PIN would. */
+async function answerStepUp(el: HTMLElement, managerName = 'E2E Manager') {
+  const dlg = el.querySelector('gable-step-up-dialog');
+  if (!dlg) throw new Error('no step up dialog opened');
+  dlg.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName }, bubbles: true }));
+  await flush();
+  await el.updateComplete;
+}
+
 import { answerAppDialog, typeIntoAppDialog, chooseOption, flush } from '../../test/dom';
 import type { CounterRegister } from '../../types/pos';
 
@@ -196,8 +208,8 @@ describe('can this sale go on account? the standing line and its ways forward', 
     }));
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
-    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'agreed on the phone', 1198);
+    await answerStepUp(el);
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'agreed on the phone', 1198, 'tok-1');
     expect(q(el, 'pos-verdict-line').textContent).toContain('A manager approved this sale on account');
     expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(false);
     el.remove();
@@ -212,7 +224,7 @@ describe('can this sale go on account? the standing line and its ways forward', 
     await typeIntoAppDialog('agreed');
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
+    await answerStepUp(el);
     expect(el.textContent).toContain('a manager other than the sale’s own cashier approves an override');
     expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
     el.remove();
@@ -348,8 +360,8 @@ describe('a check, its ID and its limit', () => {
     await typeIntoAppDialog('regular customer');
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
-    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'check', 'regular customer', 1198);
+    await answerStepUp(el);
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'check', 'regular customer', 1198, 'tok-1');
     q(el, 'pos-pay').click();
     await flush();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'check', amount_cents: 1198 }]);
