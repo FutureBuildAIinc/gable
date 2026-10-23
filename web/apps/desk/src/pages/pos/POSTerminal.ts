@@ -2201,8 +2201,11 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
           <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
+          ${sale?.tax_exemption ? html`
+          <div class="flex items-baseline justify-between gap-2 py-1 text-slate-400"><dt>Tax</dt>
+            <dd class="text-right text-xs" data-testid="summary-tax-exempt">Tax exempt${sale.tax_exemption.certificate_number ? html` &middot; ${sale.tax_exemption.certificate_number}` : nothing}${sale.tax_exemption.expiry_day ? html` &middot; expires ${sale.tax_exemption.expiry_day}` : nothing}</dd></div>` : html`
           <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
-            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
+            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>`}
           <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-white" data-testid="summary-total">${fmt(total)}</dd></div>
           ${completed ? html`

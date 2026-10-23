@@ -2753,3 +2753,27 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     el.remove();
   });
 });
+
+describe('the summary when the attached customer is tax exempt', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('shows Tax exempt with the certificate number and its expiry in place of the tax figure', async () => {
+    const el = await mount(sale({ tax_cents: 0, total_cents: 8000,
+      tax_exemption: { certificate_number: 'CERT-88', expiry_day: '2027-01-31' } }));
+    const line = q(el, 'summary-tax-exempt');
+    expect(line).toBeTruthy();
+    expect(line.textContent).toContain('Tax exempt');
+    expect(line.textContent).toContain('CERT-88');
+    expect(line.textContent).toContain('expires 2027-01-31');
+    expect(q(el, 'summary-tax')).toBeNull();
+    expect(q(el, 'summary-total')?.textContent).toContain('80.00');
+    el.remove();
+  });
+
+  it('shows the tax as normal when the certificate has expired (the sale carries no exemption)', async () => {
+    const el = await mount(sale({ tax_cents: 650, total_cents: 8650, tax_exemption: null }));
+    expect(q(el, 'summary-tax-exempt')).toBeNull();
+    expect(q(el, 'summary-tax')?.textContent).toContain('6.50');
+    el.remove();
+  });
+});
