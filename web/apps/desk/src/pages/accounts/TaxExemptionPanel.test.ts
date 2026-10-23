@@ -56,10 +56,12 @@ describe('the account tax exemption panel', () => {
     });
 
     it('marks an expired certificate and one not yet in effect', async () => {
+        const lastYear = String(Number(today.slice(0, 4)) - 1);
+        const nextYear = String(Number(today.slice(0, 4)) + 1);
         const expired = cert({ id: 'e2', certificate_number: 'OLD-1', is_active: true,
-            effective_date: '2020-01-01T00:00:00Z', expiry_date: `${today.slice(0, 4) - 1}-12-31T00:00:00Z` });
+            effective_date: '2020-01-01T00:00:00Z', expiry_date: `${lastYear}-12-31T00:00:00Z` });
         const future = cert({ id: 'e3', certificate_number: 'NEW-1',
-            effective_date: `${today.slice(0, 4) + 1}-01-01T00:00:00Z` });
+            effective_date: `${nextYear}-01-01T00:00:00Z` });
         const el = await mount('c1', [expired, future]);
         const statuses = [...el.querySelectorAll('[data-testid="tax-exemption-status"]')].map((s) => s.textContent);
         expect(statuses).toEqual(['Expired', 'Not in effect yet']);
