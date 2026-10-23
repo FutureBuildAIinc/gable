@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     chargeRefusal, money, standingOf,
-    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal,
+    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords,
 } from './standing';
 import type { CounterCustomer, CounterStanding, WayForward } from '../../types/pos';
 
@@ -173,5 +173,30 @@ describe('check limits, store credit and the tenders offered', () => {
         expect(chargeRefusal(over, 100, 'PO-1', true)).toBeNull();
         expect(chargeRefusal(over, 100, '', true)).toMatch(/purchase order/);
         expect(chargeRefusal(over, 100, 'PO-1')).toMatch(/Over the credit limit/);
+    });
+});
+
+describe('the dealer check ID rule, as the counter reads it', () => {
+    const never = { mode: 'never' as const, over_cents: null };
+    const every = { mode: 'every_check' as const, over_cents: null };
+    const over50 = { mode: 'over_amount' as const, over_cents: 5000 };
+
+    it('never asks when no rule is set or the rule is never', () => {
+        expect(idRequired(null, 100000)).toBe(false);
+        expect(idRequired(never, 100000)).toBe(false);
+        expect(idRequiredWords(null, 100000)).toBeNull();
+    });
+
+    it('asks on every check when the rule is every check', () => {
+        expect(idRequired(every, 1)).toBe(true);
+        expect(idRequiredWords(every, 1))
+            .toBe(`This check needs the customer's ID: check it and pick the ID type`);
+    });
+
+    it('asks only on checks over the figure, not at it', () => {
+        expect(idRequired(over50, 5000)).toBe(false);
+        expect(idRequired(over50, 5001)).toBe(true);
+        expect(idRequiredWords(over50, 6000))
+            .toBe(`A check over $50.00 needs the customer's ID: check it and pick the ID type`);
     });
 });

@@ -14,7 +14,7 @@ import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal,
+  storeCreditOffer, tenderMethods, idRefusal, idRequiredWords, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -80,6 +80,9 @@ export class POSTerminal extends LitElement {
   // The words a check over the limit was refused in (the server's, or the
   // screen's from the customer's own limit), with Ask a manager beside them.
   @state() private _checkOverWords: string | null = null;
+  // The dealer's check ID rule (never by default; a read failure reads as
+  // never: the server holds the rule itself at the completion).
+  @state() private _idRule: CheckIDRule | null = null;
 
   // The linear panels: the sale's current step and the one panel open (or none).
   @state() private _step: PanelKey = 'customer';
@@ -164,6 +167,17 @@ export class POSTerminal extends LitElement {
     document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
+    void this._loadIDRule();
+  }
+
+  /** Reads the dealer's check ID rule; a read failure leaves it never (the server still holds it). */
+  private async _loadIDRule() {
+    try {
+      const s = await posService.settings();
+      this._idRule = s.rules.check_id_required;
+    } catch {
+      this._idRule = null;
+    }
   }
 
   /**
@@ -934,7 +948,23 @@ export class POSTerminal extends LitElement {
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
-    return payPlan(sale.total_cents, this._pendingTenders, this._entry).ok;
+    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry);
+    return plan.ok && this._idHoldWords(plan.tenders) === null;
+  }
+
+  /**
+   * Why the dealer's ID rule holds the plan's checks (why, or null when it
+   * does not): every check the rule covers must record the ID was checked.
+   * A manager's approval covers the limit, never the ID.
+   */
+  private _idHoldWords(tenders: TenderIn[]): string | null {
+    for (const t of tenders) {
+      if (t.method === 'check' && !t.id_checked) {
+        const why = idRequiredWords(this._idRule, t.amount_cents);
+        if (why) return why;
+      }
+    }
+    return null;
   }
 
   /** The same facts the controls disable on, so a dimmed key means a disabled control. */
@@ -1189,6 +1219,12 @@ export class POSTerminal extends LitElement {
         this._checkOverWords = overLimit;
         return overLimit;
       }
+      // the dealer's ID rule holds the check until the ID is checked; a
+      // manager's check approval covers the limit, never the ID
+      if (!entry.id_checked) {
+        const why = idRequiredWords(this._idRule, entry.amount_cents);
+        if (why) return why;
+      }
     }
     if (entry.method === 'store_credit') {
       const held = this._standing?.open_credit_memo_cents ?? 0;
@@ -1269,6 +1305,12 @@ export class POSTerminal extends LitElement {
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
+      return;
+    }
+    // the ID rule holds added checks the same way it holds the entry
+    const idHold = this._idHoldWords(plan.tenders);
+    if (idHold) {
+      this._error = idHold;
       return;
     }
     // Every account tender on its way out is rechecked here, whether it was just
@@ -2091,6 +2133,8 @@ export class POSTerminal extends LitElement {
   private _renderCheckExtras() {
     const isCheck = this._tenderMethod === 'check';
     const limit = this._standing?.check_limit_cents ?? null;
+    const amount = this._entry?.amount_cents ?? this._owedCents;
+    const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, amount) : null;
     return html`
       <div class="mt-3 rounded-lg border border-white/10 p-3" data-testid="pos-tender-extras">
         ${isCheck ? html`
@@ -2099,6 +2143,10 @@ export class POSTerminal extends LitElement {
             @input=${(e: Event) => { this._checkRef = (e.target as HTMLInputElement).value; }}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-2 py-2 font-mono text-sm text-white outline-none focus:border-gable-green" />
           ${limit !== null ? html`<p class="mt-1 text-xs text-slate-400" data-testid="pos-check-limit">Check limit ${money(limit)}</p>` : nothing}` : nothing}
+        ${idNeeded !== null ? html`
+          <div class="${isCheck ? 'mt-3 ' : ''}rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-300" role="status" data-testid="pos-check-id-needed">
+            <p>${idNeeded}</p>
+          </div>` : nothing}
         <label class="${isCheck ? 'mt-3 ' : ''}flex items-center gap-2 text-sm text-slate-200" for="pos-id-checked">
           <input id="pos-id-checked" data-testid="pos-id-checked" type="checkbox" .checked=${this._idChecked}
             @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; }} />
@@ -2165,10 +2213,12 @@ export class POSTerminal extends LitElement {
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
     const canPay = this._canPay;
+    const idHold = plan.ok ? this._idHoldWords(plan.tenders) : null;
     const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
+      : plan.ok && idHold !== null ? 'Check the customer\u2019s ID'
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
       : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`

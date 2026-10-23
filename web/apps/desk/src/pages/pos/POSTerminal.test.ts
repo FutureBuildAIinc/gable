@@ -22,6 +22,7 @@ const svc = vi.hoisted(() => ({
   recordMovement: vi.fn(),
   printReceipt: vi.fn(),
   emailReceipt: vi.fn(),
+  settings: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -2751,5 +2752,68 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     expect(el.textContent).toContain('Z-Report - Till Closed');
     expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
     el.remove();
+  });
+});
+
+describe('the dealer check ID rule at the counter', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const rule = (mode: 'never' | 'every_check' | 'over_amount', over_cents: number | null = null) =>
+    ({ revision: 2, rules: { check_limit_cents: null, check_id_required: { mode, over_cents } } });
+  const chooseCheck = async (el: POSTerminal) => {
+    q(el, 'tender-check').click();
+    await el.updateComplete;
+  };
+  const checkTheID = async (el: POSTerminal) => {
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).checked = true;
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    await chooseOption(el.querySelector('#pos-id-type') as HTMLElement & { value: string }, 'drivers_license');
+  };
+
+  it('asks for the ID before Pay on a check the rule covers, and pays once it is checked', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`A check over $50.00 needs the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-pay').textContent).toContain('Check the customer\u2019s ID');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
+      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+    el.remove();
+  });
+
+  it('asks on every check when the rule is every check, and never when no rule is set', async () => {
+    svc.settings.mockResolvedValue(rule('every_check'));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`This check needs the customer's ID`);
+    el.remove();
+
+    svc.settings.mockResolvedValue(rule('never'));
+    const el2 = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el2.updateComplete;
+    q(el2, 'tender-check').click();
+    await el2.updateComplete;
+    await typeInto(el2, '86.50');
+    expect(el2.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el2, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el2.remove();
   });
 });
