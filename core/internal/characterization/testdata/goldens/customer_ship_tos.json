@@ -466,39 +466,22 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 400,
       "content_type": "application/json",
       "body": {
-        "account_number": "GOLD-A-001",
-        "address": "7 Golden Way, Kelowna BC",
-        "balance_cents": 0,
-        "branch_ids": [
-          "<id-13>"
-        ],
-        "check_limit_cents": null,
-        "created_at": "<ts+0d>",
-        "credit_limit_cents": 5000000,
-        "currency": null,
-        "effective_currency": "USD",
-        "email": "contacts@example.com",
-        "id": "<id-1>",
-        "is_active": true,
-        "name": "Golden Contacts Co",
-        "named_buyer_required": false,
-        "payment_terms": {
-          "code": "GOLDEN-NET15",
-          "id": "<id-12>",
-          "name": "Golden net 20"
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "job_required",
+              "message": "is required on a PUT: a left out field would clear the job requirement"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
-        "payment_terms_id": "<id-12>",
-        "phone": "250-555-0177",
-        "po_required": false,
-        "price_profile_id": "<id-14>",
-        "primary_branch_id": "<id-13>",
-        "revision": 6,
-        "salesperson_id": null,
-        "salesperson_name": null,
-        "updated_at": "<ts+0d>"
+        "meta": {
+          "request_id": "<id-13>"
+        }
       }
     }
   },
@@ -516,7 +499,7 @@
         "address": "7 Golden Way, Kelowna BC",
         "balance_cents": 0,
         "branch_ids": [
-          "<id-13>"
+          "<id-14>"
         ],
         "check_limit_cents": null,
         "created_at": "<ts+0d>",
@@ -526,19 +509,20 @@
         "email": "contacts@example.com",
         "id": "<id-1>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {
-          "code": "GOLDEN-NET15",
-          "id": "<id-12>",
-          "name": "Golden net 20"
+          "code": "NET30",
+          "id": "<id-15>",
+          "name": "Net 30"
         },
-        "payment_terms_id": "<id-12>",
+        "payment_terms_id": "<id-15>",
         "phone": "250-555-0177",
         "po_required": false,
-        "price_profile_id": "<id-14>",
-        "primary_branch_id": "<id-13>",
-        "revision": 6,
+        "price_profile_id": "<id-16>",
+        "primary_branch_id": "<id-14>",
+        "revision": 5,
         "salesperson_id": null,
         "salesperson_name": null,
         "updated_at": "<ts+0d>"
@@ -558,26 +542,26 @@
         "items": [
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "credit_limit_cents": 10000000,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "number": "GOLD-001",
               "revision": 1
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
-            "event_id": "<id-16>",
+            "event_id": "<id-18>",
             "org": "default",
             "type": "customer.created"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "credit_limit_cents": 5000000,
@@ -590,7 +574,7 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-17>",
+            "event_id": "<id-19>",
             "org": "default",
             "type": "customer.created"
           }
@@ -613,55 +597,15 @@
         "items": [
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
-            "data": {
-              "balance_cents": 0,
-              "changed": [
-                "po_required"
-              ],
-              "credit_limit_cents": 10000000,
-              "currency": "USD",
-              "customer_id": "<id-15>",
-              "number": "GOLD-001",
-              "part": "header",
-              "revision": 2
-            },
-            "entity": {
-              "id": "<id-15>",
-              "kind": "customer"
-            },
-            "event_id": "<id-18>",
-            "org": "default",
-            "type": "customer.updated"
-          },
-          {
-            "at": "<ts+0d>",
             "branch_id": null,
             "data": {
               "balance_cents": 3696,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
-              "kind": "customer"
-            },
-            "event_id": "<id-19>",
-            "org": "default",
-            "type": "customer.updated"
-          },
-          {
-            "at": "<ts+0d>",
-            "branch_id": null,
-            "data": {
-              "balance_cents": 3621,
-              "currency": "USD",
-              "customer_id": "<id-15>",
-              "part": "balance"
-            },
-            "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-20>",
@@ -672,13 +616,13 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "balance_cents": 3696,
+              "balance_cents": 3621,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-21>",
@@ -689,13 +633,13 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "balance_cents": 1696,
+              "balance_cents": 3696,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-22>",
@@ -706,13 +650,13 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "balance_cents": 553,
+              "balance_cents": 1696,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-23>",
@@ -723,13 +667,13 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "balance_cents": 552,
+              "balance_cents": 553,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-24>",
@@ -740,13 +684,13 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "balance_cents": 3696,
+              "balance_cents": 552,
               "currency": "USD",
-              "customer_id": "<id-15>",
+              "customer_id": "<id-17>",
               "part": "balance"
             },
             "entity": {
-              "id": "<id-15>",
+              "id": "<id-17>",
               "kind": "customer"
             },
             "event_id": "<id-25>",
@@ -755,11 +699,28 @@
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": null,
+            "data": {
+              "balance_cents": 3696,
+              "currency": "USD",
+              "customer_id": "<id-17>",
+              "part": "balance"
+            },
+            "entity": {
+              "id": "<id-17>",
+              "kind": "customer"
+            },
+            "event_id": "<id-26>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "created",
               "balance_cents": 0,
-              "contact_id": "<id-26>",
+              "contact_id": "<id-27>",
               "credit_limit_cents": 5000000,
               "currency": "USD",
               "customer_id": "<id-1>",
@@ -771,39 +732,17 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-27>",
+            "event_id": "<id-28>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "created",
               "balance_cents": 0,
-              "contact_id": "<id-28>",
-              "credit_limit_cents": 5000000,
-              "currency": "USD",
-              "customer_id": "<id-1>",
-              "number": "GOLD-A-001",
-              "part": "contact",
-              "revision": 1
-            },
-            "entity": {
-              "id": "<id-1>",
-              "kind": "customer"
-            },
-            "event_id": "<id-29>",
-            "org": "default",
-            "type": "customer.updated"
-          },
-          {
-            "at": "<ts+0d>",
-            "branch_id": "<id-13>",
-            "data": {
-              "action": "updated",
-              "balance_cents": 0,
-              "contact_id": "<id-26>",
+              "contact_id": "<id-29>",
               "credit_limit_cents": 5000000,
               "currency": "USD",
               "customer_id": "<id-1>",
@@ -821,7 +760,29 @@
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
+            "data": {
+              "action": "updated",
+              "balance_cents": 0,
+              "contact_id": "<id-27>",
+              "credit_limit_cents": 5000000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "GOLD-A-001",
+              "part": "contact",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "customer"
+            },
+            "event_id": "<id-31>",
+            "org": "default",
+            "type": "customer.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "credit_limit_cents": 5000000,
@@ -835,13 +796,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-31>",
+            "event_id": "<id-32>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "credit_limit_cents": 5000000,
@@ -855,13 +816,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-32>",
+            "event_id": "<id-33>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "changed": [
@@ -878,13 +839,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-33>",
+            "event_id": "<id-34>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "balance_cents": 0,
               "changed": [
@@ -901,17 +862,17 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-34>",
+            "event_id": "<id-35>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "deleted",
               "balance_cents": 0,
-              "contact_id": "<id-26>",
+              "contact_id": "<id-27>",
               "credit_limit_cents": 5000000,
               "currency": "USD",
               "customer_id": "<id-1>",
@@ -923,13 +884,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-35>",
+            "event_id": "<id-36>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "created",
               "balance_cents": 0,
@@ -945,13 +906,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-36>",
+            "event_id": "<id-37>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "created",
               "balance_cents": 0,
@@ -967,13 +928,13 @@
               "id": "<id-1>",
               "kind": "customer"
             },
-            "event_id": "<id-37>",
+            "event_id": "<id-38>",
             "org": "default",
             "type": "customer.updated"
           },
           {
             "at": "<ts+0d>",
-            "branch_id": "<id-13>",
+            "branch_id": "<id-14>",
             "data": {
               "action": "updated",
               "balance_cents": 0,
@@ -984,29 +945,6 @@
               "part": "ship_to",
               "revision": 5,
               "ship_to_id": "<id-2>"
-            },
-            "entity": {
-              "id": "<id-1>",
-              "kind": "customer"
-            },
-            "event_id": "<id-38>",
-            "org": "default",
-            "type": "customer.updated"
-          },
-          {
-            "at": "<ts+0d>",
-            "branch_id": "<id-13>",
-            "data": {
-              "balance_cents": 0,
-              "changed": [
-                "payment_terms_id"
-              ],
-              "credit_limit_cents": 5000000,
-              "currency": "USD",
-              "customer_id": "<id-1>",
-              "number": "GOLD-A-001",
-              "part": "terms",
-              "revision": 6
             },
             "entity": {
               "id": "<id-1>",

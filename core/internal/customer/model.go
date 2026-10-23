@@ -53,6 +53,9 @@ type Customer struct {
 	PaymentTermsID uuid.UUID       `json:"payment_terms_id"`
 	PaymentTerms   PaymentTermsRef `json:"payment_terms"`
 	POrequired     bool            `json:"po_required"`
+	// JobRequired asks every charge sale at the counter to name a job, as
+	// POrequired asks for a purchase order number.
+	JobRequired     bool            `json:"job_required"`
 
 	// NamedBuyerRequired asks every sale on account at the counter to name a
 	// buyer from the contacts flagged as authorized buyers. CheckLimitCents

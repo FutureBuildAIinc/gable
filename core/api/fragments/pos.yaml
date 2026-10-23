@@ -2640,12 +2640,13 @@ components:
         name: {type: string}
     PosCounterCustomer:
       type: object
-      required: [id, account_number, name, po_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
+      required: [id, account_number, name, po_required, job_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
       properties:
         id: {type: string, format: uuid}
         account_number: {type: string}
         name: {type: string}
         po_required: {type: boolean, description: "The account asks for a purchase order on a charge sale (409 po_required at completion without one)."}
+        job_required: {type: boolean, description: "The account asks for a job on a charge sale (409 job_required at completion without one)."}
         credit_limit_cents: {type: [integer, "null"], format: int64, description: "Null: no limit. 0: no credit."}
         open_receivable_cents: {type: integer, format: int64, description: "What the credit check reads: open invoices less open credit memos and unapplied cash."}
         available_credit_cents: {type: [integer, "null"], format: int64, description: "The limit less the open receivable; negative when over; null with no limit."}

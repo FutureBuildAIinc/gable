@@ -118,9 +118,10 @@ var (
 )
 
 // do sends the request. A PUT of a customer or a contact must carry its
-// controls (payment_terms_id and po_required; can_place_orders and the order
-// limit); tests that are about something else get the neutral values added
-// when they leave them out, and doRaw sends the body exactly as given.
+// controls (payment_terms_id, po_required and job_required; can_place_orders
+// and the order limit); tests that are about something else get the neutral
+// values added when they leave them out, and doRaw sends the body exactly as
+// given.
 func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	f.t.Helper()
 	if m, ok := body.(map[string]any); ok && method == "PUT" {
@@ -137,6 +138,7 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 		case customerPutPath.MatchString(path):
 			set("payment_terms_id", f.termsID("NET30"))
 			set("po_required", false)
+			set("job_required", false)
 		case contactPutPath.MatchString(path):
 			set("can_place_orders", true)
 			set("order_limit_cents", nil)
