@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import './CustomerForm.ts';
 import type { GableCustomerForm } from './CustomerForm.ts';
 import type { Customer, CustomerRequest } from '../../types/customer.ts';
