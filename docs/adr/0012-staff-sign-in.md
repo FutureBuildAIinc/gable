@@ -96,27 +96,20 @@ depend on a component a self hosting dealer cannot obtain.
   https://appwrite.io/docs/advanced/self-hosting and
   https://appwrite.io/docs/advanced/self-hosting/installation
 
-### What FutureBuild's OIDC bridge is
+### What an OIDC bridge in front of Appwrite would be
 
-FutureBuild runs an OIDC bridge in front of its own Appwrite deployment so
-that tools with native OIDC can sign in through it. As built, it:
+Appwrite is not an OIDC provider. Signing staff in through OIDC therefore
+means running a separate issuer in front of Appwrite: a bridge with its own
+sign in form, its own database, signing keys and their rotation, that checks
+the person against Appwrite and issues OIDC tokens. Such a bridge, as an
+operator would typically build one for a few web tools, serves confidential
+web clients with exact `https` redirect URIs, signs ID tokens and publishes a
+JWKS, may issue opaque access tokens, and carries Team membership at most as
+a list of ids. Gable does not publish one, so a self hosting dealer would
+have none to run.
 
-- serves its own sign in form, email and password only, and checks the
-  password by opening an Appwrite session server to server; an account with
-  Appwrite's multi factor setting on cannot sign in through it;
-- gates every client on one list of required Teams, and puts the matched
-  Team ids (not the membership roles) in a `groups` claim; the subject is
-  the Appwrite project, user id and registration;
-- registers confidential clients only (a client secret, PKCE required) with
-  exact `https` redirect URIs: no public client, no loopback address and no
-  custom scheme;
-- signs ID tokens ES256 and publishes a JWKS, but issues opaque access
-  tokens, so only its ID token is a JWT the core's JWKS check could read;
-- is FutureBuild's own component and is not published with Gable.
-
-No sign in through that bridge has yet completed in FutureBuild's
-production. Whichever path this record takes, the first build slice proves it
-end to end on a local Appwrite before anything relies on it.
+Whichever path this record takes, the first build slice proves it end to end
+on a local Appwrite before anything relies on it.
 
 ## Decision
 
@@ -127,8 +120,8 @@ deployment signs staff in; the web runs an authorization code flow with PKCE;
 the core verifies the issuer's tokens through its existing JWKS check.
 
 - A self hosting dealer would have to run an OIDC issuer in front of its
-  Appwrite. Appwrite is not itself an OIDC provider, and FutureBuild's bridge
-  is not published, so the dealer has nothing to run. Gable would have to
+  Appwrite. Appwrite is not itself an OIDC provider, and Gable publishes no
+  bridge, so the dealer has nothing to run. Gable would have to
   publish and maintain a bridge of its own: a second identity service with
   its own database, signing keys and rotation, which is more than this item
   can carry and more than a dealer should host.
@@ -137,9 +130,9 @@ the core verifies the issuer's tokens through its existing JWKS check.
   job. Its tokens carry no roles, so `RequireRole` would refuse every staff
   request until the core looked roles up itself, and the core checks no
   audience today.
-- The bridge as built cannot serve the shells (no loopback, no custom
-  scheme, no public client), nor four of the six ruled methods (Google,
-  Microsoft, magic link and passkey; its form is email and password only).
+- A bridge of the usual kind serves confidential web clients only, so the
+  shells (loopback or a custom scheme, public clients) and the methods its
+  own form does not offer would each need more bridge work.
 - Teams map only to "may sign in": the `groups` claim has Team ids and no
   membership roles.
 
@@ -361,19 +354,14 @@ Passkeys wait on question 3 and are not counted.
   the web when slice 3 lands.
 - The total exceeds the matrix's re-sized S9 estimate (16 to 24); question 1.
 
-## Questions left for the principal
+## Open questions
 
 1. The plan is 43 to 67 dev hours against the S9 row's 16 to 24. Which slices
-   make the demo cut (slices 1 to 3 and 7 are the smallest set that signs
+   make the first cut (slices 1 to 3 and 7 are the smallest set that signs
    staff in for real on the web)?
-2. FutureBuild's hosted production: does Gable use the Appwrite project and a
-   Team per dealer on the platform's deployment, and who issues Gable's API
-   key with the four scopes there?
-3. Passkeys: Appwrite ships them only in recent releases, and a passkey is
+2. Passkeys: Appwrite ships them only in recent releases, and a passkey is
    bound to the origin that registers it. Is `passkey` deferred, or built
    with the browser talking to Appwrite for that one method?
-4. The JWKS path: retire it once this lands, or keep it (and add the audience
+3. The JWKS path: retire it once this lands, or keep it (and add the audience
    check) for a deployment that brings its own issuer instead of Appwrite's
    `oidc` provider?
-5. Does FutureBuild's bridge stay out of Gable's path entirely, as this
-   record assumes, or must Gable also accept its tokens for some tool?
