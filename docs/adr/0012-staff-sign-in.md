@@ -156,7 +156,7 @@ self hosting dealer cannot obtain.
   https://github.com/appwrite/appwrite/blob/2.0.0/src/Appwrite/Auth/OAuth2/Microsoft.php),
   and reported every address it
   returned as verified before that, so 2.0.0 is the first release whose
-  provider address cannot take over an existing account. The 2.0.0 release
+  Microsoft provider address cannot take over an existing account. The 2.0.0 release
   notes do not list that change, so the tagged source is the record of it. The
   Google adapter
   takes the provider's
@@ -856,7 +856,9 @@ trustworthy origin, so the local walk works.
 - **The floor:** the core reads the local Appwrite's version and starts; a
   version below 2.0.0 refuses the core's start; a version it cannot read
   keeps every provider redirect method closed at the door while email and
-  password sign in still answers.
+  password sign in still answers; a core that read a 2.x version at start
+  and later reads a 1.x version closes every Appwrite method, email and
+  password included, and logs it.
 - **Fail closed:** no cookie, an unknown, a revoked, an idle expired and an
   absolutely expired session each answer 401 on a guarded route and never
   pass through; the core with Appwrite settings and no JWKS starts with the
@@ -912,8 +914,10 @@ trustworthy origin, so the local walk works.
 - **Sessions:** a new session id on every sign in and a presented id
   ignored; the idle, absolute and snapshot age limits; a definite removal or
   block revoking at refresh; the CSRF header missing refused, and a cross
-  site request carrying it refused by the cookie; the concurrency test on
-  the session table.
+  site request carrying it refused by the cookie; a cross site form post to
+  the sign in route (no custom header, a foreign `Origin`) refused, and the
+  same post with the header or Gable's own `Origin` admitted; the
+  concurrency test on the session table.
 - **Redirect methods:** a callback with a missing, wrong or reused `state`
   refused before any exchange, and the `state` cookie sent as Lax on
   `Path=/api`, so that it reaches the callback at all; a `state` whose
