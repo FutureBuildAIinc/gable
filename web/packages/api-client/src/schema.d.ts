@@ -13559,6 +13559,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -13828,6 +13830,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14374,6 +14378,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14463,6 +14469,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -16351,7 +16359,7 @@ export interface components {
          * @description The closed lowercase list of return reasons; an absent reason is other.
          * @enum {string}
          */
-        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "other";
+        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "mis_tint" | "other";
         PosWayForward: {
             /** @enum {string} */
             kind: "pay_down" | "manager_override" | "switch_tender";
@@ -16826,6 +16834,8 @@ export interface components {
             vendor_id: string | null;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description The paint line's tint record (row CP-16), null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -16927,6 +16937,10 @@ export interface components {
              * @description The fee this line's reason withheld from its refund, half even to the cent.
              */
             restocking_fee_cents: number;
+            /** @description The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned. */
+            mis_tint: boolean;
+            /** @description A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock. */
+            tinted_return: boolean;
         };
         /** @description One drawer shift. The expected cash is the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. */
         PosTillSession: {
@@ -18828,6 +18842,8 @@ export interface components {
             stock_quantity: components["schemas"]["Quantity"] | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
             sku: string;
             description: string;
             /** @description What a portal user wrote when asking for the line to be priced; an edit that keeps the line id keeps it. */
@@ -18926,6 +18942,8 @@ export interface components {
             tally?: components["schemas"]["TallyRequest"];
         };
         QuoteTransitionRequest: {
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
             to: components["schemas"]["QuoteStatus"];
             /** Format: int64 */
             revision?: number;
@@ -19755,6 +19773,24 @@ export interface components {
         };
         TintCharge: {
             tint_charge_cents?: number;
+        };
+        /** @description A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed. */
+        LineTint: {
+            /** Format: uuid */
+            formula_id: string | null;
+            color_code: string;
+            color_name: string;
+            base_code: string;
+            container_size_code: string;
+            /** @description True when the amounts were rescaled to this size; the counter may override any of them. */
+            rescaled: boolean;
+            /** Format: int64 */
+            tint_charge_cents: number | null;
+            components: {
+                colorant_code: string;
+                colorant_name: string;
+                amount: components["schemas"]["TintAmount"];
+            }[];
         };
         /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
         Unit: {
