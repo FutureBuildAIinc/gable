@@ -273,6 +273,23 @@ describe('the counter as the Panels layout', () => {
       const el = await withCustomer(noneOnFile);
       expect(el.querySelector('label[for="pos-job"]')).toBeTruthy();
       expect(inner(el)._accountRefusal).toMatch(/none on file/);
+      const select = el.querySelector('#pos-job') as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(select.textContent).toContain('No jobs on file');
+      expect(el.querySelector('#pos-customer')?.textContent).toContain('add one on the account page');
+    });
+
+    it('shows the chosen job and purchase order on the summary panels and the completed sale', async () => {
+      const el = await withCustomer(needsJob, 'PO-42');
+      inner(el)._jobId = 'j1';
+      inner(el)._sale = sale({ customer_id: needsJob.id, customer_po: 'PO-42', job_id: 'j1', status: 'completed', tenders: [{ method: 'account', amount_cents: 8650 }] });
+      await el.updateComplete;
+      expect(q(el, 'review-po').textContent).toBe('PO-42');
+      expect(q(el, 'review-job').textContent).toBe('Ridge Build');
+      expect(q(el, 'pos-order-refs').textContent).toContain('PO PO-42');
+      expect(q(el, 'pos-order-refs').textContent).toContain('Job Ridge Build');
+      expect(q(el, 'pos-complete-refs').textContent).toContain('PO PO-42');
+      expect(q(el, 'pos-complete-refs').textContent).toContain('Job Ridge Build');
     });
 
     it('rechecks at Pay when the customer goes on hold after the account was chosen', async () => {

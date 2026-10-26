@@ -25,12 +25,25 @@ async function signIn(page: Page, name: string) {
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
 }
 
+/** The branch the counter's register belongs to, the yard the whole run works in. */
+async function registerBranch(request: APIRequestContext): Promise<string> {
+  const registers = (await (await request.get('/api/v1/pos/registers')).json()) as {
+    items: { id: string; branch_id: string }[];
+  };
+  const reg = registers.items.find((r) => r.id === 'REG-01');
+  if (!reg) throw new Error('the seed holds no REG-01 register for the counter run');
+  return reg.branch_id;
+}
+
 /**
  * A seeded customer with at least one active job and credit room, discovered
  * through its quotes (the seed draws fresh job ids every run). The counter's
  * job roster is the customer's active projects, which only the seed carries.
  */
-async function customerWithAJob(request: APIRequestContext): Promise<{ id: string; name: string; account_number: string; job_id: string } | null> {
+async function customerWithAJob(
+  request: APIRequestContext,
+  branchId: string,
+): Promise<{ id: string; name: string; account_number: string; job_id: string } | null> {
   const quotes = (await (await request.get('/api/v1/quotes?limit=200')).json()) as {
     items: { customer_id: string; job_id: string | null }[];
   };
@@ -45,9 +58,10 @@ async function customerWithAJob(request: APIRequestContext): Promise<{ id: strin
       id: string; name: string; account_number: string; credit_limit_cents: number | null; balance_cents: number;
       branch_ids: string[]; is_active: boolean;
     };
-    // one branch only: a shared customer's restricted fields (the Job
-    // required control among them) are refused to the role the run signs in
-    if (c.branch_ids.length !== 1 || !c.is_active) continue;
+    // one branch only, and the register's own: a shared customer's restricted
+    // fields (the Job required control among them) are refused to the role the
+    // run signs in, and a write through another yard's header is a 404
+    if (c.branch_ids.length !== 1 || c.branch_ids[0] !== branchId || !c.is_active) continue;
     if (c.credit_limit_cents === null || c.credit_limit_cents - c.balance_cents >= 2_000_000) {
       return { id: c.id, name: c.name, account_number: c.account_number, job_id: [...jobs][0] };
     }
@@ -92,11 +106,16 @@ async function openCounter(page: Page) {
 }
 
 test('the counter: an account that requires a job is charged only with a job picked', async ({ page, request }) => {
-  const account = await customerWithAJob(request);
+  const branchId = await registerBranch(request);
+  const account = await customerWithAJob(request, branchId);
   if (!account) {
-    test.skip(true, 'the seed holds no single branch customer with a job and credit room to charge');
+    test.skip(true, 'the seed holds no single branch customer at the register branch with a job and credit room to charge');
     return;
   }
+  // The run works in the register's yard: the account page PUT and the
+  // counter both write through the branch the header carries, and a write on
+  // another yard's customer is a 404 (or shares the customer out).
+  await page.addInitScript((id) => localStorage.setItem('gable_current_branch_id', id), branchId);
   await signIn(page, 'POS Account E2E');
   const product = await stockedProduct(request);
 
@@ -144,6 +163,11 @@ test('the counter: an account that requires a job is charged only with a job pic
   await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+  // The completed sale shows what it was charged against, on the screen.
+  await expect(page.getByTestId('pos-complete-refs')).toContainText('PO PO-E2E-JOB-91');
+  await expect(page.getByTestId('pos-complete-refs')).toContainText(/Job \S/);
+  await expect(page.getByTestId('pos-order-refs')).toContainText('PO PO-E2E-JOB-91');
+  await expect(page.getByTestId('pos-order-refs')).toContainText(/Job \S/);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-charged.png'), fullPage: true });
 
   // The books: the completed sale and its invoice carry the job.
@@ -158,12 +182,12 @@ test('the counter: an account that requires a job is charged only with a job pic
   expect(full.job_id).toBe(account.job_id);
   expect(full.customer_po).toBe('PO-E2E-JOB-91');
 
-  // Put the account back the way the seed held it. The charge sale may have
-  // added the counter's branch to the customer (the first document at another
-  // yard adds it), and a shared customer's restricted fields are refused to
-  // this role: a 403 leaves the flag on, which no other spec reads.
+  // Put the account back the way the seed held it. The customer stayed on its
+  // one branch (the register's own), so the header the run pins carries the
+  // write and the revert is a plain success.
   const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as Record<string, unknown>;
   const revert = await request.put(`/api/v1/customers/${account.id}`, {
+    headers: { 'X-Branch-Id': branchId },
     data: {
       account_number: fresh.account_number, name: fresh.name, email: fresh.email, phone: fresh.phone,
       address: fresh.address, price_profile_id: fresh.price_profile_id, is_active: fresh.is_active,
@@ -171,5 +195,5 @@ test('the counter: an account that requires a job is charged only with a job pic
       po_required: fresh.po_required, job_required: false, revision: fresh.revision,
     },
   });
-  expect([200, 403]).toContain(revert.status());
+  expect(revert.status(), await revert.text()).toBe(200);
 });

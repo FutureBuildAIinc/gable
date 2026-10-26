@@ -699,8 +699,8 @@ export class POSTerminal extends LitElement {
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}
           ${this._renderBuyerPick(finished)}
-          <div class="mt-3 grid grid-cols-2 items-start gap-2">
-            <div class="${c.jobs.length > 0 || c.job_required ? '' : 'col-span-2'}">
+          <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 items-end gap-2">
+            <div class="${c.jobs.length > 0 || c.job_required ? '' : 'sm:col-span-2'}">
               <label class="block text-xs text-slate-400" for="pos-po">
                 Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
               </label>
@@ -715,13 +715,15 @@ export class POSTerminal extends LitElement {
               <div>
                 <label class="block text-xs text-slate-400" for="pos-job">Job${c.job_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}</label>
                 <div class="mt-1">
-                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
-                    .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
+                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished || (c.job_required && c.jobs.length === 0)}
+                    .options=${c.jobs.length === 0 ? [{ value: '', label: 'No jobs on file' }] : [{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
                     @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
                   ></gable-select>
                 </div>
               </div>` : nothing}
           </div>
+          ${c.job_required && c.jobs.length === 0 ? html`
+            <p class="mt-1 text-xs text-slate-400">This account requires a job and has none on file: add one on the account page.</p>` : nothing}
           ${finished ? nothing : html`
             <div class="mt-3 flex items-center justify-between gap-3">
               <span class="text-xs text-slate-400">${hasLines ? '' : 'Add items to continue'}</span>
@@ -2174,9 +2176,16 @@ export class POSTerminal extends LitElement {
       </div>`;
   }
 
+  /** The name of the job a sale names, when the customer's roster holds it. */
+  private _jobName(jobId: string | null): string | null {
+    if (jobId === null || jobId === '') return null;
+    return this._customer?.jobs.find((j) => j.id === jobId)?.name ?? null;
+  }
+
   private _renderSummaryPanel(sale: Sale | null, state: PanelState, isOpen: boolean) {
     const count = (sale?.lines ?? []).filter((l) => l.parent_line_id === null).length;
     const tender = this._paymentValue(sale);
+    const jobName = this._jobName(this._jobId || sale?.job_id || null);
     return html`
       <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-summary">
         ${this._panelHead('summary', 3, 'Summary', state, isOpen, sale?.status === 'completed' ? fmt(sale.total_cents) : '')}
@@ -2184,6 +2193,12 @@ export class POSTerminal extends LitElement {
           <dl class="text-sm">
             <div class="flex justify-between py-1"><dt class="text-slate-400">Customer</dt>
               <dd class="text-white">${this._customer?.name ?? 'Walk-in sale'}</dd></div>
+            ${sale?.customer_po ? html`
+              <div class="flex justify-between py-1"><dt class="text-slate-400">Purchase order</dt>
+                <dd class="font-mono text-white" data-testid="review-po">${sale.customer_po}</dd></div>` : nothing}
+            ${jobName !== null ? html`
+              <div class="flex justify-between py-1"><dt class="text-slate-400">Job</dt>
+                <dd class="text-white" data-testid="review-job">${jobName}</dd></div>` : nothing}
             <div class="flex justify-between py-1"><dt class="text-slate-400">Lines</dt>
               <dd class="font-mono text-white" data-testid="review-lines">${count}</dd></div>
             <div class="flex justify-between py-1"><dt class="text-slate-400">Tender</dt>
@@ -2227,10 +2242,16 @@ export class POSTerminal extends LitElement {
       : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
+    const po = (sale?.customer_po ?? this._poText).trim();
+    const jobName = this._jobName(this._jobId || sale?.job_id || null);
     return html`
       <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
         <h2 class="text-lg font-bold text-white">Order summary</h2>
         <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
+        ${po !== '' || jobName !== null ? html`
+          <p class="mt-0.5 font-mono text-xs text-slate-400" data-testid="pos-order-refs">
+            ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
+          </p>` : nothing}
         ${productLines.length === 0 ? html`
           <p class="mt-3 text-sm text-slate-400" data-testid="pos-no-lines">No items yet</p>` : html`
           <ul class="mt-3 space-y-3" aria-label="Ticket lines" data-testid="pos-lines">
@@ -2398,6 +2419,8 @@ export class POSTerminal extends LitElement {
       : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
     const invoice = sale.invoice_id;
+    const po = (sale.customer_po ?? '').trim();
+    const jobName = this._jobName(sale.job_id || this._jobId);
     return html`
       <section class="rounded-xl border border-gable-green bg-slate-steel p-4" data-testid="pos-complete" aria-live="polite">
         <div class="flex items-center gap-3">
@@ -2405,6 +2428,10 @@ export class POSTerminal extends LitElement {
           <div class="min-w-0">
             <h2 class="text-xl font-bold text-white">Sale complete</h2>
             <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
+            ${po !== '' || jobName !== null ? html`
+              <p class="mt-1 font-mono text-xs text-slate-400" data-testid="pos-complete-refs">
+                ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
+              </p>` : nothing}
           </div>
         </div>
         ${invoice ? html`

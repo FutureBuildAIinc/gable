@@ -135,6 +135,7 @@ export class GableAccountDetail extends LitElement {
                 this.txnCursor = led.page.next_cursor;
             } else {
                 this.ledgerNote = ledgerYardNote(cust.branch_ids);
+                this.editing = false;
                 this.transactions = [];
                 this.txnCursor = null;
             }
@@ -486,7 +487,8 @@ export class GableAccountDetail extends LitElement {
                         <div class="flex gap-2">
                             <button
                                 @click=${() => void this.openEdit()}
-                                ?disabled=${this.editing}
+                                ?disabled=${this.editing || this.ledgerNote !== ''}
+                                title=${this.ledgerNote ? 'This account is held at another yard: switch the yard to edit it' : ''}
                                 class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
                             >Edit Profile</button>
                             <a
