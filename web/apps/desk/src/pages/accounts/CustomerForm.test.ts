@@ -75,4 +75,17 @@ describe('GableCustomerForm job required', () => {
         const got = await submitOf(el);
         expect(got.job_required).toBe(true);
     });
+
+    it('names the shared customer restriction when another branch also holds the account', async () => {
+        const el = await mount(customer({ branch_ids: ['b', 'b2'] }));
+        expect(el.querySelector('[data-testid="cust-shared-controls-note"]')?.textContent).toContain('finance or owner role');
+    });
+
+    it('names no restriction on a customer one branch holds, or on create', async () => {
+        const el = await mount(customer({ branch_ids: ['b'] }));
+        expect(el.querySelector('[data-testid="cust-shared-controls-note"]')).toBeNull();
+        el.remove();
+        const fresh = await mount(null);
+        expect(fresh.querySelector('[data-testid="cust-shared-controls-note"]')).toBeNull();
+    });
 });

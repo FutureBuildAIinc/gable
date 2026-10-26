@@ -45,18 +45,16 @@ export class GableCustomerForm extends LitElement {
         if (!this.seeded && this.customer) {
             this.seeded = true;
             const c = this.customer;
-            {
-                this.name = c.name;
-                this.accountNumber = c.account_number;
-                this.email = c.email ?? '';
-                this.phone = c.phone ?? '';
-                this.address = c.address ?? '';
-                this.termsId = c.payment_terms_id;
-                this.creditLimit = creditLimitInputText(c.credit_limit_cents);
-                this.poRequired = c.po_required;
-                this.jobRequired = c.job_required;
-                this.isActive = c.is_active;
-            }
+            this.name = c.name;
+            this.accountNumber = c.account_number;
+            this.email = c.email ?? '';
+            this.phone = c.phone ?? '';
+            this.address = c.address ?? '';
+            this.termsId = c.payment_terms_id;
+            this.creditLimit = creditLimitInputText(c.credit_limit_cents);
+            this.poRequired = c.po_required;
+            this.jobRequired = c.job_required;
+            this.isActive = c.is_active;
         }
         // Create: preselect the dealer's usual terms once they have loaded.
         if (!this.customer && this.termsId === '' && this.terms.length > 0) {
@@ -142,6 +140,8 @@ export class GableCustomerForm extends LitElement {
                         ${editing ? checkbox(id('active'), 'Active', this.isActive, v => { this.isActive = v; }) : nothing}
                         ${err.po_required ? html`<p class="text-xs text-red-400" role="alert">${err.po_required}</p>` : nothing}
                         ${err.job_required ? html`<p class="text-xs text-red-400" role="alert">${err.job_required}</p>` : nothing}
+                        ${editing && (this.customer?.branch_ids.length ?? 0) > 1 ? html`
+                            <p class="text-xs text-zinc-400" data-testid="cust-shared-controls-note">This account is held by more than one branch: changing Purchase order required or Job required takes the finance or owner role.</p>` : nothing}
                     </div>
                 </div>
                 <div class="flex justify-end gap-2">
