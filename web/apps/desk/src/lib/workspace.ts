@@ -76,6 +76,7 @@ const staticZones: AppZone[] = [
     { label: 'Daily Till', path: '/reports/daily-till' },
     { label: 'POS Terminal', path: '/pos' },
     { label: 'Lost card answers', path: '/pos/lost-answers' },
+    { label: 'Refund intents', path: '/pos/refund-intents' },
   ] },
   { prefix: '/reports', key: 'reporting', label: 'Reporting', icon: BarChart3, menu: [
     { label: 'Saved Reports', path: '/reports/saved' },
