@@ -19,6 +19,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -917,5 +919,122 @@ func TestCP07_CounterDepositRidesTheOpenTillSession(t *testing.T) {
 	}, "req-cp07-till-closed-void")
 	if rVoid.status != http.StatusConflict {
 		t.Errorf("voiding a payment from a closed till session = %d: %s, want 409", rVoid.status, rVoid.raw)
+	}
+}
+
+// RULE: a database already past migration 101 (every demo and install on
+// origin/refactor/v1) gains payments.till_session_id and its index by applying
+// migration 147 on top, rolls back cleanly with 147's down file, and serves
+// counter deposits on the upgraded database.
+func TestCP07_Migration147UpgradeFromV1AndDown(t *testing.T) {
+	conn, _ := scratchDB(t)
+	all, err := filepath.Glob("../../migrations/*.sql")
+	if err != nil || len(all) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+	sort.Strings(all)
+	var up147 string
+	for _, file := range all {
+		base := filepath.Base(file)
+		switch {
+		case strings.HasSuffix(base, "_down.sql"):
+		case strings.HasPrefix(base, "147_"):
+			up147 = file
+		case base < "147_":
+			apply(t, conn, file)
+		}
+	}
+	if up147 == "" {
+		t.Fatal("migration 147_payments_till_session.sql not found")
+	}
+	down147 := "../../migrations/down/147_payments_till_session_down.sql"
+
+	ctx := context.Background()
+	hasCol := func() int {
+		var n int
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'payments' AND column_name = 'till_session_id'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	hasIdx := func() int {
+		var n int
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE tablename = 'payments' AND indexname = 'idx_payments_till_session'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// On the v1 schema (already past 101), till_session_id is not on payments yet.
+	if hasCol() != 0 || hasIdx() != 0 {
+		t.Fatalf("before 147: column=%d index=%d, want 0 and 0 (101 must not be edited in place)", hasCol(), hasIdx())
+	}
+
+	// Apply 147 (and a second time as an idempotent no-op), then roll back with down, then re-apply 147.
+	apply(t, conn, up147)
+	apply(t, conn, up147)
+	if hasCol() != 1 || hasIdx() != 1 {
+		t.Fatalf("after 147 up: column=%d index=%d, want 1 and 1", hasCol(), hasIdx())
+	}
+	apply(t, conn, down147)
+	if hasCol() != 0 || hasIdx() != 0 {
+		t.Fatalf("after 147 down: column=%d index=%d, want 0 and 0", hasCol(), hasIdx())
+	}
+	apply(t, conn, up147)
+	if hasCol() != 1 || hasIdx() != 1 {
+		t.Fatalf("after 147 re-apply: column=%d index=%d, want 1 and 1", hasCol(), hasIdx())
+	}
+
+	// Drive the counter deposit flow against the upgraded database.
+	upgradedDB, err := database.Connect(conn.Config().ConnString())
+	if err != nil {
+		t.Fatalf("connect upgraded db: %v", err)
+	}
+	t.Cleanup(upgradedDB.Close)
+
+	f := newFixture(t, upgradedDB)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-UPG-" + uuid.NewString()[:8]
+	var branchID string
+	if err := upgradedDB.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upgradedDB.Pool.Exec(ctx, `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Upgrade "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = upgradedDB.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = upgradedDB.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	rTill := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 10000,
+	}, "req-cp07-upg-till")
+	if rTill.status != http.StatusCreated {
+		t.Fatalf("open till on upgraded db = %d: %s", rTill.status, rTill.raw)
+	}
+	tillID := str(t, rTill.body, "id")
+
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+
+	rDep := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 2500, "method": "cash",
+	}, "req-cp07-upg-dep")
+	if rDep.status != http.StatusCreated {
+		t.Fatalf("counter deposit on upgraded db = %d: %s", rDep.status, rDep.raw)
+	}
+	rRep := f.do("GET", "/api/v1/pos/till/"+tillID+"/report", nil)
+	if rRep.status != http.StatusOK {
+		t.Fatalf("till report on upgraded db = %d: %s", rRep.status, rRep.raw)
+	}
+	expected, _ := rRep.body["expected_by_method"].(map[string]any)
+	if got := num(t, expected, "CASH"); got != 12500 {
+		t.Errorf("upgraded db till expected_by_method.CASH = %d, want 12500", got)
 	}
 }

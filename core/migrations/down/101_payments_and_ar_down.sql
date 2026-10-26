@@ -32,7 +32,6 @@ BEGIN
 END $$;
 
 DROP INDEX IF EXISTS idx_customer_transactions_reference;
-DROP INDEX IF EXISTS idx_payments_till_session;
 DROP INDEX IF EXISTS idx_payments_project;
 DROP INDEX IF EXISTS idx_payments_order;
 DROP INDEX IF EXISTS idx_payments_unapplied;
@@ -134,7 +133,6 @@ DROP SEQUENCE IF EXISTS payment_number_seq;
 ALTER TABLE payments DROP COLUMN IF EXISTS gl_entry_id;
 ALTER TABLE payments DROP COLUMN IF EXISTS migrated_excess;
 ALTER TABLE payments DROP COLUMN IF EXISTS amount_unapplied;
-ALTER TABLE payments DROP COLUMN IF EXISTS till_session_id;
 ALTER TABLE payments DROP COLUMN IF EXISTS project_id;
 ALTER TABLE payments DROP COLUMN IF EXISTS order_id;
 ALTER TABLE payments DROP COLUMN IF EXISTS received_on;
