@@ -107,6 +107,9 @@ type Service struct {
 	terminalWait   time.Duration
 	terminalCrash  func(point string) error
 	bank           BankLines
+	// scale is the branch scale's driver (CP-19); nil keeps the manual
+	// weight entry path, which carries its reason instead.
+	scale ScaleReader
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -824,6 +827,9 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 		}
 		if old.LineType == salesdoc.LineText || old.Quantity == nil {
 			return invalid("line_id", "has no quantity to change")
+		}
+		if old.WeightSource != nil {
+			return invalid("line_id", "is weighed: the quantity is the scale's; remove the line and weigh again")
 		}
 		if sale.CustomerID == nil {
 			walkInID, _, err := s.repo.WalkInCustomer(ctx)

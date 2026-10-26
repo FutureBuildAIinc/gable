@@ -21,24 +21,23 @@ import (
 // Simulator is an in-process SMA indicator. Its control methods are the
 // test's hands on the scale.
 type Simulator struct {
-	mu       sync.Mutex
-	settled  *sync.Cond
-	weight   int64
-	tare     int64
-	unit     Unit
-	mode     Mode
-	motion   bool
-	status   Status
-	settleIn time.Duration
-	last     Command
-	ln       net.Listener
-	closed   bool
+	mu          sync.Mutex
+	weight      int64
+	tare        int64
+	unit        Unit
+	mode        Mode
+	motion      bool
+	status      Status
+	settleIn    time.Duration
+	stableWait  time.Duration
+	last        Command
+	ln          net.Listener
+	closed      bool
 }
 
 // NewSimulator answers a simulator at center of zero in pounds.
 func NewSimulator() *Simulator {
-	s := &Simulator{unit: UnitPound, mode: ModeGross, settleIn: 100 * time.Millisecond}
-	s.settled = sync.NewCond(&s.mu)
+	s := &Simulator{unit: UnitPound, mode: ModeGross, settleIn: 100 * time.Millisecond, stableWait: 8 * time.Second}
 	return s
 }
 
@@ -74,7 +73,6 @@ func (s *Simulator) SetWeightMilli(milli int64, unit Unit) {
 	time.AfterFunc(settle, func() {
 		s.mu.Lock()
 		s.motion = false
-		s.settled.Broadcast()
 		s.mu.Unlock()
 	})
 }
@@ -86,7 +84,6 @@ func (s *Simulator) SetWeightStableMilli(milli int64, unit Unit) {
 	s.weight = milli
 	s.unit = unit
 	s.motion = false
-	s.settled.Broadcast()
 	s.mu.Unlock()
 }
 
@@ -94,9 +91,6 @@ func (s *Simulator) SetWeightStableMilli(milli int64, unit Unit) {
 func (s *Simulator) SetMotion(moving bool) {
 	s.mu.Lock()
 	s.motion = moving
-	if !moving {
-		s.settled.Broadcast()
-	}
 	s.mu.Unlock()
 }
 
@@ -128,6 +122,15 @@ func (s *Simulator) SetSettleDelay(d time.Duration) {
 	s.mu.Unlock()
 }
 
+// SetStableWait sets how long the stable command waits for a load that
+// never settles before it answers with the moving reading: a real
+// indicator answers too, eventually, and the driver refuses the motion.
+func (s *Simulator) SetStableWait(d time.Duration) {
+	s.mu.Lock()
+	s.stableWait = d
+	s.mu.Unlock()
+}
+
 // LastCommand is the last command letter a driver sent, so a test proves
 // the driver issued a command and did not just receive a number.
 func (s *Simulator) LastCommand() Command {
@@ -140,7 +143,6 @@ func (s *Simulator) LastCommand() Command {
 func (s *Simulator) Close() error {
 	s.mu.Lock()
 	s.closed = true
-	s.settled.Broadcast()
 	s.mu.Unlock()
 	if s.ln != nil {
 		return s.ln.Close()
@@ -180,12 +182,23 @@ func (s *Simulator) serve(conn net.Conn) {
 				return
 			}
 		case CmdWeighStable:
-			// The stable command answers once the load settles.
+			// The stable command answers once the load settles, or once
+			// its wait is out: the answer then still carries the motion
+			// flag, and the driver refuses it.
 			s.mu.Lock()
-			for s.motion && !s.closed {
-				s.settled.Wait()
-			}
+			wait := s.stableWait
 			s.mu.Unlock()
+			deadline := time.Now().Add(wait)
+			for {
+				s.mu.Lock()
+				moving := s.motion
+				closed := s.closed
+				s.mu.Unlock()
+				if !moving || closed || time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			if _, err := conn.Write(s.response()); err != nil {
 				return
 			}

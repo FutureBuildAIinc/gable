@@ -34,7 +34,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
-	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
@@ -68,6 +67,7 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/scheduling"
+	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/unit"
@@ -789,7 +789,21 @@ func Run() {
 	// and the payment refund route holds the same credit to the counter's
 	// terminal rail: the online gateway is never the way back for it
 	paymentSvc.WithTenderCreditGuard(posSvc)
+	// The scale seam (CP-19, ruling D8): the SMA driver behind its interface,
+	// and on a demo stack the simulator with a device row per branch, so the
+	// ticket names the device that produced the reading. An unset value
+	// wires no scale: the manual weight entry with its reason remains.
 	posHandler := pos.NewHandler(posSvc)
+	if cfg.POSScaleSimulator == "1" {
+		scaleSim, scaleDriver, err := wireSimulatedScale(context.Background(), db)
+		if err != nil {
+			logger.Error("wire the simulated scale", "error", err)
+			os.Exit(1)
+		}
+		posSvc.WithScale(scaleDriver)
+		posHandler.WithScaleSimulator(scaleSim)
+		logger.Warn("the simulated scale is wired: a demo stack only, never a production configuration")
+	}
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
 	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 

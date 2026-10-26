@@ -4,6 +4,7 @@
 package salesdoc
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -76,6 +77,16 @@ func (s *LineScan) Finish(l *Line) {
 	l.LineTotal = PtrCents(s.lineTotal)
 	l.SpecialOrderCost = PtrPrice(s.specialCost)
 	l.WeightGrossLb, l.WeightTareLb, l.WeightNetLb = PtrQuantity(s.weightGross), PtrQuantity(s.weightTare), PtrQuantity(s.weightNet)
+	// The weight block's vocabularies store uppercase; the wire is
+	// lowercase (ADR 0001 section 6).
+	if l.WeightSource != nil {
+		lower := strings.ToLower(*l.WeightSource)
+		l.WeightSource = &lower
+	}
+	if l.WeightNetBasis != nil {
+		lower := strings.ToLower(*l.WeightNetBasis)
+		l.WeightNetBasis = &lower
+	}
 	l.WeightCapturedAt = httpx.PtrTimestamp(s.weightCapturedAt)
 	l.CreatedAt = httpx.TimestampOf(s.created)
 }

@@ -219,6 +219,11 @@ type ProductRef struct {
 	CommissionRate float64
 	IsKit          bool
 	Taxable        bool
+	// DensityLbPerCY and its volume state are the weighed line's bridge
+	// between the ton and the cubic yard (CP-19): null on a product without
+	// one, and a line that needs it refuses rather than guesses.
+	DensityLbPerCY     *httpx.Quantity
+	DensityVolumeState *string
 }
 
 // KitComponent is one row of a kit's definition (ADR 0005 section 2.6):

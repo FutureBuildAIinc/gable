@@ -97,7 +97,7 @@ END $$;
 
 ALTER TABLE scale_tickets
     ADD CONSTRAINT scale_tickets_sale_line_fkey
-    FOREIGN KEY (sale_line_id) REFERENCES pos_line_items (id);
+    FOREIGN KEY (sale_line_id) REFERENCES pos_line_items (id) ON DELETE SET NULL;
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS density_lb_per_cy NUMERIC(12, 4) NULL
     CHECK (density_lb_per_cy IS NULL OR density_lb_per_cy > 0);

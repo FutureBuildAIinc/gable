@@ -130,10 +130,10 @@ func TestParseErrorStatusesCarryNoWeight(t *testing.T) {
 
 func TestParseRejectsBadFraming(t *testing.T) {
 	for name, frame := range map[string][]byte{
-		"no line feed":     []byte(" 1G   12400.500lb \r"),
+		"no line feed":       []byte(" 1G   12400.500lb \r"),
 		"no carriage return": []byte("\n 1G   12400.500lb "),
-		"short body":       []byte("\n 1G  12400.5lb \r"),
-		"empty":            []byte(""),
+		"short body":         []byte("\n 1G  12400.5lb \r"),
+		"empty":              []byte(""),
 	} {
 		if _, err := scale.ParseResponse(frame); err == nil {
 			t.Errorf("%s: %q parsed without error", name, frame)

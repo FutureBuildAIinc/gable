@@ -149,6 +149,6 @@ func TestSimulatorRecordsTheLastCommand(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	if sim.LastCommand() != scale.CmdWeigh {
-	 t.Errorf("got %q", sim.LastCommand())
+		t.Errorf("got %q", sim.LastCommand())
 	}
 }

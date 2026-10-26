@@ -119,6 +119,12 @@ type Product struct {
 	RandomLength     bool             `json:"-"`
 	Units            []UnitSetRowView `json:"-"`
 
+	// The density in pounds per cubic yard with its volume state (CP-19):
+	// the weighed line's only bridge between the ton and the cubic yard,
+	// null on a product without one.
+	DensityLbPerCY     *httpx.Quantity `json:"-"`
+	DensityVolumeState *string         `json:"-"`
+
 	// ImageURL is the picture path as the reads answer it: set only while
 	// the catalog.product_images setting is on (the repository applies the
 	// setting in its statement), nil for a product with none.
@@ -181,6 +187,11 @@ type View struct {
 	RandomLength     bool             `json:"random_length"`
 	Units            []UnitSetRowView `json:"units"`
 
+	// The weighed sale's density (CP-19): pounds per cubic yard and the
+	// volume state the figure was measured at, null without one.
+	DensityLbPerCY     *httpx.Quantity `json:"density_lb_per_cy"`
+	DensityVolumeState *string         `json:"density_volume_state"`
+
 	// ImageURL is the product's picture path while the catalog.product_images
 	// setting is on; null when it is off or the product has no picture.
 	ImageURL *string `json:"image_url"`
@@ -230,6 +241,7 @@ func ViewOf(p *Product) View {
 		SaleUOM: p.SaleUOM, PriceUOM: p.PriceUOM, PurchaseUOM: p.PurchaseUOM,
 		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
 		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
+		DensityLbPerCY: p.DensityLbPerCY, DensityVolumeState: p.DensityVolumeState,
 		Units: p.Units, ImageURL: p.ImageURL,
 	}
 }

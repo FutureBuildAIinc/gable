@@ -30,6 +30,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
+	"github.com/gablelbm/gable/internal/scale"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -69,6 +70,11 @@ type fixture struct {
 	// till (CP-08), so the helper opens one with no float, as a cashier would,
 	// unless the test is proving that refusal.
 	noAutoTill bool
+	// scale and scaleDeviceID, when the withScale opt sets them, are the
+	// simulated scale the counter reads and the device row the ticket names
+	// (CP-19).
+	scale         *scale.Simulator
+	scaleDeviceID uuid.UUID
 }
 
 // withoutTill is the opt of a test that proves the open till rule itself.
@@ -114,7 +120,7 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), kitID: uuid.New(),
-		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8]}
+		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New()}
 	if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
@@ -287,14 +293,20 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns)`)
 	exec(`DELETE FROM pos_returns`)
 	exec(`DELETE FROM pos_tenders WHERE transaction_id IN ` + sales)
+	// the scale ticket and its line hold each other's keys; the links go
+	// before either side (CP-19)
+	exec(`UPDATE scale_tickets SET sale_line_id = NULL WHERE sale_line_id IS NOT NULL`)
+	exec(`UPDATE pos_line_items SET scale_ticket_id = NULL WHERE scale_ticket_id IS NOT NULL`)
 	exec(`DELETE FROM pos_line_items WHERE transaction_id IN ` + sales)
+	exec(`DELETE FROM scale_tickets`)
+	exec(`DELETE FROM scale_devices`)
 	exec(`DELETE FROM pos_transactions`)
 	exec(`DELETE FROM payments WHERE id IN `+pays, f.customerID)
 	exec(`DELETE FROM credit_memo_lines WHERE credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.customerID)
 	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
 	exec(`DELETE FROM invoices WHERE id IN `+invs, f.customerID)
-	// the entries the drawer's own acts posted (movements, variances) are named
+	// the counter's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
 	exec(`DELETE FROM till_movements`)
 	exec(`DELETE FROM till_pickup_approvals`)
