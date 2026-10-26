@@ -1,0 +1,298 @@
+{
+  "extensions": [
+    {
+      "name": "half_down_rounds_toward_zero",
+      "qty": "1",
+      "uom": "EA",
+      "price_uom": "EA",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 10049,
+      "price_key": "walkin",
+      "price_source": "list",
+      "price_basis": null,
+      "expected_cents": 100
+    },
+    {
+      "name": "half_up_rounds_away_from_zero",
+      "qty": "1",
+      "uom": "EA",
+      "price_uom": "EA",
+      "uom_qty": "1",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 10050,
+      "price_key": "walkin",
+      "price_source": "list",
+      "price_basis": null,
+      "expected_cents": 101
+    },
+    {
+      "name": "unit_other_than_price_unit",
+      "qty": "375",
+      "uom": "PCS",
+      "price_uom": "MBF",
+      "uom_qty": "187.5",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 5200000,
+      "price_key": "walkin",
+      "price_source": "list",
+      "price_basis": null,
+      "expected_cents": 104000
+    },
+    {
+      "name": "contract_price_in_own_unit",
+      "qty": "150",
+      "uom": "LF",
+      "price_uom": "BF",
+      "uom_qty": "3",
+      "price_uom_qty": "2",
+      "unit_price_ten_thousandths": 11250,
+      "price_key": "customer:22222222-2222-2222-2222-222222222222",
+      "price_source": "contract",
+      "price_basis": null,
+      "expected_cents": 11250
+    },
+    {
+      "name": "cost_derived_level_in_derived_unit",
+      "qty": "250",
+      "uom": "BF",
+      "price_uom": "MBF",
+      "uom_qty": "1000",
+      "price_uom_qty": "1",
+      "unit_price_ten_thousandths": 6250000,
+      "price_key": "level:tier-a",
+      "price_source": "level",
+      "price_basis": "cost_markup",
+      "expected_cents": 15625
+    }
+  ],
+  "taxes": [
+    {
+      "name": "tax_below_half_rounds_down",
+      "taxable_cents": 100,
+      "rate": "0.084990",
+      "rate_scaled": 84990,
+      "expected_tax_cents": 8
+    },
+    {
+      "name": "tax_at_half_rounds_away_from_zero",
+      "taxable_cents": 100,
+      "rate": "0.085000",
+      "rate_scaled": 85000,
+      "expected_tax_cents": 9
+    },
+    {
+      "name": "tax_above_half_rounds_up",
+      "taxable_cents": 1000,
+      "rate": "0.088750",
+      "rate_scaled": 88750,
+      "expected_tax_cents": 89
+    },
+    {
+      "name": "tax_zero_rate",
+      "taxable_cents": 25000,
+      "rate": "0.000000",
+      "rate_scaled": 0,
+      "expected_tax_cents": 0
+    }
+  ],
+  "stock_conversions": [
+    {
+      "name": "exact_conversion_into_stocking_unit",
+      "qty": "150",
+      "uom": "LF",
+      "stock_uom": "BF",
+      "unit_qty": "3",
+      "stock_qty": "2",
+      "refused": false,
+      "expected_stock_qty": "100",
+      "nearest_below": null,
+      "nearest_above": null,
+      "expected_error": null
+    },
+    {
+      "name": "inexact_conversion_refused_with_nearest",
+      "qty": "10",
+      "uom": "BF",
+      "stock_uom": "PCS",
+      "unit_qty": "28",
+      "stock_qty": "3",
+      "refused": true,
+      "expected_stock_qty": null,
+      "nearest_below": "9.9988",
+      "nearest_above": "10.0016",
+      "expected_error": "does not convert exactly into the stocking unit PCS; the nearest quantities that do are 9.9988 and 10.0016"
+    }
+  ],
+  "stock_restatements": [
+    {
+      "name": "old_unit_in_current_set_converts_recorded_stock_qty",
+      "line_index": 0,
+      "recorded_stock_uom": "BDL",
+      "recorded_stock_qty": "2",
+      "current_stock_uom": "EA",
+      "unit_set": [
+        {
+          "uom": "EA",
+          "unit_qty": "1",
+          "stock_qty": "1",
+          "sell": true,
+          "price": true
+        },
+        {
+          "uom": "BDL",
+          "unit_qty": "1",
+          "stock_qty": "24",
+          "sell": true,
+          "price": true
+        }
+      ],
+      "refused": false,
+      "expected_stock_uom": "EA",
+      "expected_stock_qty": "48",
+      "expected_code": null
+    },
+    {
+      "name": "old_unit_gone_from_current_set_refused",
+      "line_index": 0,
+      "recorded_stock_uom": "PAL",
+      "recorded_stock_qty": "1",
+      "current_stock_uom": "EA",
+      "unit_set": [
+        {
+          "uom": "EA",
+          "unit_qty": "1",
+          "stock_qty": "1",
+          "sell": true,
+          "price": true
+        }
+      ],
+      "refused": true,
+      "expected_stock_uom": null,
+      "expected_stock_qty": null,
+      "expected_code": "stock_unit_changed"
+    }
+  ],
+  "tallies": [
+    {
+      "name": "two_by_four_tally_linear_and_board_feet",
+      "thickness_in": "2",
+      "width_in": "4",
+      "rows": [
+        {
+          "pieces": 10,
+          "length_ft": "8"
+        },
+        {
+          "pieces": 5,
+          "length_ft": "12"
+        }
+      ],
+      "expected_linear_feet": "140",
+      "expected_board_feet": "93.3333"
+    },
+    {
+      "name": "one_by_six_tally_board_feet_half_away_from_zero",
+      "thickness_in": "1",
+      "width_in": "6",
+      "rows": [
+        {
+          "pieces": 1,
+          "length_ft": "1.0001"
+        }
+      ],
+      "expected_linear_feet": "1.0001",
+      "expected_board_feet": "0.5001"
+    }
+  ],
+  "tenders": [
+    {
+      "name": "cash_over_tender_gives_change",
+      "total_cents": 4150,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 5000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 5000,
+      "expected_cash_cents": 5000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 850,
+      "expected_code": null
+    },
+    {
+      "name": "split_account_and_cash_gives_change_from_cash",
+      "total_cents": 12500,
+      "tenders": [
+        {
+          "method": "account",
+          "amount_cents": 10000
+        },
+        {
+          "method": "cash",
+          "amount_cents": 3000
+        }
+      ],
+      "refused": false,
+      "expected_tendered_cents": 13000,
+      "expected_cash_cents": 3000,
+      "expected_account_cents": 10000,
+      "expected_change_cents": 500,
+      "expected_code": null
+    },
+    {
+      "name": "insufficient_tender_refused",
+      "total_cents": 5000,
+      "tenders": [
+        {
+          "method": "cash",
+          "amount_cents": 4000
+        }
+      ],
+      "refused": true,
+      "expected_tendered_cents": 4000,
+      "expected_cash_cents": 4000,
+      "expected_account_cents": 0,
+      "expected_change_cents": 0,
+      "expected_code": "insufficient_tender"
+    },
+    {
+      "name": "non_cash_over_tender_refused",
+      "total_cents": 5000,
+      "tenders": [
+        {
+          "method": "check",
+          "amount_cents": 6000
+        }
+      ],
+      "refused": true,
+      "expected_tendered_cents": 6000,
+      "expected_cash_cents": 0,
+      "expected_account_cents": 0,
+      "expected_change_cents": 0,
+      "expected_code": "change_from_cash"
+    },
+    {
+      "name": "two_account_legs_refused",
+      "total_cents": 5000,
+      "tenders": [
+        {
+          "method": "account",
+          "amount_cents": 3000
+        },
+        {
+          "method": "account",
+          "amount_cents": 2000
+        }
+      ],
+      "refused": true,
+      "expected_tendered_cents": 5000,
+      "expected_cash_cents": 0,
+      "expected_account_cents": 5000,
+      "expected_change_cents": 0,
+      "expected_code": "one_account_leg"
+    }
+  ]
+}
