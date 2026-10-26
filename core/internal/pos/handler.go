@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -173,7 +174,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// review P1-3): the claim's sale is read through the caller's branch
 	// context, so another branch's claim is a missing row.
 	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveMount(h.ResolveRefundIntent))
-
+	// The manager's list of the claims still waiting on a person (CP-06):
+	// the resolve routes' own mount, roles and wall.
+	mux.HandleFunc("GET /api/v1/pos/refund-intents", resolveMount(h.ListRefundIntents))
 	// The card terminal's intent routes (CP-05, IX-01): the desk's waiting
 	// state and its honest cancel behind the counter's own guard, and the
 	// sweep and the manager's lost answer queue behind the finance and owner
@@ -305,6 +308,21 @@ func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	// A completed sale carries what of each line earlier returns brought
+	// back, so the return dialog can hold a fully returned line back (CP-06).
+	if sale.Status == StatusCompleted {
+		returned, err := h.service.repo.ReturnedQtyByLine(r.Context(), id)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if len(returned) > 0 {
+			sale.ReturnedQuantities = map[string]httpx.Quantity{}
+			for lineID, qty := range returned {
+				sale.ReturnedQuantities[lineID.String()] = qty
+			}
+		}
 	}
 	httpx.WriteRevisionETag(w, sale.Revision)
 	writeJSON(w, http.StatusOK, sale)
@@ -445,20 +463,26 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sale)
 }
 
-// ListTransactions is GET /pos/transactions: the list envelope.
+// ListTransactions is GET /pos/transactions: the list envelope. q is the
+// counter's sale search (CP-06): the sale number (the receipt's barcode
+// text), the invoice number or the customer name; a search names no day
+// bound unless it carries a date, while a plain list stays the register's
+// day.
 func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
-	q, err := httpx.StrictQuery(r, "register_id", "date", "status", "limit", "cursor", "include")
+	q, err := httpx.StrictQuery(r, "register_id", "date", "status", "q", "limit", "cursor", "include")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	f := SaleFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02")}
+	f := SaleFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02"), Query: strings.TrimSpace(q.Get("q"))}
 	if d := q.Get("date"); d != "" {
 		if _, err := time.Parse("2006-01-02", d); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
 		f.Date = d
+	} else if f.Query != "" {
+		f.Date = ""
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {
@@ -471,6 +495,23 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 50
 	items, err := h.service.repo.ListSales(r.Context(), f, limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteList(w, items, "", limit)
+}
+
+// ListRefundIntents is GET /pos/refund-intents: the manager's list of the
+// refund claims still waiting on a person (CP-06), under the resolve
+// routes' own guard.
+func (h *Handler) ListRefundIntents(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r, "limit", "cursor", "include"); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	limit := 50
+	items, err := h.service.repo.ListOpenRefundIntents(r.Context(), limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

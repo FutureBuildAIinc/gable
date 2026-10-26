@@ -71,15 +71,20 @@ paths:
     get:
       operationId: posTransactionList
       tags: [pos]
-      summary: List the day's sales
+      summary: List the day's sales, or search them
       description: >-
         The list envelope over one register's day: register_id filters (absent
         lists every register's), date is a YYYY-MM-DD that defaults to the
         branch's today, status takes one lowercase value (open, held,
         completed, voided; an uppercase or unknown value is a 400 naming
-        status). The page is the whole day newest first, so next_cursor is
+        status). q is the return counter's sale search (CP-06): a sale
+        matches when its number (the receipt's barcode text), its invoice's
+        number or its customer's name contains the text, case folded; a
+        search names no day bound unless it also carries a date. The page is
+        the whole day or the whole search newest first, so next_cursor is
         null and limit echoes the 50 the route serves; cursor, limit and
-        include are accepted query names. An empty day is [] in the bytes.
+        include are accepted query names. An empty day or a search nothing
+        matches is [] in the bytes.
       parameters:
         - name: register_id
           in: query
@@ -93,6 +98,10 @@ paths:
           in: query
           required: false
           schema: {type: string, enum: [open, held, completed, voided]}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, description: "The search text: sale number, invoice number or customer name."}
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/Include"
@@ -1624,6 +1633,43 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/refund-intents:
+    get:
+      operationId: posRefundIntentList
+      tags: [pos]
+      summary: List the refund claims waiting on a manager
+      description: >-
+        The list envelope over the counter's open refund claims (CP-06),
+        oldest first: every PENDING claim (a terminal answer still owed, or a
+        claim waiting on the resolve route) and every void's FAILED claim
+        whose tender's posted payment still holds the declined credit the
+        pay back route returns to the card (held_credit_cents carries it). A
+        settled claim and a paid back credit leave the list. Only the
+        finance and owner roles, the resolve and pay back routes' own guard;
+        the sale join carries the branch wall, so the list never crosses the
+        caller's branch. The page is the whole open set, so next_cursor is
+        null and limit echoes the 50 the route serves; cursor, limit and
+        include are accepted query names. An empty list is [] in the bytes.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The open claims.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRefundIntentPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/refund-intents/{id}/resolve:
     post:
       operationId: posRefundIntentResolve
@@ -2312,6 +2358,32 @@ components:
           type: string
           description: "Required when the outcome is no_refund: the reference finance filed for the reconciliation."
         reason: {type: string, description: Why the record was made, 1 to 500 characters.}
+    PosRefundIntentSummary:
+      type: object
+      description: One open refund claim in the manager's list (CP-06).
+      required: [id, sale_id, sale_number, tender_id, tender_method, amount_cents, act, state, held_credit_cents, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string, description: "The claim's sale, POS-000001."}
+        tender_id: {type: string, format: uuid}
+        tender_method: {type: string, enum: [cash, check, card, account, store_credit]}
+        amount_cents: {type: integer, format: int64, description: "The claim's amount."}
+        act: {type: string, enum: [void, return, payback]}
+        state: {type: string, enum: [PENDING, FAILED], description: "PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns."}
+        held_credit_cents: {type: integer, format: int64, description: "What the tender's posted payment still holds unapplied; the credit a pay back returns."}
+        created_at: {type: string, format: date-time}
+    PosRefundIntentPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosRefundIntentSummary"
+        next_cursor: {type: [string, "null"], description: "Null: the page is the whole open set."}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
     PosRefundIntentResolved:
       type: object
       required: [id, sale_id, tender_id, act, state, outcome]
@@ -2581,7 +2653,7 @@ components:
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count, customer_name, invoice_number]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -2597,6 +2669,8 @@ components:
         completed_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
         item_count: {type: integer}
+        customer_name: {type: [string, "null"], description: "The account the sale names; null on a walk-in."}
+        invoice_number: {type: [string, "null"], description: "The invoice's number; null until the sale completes."}
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
@@ -2624,6 +2698,10 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        returned_quantities:
+          type: object
+          description: "Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it."
+          additionalProperties: {type: string, description: "A decimal string with at most 4 fraction digits."}
         lines:
           type: array
           items:

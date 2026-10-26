@@ -122,6 +122,12 @@ type Sale struct {
 	PrintCount       int        `json:"print_count"`
 	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
 
+	// ReturnedQuantities sums, per sale line id, the quantity every earlier
+	// return brought back, so the counter's return dialog can show a line
+	// already fully returned as not returnable. Set on a completed sale's
+	// read; omitted when nothing of the sale was ever returned.
+	ReturnedQuantities map[string]httpx.Quantity `json:"returned_quantities,omitempty"`
+
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`
 
@@ -147,6 +153,12 @@ type SaleSummary struct {
 	CompletedAt *httpx.Timestamp `json:"completed_at"`
 	CreatedAt   httpx.Timestamp  `json:"created_at"`
 	ItemCount   int              `json:"item_count"`
+
+	// CustomerName and InvoiceNumber are the list's search and display
+	// text: the account the sale names (null for a walk-in) and its
+	// invoice's number (null until the sale completes).
+	CustomerName  *string `json:"customer_name"`
+	InvoiceNumber *string `json:"invoice_number"`
 }
 
 // Tender is one payment taken at the counter, stored net: the tendered
@@ -234,6 +246,24 @@ type ReturnLine struct {
 	// invoice line its restock cost reads. Both internal, never on the wire.
 	SaleLineID    *uuid.UUID `json:"-"`
 	InvoiceLineID *uuid.UUID `json:"-"`
+}
+
+// RefundIntentSummary is the manager list's item (CP-06): one open refund
+// claim with its sale, amount, tender and state. Open means PENDING (a
+// terminal answer still owed or a claim waiting on the resolve route) or a
+// void's FAILED claim whose tender still holds the credit the pay back
+// route returns to the card; HeldCreditCents carries that credit.
+type RefundIntentSummary struct {
+	ID              uuid.UUID       `json:"id"`
+	SaleID          uuid.UUID       `json:"sale_id"`
+	SaleNumber      string          `json:"sale_number"`
+	TenderID        uuid.UUID       `json:"tender_id"`
+	TenderMethod    TenderMethod    `json:"tender_method"`
+	AmountCents     httpx.Cents     `json:"amount_cents"`
+	Act             string          `json:"act"`
+	State           string          `json:"state"`
+	HeldCreditCents httpx.Cents     `json:"held_credit_cents"`
+	CreatedAt       httpx.Timestamp `json:"created_at"`
 }
 
 // TillSessionStatus is the drawer lifecycle.
