@@ -63,6 +63,11 @@ type Location struct {
 	TaxJurisdictionCode *string    `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64   `json:"default_tax_rate"`
 	Timezone            *string    `json:"timezone"`
+	// CountryCode is the branch's country, two letters (CP-17a): the
+	// country picks the branch's large cash rule. A branch falls back to
+	// the dealer's country.default when its own is unset; a branch with
+	// neither cannot be saved.
+	CountryCode         *string    `json:"country_code"`
 	Active              bool       `json:"active"`
 	BranchID            *uuid.UUID `json:"branch_id"`
 

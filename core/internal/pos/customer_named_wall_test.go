@@ -228,7 +228,7 @@ func TestTheCompletionHoldsABoundKeyToItsPin(t *testing.T) {
 	before := f.counterInvoices(t)
 	id := uuid.MustParse(saleID)
 	_, err := f.service.CompleteSale(w.boundCtx(), id, "", nil,
-		[]pos.TenderIn{{Method: pos.TenderAccount, AmountCents: httpx.Cents(total)}}, "", "key")
+		[]pos.TenderIn{{Method: pos.TenderAccount, AmountCents: httpx.Cents(total)}}, "", "key", nil, false)
 	var he *httpx.Error
 	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
 		t.Fatalf("bound key completion naming another yard's customer: %v, want the module's 404", err)

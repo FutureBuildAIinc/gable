@@ -14,6 +14,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -29,6 +30,10 @@ type TenderIn struct {
 	TokenID     string
 	IDChecked   bool
 	IDType      string
+	// Instrument names the kind of check when the tender is one (CP-17a):
+	// a personal check, a cashier's check, a bank draft, a traveler's check
+	// or a money order. Empty means an ordinary check.
+	Instrument string
 }
 
 // ErrTaxProviderUnavailable is the 503 the counter answers when the tax
@@ -108,7 +113,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 // tax provider call happen before the transaction opens; their results are
 // written inside it.
 func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
-	tenders []TenderIn, pickedUpBy, actor string) (*Sale, error) {
+	tenders []TenderIn, pickedUpBy, actor string, payer *largecash.PayerIn, suspectedAvoidance bool) (*Sale, error) {
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
@@ -299,7 +304,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, payer, suspectedAvoidance)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -323,7 +328,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 // come with it.
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
-	charges []*chargeResult, priced *providerTax, ex *exchangeLeg) (*Sale, error) {
+	charges []*chargeResult, priced *providerTax, ex *exchangeLeg,
+	payer *largecash.PayerIn, suspectedAvoidance bool) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -773,6 +779,18 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		if err := s.repo.CompleteSale(ctx, saleID, inv.ID, int64(totals.SubtotalCents), taxCents, total, change); err != nil {
 			return err
 		}
+
+		// The large cash rules of the branch's country (CP-17a), inside this
+		// transaction: the tenders that counted, each with the classifier's
+		// recorded reason, the captured payer on a crossing (the sensitive
+		// values sealed), and the crossing's event row. A crossing without
+		// the payer's details refuses the whole completion (409
+		// payer_details_required) and nothing above is booked.
+		if s.largeCash != nil {
+			if err := s.largeCash.Capture(ctx, largeCashFacts(sale, lines, tenders, change, payer, suspectedAvoidance)); err != nil {
+				return err
+			}
+		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{
 				Action: "pos.transaction.completed", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
@@ -817,6 +835,36 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		return nil, err
 	}
 	return out, nil
+}
+
+// largeCashFacts builds the large cash rules' view of this completion: the
+// branch, the named customer, the billed lines, and the tenders with their
+// cash net of the change walked out of them (the money kept is the money
+// received).
+func largeCashFacts(sale *Sale, lines []salesdoc.Line, tenders []TenderIn, change int64,
+	payer *largecash.PayerIn, suspectedAvoidance bool) *largecash.CompletionFacts {
+	f := &largecash.CompletionFacts{TransactionID: sale.ID, BranchID: sale.BranchID,
+		CustomerID: sale.CustomerID, Currency: sale.Currency,
+		SuspectedAvoidance: suspectedAvoidance, Payer: payer}
+	for i := range lines {
+		if lines[i].ProductID != nil && lines[i].LineTotal != nil {
+			f.Lines = append(f.Lines, largecash.LineFact{ProductID: *lines[i].ProductID,
+				LineTotalCents: int64(*lines[i].LineTotal)})
+		}
+	}
+	left := change
+	for i := range tenders {
+		t := &tenders[i]
+		amount := int64(t.AmountCents)
+		if t.Method == TenderCash && left > 0 {
+			give := min64(amount, left)
+			amount -= give
+			left -= give
+		}
+		f.Tenders = append(f.Tenders, largecash.TenderFacts{Method: t.Method.Status(),
+			Instrument: t.Instrument, AmountCents: amount})
+	}
+	return f
 }
 
 func min64(a, b int64) int64 {

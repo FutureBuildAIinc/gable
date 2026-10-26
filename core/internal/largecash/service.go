@@ -352,15 +352,8 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 	if agg.rule == RuleCA {
 		state = "recorded"
 	}
-	return s.repo.InsertEvent(ctx, s.payerKey(f), derefCustomer(f.CustomerID), f.BranchID, agg.rule, f.Currency,
+	return s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, agg.rule, f.Currency,
 		counted, agg.base+counted, uniq, agg.tenderCount+1, state)
-}
-
-func derefCustomer(id *uuid.UUID) uuid.UUID {
-	if id == nil {
-		return uuid.Nil
-	}
-	return *id
 }
 
 // payerKey is the aggregation key: the named customer, else the captured

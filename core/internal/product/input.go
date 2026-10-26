@@ -47,6 +47,10 @@ type createRequest struct {
 	BoardWidthIn     *json.RawMessage `json:"board_width_in"`
 	BoardLengthFT    *json.RawMessage `json:"board_length_ft"`
 	RandomLength     *bool            `json:"random_length"`
+
+	// ConsumerDurable is the Form 8300 designated reporting transaction
+	// flag (CP-17a); false when the create does not name it.
+	ConsumerDurable *bool `json:"consumer_durable"`
 }
 
 // ParseCreate validates the create body and fills the domain row to hand the
@@ -119,6 +123,9 @@ func ParseCreate(r *http.Request) (*Product, error) {
 	}
 	p.LengthIn, p.WidthIn, p.HeightIn = req.LengthIn, req.WidthIn, req.HeightIn
 	p.Stackable, p.GeometrySource = req.Stackable, req.GeometrySource
+	if req.ConsumerDurable != nil {
+		p.ConsumerDurable = *req.ConsumerDurable
+	}
 
 	if err := v.Err(); err != nil {
 		return nil, err
@@ -179,7 +186,25 @@ func parseLeadTime(r *http.Request) (days *int, revision *int64, err error) {
 	return req.LeadTimeDays, req.Revision, nil
 }
 
-// dimensionsRequest is the PATCH /products/{id}/dimensions body. Every field
+// consumerDurableRequest is the PATCH /products/{id}/consumer-durable body.
+type consumerDurableRequest struct {
+	ConsumerDurable *bool  `json:"consumer_durable"`
+	Revision        *int64 `json:"revision"`
+}
+
+func parseConsumerDurable(r *http.Request) (flag bool, revision *int64, err error) {
+	var req consumerDurableRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return false, nil, err
+	}
+	if req.ConsumerDurable == nil {
+		return false, req.Revision, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "consumer_durable", Message: "is required"})
+	}
+	return *req.ConsumerDurable, req.Revision, nil
+}
+
+// dimensionsRequest is the PATCH /products/{id}/dimensions body.// dimensionsRequest is the PATCH /products/{id}/dimensions body. Every field
 // is a pointer so a null reaches the column as SQL NULL (the geometry
 // contract).
 type dimensionsRequest struct {

@@ -199,7 +199,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		pre.WalkInID = walkInID
 		revision := pre.Revision
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
-			make([]*chargeResult, len(in.Tenders)), pricedTax, leg)
+			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, nil, false)
 		if err != nil {
 			return err
 		}

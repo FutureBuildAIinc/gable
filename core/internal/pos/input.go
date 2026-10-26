@@ -5,7 +5,9 @@ package pos
 
 import (
 	"encoding/json"
+
 	"fmt"
+	"github.com/gablelbm/gable/internal/largecash"
 	"strings"
 	"time"
 
@@ -126,11 +128,62 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 }
 
 // completeSaleRequest is POST /pos/transactions/{id}/complete: the tenders in
-// cents (IN-1.2) and who collected the basket.
+// cents (IN-1.2), who collected the basket, and the large cash capture of
+// CP-17a (the payer's details when the payment takes the payer over the
+// threshold, and the manager's suspected avoidance mark).
 type completeSaleRequest struct {
-	Tenders    []tenderRequest `json:"tenders"`
-	PickedUpBy *string         `json:"picked_up_by"`
-	Revision   json.RawMessage `json:"revision"`
+	Tenders            []tenderRequest `json:"tenders"`
+	PickedUpBy         *string         `json:"picked_up_by"`
+	Revision           json.RawMessage `json:"revision"`
+	Payer              *payerRequest   `json:"payer"`
+	SuspectedAvoidance *bool           `json:"suspected_avoidance"`
+}
+
+// payerRequest is the payer identity the counter captured for a large cash
+// crossing. The taxpayer identification number and the ID number are
+// sensitive: they are sealed before storage, never logged and never in an
+// audit row's body.
+type payerRequest struct {
+	Name            *string `json:"name"`
+	Address         *string `json:"address"`
+	Occupation      *string `json:"occupation"`
+	DateOfBirth     *string `json:"date_of_birth"`
+	IDType          *string `json:"id_type"`
+	IDNumber        *string `json:"id_number"`
+	TaxpayerID      *string `json:"taxpayer_id"`
+	ThirdPartyPayer *bool   `json:"third_party_payer"`
+}
+
+// payer answers the parsed payer, nil when the request carries none.
+func (r *completeSaleRequest) payer() *largecash.PayerIn {
+	if r.Payer == nil {
+		return nil
+	}
+	p := &largecash.PayerIn{
+		Name:        deref(r.Payer.Name),
+		Address:     deref(r.Payer.Address),
+		Occupation:  deref(r.Payer.Occupation),
+		DateOfBirth: deref(r.Payer.DateOfBirth),
+		IDType:      deref(r.Payer.IDType),
+		IDNumber:    deref(r.Payer.IDNumber),
+		TaxpayerID:  deref(r.Payer.TaxpayerID),
+	}
+	if r.Payer.ThirdPartyPayer != nil {
+		p.ThirdPartyPayer = *r.Payer.ThirdPartyPayer
+	}
+	return p
+}
+
+// suspectedAvoidance answers the manager's suspected avoidance mark.
+func (r *completeSaleRequest) suspectedAvoidance() bool {
+	return r.SuspectedAvoidance != nil && *r.SuspectedAvoidance
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 type tenderRequest struct {
@@ -140,6 +193,10 @@ type tenderRequest struct {
 	TokenID     *string         `json:"token_id"`
 	IDChecked   *bool           `json:"id_checked"`
 	IDType      *string         `json:"id_type"`
+	// Instrument names the kind of check the tender is (CP-17a): a personal
+	// check, a cashier's check, a bank draft, a traveler's check or a money
+	// order. Empty means an ordinary check.
+	Instrument *string `json:"instrument"`
 }
 
 func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []TenderIn {
@@ -179,6 +236,14 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 		}
 		if t.IDType != nil {
 			in.IDType = *t.IDType
+		}
+		if t.Instrument != nil {
+			in.Instrument = strings.ToLower(strings.TrimSpace(*t.Instrument))
+			if in.Instrument != "" {
+				v.Enum(field("instrument"), in.Instrument, largecash.Instruments()...)
+				v.Check(in.Method == TenderCheck, field("instrument"),
+					"an instrument is named on a check tender only")
+			}
 		}
 		if in.IDChecked || in.IDType != "" {
 			v.Check(in.Method == TenderCheck || in.Method == TenderAccount, field("id_checked"),

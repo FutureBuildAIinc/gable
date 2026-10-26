@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -206,6 +207,7 @@ type createLocationRequest struct {
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
 	Timezone            *string  `json:"timezone"`
+	CountryCode         *string  `json:"country_code"`
 	Active              *bool    `json:"active"`
 }
 
@@ -227,6 +229,7 @@ func (req createLocationRequest) resolve(v *httpx.Validator, forceType LocationT
 		TaxJurisdictionCode: req.TaxJurisdictionCode,
 		DefaultTaxRate:      req.DefaultTaxRate,
 		Timezone:            req.Timezone,
+		CountryCode:         normalizeCountry(req.CountryCode),
 		Active:              req.Active == nil || *req.Active,
 	}
 	if forceType != "" {
@@ -264,8 +267,22 @@ type locationUpdateRequest struct {
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
 	Timezone            *string  `json:"timezone"`
+	CountryCode         *string  `json:"country_code"`
 	Active              *bool    `json:"active"`
 	Revision            *int64   `json:"revision"`
+}
+
+// normalizeCountry uppercases and trims a country code; an empty value
+// becomes nil (unset), never a stored empty string.
+func normalizeCountry(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := strings.ToUpper(strings.TrimSpace(*s))
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func writeLocJSON(w http.ResponseWriter, status int, body any) {
@@ -518,6 +535,9 @@ func (h *Handler) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	loc.Path, loc.Code, loc.Description = req.Path, req.Code, req.Description
 	loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone = req.Name, req.Address, req.City, req.State, req.Zip, req.Phone
 	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone
+	if req.CountryCode != nil {
+		loc.CountryCode = normalizeCountry(req.CountryCode)
+	}
 	if req.Active != nil {
 		loc.Active = *req.Active // omitted keeps the stored value
 	}

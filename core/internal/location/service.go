@@ -121,6 +121,9 @@ func (s *Service) CreateLocation(ctx context.Context, loc *Location) error {
 		return err
 	}
 
+	if err := s.holdBranchCountry(ctx, loc); err != nil {
+		return err
+	}
 	if loc.Type == LocTypeBranch {
 		if loc.ParentID != nil {
 			return httpx.BadRequest("one or more fields failed validation",
@@ -171,6 +174,32 @@ func lower(s string) string {
 // UpdateLocation persists edits to a location. Type and parent_id are not
 // mutable here; create a new row instead. The revision precondition is part
 // of the write (ADR 0001 section 11).
+// holdBranchCountry refuses to save a branch with neither its own country
+// nor the dealer's default country (CP-17a): the country picks the branch's
+// large cash rule, and a silent fallback or a branch with no rule is the
+// mistake that only surfaces at a filing deadline.
+func (s *Service) holdBranchCountry(ctx context.Context, loc *Location) error {
+	if loc.Type != LocTypeBranch {
+		return nil
+	}
+	if loc.CountryCode != nil && *loc.CountryCode != "" {
+		if len(*loc.CountryCode) != 2 {
+			return httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "country_code", Message: "must be two letters, for example US or CA"})
+		}
+		return nil
+	}
+	def, ok, err := s.repo.SettingValue(ctx, "country.default")
+	if err != nil {
+		return err
+	}
+	if !ok || strings.TrimSpace(def) == "" {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "country_code", Message: "set the branch's country (or the dealer's default country) before saving: the country picks the branch's large cash rule"})
+	}
+	return nil
+}
+
 func (s *Service) UpdateLocation(ctx context.Context, loc *Location, revision int64) error {
 	if loc.ID == uuid.Nil {
 		return httpx.BadRequest("one or more fields failed validation",
@@ -179,6 +208,9 @@ func (s *Service) UpdateLocation(ctx context.Context, loc *Location, revision in
 	v := &httpx.Validator{}
 	v.Required("code", loc.Code)
 	if err := v.Err(); err != nil {
+		return err
+	}
+	if err := s.holdBranchCountry(ctx, loc); err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(ctx context.Context) error {

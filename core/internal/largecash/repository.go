@@ -215,7 +215,7 @@ func (r *Repository) InsertPayer(ctx context.Context, transactionID, branchID uu
 
 // InsertEvent records one threshold crossing: reportable is the United
 // States duty, recorded is the Canadian dealer policy.
-func (r *Repository) InsertEvent(ctx context.Context, payerKey string, customerID, branchID uuid.UUID, ruleFamily, currency string,
+func (r *Repository) InsertEvent(ctx context.Context, payerKey string, customerID *uuid.UUID, branchID uuid.UUID, ruleFamily, currency string,
 	amountCents, totalCents int64, transactionIDs []uuid.UUID, tenderCount int, state string) error {
 	_, err := r.exec(ctx).Exec(ctx, `
 		INSERT INTO large_cash_events (payer_key, customer_id, branch_id, rule_family, currency, amount_cents, total_cents,

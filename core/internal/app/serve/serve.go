@@ -47,6 +47,7 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
@@ -784,6 +785,16 @@ func Run() {
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)
 	}
+	// The large cash rules of the branch's country (CP-17a): the payer
+	// capture at the counter, the classifier and the two aggregations, the
+	// sensitive values sealed with the same payment vault key.
+	lcVault, lcVaultErr := payment.NewVault(cfg.PaymentVaultKey)
+	if lcVaultErr != nil {
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key; the large cash payer's sensitive values cannot be sealed")
+	}
+	largeCashSvc := largecash.NewService(db, lcVault, cfg.PaymentVaultKey)
+	posSvc.WithLargeCash(largeCashSvc)
+	largecash.NewHandler(largeCashSvc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
 	// and the payment refund route holds the same credit to the counter's
