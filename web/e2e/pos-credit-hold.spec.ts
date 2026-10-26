@@ -137,11 +137,12 @@ test('the counter: a credit hold AR placed stops the charge, cash still pays, th
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-credit-hold-released.png'), fullPage: true });
 
-  // The books: the charge sale carries an open invoice on the account.
+  // The books: the charge sale carries an open invoice on the account (the
+  // list's statuses are the lowercase lifecycle vocabulary).
   const invoices = (await (await request.get(`/api/v1/invoices?customer_id=${account.id}`)).json()) as {
     items: { status: string; customer_id: string }[];
   };
-  expect(invoices.items.some((i) => i.status === 'UNPAID' || i.status === 'PARTIAL')).toBe(true);
+  expect(invoices.items.some((i) => i.status === 'unpaid' || i.status === 'partial')).toBe(true);
 
   // Clean the run's account off the seeded books the way the counter's void
   // does, so a rerun of the stack finds the seed as it was.
