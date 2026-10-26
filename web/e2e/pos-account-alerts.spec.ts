@@ -151,10 +151,15 @@ test('the counter: the customer alerts are read at the counter, and a warning st
   const warningRow = page.locator('[data-testid="alert-row"][data-alert-kind="warning"]');
   await warningRow.getByTestId('alert-end').click();
   await answerAppDialog(page, 'End alert');
+  // The ended alert leaves the open list, and it is still on the account.
+  await expect(page.locator('[data-testid="alert-row"][data-alert-kind="warning"]')).toHaveCount(0);
+  await page.getByTestId('alert-show-ended').check();
   await expect(warningRow.getByTestId('alert-ended')).toBeVisible();
 
   // A new sale with the same customer: the warning is ended, so no dialog.
   await openCounter(page);
+  await page.getByRole('button', { name: 'New Sale', exact: true }).click();
+  await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await attachCustomer(page, account);
   await expect(page.getByTestId('pos-alert-note')).toContainText('Call before the delivery');
   await expect(page.getByTestId('pos-alert-warning')).toHaveCount(0);
