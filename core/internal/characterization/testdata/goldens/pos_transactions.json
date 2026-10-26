@@ -535,10 +535,13 @@
         "revision": 2,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -671,10 +674,13 @@
         "revision": 3,
         "status": "open",
         "subtotal_cents": 8788,
-        "tax_cents": 1055,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 9843
+        "total_cents": 8788
       }
     }
   },
@@ -840,10 +846,13 @@
         "revision": 4,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -996,10 +1005,13 @@
         "revision": 4,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -1092,7 +1104,7 @@
             "register_id": "REG-01",
             "revision": 4,
             "status": "open",
-            "total_cents": 1756
+            "total_cents": 1568
           },
           {
             "branch_id": "<id-1>",
@@ -1500,6 +1512,9 @@
         "status": "completed",
         "subtotal_cents": 1568,
         "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [
           {
             "amount_cents": 1568,
@@ -2167,6 +2182,9 @@
         "status": "completed",
         "subtotal_cents": 1568,
         "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [
           {
             "amount_cents": 1568,

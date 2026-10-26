@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
@@ -773,8 +774,8 @@ func (f *fakeOrderRepo) BranchTaxRate(context.Context, uuid.UUID) (*string, erro
 	rate := "0.000000"
 	return &rate, nil
 }
-func (f *fakeOrderRepo) CustomerExempt(context.Context, uuid.UUID) (bool, error) {
-	return false, nil
+func (f *fakeOrderRepo) CustomerExemption(_ context.Context, _ uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	return nil, nil
 }
 func (f *fakeOrderRepo) OpenReceivableCents(context.Context, uuid.UUID, *uuid.UUID) (int64, error) {
 	return 0, nil

@@ -83,7 +83,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 	if s.tax == nil || !s.tax.ProviderConfigured() {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, customerID)
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	}
 	estimate := priced
 	if estimate == nil {
-		exempt, err := s.repo.CustomerExempt(ctx, realCustomerID)
+		exempt, err := s.exemptOn(ctx, pre.BranchID, realCustomerID)
 		if err != nil {
 			return nil, err
 		}
@@ -399,7 +399,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			taxCents = int64(priced.taxCents)
 			taxSource = string(salesdoc.TaxSourceProvider)
 		} else {
-			exempt, err := s.repo.CustomerExempt(ctx, customerID)
+			exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 			if err != nil {
 				return err
 			}

@@ -578,6 +578,7 @@ PUT	/api/v1/ship-tos/{id}	internal/customer	h.HandleUpdateShipTo
 POST	/api/v1/tax/exemptions	internal/tax	h.createExemption
 GET	/api/v1/tax/exemptions/{customerID}	internal/tax	h.getExemptions
 DELETE	/api/v1/tax/exemptions/{id}	internal/tax	h.deleteExemption
+POST	/api/v1/tax/exemptions/{id}/end	internal/tax	h.endExemption
 POST	/api/v1/tax/preview	internal/tax	h.previewTax
 GET	/api/v1/units	internal/unit	h.handleList
 POST	/api/v1/units	internal/unit	h.handleCreate
