@@ -104,77 +104,100 @@ async function payByCheck(page: Page, total: number, withID: boolean) {
 }
 
 test('the counter rules a dealer sets: the check ID rule, the check limit, and a customer own limit', async ({ page, request }) => {
+  // Three counter walks and an account page visit: longer than one default
+  // test slot, so this walk takes the slow one.
+  test.slow();
   await signIn(page, 'Playwright Admin');
   const product = await stockedProduct(request);
 
-  // The Counter rules screen: checks over $50 need the customer's ID, and no
-  // check over $100 is taken database wide.
-  await page.goto('/admin/counter-rules');
-  await expect(page.getByRole('heading', { name: 'Counter rules' })).toBeVisible();
-  await page.getByTestId('counter-rules-limit').fill('100.00');
-  await page.getByTestId('counter-rules-id-choice-over_amount').locator('input').check();
-  await page.getByTestId('counter-rules-id-over').fill('50.00');
-  await page.getByTestId('counter-rules-save').click();
-  await expect(page.getByTestId('counter-rules-saved')).toContainText('Counter rules saved');
+  // The rules this walk finds, put back at the end so no later run or manual
+  // walk inherits rules no dealer chose.
+  const savedRules = ((await (await request.get('/api/v1/pos/settings')).json()) as { rules: Record<string, unknown> }).rules;
+  try {
+    // The Counter rules screen: checks over $50 need the customer's ID, and no
+    // check over $100 is taken database wide.
+    await page.goto('/admin/counter-rules');
+    await expect(page.getByRole('heading', { name: 'Counter rules' })).toBeVisible();
+    await page.getByTestId('counter-rules-limit').fill('100.00');
+    await page.getByTestId('counter-rules-id-choice-over_amount').locator('input').check();
+    await page.getByTestId('counter-rules-id-over').fill('50.00');
+    await page.getByTestId('counter-rules-save').click();
+    await expect(page.getByTestId('counter-rules-saved')).toContainText('Counter rules saved');
 
-  // The account this walk uses: no check limit of its own yet, so the
-  // database wide rule governs it.
-  const run = Date.now().toString(36).toUpperCase();
-  const res = await request.post('/api/v1/customers', {
-    data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}` },
-  });
-  expect(res.status(), await res.text()).toBe(201);
-  const account = (await res.json()) as { id: string; account_number: string };
+    // The account this walk uses, held by the yard the desk session works
+    // (its stored branch), so the branch wall cannot refuse the page edit
+    // below; no check limit of its own yet, so the database wide rule
+    // governs it.
+    const yard = await page.evaluate(() => localStorage.getItem('gable_current_branch_id'));
+    const run = Date.now().toString(36).toUpperCase();
+    const res = await request.post('/api/v1/customers', {
+      data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}`, primary_branch_id: yard },
+    });
+    expect(res.status(), await res.text()).toBe(201);
+    const account = (await res.json()) as { id: string; account_number: string };
 
-  // At the counter: a $60 check is held until the ID is checked.
-  await openCounter(page);
-  const total = await ringPast(page, product.sku, 60);
-  await payByCheck(page, 60, false);
-  await expect(page.getByTestId('pos-check-id-needed')).toContainText(
-    `A check over $50.00 needs the customer's ID`,
-  );
-  // Pay stays off with the ID still unchecked (the split leaves the rest
-  // owed, so the button says that; the ID hold is the band above).
-  await expect(page.getByTestId('pos-pay')).toBeDisabled();
-  // The ID is checked and its kind picked (the number is never taken), and
-  // the rest of the sale in cash: Pay completes it.
-  await page.locator('#pos-id-checked').check();
-  await pickOptionByValue(page.getByTestId('pos-id-type'), 'drivers_license');
-  await expect(page.getByTestId('pos-check-id-needed')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add as split tender' }).click();
-  await page.getByTestId('tender-cash').click();
-  await page.locator('#pos-tender-amount').fill((total - 60).toFixed(2));
-  await page.getByTestId('pos-pay').click();
-  await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+    // At the counter: a $60 check is held until the ID is checked.
+    await openCounter(page);
+    const total = await ringPast(page, product.sku, 60);
+    await payByCheck(page, 60, false);
+    await expect(page.getByTestId('pos-check-id-needed')).toContainText(
+      `A check over $50.00 needs the customer's ID`,
+    );
+    // Pay stays off with the ID still unchecked (the split leaves the rest
+    // owed, so the button says that; the ID hold is the band above).
+    await expect(page.getByTestId('pos-pay')).toBeDisabled();
+    // The ID is checked and its kind picked (the number is never taken), and
+    // the rest of the sale in cash: Pay completes it.
+    await page.locator('#pos-id-checked').check();
+    await pickOptionByValue(page.getByTestId('pos-id-type'), 'drivers_license');
+    await expect(page.getByTestId('pos-check-id-needed')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Add as split tender' }).click();
+    await page.getByTestId('tender-cash').click();
+    await page.locator('#pos-tender-amount').fill((total - 60).toFixed(2));
+    await page.getByTestId('pos-pay').click();
+    await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
 
-  // A $150 check is over the $100 database wide limit: naming the account,
-  // the counter says so and the sale is not completed.
-  await page.getByRole('button', { name: 'New Sale', exact: true }).click();
-  await expect(page.getByTestId('pos-no-lines')).toBeVisible();
-  await nameAccount(page, account.account_number);
-  await addOne(page, product.sku);
-  await payByCheck(page, 150, true);
-  await page.getByRole('button', { name: 'Add as split tender' }).click();
-  await expect(page.getByTestId('pos-check-over')).toContainText('over the check limit');
-  await expect(page.getByTestId('pos-check-ask-manager')).toBeVisible();
-  // Pay stays off: the sale is not completed while the check is over the limit.
-  await expect(page.getByTestId('pos-pay')).toBeDisabled();
-  await expect(page.getByTestId('pos-complete')).toHaveCount(0);
+    // A $150 check is over the $100 database wide limit: naming the account,
+    // the counter says so and the sale is not completed. The sale is run
+    // past $150 first, so the refused check cannot cover it on its own.
+    await page.getByRole('button', { name: 'New Sale', exact: true }).click();
+    await expect(page.getByTestId('pos-no-lines')).toBeVisible();
+    await nameAccount(page, account.account_number);
+    await ringPast(page, product.sku, 150);
+    await payByCheck(page, 150, true);
+    await page.getByRole('button', { name: 'Add as split tender' }).click();
+    await expect(page.getByTestId('pos-check-over')).toContainText('over the check limit');
+    await expect(page.getByTestId('pos-check-ask-manager')).toBeVisible();
+    // Pay stays off: the sale is not completed while the check is over the limit.
+    await expect(page.getByTestId('pos-pay')).toBeDisabled();
+    await expect(page.getByTestId('pos-complete')).toHaveCount(0);
 
-  // The account's own page: a $200 check limit on one account.
-  await page.goto(`/accounts/${account.id}`);
-  await expect(page.getByTestId('account-check-limit')).toContainText('Counter rule');
-  await page.getByRole('button', { name: 'Edit Profile' }).click();
-  await page.getByLabel('Check limit (dollars)').fill('200.00');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByTestId('account-check-limit')).toContainText('$200.00');
+    // The account's own page: a $200 check limit on one account.
+    await page.goto(`/accounts/${account.id}`);
+    await expect(page.getByTestId('account-check-limit')).toContainText('Counter rule');
+    await page.getByRole('button', { name: 'Edit Profile' }).click();
+    await page.getByLabel('Check limit (dollars)').fill('200.00');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByTestId('account-check-limit')).toContainText('$200.00');
 
-  // The same $150 check to that account completes with the ID: the
-  // customer's own limit beats the database wide one.
-  await openCounter(page);
-  await nameAccount(page, account.account_number);
-  await ringPast(page, product.sku, 150);
-  await payByCheck(page, 150, true);
-  await page.getByTestId('pos-pay').click();
-  await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+    // The same $150 check to that account completes with the ID (the rest in
+    // cash): the customer's own limit beats the database wide one.
+    await openCounter(page);
+    await nameAccount(page, account.account_number);
+    const last = await ringPast(page, product.sku, 150);
+    await payByCheck(page, 150, true);
+    await page.getByRole('button', { name: 'Add as split tender' }).click();
+    await page.getByTestId('tender-cash').click();
+    await page.locator('#pos-tender-amount').fill((last - 150).toFixed(2));
+    await page.getByTestId('pos-pay').click();
+    await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+  } finally {
+    // The rules the walk found go back on the revision the walks left.
+    const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };
+    const put = await request.put('/api/v1/pos/settings', {
+      headers: { 'If-Match': `"${now.revision}"` },
+      data: { rules: savedRules, revision: now.revision },
+    });
+    expect(await put.text(), `putting the rules back = ${put.status()}`).toContain('"rules"');
+  }
 });
