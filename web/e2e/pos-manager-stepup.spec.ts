@@ -118,7 +118,6 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
   await page.getByTestId('tender-check').click();
   const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
   await page.getByLabel('Tender amount').fill(total.toFixed(2));
-  await page.getByRole('button', { name: 'Add as split tender' }).click();
   await expect(page.getByTestId('pos-check-over')).toBeVisible();
   await page.getByTestId('pos-check-ask-manager').click();
   await fillAppDialogPrompt(page, 'e2e: the manager knows this customer');
@@ -133,6 +132,7 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
 
   // The sale completes on the check the manager approved.
   await page.getByRole('button', { name: 'Add as split tender' }).click();
+  await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
   await page.getByTestId('pos-pay').click();
   const card = page.getByTestId('pos-complete');
   await expect(card).toContainText('Sale complete', { timeout: 15000 });
