@@ -50,11 +50,6 @@ type Alert struct {
 	Revision            int64            `json:"revision"`
 }
 
-// IsOpen says the alert is still on the customer: it has not been ended.
-func (a *Alert) IsOpen() bool {
-	return a != nil && a.EndedAt == nil
-}
-
 // AlertDraft is a validated alert to add.
 type AlertDraft struct {
 	Kind                AlertKind

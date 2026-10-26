@@ -35,11 +35,6 @@ export type AlertRequest = Schemas['AlertRequest'];
 
 /** What an alert is: a note to read, or a warning to act on. */
 export type AlertKind = NonNullable<Alert['kind']>;
-export const ALERT_KINDS: AlertKind[] = ['note', 'warning'];
-
-/** The state an alerts list holds: the open alerts, the ended ones, or both. */
-export type AlertState = 'open' | 'ended' | 'all';
-export const ALERT_STATES: AlertState[] = ['open', 'ended', 'all'];
 
 /** Every contact role the wire accepts (a contact may also have none). */
 export type ContactRole = NonNullable<Contact['role']>;
