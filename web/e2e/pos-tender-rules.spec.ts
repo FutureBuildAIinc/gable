@@ -152,7 +152,8 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   await expect(page.getByTestId('pos-check-over')).toContainText('over the check limit');
   await expect(page.getByTestId('pos-check-ask-manager')).toBeVisible();
-  await page.getByTestId('pos-pay').click();
+  // Pay stays off: the sale is not completed while the check is over the limit.
+  await expect(page.getByTestId('pos-pay')).toBeDisabled();
   await expect(page.getByTestId('pos-complete')).toHaveCount(0);
 
   // The account's own page: a $200 check limit on one account.
