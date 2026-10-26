@@ -805,12 +805,23 @@ In the Appwrite project the operator:
   JWT), and enables only the OAuth2 providers the dealer allows, entering each
   provider's client id and secret in its OAuth2
   settings, registering at the provider the redirect URI Appwrite shows
-  there (Appwrite's own callback, not Gable's). Those switches govern the
-  client methods only, and a key call skips them: the core's own email and
+  there (Appwrite's own callback, not Gable's). Those switches are the
+  project's own `auths` settings, and Appwrite's server reads them on every
+  request to a route in its `auth` group
+  (`app/controllers/shared/api/auth.php`), so a client call to the sign up
+  (`POST /v1/account`), to the client magic URL token or to any other client
+  method is refused while that method's switch is off; a key call skips that
+  check, so the core's own email and
   password sign in still works with email and password off, which slice 1
-  proves, while the client sign up (`POST /v1/account`) and the client magic
+  proves, while the client sign up and the client magic
   URL token stay closed, so no stranger can sign up under an invitee's
   address and block the invite;
+- creates the Team with the key, through the API, which is how a Team is
+  made with no owner membership at all: a Team created in the Appwrite
+  console gives its creator the owner role, and that person could never sign
+  in to Gable (section 5). So if the Team was created in the console, the
+  operator removes the console creator's owner membership with the key
+  before adding staff;
 - gives no member Appwrite's Team `owner` role, because Gable's key
   administers the Team and a Team `owner` can rewrite any member's roles or
   invite any address with any roles, which is as strong as every Gable role
@@ -943,9 +954,13 @@ trustworthy origin, so the local walk works.
   left as they were; an expired
   invite link failing cleanly and a resent invite working; a removed
   manager's PIN refused at once.
-- **Playwright** against the local Appwrite: sign in, sign out, and an
-  expired session showing the panel; one walk per redirect method as it
-  lands.
+- **Playwright, in two jobs.** The Playwright job keeps the persona flow and
+  the session expired panel on its own dev mode stack (`web/scripts/e2e-stack.sh`
+  builds that core with `AUTH_MODE=dev`, and a dev build exits when the
+  Appwrite settings are set, so that stack cannot sign in against Appwrite).
+  The Appwrite backed specs, the real sign in, the sign out and one walk per
+  redirect method as it lands, run in the local Appwrite job above, against a
+  core built without the tag.
 
 ### 10. Build plan
 
