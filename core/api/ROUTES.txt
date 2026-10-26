@@ -237,6 +237,9 @@ GET	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleListContac
 POST	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleCreateContact
 GET	/api/v1/customers/{id}	internal/customer	h.HandleGetCustomer
 PUT	/api/v1/customers/{id}	internal/customer	h.HandleUpdateCustomer
+GET	/api/v1/customers/{id}/alerts	internal/customer	h.HandleListAlerts
+POST	/api/v1/customers/{id}/alerts	internal/customer	h.HandleAddAlert
+POST	/api/v1/customers/{id}/alerts/{alertId}/end	internal/customer	h.HandleEndAlert
 GET	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleGetEscalationPolicy
 PUT	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleSetEscalationPolicy
 PATCH	/api/v1/customers/{id}/salesperson	internal/customer	h.HandleUpdateSalesperson

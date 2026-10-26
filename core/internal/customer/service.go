@@ -77,6 +77,7 @@ const (
 	PartShipTo           = "ship_to"
 	PartContact          = "contact"
 	PartEscalationPolicy = "escalation_policy"
+	PartAlert            = "alert"
 )
 
 type Service struct {
@@ -86,6 +87,7 @@ type Service struct {
 	audit    AuditLogger   // optional; nil writes no audit rows (unit tests)
 	branches BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
 	shared   SharedGuard   // optional; nil leaves a shared customer's fields unrestricted (unit tests)
+	actor    ActorResolver // optional; nil writes "unknown" for the rows that keep an author
 	now      func() time.Time
 }
 
@@ -110,6 +112,13 @@ func (s *Service) WithAudit(a AuditLogger) *Service {
 // WithBranchGuard makes Create refuse a primary_branch_id the caller may not target.
 func (s *Service) WithBranchGuard(g BranchGuard) *Service {
 	s.branches = g
+	return s
+}
+
+// WithActorResolver wires the naming of the acting principal for the rows
+// that keep one: the alert's author and the one who ended it.
+func (s *Service) WithActorResolver(a ActorResolver) *Service {
+	s.actor = a
 	return s
 }
 
@@ -149,7 +158,7 @@ func needRevision(p Precondition) error {
 
 // notFound maps the repository's sentinels to the wire's 404.
 func notFound(err error) error {
-	for _, s := range []error{ErrNotFound, ErrShipToNotFound, ErrContactNotFound, ErrTermsNotFound} {
+	for _, s := range []error{ErrNotFound, ErrShipToNotFound, ErrContactNotFound, ErrTermsNotFound, ErrAlertNotFound} {
 		if errors.Is(err, s) {
 			return httpx.NotFound(s.Error())
 		}

@@ -99,6 +99,15 @@ type Repository interface {
 	DeleteContact(ctx context.Context, id uuid.UUID) error
 	ListContacts(ctx context.Context, customerID uuid.UUID, f ChildFilter) ([]Contact, error)
 	CountContacts(ctx context.Context, customerID uuid.UUID, f ChildFilter) (int64, error)
+
+	// The alerts of a customer: added, listed and ended. An alert is ended,
+	// not deleted, so the row stays for the audit trail.
+	InsertAlert(ctx context.Context, a *Alert) error
+	GetAlert(ctx context.Context, id uuid.UUID) (*Alert, error)
+	LockAlert(ctx context.Context, id uuid.UUID) error
+	EndAlert(ctx context.Context, a *Alert) error
+	ListAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) ([]Alert, error)
+	CountAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) (int64, error)
 }
 
 type PostgresRepository struct {

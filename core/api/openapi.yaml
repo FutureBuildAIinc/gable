@@ -3449,6 +3449,152 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts:
+    get:
+      operationId: customerListAlerts
+      tags: [customer]
+      summary: List a customer's alerts
+      description: >-
+        The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, ended, all]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: customerCreateAlert
+      tags: [customer]
+      summary: Leave an alert on a customer
+      description: >-
+        kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertRequest"
+      responses:
+        "201":
+          description: The created alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts/{alertId}/end:
+    post:
+      operationId: customerEndAlert
+      tags: [customer]
+      summary: End an alert
+      description: >-
+        An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The ended alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/contacts/{id}:
     get:
       operationId: contactGet
@@ -23449,6 +23595,62 @@ components:
         updated_at:
           type: string
           format: date-time
+    Alert:
+      type: object
+      required: [id, customer_id, kind, text, show_at_counter, show_at_orders, acknowledge_required, created_by, created_at, ended_by, ended_at, revision]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string, maxLength: 500}
+        show_at_counter: {type: boolean, description: "The alert speaks in the counter's customer panel."}
+        show_at_orders: {type: boolean, description: "The alert speaks on the order page."}
+        acknowledge_required: {type: boolean, description: "A warning only: the counter has to read it and say so before the sale is taken."}
+        created_by: {type: string, description: "The signed-in user who left the alert."}
+        created_at: {type: string, format: date-time}
+        ended_by: {type: [string, "null"], description: "The signed-in user who called the alert off; null while it is open."}
+        ended_at: {type: [string, "null"], format: date-time, description: "When the alert was called off; null while it is open."}
+        revision: {type: integer, format: int64, minimum: 1, description: "Moves when the alert is ended."}
+    AlertPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alert"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    AlertRequest:
+      type: object
+      required: [kind, text]
+      additionalProperties: false
+      description: >-
+        The body of an alert to leave. The author is the signed-in user, never the body.
+      properties:
+        kind:
+          type: string
+          enum: [note, warning]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        show_at_counter:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        show_at_orders:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        acknowledge_required:
+          type: boolean
+          description: "Defaults to false; only a warning may ask to be acknowledged."
     ContactPage:
       type: object
       required: [items, next_cursor, limit]
