@@ -216,7 +216,7 @@ describe('the counter as the Panels layout', () => {
   });
 
   describe('the account refusal guards', () => {
-    type Inner = { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _tenderMethod: string; _chooseMethod(m: string): void };
+    type Inner = { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _jobId: string; _tenderMethod: string; _accountRefusal: string | null; _chooseMethod(m: string): void };
     const inner = (el: POSTerminal) => el as unknown as Inner;
     const withCustomer = async (c: CounterCustomer, po = ''): Promise<POSTerminal> => {
       const el = await mount(sale({ customer_id: c.id }));
