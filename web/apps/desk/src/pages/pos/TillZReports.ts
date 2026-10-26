@@ -6,6 +6,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { posService } from '../../services/POSService';
 import type { TillReport, ZReport } from '../../types/pos';
 import { formatDateTime } from '../../lib/dates.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import './TillReportView.ts';
 
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -82,10 +84,9 @@ export class TillZReports extends LitElement {
         return html`
             <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Z Reports</h2>
             <p style="margin:0 0 14px;font-size:13px;color:rgb(var(--gb-till-muted))">The frozen close of each past drawer of register <span class="font-mono">${this.registerId}</span>. One opens read only.</p>
-            <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px" for="z-day">Business day (empty is today)</label>
-            <input id="z-day" type="date" .value=${this.day} data-testid="z-day"
-                @change=${(e: Event) => { this.day = (e.target as HTMLInputElement).value; void this.load(); }}
-                style="width:100%;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none" />
+            <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Business day (empty is today)</label>
+            <gable-date-field label="Business day" data-testid="z-day" .value=${this.day}
+                @change=${(e: Event) => { this.day = (e.target as GableDateField).value; void this.load(); }}></gable-date-field>
             ${this.failure ? html`<p role="alert" data-testid="z-failure" style="margin:12px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this.failure}</p>` : nothing}
             <div style="margin-top:14px" data-testid="z-list">
                 ${list === null ? html`<p style="font-size:13px;color:rgb(var(--gb-till-muted))">Reading the Z reports…</p>`
