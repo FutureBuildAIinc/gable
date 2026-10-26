@@ -176,9 +176,12 @@ test('a pickup taken and a held variance signed off by the manager\'s PIN', asyn
   await page.getByRole('button', { name: 'Close Till' }).click();
   // the count dialog lists one field per tender the drawer expects; the
   // cash field is the row whose label reads Cash
-  const cashField = page.locator('label').filter({ hasText: 'Cash' }).first()
-    .locator('xpath=following-sibling::input');
-  await cashField.fill('60.00');
+  // every field the drawer expects must be counted: cash at 60 (the drawer
+  // holds 80 of it after the float and the pickup), the rest at nothing
+  const counts = page.getByRole('spinbutton');
+  for (let i = 0; i < await counts.count(); i++) {
+    await counts.nth(i).fill(i === 0 ? '60.00' : '0.00');
+  }
   await page.getByRole('button', { name: 'Post Count & Close' }).click();
   await expect(page.getByTestId('till-waiting-signoff')).toBeVisible({ timeout: 15000 });
 
