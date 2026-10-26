@@ -282,7 +282,7 @@ describe('the counter as the Panels layout', () => {
     it('shows the chosen job and purchase order on the summary panels and the completed sale', async () => {
       const el = await withCustomer(needsJob, 'PO-42');
       inner(el)._jobId = 'j1';
-      inner(el)._sale = sale({ customer_id: needsJob.id, customer_po: 'PO-42', job_id: 'j1', status: 'completed', tenders: [{ method: 'account', amount_cents: 8650 }] });
+      inner(el)._sale = sale({ customer_id: needsJob.id, customer_po: 'PO-42', job_id: 'j1', status: 'completed' });
       await el.updateComplete;
       expect(q(el, 'review-po').textContent).toBe('PO-42');
       expect(q(el, 'review-job').textContent).toBe('Ridge Build');
