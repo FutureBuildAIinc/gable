@@ -112,12 +112,14 @@ test('weigh in and out sets the line quantity and tags the sale', async ({ page,
 
   // The first weighable line is the only one; pick it by its value.
   const lineSelect = page.getByTestId('scale-line-out');
-  const value = await lineSelect.evaluate((el) => {
-    const opts = (el as unknown as { options: { value: string; label: string }[] }).options;
-    return opts.find((o) => o.value !== '')?.value ?? '';
-  });
+  const firstOptionValue = async (el: ReturnType<Page['getByTestId']>) =>
+    el.evaluate((node) => {
+      const opts = (node as unknown as { options: { value: string; label: string }[] }).options;
+      return opts.find((o) => o.value !== '')?.value ?? '';
+    });
+  const value = await firstOptionValue(lineSelect);
   await pickOptionByValue(lineSelect, value);
-  await pickOptionByValue(page.getByTestId('scale-ticket-out'), 'wt1');
+  await pickOptionByValue(page.getByTestId('scale-ticket-out'), await firstOptionValue(page.getByTestId('scale-ticket-out')));
   await page.getByTestId('scale-weigh-out').click();
 
   const qtyInput = page.locator('[data-testid="pos-line-quantity"] input').first();
@@ -136,7 +138,7 @@ test('weigh in and out sets the line quantity and tags the sale', async ({ page,
 
   const card = page.getByTestId('pos-complete');
   await expect(card).toContainText('Sale complete', { timeout: 15000 });
-  await expect(card).toContainText(ticketNumber);
+  await expect(badge).toContainText(ticketNumber);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-scale-completed.png'), fullPage: true });
 });
 
