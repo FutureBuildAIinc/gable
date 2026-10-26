@@ -34,7 +34,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
-	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
@@ -68,8 +67,10 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/scheduling"
+	"github.com/gablelbm/gable/internal/signinmethods"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -263,6 +264,15 @@ func Run() {
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db)
 	unit.NewHandler(unitSvc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+		middleware.RequireRole("admin", "owner"))
+
+	// Paint tint catalogue (row CP-16): the dealer's own bases, colorants,
+	// colours and per size formulas, the rescale, and the saved colours per
+	// customer and job. Read for every desk role (the counter needs it mid
+	// sale), write for admin and owner; the catalogue is dealer wide.
+	tintSvc := tint.NewService(tint.NewRepository(db))
+	tint.NewHandler(tintSvc).RegisterRoutes(mux,
 		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
 		middleware.RequireRole("admin", "owner"))
 
