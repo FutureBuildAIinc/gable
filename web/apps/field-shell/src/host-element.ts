@@ -51,6 +51,7 @@ import { currentYardId, loadYards, storeYard } from './yard.ts';
 const DEV_ROLES: readonly { id: string; label: string }[] = [
   { id: 'warehouse', label: 'Warehouse' },
   { id: 'driver', label: 'Driver' },
+  { id: 'cashier', label: 'Cashier' },
   { id: 'owner', label: 'Owner' },
   { id: 'admin', label: 'Admin' },
 ];
