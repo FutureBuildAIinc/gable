@@ -17,6 +17,7 @@ import type {
     TillSession,
     TillReport,
     TillMovement,
+    ZReport,
     MovementRequest,
     BranchDay,
     DepositCandidate,
@@ -450,6 +451,27 @@ export const posService = {
                 body: JSON.stringify({ counted_by_method: countedByMethod, notes }),
             }),
             'Failed to close the till',
+        );
+        return response.json();
+    },
+
+    /** The register's stored Z reports of a business date (today when none is sent). */
+    async zReports(registerID: string, date?: string): Promise<ZReport[]> {
+        const params = new URLSearchParams({ register_id: registerID });
+        if (date) params.set('date', date);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/zreports?${params.toString()}`),
+            'Failed to load the Z reports',
+        );
+        const list = (await response.json()) as ZReport[];
+        return Array.isArray(list) ? list : [];
+    },
+
+    /** One session's frozen Z report. */
+    async zReport(sessionID: string): Promise<ZReport> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/zreport`),
+            'Failed to load the Z report',
         );
         return response.json();
     },
