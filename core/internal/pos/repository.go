@@ -131,7 +131,7 @@ type Repository interface {
 	// Z-reports
 	CreateZReport(ctx context.Context, z *ZReport) error
 	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
-	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
+	ListZReports(ctx context.Context, registerID string, date string) ([]ZReport, error)
 
 	// LockCustomerCredit serializes the acts that read one customer's
 	// credit exposure (section 11, step 1a: the same advisory lock the
