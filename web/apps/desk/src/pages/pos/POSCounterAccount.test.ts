@@ -174,6 +174,16 @@ describe('can this sale go on account? the standing line and its ways forward', 
     el.remove();
   });
 
+  it('offers a deposit on the customer’s order once the account is attached', async () => {
+    const el = await withAccount(standing());
+    const button = q(el, 'pos-deposit-on-order') as HTMLButtonElement;
+    expect(button).toBeDefined();
+    button.click();
+    await el.updateComplete;
+    expect(el.querySelector('[data-testid="pos-deposit-dialog"]')).toBeDefined();
+    el.remove();
+  });
+
   it('opens the account’s own page to take a payment, and the sale stays open', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const el = await withAccount(blockedStanding());
