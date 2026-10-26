@@ -88,10 +88,12 @@ export function verdictLine(s: CounterStanding): Standing {
  * The standing line of an account the AR core holds: the same blocked
  * treatment the zero limit gets, in the hold's own words (the verdict's line
  * beneath it carries the hold's reason), or null when the account is not
- * held by a hold record.
+ * held by a hold record. Keyed off the server's on_hold flag, not the
+ * verdict's reason: a sale over the cap of a live override window is refused
+ * with the same reason while the account itself is not held.
  */
 export function holdStanding(s: CounterStanding | null): Standing | null {
-    if (s === null || s.on_account.verdict !== 'blocked' || s.on_account.reason !== 'account_hold') return null;
+    if (s === null || !s.on_hold || s.on_account.verdict !== 'blocked' || s.on_account.reason !== 'account_hold') return null;
     return { tone: 'stop', text: 'On credit hold' };
 }
 

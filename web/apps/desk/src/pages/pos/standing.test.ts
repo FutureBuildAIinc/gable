@@ -201,6 +201,19 @@ describe('an account held by a credit hold record', () => {
         expect(holdStanding(allowed)).toBeNull();
         expect(holdStanding(null)).toBeNull();
     });
+    it('is not a held record when only the sale is over the cap of a live override window: the on_hold flag says the account is not held', () => {
+        const overCap: CounterStanding = {
+            ...heldRecord,
+            on_hold: false,
+            on_account: {
+                verdict: 'blocked', reason: 'account_hold', over_cents: null,
+                message: 'The hold on this account is overridden up to 5.99 USD a sale: this sale asks 6.00 USD.',
+                ways_forward: holdWays,
+            },
+        };
+        expect(holdStanding(overCap)).toBeNull();
+        expect(verdictLine(overCap).text).toContain('overridden up to');
+    });
     it('offers no account tender while the hold stands', () => {
         expect(heldRecord.payment_options).not.toContain('account');
     });
