@@ -29,18 +29,10 @@ export class GablePosOrderDeposit extends LitElement {
 
   @state() private _orders: OrderSummary[] = [];
   @state() private _loading = false;
-  @state() private _pickedId = '';
   @state() private _picked: Order | null = null;
-  @state() private _taking = false;
 
   updated(changed: Map<string, unknown>) {
-    if (changed.has('isOpen') && this.isOpen) {
-      this._pickedId = '';
-      this._picked = null;
-      void this._loadOrders();
-    }
-    if (changed.has('customerId') && this.isOpen) {
-      this._pickedId = '';
+    if ((changed.has('isOpen') && this.isOpen) || (changed.has('customerId') && this.isOpen)) {
       this._picked = null;
       void this._loadOrders();
     }
@@ -65,30 +57,25 @@ export class GablePosOrderDeposit extends LitElement {
   }
 
   private async _pick(id: string) {
-    this._pickedId = id;
     this._picked = null;
-    if (!id) return;
     try {
       this._picked = await OrderService.getOrder(id);
     } catch {
       ToastService.show('Failed to read the order', 'error');
-      this._pickedId = '';
     }
   }
 
   private async _takeDeposit(deposit: CreatePaymentRequest) {
-    this._taking = true;
     try {
       await paymentService.createPayment(deposit);
       ToastService.show(`Deposit taken on ${this._picked?.number ?? 'the order'}`, 'success');
-      this._close();
-      // the order's balance shrank: reload it if the clerk picks it again
+      // the order's balance shrank: the dialog closes and the list reloads
+      // clean if the clerk takes another
       this._picked = null;
-      this._pickedId = '';
+      this._close();
+      void this._loadOrders();
     } catch (err) {
       ToastService.show(err instanceof Error ? err.message : 'Failed to take the deposit', 'error');
-    } finally {
-      this._taking = false;
     }
   }
 
@@ -108,7 +95,7 @@ export class GablePosOrderDeposit extends LitElement {
                 Total ${formatCents(this._picked.total_cents)} · balance due after deposits
                 <span class="font-mono">${formatCents(this._picked.balance_due_after_deposits_cents)}</span>
               </p>
-              <button type="button" @click=${() => { this._picked = null; this._pickedId = ''; }}
+              <button type="button" @click=${() => { this._picked = null; }}
                 class="mt-2 text-sm text-zinc-300 hover:text-white underline">Pick another order</button>
             </div>
             <gable-deposit-modal
