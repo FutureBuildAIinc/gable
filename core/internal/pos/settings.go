@@ -69,14 +69,16 @@ type PosSettings struct {
 }
 
 // CheckIDRequiredOverCents reads the ID rule; nil is never (absent or empty).
+// A failed read is an error, never "never": the rule a dealer asked for is
+// not switched off by a broken query.
 func (r *PostgresRepository) CheckIDRequiredOverCents(ctx context.Context) (*int64, error) {
 	var raw *string
 	err := r.ex(ctx).QueryRow(ctx, `SELECT value FROM system_settings WHERE key = $1`, settingCheckIDRequired).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) || raw == nil || strings.TrimSpace(*raw) == "" {
-		return nil, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
+	}
+	if err != nil || raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
 	}
 	n, perr := strconv.ParseInt(strings.TrimSpace(*raw), 10, 64)
 	if perr != nil || n < 0 {
@@ -155,42 +157,54 @@ func errSettingWrite(err error) error {
 
 // checkTenderIDRule holds each check tender to the dealer's ID rule
 // (pos.check_id_required_over_cents): absent or empty is never, 0 is every
-// check, a figure is checks over it. A check the rule covers that does not
-// carry id_checked is refused 409 id_required; the rule never asks for the
-// ID's number, which no body carries. Cash is never held.
+// check, a figure is checks over it. The rule reads one check at a time, as
+// the check limit does: a check it covers is refused 409 id_required unless
+// that same tender carries id_checked, so a second checked check in the sale
+// frees nothing, and splitting the money into checks under the figure leaves
+// each check uncovered. The rule never asks for the ID's number, which no
+// body carries. Cash is never held.
 func (s *Service) checkTenderIDRule(ctx context.Context, customerID uuid.UUID, tenders []TenderIn) error {
-	var biggest int64
+	anyCheck := false
 	for i := range tenders {
-		if tenders[i].Method == TenderCheck && int64(tenders[i].AmountCents) > biggest {
-			biggest = int64(tenders[i].AmountCents)
+		if tenders[i].Method == TenderCheck {
+			anyCheck = true
+			break
 		}
 	}
-	if biggest == 0 {
+	if !anyCheck {
 		return nil
 	}
 	over, err := s.repo.CheckIDRequiredOverCents(ctx)
 	if err != nil {
 		return err
 	}
-	if over == nil || biggest <= *over {
+	if over == nil {
 		return nil
 	}
+	var facts *CustomerFacts
 	for i := range tenders {
-		if tenders[i].Method == TenderCheck && tenders[i].IDChecked {
-			return nil
+		if tenders[i].Method != TenderCheck || tenders[i].IDChecked {
+			continue
 		}
+		if *over != 0 && int64(tenders[i].AmountCents) <= *over {
+			continue
+		}
+		if facts == nil {
+			f, ferr := s.repo.CustomerFacts(ctx, customerID)
+			if ferr != nil {
+				return ferr
+			}
+			facts = &f
+		}
+		if *over == 0 {
+			return conflict("id_required",
+				"This check needs the customer's ID: check it and pick the ID type")
+		}
+		return conflict("id_required", fmt.Sprintf(
+			"A check over %s needs the customer's ID: check it and pick the ID type",
+			moneyWords(facts.Currency, *over)))
 	}
-	facts, err := s.repo.CustomerFacts(ctx, customerID)
-	if err != nil {
-		return err
-	}
-	if *over == 0 {
-		return conflict("id_required",
-			"A check needs the customer's ID: check it and pick the ID type")
-	}
-	return conflict("id_required", fmt.Sprintf(
-		"A check over %s needs the customer's ID: check it and pick the ID type",
-		moneyWords(facts.Currency, *over)))
+	return nil
 }
 
 // idRuleOf shapes the raw setting as the wire's rule.

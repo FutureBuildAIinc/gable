@@ -104,6 +104,29 @@ func TestCP04_CashUnaffectedByIDRule(t *testing.T) {
 	}
 }
 
+// RULE: the ID rule holds each check tender on its own. A check the rule
+// covers is refused without its own ID even when a second check in the same
+// sale carried one, and splitting the money into checks under the figure
+// leaves each check uncovered (the rule is per check, as the limit rule is).
+func TestCP04_SplitCheckEachNeedsID(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	setIDRule(t, f, "1000")
+
+	// the covered check carries no ID; a small checked check does not free it
+	sale, _ := f.cartOf("2", nil) // 1198
+	blockerOf(t, f.completeSale(sale, idTender(100, "state_id"), tender("check", 1098)), "id_required")
+	// the same two checks, each with the ID, complete
+	if r := f.completeSale(sale, idTender(100, "state_id"), idTender(1098, "drivers_license")); r.status != http.StatusOK {
+		t.Errorf("two checks each with the ID = %d: %s", r.status, r.raw)
+	}
+	// two checks under the figure ask for no ID: the rule reads one check at a time
+	sale2, _ := f.cartOf("2", nil)
+	if r := f.completeSale(sale2, tender("check", 599), tender("check", 599)); r.status != http.StatusOK {
+		t.Errorf("two checks under the figure = %d: %s", r.status, r.raw)
+	}
+}
+
 // RULE: the settings round trip carries both rules; only an owner or an
 // admin may write them, a stale revision is refused, and the write is
 // audited.
@@ -147,8 +170,12 @@ func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 		t.Errorf("a write on a revision the settings never held = %d %s, want 409 stale_revision: %s", r.status, code, r.raw)
 	}
 
+	var written []int64
+	var actors []string
 	for _, role := range []string{"admin", "owner"} {
-		get = f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", role, "X-Test-Sub", mustUUID(t))
+		sub := mustUUID(t)
+		actors = append(actors, sub)
+		get = f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", role, "X-Test-Sub", sub)
 		if get.status != http.StatusOK {
 			t.Fatalf("GET as %s = %d: %s", role, get.status, get.raw)
 		}
@@ -156,13 +183,14 @@ func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 		wantLimit := int64(10000 + cur)
 		wantOver := int64(5000 + cur)
 		put := f.do("PUT", "/api/v1/pos/settings", body(wantLimit, "over_amount", wantOver, cur),
-			"X-Test-Role", role, "X-Test-Sub", mustUUID(t), "If-Match", fmt.Sprintf(`"%d"`, cur))
+			"X-Test-Role", role, "X-Test-Sub", sub, "If-Match", fmt.Sprintf(`"%d"`, cur))
 		if put.status != http.StatusOK {
 			t.Fatalf("PUT as %s = %d: %s", role, put.status, put.raw)
 		}
 		if rev(t, put) != cur+1 {
 			t.Errorf("revision after the write = %d, want %d", rev(t, put), cur+1)
 		}
+		written = append(written, rev(t, put))
 		rules := rulesOf(put.body)
 		if num(t, rules, "check_limit_cents") != wantLimit {
 			t.Errorf("check_limit_cents = %v, want %d", rules["check_limit_cents"], wantLimit)
@@ -177,9 +205,15 @@ func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 	if v := f.scalar(`SELECT value FROM system_settings WHERE key = 'pos.check_limit_cents'`); v == nil {
 		t.Errorf("the check limit setting row was not written")
 	}
-	// the audit row
-	if n := f.scalar(`SELECT count(*) FROM audit_log WHERE action = 'pos.settings.saved'`); n == nil {
-		t.Errorf("the settings write wrote no audit row")
+	// the audit rows: one per write, each carrying the revision it made
+	// (scoped to this test's actors; the table keeps earlier runs' rows)
+	if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.settings.saved' AND user_id::text = ANY($1)`, actors); n != int64(len(written)) {
+		t.Errorf("the settings writes wrote %d audit rows, want %d", n, len(written))
+	}
+	for i, r := range written {
+		if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.settings.saved' AND user_id::text = $1 AND (changes->>'revision')::bigint = $2`, actors[i], r); n != 1 {
+			t.Errorf("revision %d carries %d audit rows, want 1", r, n)
+		}
 	}
 }
 
