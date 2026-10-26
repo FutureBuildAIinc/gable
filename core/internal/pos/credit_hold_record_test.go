@@ -11,13 +11,18 @@ package pos_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
@@ -249,11 +254,15 @@ func TestCP11_ManagerOverrideCoversHold(t *testing.T) {
 }
 
 // RULE: a hold placed while sales complete (pool size 4, three contenders,
-// the hold under the same credit advisory lock the completion takes): no
-// charge completes after the hold commits.
+// the hold placed through the AR core's own act, the completions the real
+// completions): the hold act serializes with the completion on the
+// customer's credit lock, so it cannot commit inside a completion's window
+// (between its fact read and its commit) and let a charge land on an
+// account that is held from that moment on.
 func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	arSvc := account.NewService(f.db, gl.NewService(gl.NewRepository(f.db), nil, slog.Default()), slog.Default())
 	sales := make([]string, 3)
 	for i := range sales {
 		sales[i] = f.startSale(&f.customerID)
@@ -261,47 +270,38 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 			t.Fatalf("add line = %d: %s", r.status, r.raw)
 		}
 	}
-	placedAt := make(chan time.Time, 1)
-	f.t.Cleanup(func() {
-		mustExec(f.t, f.db, `DELETE FROM credit_holds WHERE customer_id = $1`, f.customerID)
-		mustExec(f.t, f.db, `UPDATE customers SET credit_hold = FALSE WHERE id = $1`, f.customerID)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM credit_holds WHERE customer_id = $1`, f.customerID)
+		mustExec(t, f.db, `UPDATE customers SET credit_hold = FALSE WHERE id = $1`, f.customerID)
 	})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer close(placedAt)
-		// the hold takes the customer's credit advisory lock, the lock every
-		// account completion holds while it reads the facts, so it lands
-		// between two completions and never inside one's read
-		tx, err := f.db.Pool.Begin(context.Background())
-		if err != nil {
-			f.t.Error(err)
-			return
-		}
-		defer tx.Rollback(context.Background())
-		if _, err := tx.Exec(context.Background(),
-			`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, f.customerID.String()); err != nil {
-			f.t.Error(err)
-			return
-		}
-		var at time.Time
-		if err := tx.QueryRow(context.Background(), `INSERT INTO credit_holds (customer_id, reason, hold_type, status, placed_by)
-			VALUES ($1, 'credit review', 'MANUAL', 'ACTIVE', 'ar-test') RETURNING placed_at`, f.customerID).Scan(&at); err != nil {
-			f.t.Error(err)
-			return
-		}
-		if _, err := tx.Exec(context.Background(), `UPDATE customers SET credit_hold = TRUE WHERE id = $1`, f.customerID); err != nil {
-			f.t.Error(err)
-			return
-		}
-		if err := tx.Commit(context.Background()); err != nil {
-			f.t.Error(err)
-			return
-		}
-		placedAt <- at
-	}()
+
+	// A connection of the test's own (never one of the pool's four) holds
+	// the product's inventory row, so every completion stops at its stock
+	// out: after it has read the account facts and passed the verdict,
+	// before it posts. That is the window the hold act must not land in.
+	stall, err := database.Connect(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stall.Close() })
+	stallTx, err := stall.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stallTx.Rollback(context.Background())
+	var stallXID string
+	if err := stallTx.QueryRow(context.Background(), `
+		SELECT pg_current_xact_id()::text FROM inventory WHERE product_id = $1 AND location_id = $2
+		FOR UPDATE OF inventory`, f.productID, f.yardID).Scan(&stallXID); err != nil {
+		t.Fatalf("hold the inventory row: %v", err)
+	}
+
+	// Three completions race (pool size 4): the first holds the customer's
+	// credit lock and stops at the stock out, the other two queue on the
+	// lock.
+	ctx := context.Background()
 	statuses := make([]int, 3)
+	var wg sync.WaitGroup
 	for i := range sales {
 		wg.Add(1)
 		go func(i int) {
@@ -309,30 +309,67 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 			statuses[i] = f.completeSale(sales[i], tender("account", 599)).status
 		}(i)
 	}
-	wg.Wait()
-	at, ok := <-placedAt
-	if !ok {
-		t.Fatal("the hold never landed")
-	}
-	for i, st := range statuses {
-		if st != http.StatusOK && st != http.StatusConflict {
-			t.Errorf("sale %d = %d, want 200 or 409", i, st)
-			continue
-		}
-		if st != http.StatusOK {
-			continue
-		}
-		var completedAt time.Time
-		if err := f.db.Pool.QueryRow(context.Background(),
-			`SELECT completed_at FROM pos_transactions WHERE id = $1`, sales[i]).Scan(&completedAt); err != nil {
+	// wait until a completion is blocked on the stalled row: a lock waiting
+	// on the stall's transaction id
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := f.db.Pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
-		if !completedAt.Before(at) {
-			t.Errorf("sale %s completed at %s, after the hold committed at %s", sales[i], completedAt, at)
+		if waiting > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := f.scalar(`SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).(int64); n == 0 {
+		t.Fatal("no completion ever reached its stock out: the stall proved nothing")
+	}
+
+	// The AR core places the hold, the act the route drives. It must not
+	// commit while a completion's transaction is open on this customer.
+	placed := make(chan error, 1)
+	go func() {
+		_, _, err := arSvc.PlaceHold(ctx, account.PlaceHoldIn{CustomerID: f.customerID,
+			Reason: "credit review", HoldType: "manual", Actor: "ar-test"})
+		placed <- err
+	}()
+	select {
+	case err := <-placed:
+		if err == nil {
+			t.Fatal("the hold act committed while a charge sale's transaction was open: money can go on an account the hold already holds")
+		}
+		t.Fatalf("the hold act failed: %v", err)
+	case <-time.After(2 * time.Second):
+		// still running: the act is waiting for the credit lock the
+		// completions hold, which is the rule this test proves
+	}
+
+	// let the sales through and take the hold's answer
+	if err := stallTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if err := <-placed; err != nil {
+		t.Fatalf("the hold act failed: %v", err)
+	}
+	for i, st := range statuses {
+		if st != http.StatusOK {
+			t.Errorf("sale %d = %d, want 200 (each decided before the hold could land)", i, st)
 		}
 	}
-	if got := f.balance(); got > 599 {
-		t.Errorf("balance_due = %d, want at most one charge of 599", got)
+	if got := f.balance(); got != 3*599 {
+		t.Errorf("balance_due = %d, want %d (three charges, each decided before the hold)", got, 3*599)
+	}
+
+	// the hold stands: the next charge on the account is refused
+	next := f.startSale(&f.customerID)
+	if r := f.addLine(next, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(next, tender("account", 599)); r.status != http.StatusConflict {
+		t.Errorf("a sale after the hold = %d, want 409: %s", r.status, r.raw)
 	}
 	f.assertARInvariants(t)
 }
