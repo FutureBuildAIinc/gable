@@ -156,7 +156,12 @@ test.describe('Deposits on an order', () => {
     await depositDialog.getByTestId('deposit-submit').click();
     const counterRes = await counterDeposit;
     expect(counterRes.status(), await counterRes.text()).toBe(201);
-    expect(counterRes.request().postDataJSON()).toMatchObject({ customer_id: customer.id, order_id: second.id, amount_cents: 300 });
+    expect(counterRes.request().postDataJSON()).toMatchObject({
+      customer_id: customer.id,
+      order_id: second.id,
+      till_session_id: expect.any(String),
+      amount_cents: 300,
+    });
     await expect(depositDialog).toHaveCount(0);
     await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-deposit-taken.png'), fullPage: true });
   });

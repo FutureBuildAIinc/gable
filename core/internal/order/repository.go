@@ -407,13 +407,26 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 
 // orderDeposits reads the posted payments taken against the order with their
 // live applications, oldest first: the deposit figures the order answer
-// carries (CP-07).
+// carries (CP-07). Only the portion left unapplied at receipt is the order's
+// deposit; any part applied at receipt to settle an invoice (act_id = p.id)
+// is an invoice payment, not a deposit or a deposit application.
 func (r *PostgresRepository) orderDeposits(ctx context.Context, orderID uuid.UUID) ([]OrderDeposit, error) {
 	deposits := []OrderDeposit{}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT p.id, p.number, to_char(p.received_on, 'YYYY-MM-DD'), p.method,
-		       ROUND(p.amount * 100)::bigint, ROUND(p.amount_unapplied * 100)::bigint, p.reference
-		FROM payments p WHERE p.order_id = $1 AND p.status = 'POSTED'
+		       ROUND(p.amount * 100)::bigint - COALESCE((
+		           SELECT SUM(ROUND(a.amount * 100)::bigint)
+		           FROM ar_applications a
+		           WHERE a.payment_id = p.id AND a.act_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL
+		       ), 0),
+		       ROUND(p.amount_unapplied * 100)::bigint, p.reference
+		FROM payments p
+		WHERE p.order_id = $1 AND p.status = 'POSTED'
+		  AND ROUND(p.amount * 100)::bigint > COALESCE((
+		      SELECT SUM(ROUND(a.amount * 100)::bigint)
+		      FROM ar_applications a
+		      WHERE a.payment_id = p.id AND a.act_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL
+		  ), 0)
 		ORDER BY p.created_at, p.id`, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the order's deposits: %w", err)
@@ -440,7 +453,7 @@ func (r *PostgresRepository) orderDeposits(ctx context.Context, orderID uuid.UUI
 	appRows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT a.payment_id, a.invoice_id, ROUND(a.amount * 100)::bigint, to_char(a.applied_on, 'YYYY-MM-DD')
 		FROM ar_applications a JOIN payments p ON p.id = a.payment_id
-		WHERE p.order_id = $1 AND a.reversed_at IS NULL AND a.kind = 'PAYMENT'
+		WHERE p.order_id = $1 AND a.reversed_at IS NULL AND a.kind = 'PAYMENT' AND a.act_id <> p.id
 		ORDER BY a.created_at, a.id`, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the deposits' applications: %w", err)

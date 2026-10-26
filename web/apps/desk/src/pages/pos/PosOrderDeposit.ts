@@ -14,10 +14,10 @@ import type { CreatePaymentRequest } from '../../types/payment';
 
 /**
  * The counter's deposit on an order (CP-07): with an account customer
- * attached at /pos, list their open orders and take a deposit on one through
- * the same payments route the order page uses (the order's customer, the
- * register's branch, the order named, no applications). Cash or check leaves
- * the drawer exactly as the order page's deposit does.
+ * attached at /pos and an open till session, list their open orders and take
+ * a deposit on one through the payments route (the order's customer, the
+ * order's own branch, the open till session, the order named, no
+ * applications). Cash or check enters the open drawer and its expected count.
  */
 @customElement('gable-pos-order-deposit')
 export class GablePosOrderDeposit extends LitElement {
@@ -28,6 +28,8 @@ export class GablePosOrderDeposit extends LitElement {
   /** The register's branch: the deposit is booked in the order's own branch,
    *  and an order of another branch is refused here, not silently rebooked. */
   @property({ type: String, attribute: 'branch-id' }) branchId = '';
+  /** The open till session the counter deposit rides. */
+  @property({ type: String, attribute: 'till-session-id' }) tillSessionId = '';
 
   @state() private _orders: OrderSummary[] = [];
   @state() private _loading = false;
@@ -75,8 +77,12 @@ export class GablePosOrderDeposit extends LitElement {
   }
 
   private async _takeDeposit(deposit: CreatePaymentRequest) {
+    if (!this.tillSessionId) {
+      ToastService.show('Open a till session before taking a counter deposit', 'error');
+      return;
+    }
     try {
-      await paymentService.createPayment(deposit);
+      await paymentService.createPayment({ ...deposit, till_session_id: this.tillSessionId });
       ToastService.show(`Deposit taken on ${this._picked?.number ?? 'the order'}`, 'success');
       // the order's balance shrank: the dialog closes and the list reloads
       // clean if the clerk takes another

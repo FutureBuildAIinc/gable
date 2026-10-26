@@ -679,8 +679,9 @@ export class POSTerminal extends LitElement {
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
           <div class="mt-2">
-            <button type="button" data-testid="pos-deposit-on-order" @click=${() => { this._depositOpen = true; }}
-              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5">
+            <button type="button" data-testid="pos-deposit-on-order" ?disabled=${this._till === null}
+              @click=${() => { this._depositOpen = true; }}
+              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
               Deposit on an order
             </button>
           </div>
@@ -721,7 +722,8 @@ export class POSTerminal extends LitElement {
           <gable-pos-order-deposit
             .isOpen=${this._depositOpen}
             .customerId=${c.id}
-            .branchId=${this._sale?.branch_id ?? ''}
+            .branchId=${this._sale?.branch_id ?? this._till?.branch_id ?? ''}
+            .tillSessionId=${this._till?.id ?? ''}
             @close=${() => { this._depositOpen = false; }}
           ></gable-pos-order-deposit>
         </div>`;

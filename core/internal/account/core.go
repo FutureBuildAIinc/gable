@@ -53,6 +53,9 @@ func NewService(db *database.DB, glSvc *gl.Service, logger *slog.Logger) *Servic
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if db != nil && db.Pool != nil {
+		_, _ = db.Pool.Exec(context.Background(), `ALTER TABLE payments ADD COLUMN IF NOT EXISTS till_session_id UUID NULL REFERENCES till_sessions (id)`)
+	}
 	return &Service{db: db, gl: glSvc, logger: logger, now: time.Now}
 }
 

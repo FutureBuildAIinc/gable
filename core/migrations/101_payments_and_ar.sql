@@ -81,6 +81,7 @@ UPDATE payments p SET received_on = pg_temp.mig101_local_date(p.created_at, p.br
 ALTER TABLE payments ALTER COLUMN received_on SET NOT NULL;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS order_id UUID NULL REFERENCES orders (id);
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS project_id UUID NULL REFERENCES projects (id);
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS till_session_id UUID NULL REFERENCES till_sessions (id);
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS amount_unapplied NUMERIC(12, 2) NULL;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS migrated_excess NUMERIC(12, 2) NOT NULL DEFAULT 0;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS gl_entry_id UUID NULL REFERENCES gl_journal_entries (id);
@@ -520,4 +521,5 @@ CREATE INDEX IF NOT EXISTS idx_payments_customer ON payments (customer_id);
 CREATE INDEX IF NOT EXISTS idx_payments_unapplied ON payments (customer_id) WHERE amount_unapplied > 0 AND status = 'POSTED';
 CREATE INDEX IF NOT EXISTS idx_payments_order ON payments (order_id) WHERE order_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_payments_project ON payments (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payments_till_session ON payments (till_session_id) WHERE till_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_customer_transactions_reference ON customer_transactions (reference_id) WHERE reference_id IS NOT NULL;

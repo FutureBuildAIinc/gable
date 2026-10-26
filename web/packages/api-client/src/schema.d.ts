@@ -14923,6 +14923,11 @@ export interface components {
             order_id?: string;
             /** Format: uuid */
             job_id?: string;
+            /**
+             * Format: uuid
+             * @description The open counter till session a cash or check counter deposit rides.
+             */
+            till_session_id?: string;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {

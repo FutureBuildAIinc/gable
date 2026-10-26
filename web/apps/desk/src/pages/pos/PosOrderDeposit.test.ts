@@ -80,6 +80,7 @@ async function open() {
     isOpen: true,
     customerId: 'cu1',
     branchId: 'b-reg',
+    tillSessionId: 'till-1',
   });
   await update(el, {});
   return el;
@@ -126,7 +127,7 @@ describe('gable-pos-order-deposit - the counter action', () => {
     el.remove();
   });
 
-  it('takes a deposit on the picked order through the payments route, the order named and no applications', async () => {
+  it('takes a deposit on the picked order through the payments route, the order and till session named and no applications', async () => {
     const el = await open();
     await pickFirst(el);
     await typeAmount(el, '400');
@@ -139,7 +140,24 @@ describe('gable-pos-order-deposit - the counter action', () => {
       amount_cents: 40_000,
       method: 'cash',
       order_id: 'ord-1',
+      till_session_id: 'till-1',
     });
+    el.remove();
+  });
+
+  it('refuses a counter deposit when no till session is open without calling the route', async () => {
+    const el = await mount<GablePosOrderDeposit>('gable-pos-order-deposit', {
+      isOpen: true,
+      customerId: 'cu1',
+      branchId: 'b-reg',
+      tillSessionId: '',
+    });
+    await update(el, {});
+    await pickFirst(el);
+    await typeAmount(el, '50');
+    submitDeposit(el);
+    await update(el, {});
+    expect(payments.createPayment).not.toHaveBeenCalled();
     el.remove();
   });
 
@@ -160,6 +178,7 @@ describe('gable-pos-order-deposit - the counter action', () => {
       isOpen: true,
       customerId: 'cu1',
       branchId: '',
+      tillSessionId: 'till-1',
     });
     await update(el2, {});
     await pickFirst(el2);
@@ -167,6 +186,7 @@ describe('gable-pos-order-deposit - the counter action', () => {
     submitDeposit(el2);
     await update(el2, {});
     expect(payments.createPayment.mock.calls[0][0].branch_id).toBe('b-reg');
+    expect(payments.createPayment.mock.calls[0][0].till_session_id).toBe('till-1');
     el2.remove();
   });
 

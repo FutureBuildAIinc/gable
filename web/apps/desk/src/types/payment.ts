@@ -52,6 +52,7 @@ export interface CreatePaymentRequest {
     reference?: string;
     notes?: string;
     order_id?: string;
+    till_session_id?: string;
     applications?: PaymentApplicationRequest[];
 }
 

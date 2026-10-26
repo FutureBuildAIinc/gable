@@ -91,6 +91,15 @@ func (s *Service) CreateCard(ctx context.Context, in *Input, who Caller) (*Payme
 			firstInvoice = a.InvoiceID.String()
 		}
 	}
+	if in.OrderID != nil {
+		var applied int64
+		for _, a := range in.Applications {
+			applied += a.AmountCents
+		}
+		if err := s.checkDeposit(ctx, *in.OrderID, res.branch, false, in.AmountCents-applied, in.Applications); err != nil {
+			return nil, err
+		}
+	}
 
 	result, err := s.gateway.Charge(ctx, ChargeRequest{
 		TokenID: in.TokenID, AmountCents: in.AmountCents, Currency: res.currency,
