@@ -718,20 +718,41 @@ func depositGroups() []groupDef {
 		name: "deposit",
 		steps: []stepDef{
 			// A deposit is a payment with an order (ADR 0005 9.1): the order
-			// reads its unapplied cash, and a deposit applies to a later invoice.
+			// reads its figures, and a deposit applies to a later invoice. The
+			// order is the group's own: a deposit goes on an order that can
+			// still be billed, never a cancelled one.
+			{
+				name:   "deposit.order.create",
+				method: "POST",
+				path:   "/api/v1/orders",
+				body: map[string]any{
+					"customer_id":   "{myCustomer}",
+					"delivery_type": "pickup",
+					"lines": []map[string]any{
+						{"product_id": "{product}", "quantity": "100"},
+					},
+				},
+				extract: map[string]string{"myDepositOrder": "/id"},
+			},
+			{name: "deposit.order.confirm", method: "POST", path: "/api/v1/orders/{myDepositOrder}/transitions",
+				body: map[string]any{"to": "confirmed", "revision": 1}},
 			{
 				name:   "deposit.create",
 				method: "POST",
 				path:   "/api/v1/payments",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "order_id": "{myCancelOrder}", "amount_cents": 2500,
+					"customer_id": "{myCustomer}", "order_id": "{myDepositOrder}", "amount_cents": 2500,
 					"method": "check", "reference": "GOLD-DEP-1",
 				},
 				extract: map[string]string{"myDeposit": "/id"},
 			},
 			{name: "deposit.get", method: "GET", path: "/api/v1/payments/{myDeposit}"},
-			{name: "deposit.list_by_order", method: "GET", path: "/api/v1/payments?order_id={myCancelOrder}"},
-			{name: "deposit.order_shows_unapplied", method: "GET", path: "/api/v1/orders/{myCancelOrder}", maskBody: true},
+			{name: "deposit.list_by_order", method: "GET", path: "/api/v1/payments?order_id={myDepositOrder}"},
+			{name: "deposit.order_shows_unapplied", method: "GET", path: "/api/v1/orders/{myDepositOrder}", maskBody: true},
+			{name: "deposit.create.over_balance", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "order_id": "{myDepositOrder}", "amount_cents": 60000, "method": "cash"}},
+			{name: "deposit.create.on_cancelled", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "order_id": "{myCancelOrder}", "amount_cents": 100, "method": "cash"}},
 			{name: "deposit.create.bad_amount", method: "POST", path: "/api/v1/payments",
 				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0, "method": "cash"}},
 			{name: "deposit.create.order_of_another_customer", method: "POST", path: "/api/v1/payments",
