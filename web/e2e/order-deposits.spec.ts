@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
-import { answerAppDialog } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
