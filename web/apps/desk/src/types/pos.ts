@@ -319,7 +319,7 @@ export interface TillReport {
     tendered_by_method: Record<string, number>;
     expected_by_method: Record<string, number>;
     /** What the session refunded per method (CASH out of the drawer, CARD back to the card). */
-    refunds_by_method: Record<string, number>;
+    refunds_by_method?: Record<string, number>;
     movements: TillMovement[];
     movement_totals_by_kind: Record<string, number>;
 }

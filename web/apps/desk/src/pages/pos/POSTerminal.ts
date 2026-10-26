@@ -1945,9 +1945,10 @@ export class POSTerminal extends LitElement {
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>
+            ${this._register ? html`
             <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
               title="The frozen Z report of each past drawer of this register"
-              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>`}
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>` : nothing}`}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}

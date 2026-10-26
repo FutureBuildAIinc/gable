@@ -8,7 +8,7 @@ import type { TillReportView } from './TillReportView';
 import type { TillZReports } from './TillZReports';
 import type { TillReport, ZReport } from '../../types/pos';
 import { flush, jsonResponse, mount, q, text, update } from '../../test/dom';
-import { expectedDrawerCash, isBlind, reportMethods } from './tillReport';
+import { cashierLabel, expectedDrawerCash, isBlind, reportMethods } from './tillReport';
 
 const session = (over: Record<string, unknown> = {}) => ({
     id: 's-1', register_id: 'REG-01', branch_id: 'b-1', cashier_id: 'u-1', status: 'open',
@@ -107,6 +107,47 @@ describe('the X report panel', () => {
     });
 });
 
+const OWN_ID = '9f549213-831c-42d9-a382-64fcf2f9fb83';
+const ownDrawer: TillReport = { ...managerReport, session: session({ cashier_id: OWN_ID, expected_by_method: { CASH: 21950 } }) as TillReport['session'] };
+
+describe('the cashier row', () => {
+    it('names the signed in person on their own drawer', async () => {
+        const el = await mount<TillReportView>('gable-till-report-view', {
+            report: ownDrawer, kind: 'x', signedIn: { id: OWN_ID, name: 'Jordan Pike' },
+        });
+        expect(text(q(el, '[data-testid="till-report-cashier"]'))).toBe('Jordan Pike');
+        el.remove();
+    });
+
+    it('names the register, never an id, on a drawer the viewer did not open', async () => {
+        const el = await mount<TillReportView>('gable-till-report-view', {
+            report: ownDrawer, kind: 'z', signedIn: { id: '11111111-1111-4111-8111-111111111111', name: 'Sam Ortiz' },
+        });
+        const row = text(q(el, '[data-testid="till-report-cashier"]'));
+        expect(row).toBe("Register REG-01's cashier");
+        expect(row).not.toContain(OWN_ID);
+        el.remove();
+    });
+
+    it('never prints the nil id a dev stack stamps, nor a name that is itself an id', () => {
+        const nil = '00000000-0000-0000-0000-000000000000';
+        const devDrawer = { ...ownDrawer, session: { ...ownDrawer.session, cashier_id: nil } } as TillReport;
+        expect(cashierLabel(devDrawer, { id: null, name: 'Dev Cashier' })).toBe("Register REG-01's cashier");
+        expect(cashierLabel(devDrawer, { id: nil, name: 'Dev Cashier' })).toBe("Register REG-01's cashier");
+        expect(cashierLabel(ownDrawer, { id: OWN_ID, name: OWN_ID })).toBe("Register REG-01's cashier");
+        expect(cashierLabel(ownDrawer, { id: OWN_ID, name: '  ' })).toBe("Register REG-01's cashier");
+    });
+
+    it('reads a report frozen before the refunds figure existed', async () => {
+        const old = { ...managerReport } as Partial<TillReport>;
+        delete old.refunds_by_method;
+        const el = await mount<TillReportView>('gable-till-report-view', { report: old as TillReport, kind: 'z' });
+        expect(el.querySelector('[data-testid="till-report-refunds"]')).toBeNull();
+        expect(text(q(el, '[data-testid="till-report-expected-cash"]'))).toBe('$219.50');
+        el.remove();
+    });
+});
+
 describe('the Z report read', () => {
     it('shows the frozen close read only, with the count against the expected', async () => {
         const el = await mount<TillReportView>('gable-till-report-view', { report: closedReport, kind: 'z' });
@@ -172,6 +213,15 @@ describe('the Z reports list', () => {
         q<HTMLButtonElement>(el, '[data-testid="z-back"]').click();
         await update(el, {});
         expect(el.querySelector('[data-testid="z-report-row"]')).not.toBeNull();
+        el.remove();
+    });
+
+    it('has one label on the day field, worded for the yard\'s day', async () => {
+        const el = await mount<TillZReports>('gable-till-z-reports', { registerId: 'REG-01' });
+        await flush();
+        await update(el, {});
+        expect(el.querySelectorAll('label').length).toBe(0);
+        expect(q(el, '[data-testid="z-day"]').getAttribute('label')).toBe("Business day (blank is the yard's today)");
         el.remove();
     });
 

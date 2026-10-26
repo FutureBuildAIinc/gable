@@ -521,6 +521,6 @@ figures in full.
 4. **The stored Z reports.** Press Z Reports (it is there with or without an open drawer): the register's frozen
    closes of the day list, the one just made first among them, each with its balanced or over and short words. Open
    one: the Z REPORT sheet reads the frozen close, the count against the expected, read only, and prints the same
-   way. At Lake Country Outpost the list holds only that yard's registers' reports.
+   way. At Lake Country Outpost the list holds only that register's reports.
 
 None of the other walks of the plan are written yet; they land with their items.

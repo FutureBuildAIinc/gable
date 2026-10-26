@@ -6,7 +6,7 @@ import { customElement, property } from 'lit/decorators.js';
 import type { TillReport } from '../../types/pos';
 import { formatDateTime } from '../../lib/dates.ts';
 import { kindLabel } from './movements.ts';
-import { expectedDrawerCash, isBlind, reportMethodLabel, reportMethods, type TillReportKind } from './tillReport.ts';
+import { cashierLabel, expectedDrawerCash, isBlind, reportMethodLabel, reportMethods, signedInPerson, type SignedInPerson, type TillReportKind } from './tillReport.ts';
 
 const fmt = (cents: number) => (cents < 0 ? `-$${(-cents / 100).toFixed(2)}` : `$${(cents / 100).toFixed(2)}`);
 
@@ -32,6 +32,8 @@ export class TillReportView extends LitElement {
     @property() kind: TillReportKind = 'x';
     /** The register's branch name, when the caller knows it. */
     @property({ attribute: 'branch-name' }) branchName = '';
+    /** Who is signed in, to name their own drawer's cashier; read from the session when not given. */
+    @property({ attribute: false }) signedIn: SignedInPerson | null = null;
 
     private close() {
         this.dispatchEvent(new CustomEvent('report-close', { bubbles: true }));
@@ -116,7 +118,8 @@ export class TillReportView extends LitElement {
         if (!r) return nothing;
         const blind = isBlind(r);
         const isX = this.kind === 'x';
-        const refunds = Object.keys(r.refunds_by_method ?? {}).sort();
+        const refundsBy = r.refunds_by_method ?? {};
+        const refunds = Object.keys(refundsBy).sort();
         const drawerCash = expectedDrawerCash(r);
         return html`
             <style>
@@ -137,7 +140,7 @@ export class TillReportView extends LitElement {
                         : 'The frozen close of this drawer, read only.'}
                 </p>
                 ${this.row('Register', html`<span class="font-mono">${r.session.register_id}</span>${this.branchName ? html` - ${this.branchName}` : nothing}`, 'till-report-register')}
-                ${this.row('Cashier', html`<span class="font-mono">${r.session.cashier_id}</span>`, 'till-report-cashier')}
+                ${this.row('Cashier', cashierLabel(r, this.signedIn ?? signedInPerson()), 'till-report-cashier')}
                 ${this.row('Opened', formatDateTime(r.session.opened_at), 'till-report-opened')}
                 ${blind ? html`
                     <p style="margin:14px 0 0;font-size:13px;color:rgb(var(--gb-till-warn))" data-testid="till-report-blind">
@@ -153,7 +156,7 @@ export class TillReportView extends LitElement {
                     ${refunds.length > 0 ? html`
                         <div style="margin-top:14px" data-testid="till-report-refunds">
                             <div style="font-size:12px;${MUTED};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Refunds</div>
-                            ${refunds.map((m) => this.row(reportMethodLabel(m), html`<span class="font-mono">${fmt(r.refunds_by_method[m])}</span>`, `till-report-refund-${m.toLowerCase()}`))}
+                            ${refunds.map((m) => this.row(reportMethodLabel(m), html`<span class="font-mono">${fmt(refundsBy[m])}</span>`, `till-report-refund-${m.toLowerCase()}`))}
                         </div>` : nothing}
                     ${this.movementsList(r)}
                     ${drawerCash !== null ? html`

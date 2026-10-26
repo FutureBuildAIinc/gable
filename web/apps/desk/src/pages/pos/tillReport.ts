@@ -6,6 +6,7 @@
 // cents throughout; the report's method maps are in storage spelling
 // (CASH, CHECK, CARD).
 
+import { authCustody } from '@gable/auth';
 import type { TillReport } from '../../types/pos';
 
 /** The panel's kind: the live X read of an open drawer, or a frozen Z. */
@@ -49,4 +50,35 @@ export function reportMethods(report: TillReport): string[] {
 export function expectedDrawerCash(report: TillReport): number | null {
     if (isBlind(report)) return null;
     return report.expected_by_method?.CASH ?? null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NIL_ID = '00000000-0000-0000-0000-000000000000';
+
+/** The signed in person as the report names a cashier: the token's subject (the id the server stamps on a drawer they open) and their name. */
+export interface SignedInPerson {
+    id: string | null;
+    name: string | null;
+}
+
+/** The person signed in now; no id for a dev session, which the server stamps with the nil id. */
+export function signedInPerson(): SignedInPerson {
+    const s = authCustody.session;
+    if (s === null) return { id: null, name: null };
+    if (s.kind === 'dev') return { id: null, name: s.name };
+    const sub = s.claims.sub ?? '';
+    return { id: UUID.test(sub) ? sub.toLowerCase() : null, name: authCustody.displayName };
+}
+
+/**
+ * The words the Cashier row says. The report carries the cashier's id and
+ * nothing else, and the counter cannot read the user list, so a name shows
+ * only for the signed in person's own drawer; any other drawer is named by
+ * its register. An id never reaches the sheet.
+ */
+export function cashierLabel(report: TillReport, who: SignedInPerson): string {
+    const id = (report.session.cashier_id ?? '').toLowerCase();
+    const name = (who.name ?? '').trim();
+    if (id !== '' && id !== NIL_ID && who.id === id && name !== '' && !UUID.test(name)) return name;
+    return `Register ${report.session.register_id}'s cashier`;
 }

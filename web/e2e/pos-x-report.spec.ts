@@ -130,6 +130,9 @@ test('the counter: X report mid shift, then the close and its stored Z report', 
   await expect(page.getByTestId('till-report-title')).toHaveText('X REPORT');
   await expect(xreport).toContainText('Not a close; the drawer stays open');
   await expect(page.getByTestId('till-report-register')).toContainText('REG-01');
+  // The cashier is named in words (a person or the register), never by an id.
+  await expect(page.getByTestId('till-report-cashier')).not.toHaveText(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i);
+  await expect(page.getByTestId('till-report-cashier')).not.toBeEmpty();
   await expect(page.getByTestId('till-report-float')).toHaveText('$100.00');
   await expect(page.getByTestId('till-report-sales')).toContainText('1 rung');
   await expect(page.getByTestId('till-report-sales')).toContainText(`$${total.toFixed(2)}`);
@@ -170,6 +173,7 @@ test('the counter: X report mid shift, then the close and its stored Z report', 
   await expect(zreport).toBeVisible();
   await expect(page.getByTestId('till-report-title')).toHaveText('Z REPORT');
   await expect(zreport).toContainText('read only');
+  await expect(page.getByTestId('till-report-cashier')).not.toHaveText(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i);
   await expect(page.getByTestId('till-report-count')).toContainText('$96.00');
   await expect(page.getByTestId('till-report-count')).toContainText(`$${(total - 1).toFixed(2)}`);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-z-report.png'), fullPage: true });
