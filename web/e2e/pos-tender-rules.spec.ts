@@ -69,16 +69,16 @@ async function saleTotal(page: Page): Promise<number> {
   return Number(text.replace(/[$,\s]/g, ''));
 }
 
-/** Rings one unit at a time until the sale's total passes the cents named, waiting for the summary to follow each line. */
-async function ringPast(page: Page, sku: string, cents: number) {
+/** Rings one unit at a time until the sale's total passes the dollars named, waiting for the summary to follow each line. */
+async function ringPast(page: Page, sku: string, dollars: number) {
   let total = await saleTotal(page);
-  for (let i = 0; i < 40 && total <= cents; i++) {
+  for (let i = 0; i < 40 && total <= dollars; i++) {
     const before = total;
     await addOne(page, sku);
     await expect.poll(() => saleTotal(page), { timeout: 10000 }).toBeGreaterThan(before);
     total = await saleTotal(page);
   }
-  expect(total).toBeGreaterThan(cents);
+  expect(total).toBeGreaterThan(dollars);
   return total;
 }
 
@@ -128,7 +128,7 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
 
   // At the counter: a $60 check is held until the ID is checked.
   await openCounter(page);
-  const total = await ringPast(page, product.sku, 6000);
+  const total = await ringPast(page, product.sku, 60);
   await payByCheck(page, 60, false);
   await expect(page.getByTestId('pos-check-id-needed')).toContainText(
     `A check over $50.00 needs the customer's ID`,
@@ -173,7 +173,7 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   // customer's own limit beats the database wide one.
   await openCounter(page);
   await nameAccount(page, account.account_number);
-  await ringPast(page, product.sku, 15000);
+  await ringPast(page, product.sku, 150);
   await payByCheck(page, 150, true);
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
