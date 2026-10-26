@@ -226,12 +226,7 @@ const demoSeedEnv = "DEMO_SEED"
 // demoSeedRequested reports whether the operator explicitly asked for demo
 // data. Anything other than an affirmative value means no.
 func demoSeedRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoSeedEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return envIsTrue(demoSeedEnv)
 }
 
 // demoImportEnv opts the seed into the invented demo catalogue and its 120 day
@@ -241,12 +236,7 @@ const demoImportEnv = "DEMO_SEED_IMPORT"
 
 // demoImportRequested reports whether the operator asked for the demo import.
 func demoImportRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoImportEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return envIsTrue(demoImportEnv)
 }
 
 // demoHistoryEnv turns the import's 120 day history (section 22c) off when set
@@ -304,6 +294,21 @@ func Run() {
 	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
+	}
+
+	// The once guard, before anything is written. The seed below truncates the
+	// transactional tables, so a run that finds a marker and skips is what
+	// keeps a redeploy from wiping a demo tenant. The guard is off unless the
+	// operator asks for it (once.go).
+	if seedOnceRequested() {
+		if _, seeded := seedMarkerValue(db); seeded && !seedForced() {
+			log.Printf(
+				"%s: the marker %q is in system_settings, so nothing was truncated and no demo data was written. "+
+					"Set %s=1 to seed it again on purpose.",
+				seedSkipMessage, seedMarkerKey, seedForceEnv,
+			)
+			return
+		}
 	}
 
 	// Read the default branch before anything below changes it: dedupeBranches
@@ -1534,6 +1539,11 @@ func Run() {
 	fmt.Println("Seed: EDI Trading Partners")
 
 	dropPlaceholderBranch(db)
+
+	// The seed finished. The marker is written here, after the last row, so a
+	// run that failed part way leaves no marker and the next run tries again
+	// (once.go).
+	writeSeedMarker(db)
 
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE BUILDING SUPPLY (KELOWNA, BC)  ")
