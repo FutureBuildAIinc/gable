@@ -150,7 +150,9 @@ test('the counter: a credit hold AR placed stops the charge, cash still pays, th
     items: { id: string; customer_id: string | null; status: string }[];
   };
   for (const s of sales.items.filter((x) => x.customer_id === account.id && x.status === 'completed')) {
-    const voided = await request.post(`/api/v1/pos/transactions/${s.id}/void`, { data: { reason: 'e2e cleanup' } });
+    const full = (await (await request.get(`/api/v1/pos/transactions/${s.id}`)).json()) as { revision: number };
+    const voided = await request.post(`/api/v1/pos/transactions/${s.id}/void`,
+      { data: { reason: 'e2e cleanup', revision: full.revision } });
     expect(voided.status(), await voided.text()).toBe(200);
   }
 });
