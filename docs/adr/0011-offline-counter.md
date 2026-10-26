@@ -723,10 +723,15 @@ returns, for the register's branch:
   (Units below);
 - a price sheet keyed by price key: `walkin`, the engine's answer for the
   walk in customer (the customer row `priceLine` prices a walk in sale for,
-  so the offline walk in price is the online one), and, for each cached
-  account, the server's own resolution of ADR 0006 rungs 1, 3 and 4 per
-  product (its contract, else its category rules, account then profile then
-  level, else its level). Rungs 1, 3 and 4 take no quantity, so each row is
+  so the offline walk in price is the online one); each cached account's own
+  key, the server's own resolution of ADR 0006 rungs 1, 3 and 4 per product
+  for that account (its contract, else its category rules, account then
+  profile then level, else its level), with the rung that won, so a line
+  priced at the level can be marked; and the key of each of those accounts'
+  levels, the level's own resolution per product for every product the
+  branch sells, which is the fallback row where the sheet carries no row of
+  the account for that product. Rungs 1, 3 and 4 take no quantity, so each
+  row is
   exactly what the engine answers online for any quantity when no rung 2
   rule applies, as of the branch's business date of the snapshot, which is
   the date the rows are computed at (the live counter prices a cost-derived
@@ -764,13 +769,16 @@ An offline sale prices a cached account at its precomputed sheet price and a
 walk in sale at the walk in sheet price. The strip and the receipt name the
 three skipped kinds (section 4), and the clerk can tell an account customer
 the sale may be adjusted later by credit memo, online, if the dealer chooses.
-The sheet grows with cached accounts times products; slice O2 measures it on
-the demo seed and, if it is too large, limits the precomputed rows to the
-products each account has bought, with the level price as that account's
-fallback.
-Where a line prices at that fallback, the strip adds "Level price: this
-account's own price is not on this register" beside the line, and the
-receipt marks the line "level price".
+The sheet grows with the branch's products times the cached accounts' levels
+(the fallback rows) plus the cached accounts times the products each has
+bought (its own rows); slice O2 measures it on the demo seed and, if it is
+too large, limits the per-account rows to the products each account has
+bought. **The level's rows cover every product the branch sells, so the
+fallback survives that limit**: a product the sheet carries no row of the
+account for is priced at that account's level's row, under that level's key
+(the price key rule below). Where a line prices at that fallback, the strip
+adds "Level price: this account's own price is not on this register" beside
+the line, and the receipt marks the line "level price".
 
 **Units.** A line offline is sold in any unit the product is sold in, as
 live. The snapshot carries, per product, the price units its sheet rows
@@ -785,12 +793,13 @@ pairs are exact decimals, never factors (ADR 0006 section 1 rule R1), so the
 extension is exact until its one rounding.
 
 **The price key is bound to the customer.** A sale's price key is not the
-device's choice: for a cached account it is that account's own key (its
-precomputed row, or, only where the sheet has no row for that product, its
-level's row); for the walk in customer it is `walkin`; nothing else. The
-server derives the key from the sale's customer and the snapshot, and a
-line priced under any other key the snapshot holds is `price_unverified`,
-so a signed sale cannot price an account at a lower key.
+device's choice: for a cached account it is that account's own key where the
+sheet carries a row of the account for that product, and, where it carries
+none, the key of the account's level, whose row the sheet carries for every
+product; for the walk in customer it is `walkin`; nothing else. The server
+derives the key from the sale's customer and the snapshot, and a line priced
+under any other key the snapshot holds is `price_unverified`, so a signed
+sale cannot price an account at a lower key.
 
 **Freshness.** The shell fetches a snapshot when the till opens (offline
 selling requires a snapshot fetched since the session opened), and refetches
@@ -849,8 +858,8 @@ so a refused sale never breaks the chain for the sales after it.
   does not otherwise touch.
 
 **6.2 Prices in the queue.** The server never reprices an offline sale. It
-takes the sheet row the sale's price key and the line's product name, and
-verifies each line's unit price against that row's price, and each line's
+takes the sheet row the sale's price key and the line's product id name,
+and verifies each line's unit price against that row's price, and each line's
 extension by the arithmetic of ADR 0005 section 2.4 and ADR 0001 section 7a,
 with the pair the snapshot carries for that row's price unit and the line's
 unit (one rounding, half away from zero, and no rounding before it, ADR 0006
@@ -981,6 +990,11 @@ Server (Go, a named test database, `CI=true`):
   carries account B's price key, and a walk in sale that carries an account
   key, are both refused `price_unverified` and post nothing, so a signed
   sale cannot price an account at another account's price.
+- **The level fallback:** an account the sheet carries no row of its own
+  for a product prices that line at the account's level's row, under that
+  level's key; a device that priced it at anything else is refused
+  `price_unverified` and posts nothing, and the line is marked "level
+  price" on the strip and the receipt.
 - **Two account legs:** a signed sale carrying two account legs is refused
   `one_account_leg` to the queue and posts nothing, the check the live
   counter makes before its transaction.
@@ -1150,14 +1164,14 @@ data and security change and gets the project's money review.
 | Slice | What | Size |
 |---|---|---|
 | O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, the confirmed mark the sale carries, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
-| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, computed at the branch's business date, each row carrying the unit the engine answered in, the exact pair each unit a product is sold in takes to each of those price units, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 19 to 31 |
+| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, computed at the branch's business date, each row carrying the unit the engine answered in, the levels' rows for the branch's products as the fallback, the exact pair each unit a product is sold in takes to each of those price units, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 21 to 34 |
 | O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the two legs check the live path runs before its transaction, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 43 to 64 |
 | O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass, write off, settled replaced cart) under locks 0a and 0b, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 19 to 31 |
 | C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 32 to 51 |
 | C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment. | 12 to 20 |
 | P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
-| | **Total** | **177 to 275** |
+| | **Total** | **179 to 278** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.
 
@@ -1208,7 +1222,7 @@ offline, so CP-05 does not gate it.
   offline off; the `money_never_queues` code stays in the enum with that
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
-  manager screen, one shared fixture set. Estimated at 177 to 275 dev hour
+  manager screen, one shared fixture set. Estimated at 179 to 278 dev hour
   equivalents.
 
 **Open items** (left for later decisions):
