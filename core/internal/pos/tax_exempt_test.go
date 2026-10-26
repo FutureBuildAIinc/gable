@@ -223,16 +223,13 @@ func TestCP10_ExemptionAttachUnderContenders(t *testing.T) {
 	today := testutil.BranchDay(t, f.db)
 	addExemption(t, f, &today, nil)
 
-	var mu sync.Mutex
+	saleIDs := [3]string{f.startSale(nil), f.startSale(nil), f.startSale(nil)}
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func(i int, saleID string) {
 			defer wg.Done()
-			mu.Lock()
-			saleID := f.startSale(nil)
-			mu.Unlock()
 			if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
 				errs <- fmt.Errorf("contender %d add line = %d: %s", i, r.status, r.raw)
 				return
@@ -250,7 +247,7 @@ func TestCP10_ExemptionAttachUnderContenders(t *testing.T) {
 				errs <- fmt.Errorf("contender %d tax_cents = %v, want 0", i, tax)
 				return
 			}
-		}(i)
+		}(i, saleIDs[i])
 	}
 	wg.Wait()
 	close(errs)
