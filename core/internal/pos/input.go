@@ -126,11 +126,16 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 }
 
 // completeSaleRequest is POST /pos/transactions/{id}/complete: the tenders in
-// cents (IN-1.2) and who collected the basket.
+// cents (IN-1.2), who collected the basket, and the counter alerts the
+// clerk acknowledged.
 type completeSaleRequest struct {
 	Tenders    []tenderRequest `json:"tenders"`
 	PickedUpBy *string         `json:"picked_up_by"`
 	Revision   json.RawMessage `json:"revision"`
+	// AcknowledgedAlertIDs names the customer's alerts the clerk read and
+	// acknowledged before taking the sale. A warning that asks to be
+	// acknowledged must be named here or the sale is refused.
+	AcknowledgedAlertIDs []string `json:"acknowledged_alert_ids"`
 }
 
 type tenderRequest struct {
@@ -193,7 +198,7 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 	return out
 }
 
-func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, error) {
+func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, []uuid.UUID, error) {
 	v := &httpx.Validator{}
 	if len(r.Tenders) == 0 {
 		v.Check(false, "tenders", "name at least one tender")
@@ -213,10 +218,20 @@ func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, error) {
 			revision = &n
 		}
 	}
-	if err := v.Err(); err != nil {
-		return nil, "", nil, err
+	acknowledged := make([]uuid.UUID, 0, len(r.AcknowledgedAlertIDs))
+	for i, raw := range r.AcknowledgedAlertIDs {
+		field := fmt.Sprintf("acknowledged_alert_ids[%d]", i)
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			v.Check(false, field, "must be an alert id")
+			continue
+		}
+		acknowledged = append(acknowledged, id)
 	}
-	return tenders, pickedUpBy, revision, nil
+	if err := v.Err(); err != nil {
+		return nil, "", nil, nil, err
+	}
+	return tenders, pickedUpBy, revision, acknowledged, nil
 }
 
 // voidSaleRequest is POST /pos/transactions/{id}/void.

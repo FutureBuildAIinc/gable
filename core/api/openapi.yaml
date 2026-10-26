@@ -15574,7 +15574,7 @@ paths:
       tags: [pos]
       summary: Can this sale go on account?
       description: >-
-        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
       parameters:
         - name: id
           in: path
@@ -32397,6 +32397,11 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken.
+          items: {type: string, format: uuid}
     PosTenderRequest:
       type: object
       required: [method, amount_cents]
@@ -32513,7 +32518,7 @@ components:
         cap_cents: {type: [integer, "null"], format: int64, description: "The most this buyer may put on the account in one sale; null for no cap of the buyer's own."}
     PosAccountStanding:
       type: object
-      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account]
+      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account, alerts]
       properties:
         customer_id: {type: string, format: uuid}
         name: {type: string}
@@ -32534,6 +32539,19 @@ components:
           description: "The payment shapes the server takes from this customer now, in the order the counter shows them."
           items: {$ref: "#/components/schemas/PosTenderMethod"}
         on_account: {$ref: "#/components/schemas/PosOnAccountVerdict"}
+        alerts:
+          type: array
+          description: >-
+            The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken.
+          items: {$ref: "#/components/schemas/PosCounterAlert"}
+    PosCounterAlert:
+      type: object
+      required: [id, kind, text, acknowledge_required]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string}
+        acknowledge_required: {type: boolean, description: "The counter has to read this warning and say so before the sale is taken."}
     PosOverrideRequest:
       type: object
       additionalProperties: false
