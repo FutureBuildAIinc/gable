@@ -12,6 +12,11 @@ review. No code is written for CP-13 before it is accepted.
 It stands on ADR 0001 (the wire contract), ADR 0003 (the outbox), ADR 0005
 (the sales and money core) and ADR 0006 (units and pricing).
 
+**The offline price set is ruled**: contract, level, category rules and walk
+in prices (item 224 point 3 as amended by item 239). Promotions, quantity
+breaks and job prices stay out of the offline price sheet, and the strip and
+the receipt name the three skipped kinds (section 4).
+
 **It supersedes, for the counter only, the rule "money never queues
 offline"** (Ruling 3 = A of the parity plan, built as item S6). That rule is
 written in the repository here, and each place changes when this record's
@@ -744,15 +749,19 @@ it displays (the catalogue, the price sheet, the cached accounts, the
 caps) and never holds a copy of its own that it could change, so the copy
 the core prices from and signs against is the one the server issued.
 
-Only rung 2 is skipped offline: its pricing rules, which are promotions,
-quantity breaks and job overrides (job prices). An offline sale prices a
-cached account at its precomputed sheet price and a walk in sale at the walk
-in sheet price. The strip and the receipt name the three skipped kinds
-(section 4), and the clerk can tell an account customer the sale may be
-adjusted later by credit memo, online, if the dealer chooses. The sheet
-grows with cached accounts times products; slice O2 measures it on the demo
-seed and, if it is too large, limits the precomputed rows to the products
-each account has bought, with the level price as that account's fallback.
+**The offline price set is contract, level, category rules and walk in
+prices** (item 224 point 3 as amended by item 239): a cached account is
+priced at its contract, else its category rules, else its level, and a walk
+in sale at the walk in price. Only rung 2 is skipped offline: its pricing
+rules, which are promotions, quantity breaks and job overrides (job prices).
+An offline sale prices a cached account at its precomputed sheet price and a
+walk in sale at the walk in sheet price. The strip and the receipt name the
+three skipped kinds (section 4), and the clerk can tell an account customer
+the sale may be adjusted later by credit memo, online, if the dealer chooses.
+The sheet grows with cached accounts times products; slice O2 measures it on
+the demo seed and, if it is too large, limits the precomputed rows to the
+products each account has bought, with the level price as that account's
+fallback.
 Where a line prices at that fallback, the strip adds "Level price: this
 account's own price is not on this register" beside the line, and the
 receipt marks the line "level price".
@@ -1205,5 +1214,3 @@ offline, so CP-05 does not gate it.
 - Card offline, if the card processor later documents store and forward.
 - Promotions, quantity breaks and job prices offline, if dealers ask for
   them.
-- Offline prices include category rules (rung 3); item 224 named contract,
-  level and walk in prices; the principal confirms or narrows this.
