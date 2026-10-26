@@ -5,8 +5,10 @@ package tax
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
@@ -36,6 +38,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/tax/exemptions/{customerID}", guard(h.getExemptions))
 	mux.HandleFunc("POST /api/v1/tax/exemptions", guard(h.createExemption))
 	mux.HandleFunc("DELETE /api/v1/tax/exemptions/{id}", guard(h.deleteExemption))
+	mux.HandleFunc("POST /api/v1/tax/exemptions/{id}/end", guard(h.endExemption))
 }
 
 func (h *Handler) previewTax(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +107,11 @@ func (h *Handler) createExemption(w http.ResponseWriter, r *http.Request) {
 
 	exemption, err := h.svc.SaveExemption(r.Context(), &req)
 	if err != nil {
+		var fieldErr *httpx.Error
+		if errors.As(err, &fieldErr) {
+			httpx.WriteError(w, r, fieldErr)
+			return
+		}
 		httputil.RespondError(w, r, "failed to save tax exemption", http.StatusInternalServerError, err)
 		return
 	}
@@ -126,5 +134,31 @@ func (h *Handler) deleteExemption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// endExemption ends a certificate: it stays on file, inactive, no longer
+// exempting a sale. An unknown id answers 404 (CP-10).
+func (h *Handler) endExemption(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		httputil.RespondError(w, r, "invalid exemption ID", http.StatusBadRequest, err)
+		return
+	}
+	ended, err := h.svc.EndExemption(r.Context(), id)
+	if err != nil {
+		var fieldErr *httpx.Error
+		if errors.As(err, &fieldErr) {
+			httpx.WriteError(w, r, fieldErr)
+			return
+		}
+		httputil.RespondError(w, r, "failed to end tax exemption", http.StatusInternalServerError, err)
+		return
+	}
+	if !ended {
+		httputil.RespondError(w, r, "tax exemption not found", http.StatusNotFound, nil)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -15,6 +15,9 @@
         },
         "movement_totals_by_kind": {},
         "movements": [],
+        "refunds_by_method": {
+          "CASH": 2800
+        },
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
@@ -305,6 +308,9 @@
         "movements": [],
         "over_short_by_method": {
           "CASH": 11232
+        },
+        "refunds_by_method": {
+          "CASH": 2800
         },
         "sale_count": 1,
         "sales_total_cents": 1568,
@@ -705,6 +711,7 @@
             "till_session_id": "<id-16>"
           }
         ],
+        "refunds_by_method": {},
         "sale_count": 0,
         "sales_total_cents": 0,
         "session": {
@@ -1003,6 +1010,9 @@
         "over_short_by_method": {
           "CASH": 11232
         },
+        "refunds_by_method": {
+          "CASH": 2800
+        },
         "sale_count": 1,
         "sales_total_cents": 1568,
         "session": {
@@ -1060,6 +1070,9 @@
           "movements": [],
           "over_short_by_method": {
             "CASH": 11232
+          },
+          "refunds_by_method": {
+            "CASH": 2800
           },
           "sale_count": 1,
           "sales_total_cents": 1568,
@@ -1142,6 +1155,9 @@
             "movements": [],
             "over_short_by_method": {
               "CASH": 11232
+            },
+            "refunds_by_method": {
+              "CASH": 2800
             },
             "sale_count": 1,
             "sales_total_cents": 1568,

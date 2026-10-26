@@ -98,6 +98,8 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
+    tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -318,8 +320,21 @@ export interface TillReport {
     change_cents: number;
     tendered_by_method: Record<string, number>;
     expected_by_method: Record<string, number>;
+    /** What the session refunded per method (CASH out of the drawer, CARD back to the card). */
+    refunds_by_method?: Record<string, number>;
     movements: TillMovement[];
     movement_totals_by_kind: Record<string, number>;
+}
+
+/** The immutable end of day snapshot written once when a session closes; its payload is the frozen closing report. */
+export interface ZReport {
+    id: string;
+    till_session_id: string;
+    register_id: string;
+    branch_id: string | null;
+    over_short_cents: number;
+    payload: TillReport;
+    generated_at: string;
 }
 
 // --- Till movements, variance sign off and the branch day (CP-08, CP-09) ---

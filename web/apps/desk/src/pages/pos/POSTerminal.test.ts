@@ -2138,14 +2138,11 @@ describe('the counter hotkeys and their pinned legend', () => {
     expect(document.activeElement).toBe(q(el, 'catalog-search'));
     await key(el, 'q', { altKey: true });
     expect(document.activeElement).toBe(el.querySelector('[aria-label="Quantity of Item b"]'));
-    // the customer is named before the first line, so the lookup key is for an empty sale
+    // the account is named before or after the lines (CP-10), so the lookup
+    // key focuses the search either way
     await key(el, 'F3');
-    expect(document.activeElement).not.toBe(el.querySelector('#pos-customer-search'));
+    expect(document.activeElement).toBe(el.querySelector('#pos-customer-search'));
     el.remove();
-    const empty = await mount(sale({ lines: [] }));
-    await key(empty, 'F3');
-    expect(document.activeElement).toBe(empty.querySelector('#pos-customer-search'));
-    empty.remove();
   });
 
   it('never fires while a dialog of the app is open, and a bare letter is only typing', async () => {
@@ -2750,6 +2747,30 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     await settle(el);
     expect(el.textContent).toContain('Z-Report - Till Closed');
     expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
+    el.remove();
+  });
+});
+
+describe('the summary when the attached customer is tax exempt', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('shows Tax exempt with the certificate number and its expiry in place of the tax figure', async () => {
+    const el = await mount(sale({ tax_cents: 0, total_cents: 8000,
+      tax_exemption: { certificate_number: 'CERT-88', expiry_day: '2027-01-31' } }));
+    const line = q(el, 'summary-tax-exempt');
+    expect(line).toBeTruthy();
+    expect(line.textContent).toContain('Tax exempt');
+    expect(line.textContent).toContain('CERT-88');
+    expect(line.textContent).toContain('expires 2027-01-31');
+    expect(q(el, 'summary-tax')).toBeNull();
+    expect(q(el, 'summary-total')?.textContent).toContain('80.00');
+    el.remove();
+  });
+
+  it('shows the tax as normal when the certificate has expired (the sale carries no exemption)', async () => {
+    const el = await mount(sale({ tax_cents: 650, total_cents: 8650, tax_exemption: null }));
+    expect(q(el, 'summary-tax-exempt')).toBeNull();
+    expect(q(el, 'summary-tax')?.textContent).toContain('6.50');
     el.remove();
   });
 });

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/google/uuid"
 )
 
@@ -121,6 +122,11 @@ type Sale struct {
 	BuyerContactID   *uuid.UUID `json:"buyer_contact_id"`
 	PrintCount       int        `json:"print_count"`
 	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
+
+	// TaxExemption is the certificate that exempts this sale on the branch's
+	// business day (CP-10): why the tax is zero, so the counter can say it.
+	// Nil when no certificate covers the day.
+	TaxExemption *tax.ExemptionStanding `json:"tax_exemption,omitempty"`
 
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`
@@ -303,6 +309,12 @@ type TillReport struct {
 	TenderedByMethod  map[string]int64 `json:"tendered_by_method"`
 	ExpectedByMethod  map[string]int64 `json:"expected_by_method"`
 	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
+
+	// RefundsByMethod is what the session refunded, per method (CASH out of
+	// the drawer, CARD back to the card), so the X report answers "refunds"
+	// beside the taken and expected figures. A method appears only where the
+	// session refunded on it.
+	RefundsByMethod map[string]int64 `json:"refunds_by_method"`
 
 	// Movements are the drops, pickups, paid in and paid out of the session,
 	// oldest first, with their totals by kind; the expected cash carries them.
