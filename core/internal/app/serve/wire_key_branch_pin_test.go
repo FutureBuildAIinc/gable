@@ -1452,7 +1452,7 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 	// Tax exemptions: the create's body names the customer, the delete's row
 	// belongs to one.
 	f.refuseForeign(t, "POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil)
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-B"}`, B), nil)
 	if n := f.exemptionsOf(t, f.custB); n != 1 {
 		t.Errorf("refused exemption create wrote the foreign customer's rows: %d", n)
 	}
@@ -1460,14 +1460,20 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 	f.seedTaxExempt(t, exemptA, f.custID)
 	f.allow(t, "bound", "DELETE", "/api/v1/tax/exemptions/"+exemptA.String(), "", nil, http.StatusNoContent)
 	f.refuseForeign(t, "DELETE", "/api/v1/tax/exemptions/"+f.taxExempt.String(), "", nil)
+	// the end route resolves the same row the delete does (CP-10): a bound
+	// key ends its own branch's certificate and never a foreign one's
+	endA := uuid.New()
+	f.seedTaxExempt(t, endA, f.custID)
+	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions/"+endA.String()+"/end", "", nil, http.StatusNoContent)
+	f.refuseForeign(t, "POST", "/api/v1/tax/exemptions/"+f.taxExempt.String()+"/end", "", nil)
 	if n := f.exemptionsOf(t, f.custB); n != 1 {
 		t.Errorf("refused exemption delete changed the foreign customer's rows: %d", n)
 	}
 	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, A), nil, http.StatusCreated)
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-A"}`, A), nil, http.StatusCreated)
 	for _, who := range []string{"unbound", "user"} {
 		f.allow(t, who, "POST", "/api/v1/tax/exemptions",
-			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil, http.StatusCreated)
+			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-B"}`, B), nil, http.StatusCreated)
 	}
 	for _, who := range []string{"unbound", "user"} {
 		id := uuid.New()

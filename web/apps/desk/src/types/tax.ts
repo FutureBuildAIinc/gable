@@ -12,6 +12,8 @@ export interface TaxExemption {
     expiry_date: string | null;
     is_active: boolean;
     created_at: string;
+    /** The server's word for the certificate's standing on the customer's branch day. */
+    status?: 'active' | 'expired' | 'future' | 'ended';
 }
 
 /** The body of the exemption create route. */

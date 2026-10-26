@@ -12,25 +12,22 @@ import { confirmDialog } from '../../components/ui/app-dialog.ts';
 import type { TaxExemption } from '../../types/tax';
 import { labeled, textInput } from './formFields.ts';
 
-/** The certificate's status words, as a clerk reads them. */
-export function exemptionStatus(ex: TaxExemption, today: string): string {
-    if (!ex.is_active) return 'Ended';
-    const from = ex.effective_date.slice(0, 10);
-    if (from > today) return 'Not in effect yet';
-    if (ex.expiry_date && ex.expiry_date.slice(0, 10) < today) return 'Expired';
-    return 'Active';
-}
-
-/** True when the certificate exempts a sale today (the counter's own rule). */
-export function exemptionCoversToday(ex: TaxExemption, today: string): boolean {
-    if (!ex.is_active) return false;
-    if (ex.effective_date.slice(0, 10) > today) return false;
-    if (ex.expiry_date && ex.expiry_date.slice(0, 10) < today) return false;
-    return true;
+/**
+ * The certificate's status words, as a clerk reads them. The server says the
+ * standing (`status`) on the customer's branch's business day, the day the
+ * counter's rule reads, so the screen holds no day of its own.
+ */
+export function exemptionStatus(ex: TaxExemption): string {
+    switch (ex.status) {
+        case 'ended': return 'Ended';
+        case 'future': return 'Not in effect yet';
+        case 'expired': return 'Expired';
+        case 'active': return 'Active';
+        default: return ex.is_active ? 'Active' : 'Ended';
+    }
 }
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const today = () => new Date().toISOString().slice(0, 10);
 
 interface ExemptionDraft {
     certificate_number: string;
@@ -41,7 +38,7 @@ interface ExemptionDraft {
 }
 
 const emptyDraft = (): ExemptionDraft => ({
-    certificate_number: '', exempt_reason: '', issuing_state: '', effective_date: today(), expiry_date: '',
+    certificate_number: '', exempt_reason: '', issuing_state: '', effective_date: '', expiry_date: '',
 });
 
 /** The dialog's own validation, in words beside the field it refused. */
@@ -52,9 +49,9 @@ export function draftErrors(d: ExemptionDraft): Record<string, string> {
     if (d.issuing_state.trim() && !/^[A-Za-z]{2}$/.test(d.issuing_state.trim())) {
         errs.issuing_state = 'The issuing state or province is two letters.';
     }
-    if (!DAY_RE.test(d.effective_date)) errs.effective_date = 'The effective day is a date, YYYY-MM-DD.';
+    if (d.effective_date && !DAY_RE.test(d.effective_date)) errs.effective_date = 'The effective day is a date, YYYY-MM-DD.';
     if (d.expiry_date && !DAY_RE.test(d.expiry_date)) errs.expiry_date = 'The expiry day is a date, YYYY-MM-DD.';
-    if (!errs.effective_date && !errs.expiry_date && d.expiry_date && d.expiry_date < d.effective_date) {
+    if (!errs.effective_date && !errs.expiry_date && d.effective_date && d.expiry_date && d.expiry_date < d.effective_date) {
         errs.expiry_date = 'The expiry day is on or after the effective day.';
     }
     return errs;
@@ -119,7 +116,7 @@ export class GableTaxExemptionPanel extends LitElement {
                 certificate_number: this.draft.certificate_number.trim(),
                 exempt_reason: this.draft.exempt_reason.trim(),
                 issuing_state: this.draft.issuing_state.trim().toUpperCase(),
-                effective_date: this.draft.effective_date,
+                effective_date: this.draft.effective_date || undefined,
                 expiry_date: this.draft.expiry_date || undefined,
             });
             ToastService.show('Certificate recorded', 'success');
@@ -152,7 +149,6 @@ export class GableTaxExemptionPanel extends LitElement {
     }
 
     render() {
-        const day = today();
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
@@ -193,7 +189,7 @@ export class GableTaxExemptionPanel extends LitElement {
                             </thead>
                             <tbody class="divide-y divide-white/5">
                                 ${this.exemptions.map((ex) => {
-                                    const status = exemptionStatus(ex, day);
+                                    const status = exemptionStatus(ex);
                                     return html`
                                     <tr data-testid="tax-exemption-row">
                                         <td class="px-4 py-3 font-mono text-gable-green">${ex.certificate_number || '—'}</td>
@@ -202,7 +198,7 @@ export class GableTaxExemptionPanel extends LitElement {
                                         <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${ex.effective_date.slice(0, 10)}</td>
                                         <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${ex.expiry_date ? ex.expiry_date.slice(0, 10) : 'No expiry'}</td>
                                         <td class="px-4 py-3">
-                                            <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${exemptionCoversToday(ex, day)
+                                            <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${ex.status === 'active'
                                                 ? 'bg-gable-green/15 text-gable-green' : 'bg-zinc-700/40 text-zinc-400'}"
                                                 data-testid="tax-exemption-status">${status}</span>
                                         </td>
@@ -248,9 +244,9 @@ export class GableTaxExemptionPanel extends LitElement {
                         <div>${labeled(ids.state, 'Issuing state or province',
                             textInput(ids.state, this.draft.issuing_state, (v) => this._set('issuing_state', v),
                                 { placeholder: 'CT', maxlength: 2 }), this.fieldErrors.issuing_state)}</div>
-                        <div>${labeled(ids.effective, 'Effective day *',
+                        <div>${labeled(ids.effective, 'Effective day',
                             textInput(ids.effective, this.draft.effective_date, (v) => this._set('effective_date', v),
-                                { placeholder: 'YYYY-MM-DD', mono: true }), this.fieldErrors.effective_date)}</div>
+                                { placeholder: 'YYYY-MM-DD', mono: true }), this.fieldErrors.effective_date, "Leave empty to start today, the yard's own day.")}</div>
                         <div>${labeled(ids.expiry, 'Expiry day',
                             textInput(ids.expiry, this.draft.expiry_date, (v) => this._set('expiry_date', v),
                                 { placeholder: 'YYYY-MM-DD', mono: true }), this.fieldErrors.expiry_date, 'Leave empty when the certificate does not expire.')}</div>

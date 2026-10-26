@@ -106,7 +106,8 @@ func TestCP10_ChargeSaleToExemptAccountCompletes(t *testing.T) {
 	if r := f.attach(saleID, map[string]any{"customer_id": f.customerID.String()}); r.status != http.StatusOK {
 		t.Fatalf("attach the exempt account = %d: %s", r.status, r.raw)
 	}
-	r := f.completeSale(saleID, tender("account", 2200))
+	shownTotal := num(t, f.getSale(t, saleID), "total_cents")
+	r := f.completeSale(saleID, tender("account", shownTotal))
 	if r.status != http.StatusOK {
 		t.Fatalf("charge to the exempt account = %d: %s", r.status, r.raw)
 	}

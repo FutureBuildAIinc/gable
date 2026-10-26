@@ -6,6 +6,7 @@ package tax
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -13,23 +14,28 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Exemptions is the one rule of "does this certificate exempt a sale on this
-// day" (CP-10): active, effective on or before the day, and not yet expired.
-// The counter's running totals, the counter's completion and the order path
-// all read it through ExemptionCovering; a window test in each pins that
-// they do. The day is the sale's business day (the branch's own), and the
-// comparison is by calendar day, not by the instant.
-func Exemptions(ex *TaxExemption, day time.Time) bool {
-	if ex == nil || !ex.IsActive {
-		return false
+// stateCode is the issuing state or province's shape: two letters.
+var stateCode = regexp.MustCompile("^[A-Za-z]{2}$")
+
+// StatusOf names the certificate's standing on day, in the words the
+// account screen shows: ended (inactive, kept on file), future (its window
+// has not begun), expired (its window has closed) or active (it exempts a
+// sale that day). The words follow the one window rule ExemptionCovering
+// reads, on the same day (the branch's business day).
+func StatusOf(ex *TaxExemption, day time.Time) string {
+	if ex == nil {
+		return ""
+	}
+	if !ex.IsActive {
+		return "ended"
 	}
 	if sameDay(ex.EffectiveDate, day) == after {
-		return false
+		return "future"
 	}
 	if ex.ExpiryDate != nil && sameDay(*ex.ExpiryDate, day) == before {
-		return false
+		return "expired"
 	}
-	return true
+	return "active"
 }
 
 const (

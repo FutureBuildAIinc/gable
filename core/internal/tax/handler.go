@@ -5,8 +5,10 @@ package tax
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
@@ -105,6 +107,11 @@ func (h *Handler) createExemption(w http.ResponseWriter, r *http.Request) {
 
 	exemption, err := h.svc.SaveExemption(r.Context(), &req)
 	if err != nil {
+		var fieldErr *httpx.Error
+		if errors.As(err, &fieldErr) {
+			httpx.WriteError(w, r, fieldErr)
+			return
+		}
 		httputil.RespondError(w, r, "failed to save tax exemption", http.StatusInternalServerError, err)
 		return
 	}
@@ -141,6 +148,11 @@ func (h *Handler) endExemption(w http.ResponseWriter, r *http.Request) {
 	}
 	ended, err := h.svc.EndExemption(r.Context(), id)
 	if err != nil {
+		var fieldErr *httpx.Error
+		if errors.As(err, &fieldErr) {
+			httpx.WriteError(w, r, fieldErr)
+			return
+		}
 		httputil.RespondError(w, r, "failed to end tax exemption", http.StatusInternalServerError, err)
 		return
 	}

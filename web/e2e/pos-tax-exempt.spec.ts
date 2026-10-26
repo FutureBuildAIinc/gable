@@ -106,7 +106,8 @@ async function addCertificate(
   await dialog.locator('#tax-exempt-number').fill(number);
   await dialog.locator('#tax-exempt-reason').fill('RESALE');
   await dialog.locator('#tax-exempt-state').fill('CT');
-  await dialog.locator('#tax-exempt-effective').fill(effective);
+  // an empty effective day starts the certificate on the yard's own day (the server's)
+  if (effective) await dialog.locator('#tax-exempt-effective').fill(effective);
   if (expiry) await dialog.locator('#tax-exempt-expiry').fill(expiry);
   await page.getByTestId('tax-exemption-save').click();
   await expect(page.getByTestId('tax-exemption-row').filter({ hasText: number })).toBeVisible({ timeout: 10000 });
@@ -117,10 +118,9 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   const product = await stockedProduct(request);
   const account = await makeAccount(request, 'OK', { credit_limit_cents: 5000000 });
   const cert = `CERT-E2E-${Date.now().toString(36).toUpperCase()}`;
-  const today = new Date().toISOString().slice(0, 10);
 
   // The certificate is recorded on the account page, in the UI.
-  await addCertificate(page, account.id, cert, today, '');
+  await addCertificate(page, account.id, cert, '', '');
   await expect(page.getByTestId('tax-exemption-status')).toHaveText('Active');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tax-exempt-account.png'), fullPage: true });
 
@@ -182,7 +182,8 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   await expect(page.getByTestId('summary-tax-exempt')).toHaveCount(0);
   await expect(page.getByTestId('summary-tax')).toContainText('$');
 
-  // An expired certificate exempts nothing: the tax stays on.
+  // An expired certificate exempts nothing: the tax stays on. Both days sit
+  // well before the yard's day whatever the clock's zone.
   const yesterday = new Date(Date.now() - 24 * 3600 * 1000 * 2).toISOString().slice(0, 10);
   const old = new Date(Date.now() - 24 * 3600 * 1000 * 30).toISOString().slice(0, 10);
   const oldCert = `CERT-OLD-${Date.now().toString(36).toUpperCase()}`;

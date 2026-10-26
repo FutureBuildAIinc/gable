@@ -18,11 +18,14 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are
-        required (400). The exemption is created active; effective_date is
-        a YYYY-MM-DD string that defaults to today, and expiry_date is a
-        YYYY-MM-DD string; any other format of either is a 500. A
-        customer outside the user's reach is refused 403 naming customer_id.
+        Roles admin, owner, finance. customer_id, exempt_reason and
+        certificate_number are required (400). The exemption is created
+        active; effective_date is a YYYY-MM-DD string that defaults to the
+        customer's primary branch's business day, expiry_date is a
+        YYYY-MM-DD string on or after effective_date, and issuing_state is a
+        two letter code when sent (any invalid field answers 400 naming the
+        field). A customer outside the user's reach is refused 403 naming
+        customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -84,9 +87,10 @@ paths:
       summary: End a tax exemption
       description: >-
         Roles admin, owner, finance. Sets the certificate inactive: it stays
-        on file (the list still shows it, inactive) but exempts no sale. An
-        unknown id answers 404. An exemption whose customer is outside the
-        user's reach answers 404 and is not ended.
+        on file (the list still shows it, ended) but exempts no sale. An
+        unknown id answers 404; a certificate that was already ended answers
+        409 already_ended. An exemption whose customer is outside the user's
+        reach answers 404 and is not ended.
       parameters:
         - name: id
           in: path
@@ -125,6 +129,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/tax/preview:
     post:
@@ -185,9 +190,16 @@ components:
           description: Absent when the exemption does not expire.
         is_active: { type: boolean }
         created_at: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [active, expired, future, ended]
+          description: >-
+            The certificate's standing on the customer's branch's business
+            day, said by the server (the same window rule the counter and the
+            orders read), so no screen computes a day of its own.
     TaxExemptionCreateRequest:
       type: object
-      required: [customer_id, exempt_reason]
+      required: [customer_id, exempt_reason, certificate_number]
       properties:
         customer_id: { type: string, format: uuid }
         exempt_reason: { type: string }

@@ -4,7 +4,7 @@
 package order_test
 
 // CP-10: the order path reads the same exemption window the counter reads
-// (tax.Exemptions): a certificate that has expired, or whose window has not
+// (tax.ExemptionCovering): a certificate that has expired, or whose window has not
 // begun, does not make an order's tax exempt.
 
 import (
@@ -38,7 +38,7 @@ func orderExemption(t *testing.T, f *fixture, effective, expiry *time.Time) {
 
 // RULE: an expired certificate does not exempt an order: the tax is the
 // branch rate's and the source is the rate, the same window the counter
-// reads (tax.Exemptions).
+// reads (tax.ExemptionCovering).
 func TestCP10_ExpiredCertificateDoesNotExemptOnOrders(t *testing.T) {
 	testutil.LockBranchDay(t)
 	testutil.LockOutboxTables(t)

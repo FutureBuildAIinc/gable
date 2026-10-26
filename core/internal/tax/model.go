@@ -54,6 +54,10 @@ type TaxExemption struct {
 	ExpiryDate        *time.Time `json:"expiry_date,omitempty" db:"expiry_date"`
 	IsActive          bool       `json:"is_active" db:"is_active"`
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	// Status is the certificate's standing on the customer's branch's
+	// business day, said by the server (active, expired, future or ended),
+	// so no screen computes a day of its own. Not stored.
+	Status string `json:"status,omitempty" db:"-"`
 }
 
 // TaxPreviewRequest is sent by the frontend to get a tax estimate on a cart or invoice.

@@ -20,12 +20,12 @@ import type { GableTaxExemptionPanel } from './TaxExemptionPanel';
 import { draftErrors, exemptionStatus } from './TaxExemptionPanel';
 import { openAppDialog, answerAppDialog } from '../../test/dom';
 
-const today = new Date().toISOString().slice(0, 10);
+const today = '2026-06-15';
 
 const cert = (over: Partial<TaxExemption> = {}): TaxExemption => ({
     id: 'e1', customer_id: 'c1', exempt_reason: 'RESALE', certificate_number: 'CERT-88',
     issuing_state: 'CT', effective_date: `${today}T00:00:00Z`, expiry_date: null,
-    is_active: true, created_at: `${today}T00:00:00Z`, ...over,
+    is_active: true, status: 'active', created_at: `${today}T00:00:00Z`, ...over,
 });
 
 async function mount(customerId = 'c1', list: TaxExemption[] = [cert()]): Promise<GableTaxExemptionPanel> {
@@ -55,16 +55,18 @@ describe('the account tax exemption panel', () => {
         el.remove();
     });
 
-    it('marks an expired certificate and one not yet in effect', async () => {
-        const lastYear = String(Number(today.slice(0, 4)) - 1);
-        const nextYear = String(Number(today.slice(0, 4)) + 1);
-        const expired = cert({ id: 'e2', certificate_number: 'OLD-1', is_active: true,
-            effective_date: '2020-01-01T00:00:00Z', expiry_date: `${lastYear}-12-31T00:00:00Z` });
-        const future = cert({ id: 'e3', certificate_number: 'NEW-1',
-            effective_date: `${nextYear}-01-01T00:00:00Z` });
-        const el = await mount('c1', [expired, future]);
+    it("shows the standing the server says, not one the screen works out", async () => {
+        const expired = cert({ id: 'e2', certificate_number: 'OLD-1', status: 'expired',
+            effective_date: '2020-01-01T00:00:00Z', expiry_date: '2020-12-31T00:00:00Z' });
+        const future = cert({ id: 'e3', certificate_number: 'NEW-1', status: 'future',
+            effective_date: '2999-01-01T00:00:00Z' });
+        // the expiry reads today in the browser's calendar, yet the server's
+        // (the yard's) day has it still active: the screen follows the server
+        const lastDay = cert({ id: 'e4', certificate_number: 'LAST-1', status: 'active',
+            expiry_date: '2000-01-01T00:00:00Z' });
+        const el = await mount('c1', [expired, future, lastDay]);
         const statuses = [...el.querySelectorAll('[data-testid="tax-exemption-status"]')].map((s) => s.textContent);
-        expect(statuses).toEqual(['Expired', 'Not in effect yet']);
+        expect(statuses).toEqual(['Expired', 'Not in effect yet', 'Active']);
         el.remove();
     });
 
@@ -87,7 +89,7 @@ describe('the account tax exemption panel', () => {
         await el.updateComplete;
         expect(svc.create).toHaveBeenCalledWith(expect.objectContaining({
             customer_id: 'c1', certificate_number: 'CERT-99', exempt_reason: 'RESALE',
-            effective_date: today,
+            effective_date: undefined,
         }));
         el.remove();
     });
@@ -139,10 +141,16 @@ describe('the certificate window rule as the panel states it', () => {
     const errors = draftErrors;
 
     it("states the status in the counter's own words", () => {
-        expect(status(cert(), today)).toBe('Active');
-        expect(status(cert({ is_active: false }), today)).toBe('Ended');
-        expect(status(cert({ effective_date: '2999-01-01T00:00:00Z' }), today)).toBe('Not in effect yet');
-        expect(status(cert({ expiry_date: '2000-01-01T00:00:00Z' }), today)).toBe('Expired');
+        expect(status(cert())).toBe('Active');
+        expect(status(cert({ status: 'ended', is_active: false }))).toBe('Ended');
+        expect(status(cert({ status: 'future' }))).toBe('Not in effect yet');
+        expect(status(cert({ status: 'expired' }))).toBe('Expired');
+    });
+
+    it('lets the effective day stay empty: the server starts the certificate on the yard\'s day', () => {
+        const errs = errors({ certificate_number: 'C-1', exempt_reason: 'RESALE', issuing_state: 'CT',
+            effective_date: '', expiry_date: '' });
+        expect(errs).toEqual({});
     });
 
     it('refuses an expiry before the effective day', () => {
