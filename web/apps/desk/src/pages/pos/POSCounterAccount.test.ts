@@ -44,15 +44,17 @@ vi.mock('../../services/POSService', async (orig) => {
 });
 
 import './POSTerminal';
+import './StepUpDialog';
 import type { POSTerminal } from './POSTerminal';
+import type { StepUpDialog } from './StepUpDialog';
 
 /** Completes the step up dialog the terminal opened, as the manager's PIN would. */
 async function answerStepUp(el: HTMLElement, managerName = 'E2E Manager') {
-  const dlg = el.querySelector('gable-step-up-dialog');
+  const dlg = el.querySelector<StepUpDialog>('gable-step-up-dialog');
   if (!dlg) throw new Error('no step up dialog opened');
   dlg.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName }, bubbles: true }));
   await flush();
-  await el.updateComplete;
+  await dlg.updateComplete;
 }
 
 import { answerAppDialog, typeIntoAppDialog, chooseOption, flush } from '../../test/dom';

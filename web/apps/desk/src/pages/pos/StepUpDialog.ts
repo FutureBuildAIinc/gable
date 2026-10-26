@@ -44,7 +44,8 @@ export class StepUpDialog extends LitElement {
     async connectedCallback() {
         super.connectedCallback();
         try {
-            this.managers = await posService.stepUpManagers(this.act);
+            const list = await posService.stepUpManagers(this.act);
+            this.managers = Array.isArray(list) ? list : [];
         } catch {
             this.managers = [];
         } finally {
