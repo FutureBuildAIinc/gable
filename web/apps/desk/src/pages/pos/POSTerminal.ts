@@ -38,6 +38,8 @@ import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
+import './TillReportView.ts';
+import './TillZReports.ts';
 import { kindLabel } from './movements.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
@@ -156,6 +158,11 @@ export class POSTerminal extends LitElement {
   private _onConnection = () => {
     this._online = navigator.onLine;
   };
+
+  // The X report of the open drawer, and the register's stored Z reports (CP-08).
+  @state() private _showXReport = false;
+  @state() private _xReport: TillReport | null = null;
+  @state() private _showZReports = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -353,6 +360,20 @@ export class POSTerminal extends LitElement {
       void this._beginFresh();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to open till';
+    } finally {
+      this._tillBusy = false;
+    }
+  }
+
+  /** The X report of the open drawer: a mid-shift read, never a close. */
+  private async _beginXReport() {
+    if (!this._till) return;
+    try {
+      this._tillBusy = true;
+      this._xReport = await posService.tillReport(this._till.id);
+      this._showXReport = true;
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to load the X report';
     } finally {
       this._tillBusy = false;
     }
@@ -1680,6 +1701,25 @@ export class POSTerminal extends LitElement {
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }
 
+  /** The X report panel on the open drawer (CP-08). */
+  private _renderXReportModal() {
+    if (!this._showXReport) return nothing;
+    return this._overlay(html`
+      ${this._xReport ? html`
+        <gable-till-report-view kind="x" .report=${this._xReport} branch-name=${this._register?.branch_name ?? ''}
+          @report-close=${() => { this._showXReport = false; this._xReport = null; }}></gable-till-report-view>` : nothing}
+    `);
+  }
+
+  /** The register's stored Z reports (CP-08). */
+  private _renderZReportsModal() {
+    if (!this._showZReports || !this._register) return nothing;
+    return this._overlay(html`
+      <gable-till-z-reports register-id=${this._registerId}
+        @z-close=${() => { this._showZReports = false; }}></gable-till-z-reports>
+    `);
+  }
+
   private _renderTillCloseModal() {
     if (!this._showTillClose) return nothing;
     const close = () => { this._showTillClose = false; this._tillReport = null; this._closeResult = null; };
@@ -1733,7 +1773,7 @@ export class POSTerminal extends LitElement {
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
-          <input type="number" step="0.01" .value=${this._counts[m]}
+          <input type="number" step="0.01" .value=${this._counts[m]} data-testid="till-count-${m}"
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
             class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
             style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="Enter the count" />
@@ -1924,8 +1964,10 @@ export class POSTerminal extends LitElement {
             <button @click=${() => this._beginFresh()}
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">New Sale</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
-              class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>`}
-        </div>
+              class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>
+            <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
+              title="The frozen Z report of each past drawer of this register"
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Z Reports</button>`}        </div>
       </header>`;
   }
 
@@ -1950,6 +1992,10 @@ export class POSTerminal extends LitElement {
             class="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col gap-1 rounded border border-white/10 bg-slate-steel p-2 shadow-raised">
             <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy}
               data-testid="pos-drawer-cash" title="Safe drop, pickup, cash paid in or paid out" class=${item}>Drawer Cash</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginXReport(); }} ?disabled=${this._tillBusy}
+              data-testid="pos-x-report" title="A mid-shift read of the drawer, printable; not a close" class=${item}>X Report</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showZReports = true; }} ?disabled=${this._tillBusy}
+              data-testid="pos-z-reports" title="The frozen Z report of each past drawer of this register" class=${item}>Z Reports</button>
             <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy}
               data-testid="pos-close-till" title="Count the drawer and close the till with its Z report" class=${item}>Close Till</button>
           </div>` : nothing}
@@ -1957,6 +2003,12 @@ export class POSTerminal extends LitElement {
           <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
             title="Safe drop, pickup, cash paid in or paid out"
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
+          <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy} data-testid="pos-x-report"
+            title="A mid-shift read of the drawer, printable; not a close"
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">X Report</button>
+          <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy} data-testid="pos-z-reports"
+            title="The frozen Z report of each past drawer of this register"
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>
           <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
             title="Count the drawer and close the till with its Z report"
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>
@@ -2459,6 +2511,8 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderXReportModal()}
+        ${this._renderZReportsModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`

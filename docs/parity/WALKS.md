@@ -497,6 +497,31 @@ it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET 
    bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
    line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
 
+### The X report mid shift, and the stored Z reports (CP-08)
+
+Needs the demo seed with at least two yards, signed in as the cashier of a yard (Jordan Pike at Kelowna Main Yard,
+register `REG-01`). The demo runs with sign in off, so the blind count rule (a cashier reads no money figures of the
+open drawer, a manager reads them) is held by the API tests
+(`TestSweepPR178OpenTillReportRedactsExpectedFiguresForCashier`), and on the demo stack the X report shows the
+figures in full.
+
+1. **The X report of the open drawer (Jordan Pike).** Open Till at `REG-01` with a float of $100.00. Ring one sale
+   of a 2x4x8 SPF Premium paid $1.00 in cash and the rest by check, and record a Safe drop of $5.00 under Drawer
+   Cash. Press X Report beside Close Till: a panel headed X REPORT says "Not a close; the drawer stays open" and
+   reads the register, the cashier, when the drawer opened, the float, the sale count and total with its tax, the
+   cash and the check taken and expected, any refunds, the drop, and the expected drawer cash ($100.00 plus the
+   $1.00 less the $5.00: $96.00). Press Print: the sheet prints through the browser's print, headed X REPORT. Close
+   the panel: the drawer is still open and the register still takes sales.
+2. **A cashier's X report stays blind.** On a signed in deployment a cashier's X report of the open drawer shows
+   the register, the sale count and the tax only, and says the money figures stay blind until the count is posted;
+   a manager's (finance, owner or admin) shows every figure. On the demo stack there is no sign in, so the report
+   shows the figures in full and the rule is proven by the API tests instead.
+3. **The close writes the Z.** Close Till, count the cash $96.00 and the check figure the sale took, and post: the
+   result reads "Z-Report - Till Closed", balanced.
+4. **The stored Z reports.** Press Z Reports (it is there with or without an open drawer): the register's frozen
+   closes of the day list, the one just made first among them, each with its balanced or over and short words. Open
+   one: the Z REPORT sheet reads the frozen close, the count against the expected, read only, and prints the same
+   way. At Lake Country Outpost the list holds only that register's reports.
 ### The yard sale: the counter on a handheld (CP-12)
 
 Proves: CP-12 (mobile sales in the yard, on a tablet or handheld). The counter is the yard sale: the same `/pos` screen

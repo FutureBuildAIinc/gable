@@ -304,6 +304,12 @@ type TillReport struct {
 	ExpectedByMethod  map[string]int64 `json:"expected_by_method"`
 	OverShortByMethod map[string]int64 `json:"over_short_by_method,omitempty"`
 
+	// RefundsByMethod is what the session refunded, per method (CASH out of
+	// the drawer, CARD back to the card), so the X report answers "refunds"
+	// beside the taken and expected figures. A method appears only where the
+	// session refunded on it.
+	RefundsByMethod map[string]int64 `json:"refunds_by_method"`
+
 	// Movements are the drops, pickups, paid in and paid out of the session,
 	// oldest first, with their totals by kind; the expected cash carries them.
 	Movements            []TillMovement   `json:"movements"`
