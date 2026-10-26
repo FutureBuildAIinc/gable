@@ -1475,17 +1475,18 @@ export class POSTerminal extends LitElement {
     this._returnSearchError = null;
   }
 
-  /** Searches completed sales by number, invoice number, or customer name. */
+  /** Searches completed sales by number, invoice number, customer name, or date. */
   private async _searchReturns() {
     const q = this._returnSearchQuery.trim();
-    if (q.length < 2) {
-      this._returnSearchError = 'Type at least two characters to search';
+    const date = this._returnSearchDate.trim();
+    if (q.length < 2 && !date) {
+      this._returnSearchError = 'Type at least two characters or pick a date to search';
       return;
     }
     try {
       this._returnSearchBusy = true;
       this._returnSearchError = null;
-      const page = await posService.searchSales(q, this._returnSearchDate || undefined);
+      const page = await posService.searchSales(q, date || undefined);
       this._returnSearchResults = page.items;
     } catch (err: unknown) {
       this._returnSearchError = err instanceof Error ? err.message : 'Failed to search the sales';
@@ -1574,7 +1575,7 @@ export class POSTerminal extends LitElement {
       });
       this._showReturn = false;
       const fee = ret.restocking_fee_cents > 0 ? `, less a ${fmt(ret.restocking_fee_cents)} restocking fee` : '';
-      this._success = `Return ${ret.number} complete - ${fmt(ret.total_cents)} refunded ${ret.refund_method}${fee}`;
+      this._success = `Return ${ret.number} complete - ${fmt(Math.abs(ret.total_cents))} refunded ${ret.refund_method}${fee}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 4000);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to take the return';

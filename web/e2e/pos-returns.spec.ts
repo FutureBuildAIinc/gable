@@ -62,12 +62,19 @@ async function addOne(page: Page, sku: string) {
   await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
 }
 
+async function openPayment(page: Page) {
+  const head = page.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function completeCashSale(page: Page, request: APIRequestContext): Promise<string> {
   const product = await stockedProduct(request);
   await openCounter(page);
   await addOne(page, product.sku);
   await addOne(page, product.sku);
   await expect(page.locator('[data-testid="pos-lines"] li')).toHaveCount(2);
+  await openPayment(page);
   await page.getByTestId('tender-cash').click();
   const totalText = (await page.getByTestId('summary-total').textContent()) ?? '';
   const total = Number(totalText.replace(/[$,\s]/g, ''));
@@ -113,7 +120,18 @@ test('CP-06: return a past sale with mixed restock choices and open refund inten
   // reason from the closed list (the damaged line is the damaged one).
   await pickOptionByValue(page.getByTestId('return-reason').nth(0), 'damaged');
   await pickOptionByValue(page.getByTestId('return-reason').nth(1), 'changed_mind');
+  const returnResponse = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/v1/pos/returns' && r.request().method() === 'POST',
+  );
   await page.getByTestId('return-take').click();
+  const retRes = await returnResponse;
+  expect(retRes.status()).toBe(201);
+  const retBody = (await retRes.json()) as { credit_memo_id: string | null };
+  expect(retBody.credit_memo_id).toBeTruthy();
+  const memoRes = await request.get(`/api/v1/credit-memos/${retBody.credit_memo_id}`);
+  expect(memoRes.status()).toBe(200);
+  const memoBody = (await memoRes.json()) as { status: string };
+  expect(memoBody.status).toBe('applied');
   await expect(page.getByText(/Return RTN-\d+ complete/)).toBeVisible({ timeout: 15000 });
   await expect(page.getByText(/\$[\d,.]+ refunded/)).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-return-complete.png'), fullPage: true });
@@ -121,5 +139,6 @@ test('CP-06: return a past sale with mixed restock choices and open refund inten
   // Open the refund intents manager screen from the menu and expect the heading.
   await page.goto('/pos/refund-intents');
   await expect(page.getByRole('heading', { name: 'Refund intents' })).toBeVisible();
+  await expect(page.getByTestId('refund-intents-empty')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-refund-intents.png'), fullPage: true });
 });

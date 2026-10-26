@@ -2852,11 +2852,29 @@ describe('return a past sale', () => {
     el.remove();
   });
 
+  it('searches by date when no query text is typed', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const dateField = q(el, 'return-search-date') as HTMLInputElement;
+    dateField.value = day;
+    dateField.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.searchSales).toHaveBeenCalledWith('', day);
+    expect(q(el, 'return-search-result')).toBeTruthy();
+    el.remove();
+  });
+
   it('defaults restock to back to stock and sends restock choices with the return', async () => {
     svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
     svc.getSale.mockResolvedValue(fullSale());
     svc.returnReasons.mockResolvedValue([]);
-    svc.createReturn.mockResolvedValue({ id: 'r1', number: 'RTN-000001', total_cents: 7500, restocking_fee_cents: 0, refund_method: 'cash' });
+    svc.createReturn.mockResolvedValue({ id: 'r1', number: 'RTN-000001', total_cents: -7500, restocking_fee_cents: 0, refund_method: 'cash' });
     const el = await mount(sale());
     q(el, 'return-search-open').click();
     await el.updateComplete;
@@ -2884,9 +2902,11 @@ describe('return a past sale', () => {
     await el.updateComplete;
     q(el, 'return-take').click();
     await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
     expect(svc.createReturn).toHaveBeenCalledWith(expect.objectContaining({
       lines: [{ line_id: 'a', quantity: '1', restock: false }],
     }));
+    expect(el.textContent).toContain('Return RTN-000001 complete - $75.00 refunded cash');
     el.remove();
   });
 });

@@ -247,10 +247,10 @@ export const posService = {
         return response.json();
     },
 
-    /** Search completed sales by sale number, invoice number, or customer name. */
+    /** Search completed sales by sale number, invoice number, customer name, or date. */
     async searchSales(q: string, date?: string): Promise<SalePage> {
         const params = new URLSearchParams();
-        params.append('q', q);
+        if (q) params.append('q', q);
         if (date) params.append('date', date);
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions?${params.toString()}`),
