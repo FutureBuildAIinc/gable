@@ -268,7 +268,13 @@ side it falls on:
 | The journal's period | `gl.ErrPeriodClosed` (`period_closed`) | Live: `period_closed` to the queue |
 
 Line pricing is never rerun: the recorded lines are stored as they are, and
-`priceLine` (the engine) is not called for an offline sale.
+`priceLine` (the engine) is not called for an offline sale. A kit line never
+reaches the sync: the core refuses it at the counter (5.4), because the
+server's explosion is what moves a kit's component stock and the device
+cannot explode a kit. A tallied line's recorded tally (its rows, its linear
+feet and its cross section) is stored with the line, in `line_tally_rows`
+and the line's board columns, so the server stores the tally the core
+answered and does not complete it again.
 
 #### 3.2 Locks
 
@@ -485,22 +491,24 @@ runs in one transaction under locks 0a and 0b and moves the exception to
   product's stocking unit changed after the snapshot, so the line's recorded
   `stock_uom` is the old unit and the live check (`checkLineStockUnits`)
   refuses that line again on every retry, which no manager can fix by
-  looking at the conversion. The server restates each affected line's
-  `stock_uom` and `stock_quantity` from the line's own sale quantity and
-  the product's current unit set, with the engine's own conversion
-  (`ConvertStock`: exact at scale 4 or refused, ADR 0006 section 3.4, the
-  refusal naming the two neighbouring quantities that do convert). The
-  line's price, extension, tax and tender figures are untouched: only the
-  two stock figures change, so the stock that moves and the cost of goods
-  it carries are the current stocking figures, and the live check passes on
-  them because they are the current unit. An audit row names the manager,
-  the reason, the old unit and quantity and the new unit and quantity. A
-  conversion that is not exact is refused the engine's way and the item
-  stays open for the manager to write off, because no quantity of that line
-  converts exactly into the current stocking unit, so it cannot move stock
-  there at all. The sale then posts through 3.1 to 3.3 like a retry, and
-  the check of the stock figures against the snapshot (5.4) does not run on
-  a line the restatement changed, whose figures the audit row carries.
+  looking at the conversion. The server restates the line the way the
+  engine's own rule does (ADR 0006 section 3.4, `salesdoc.ResolveStockMove`):
+  it converts the line's **recorded stock quantity**, never the sale
+  quantity, from the old unit through the product's current unit set, when
+  the old unit is still a row of that set, and it writes the current
+  stocking unit and the quantity it converts to. The line's price,
+  extension, tax and tender figures are untouched: only the two stock
+  figures change, so the stock that moves and the cost of goods it carries
+  are the current stocking figures, and the live check passes on them
+  because they are the current unit. An audit row names the manager, the
+  reason, the old unit and quantity and the new unit and quantity. When the
+  old unit is no longer a row of the current set, or the conversion is not
+  exact at scale 4, the engine's rule refuses (a 409 naming the line, the
+  blocker `stock_unit_changed`), the same refusal the live path gives, and
+  the item stays open for the manager to write off. The sale then posts
+  through 3.1 to 3.3 like a retry, and the check of the stock figures
+  against the snapshot (5.4) does not run on a line the restatement
+  changed, whose figures the audit row carries.
 - **Late post**, for a closed session, day or fiscal period: the sale posts
   on the earliest open business date in an open period, keeping its own
   date on the sale. It attaches to **no** till session (`till_session_id`
@@ -812,7 +820,11 @@ returns, for the register's branch:
   below), and with the units the product is sold in, each with its exact
   pair to the product's stocking unit (`products.uom_primary`), so a line
   sold in any of them converts into the stocking unit exactly (Units
-  below). The snapshot carries no
+  below). The list is widened further with the kit flag
+  (`products.is_kit`), and the unit set carries the cross section with it
+  (the board thickness and width the read of the unit set takes today,
+  `pos/repository.go:1711-1716`), so the core can tell a kit from a plain
+  product and can complete a tallied line. The snapshot carries no
   price unit of its own for a product: every price unit in it is the one a
   sheet row answers in, so a line's price and its pair have one source
   (Units below);
@@ -829,13 +841,18 @@ returns, for the register's branch:
   the level can be marked; and the key of each of those accounts' levels,
   the level's own resolution per product for every product the branch
   sells, which is the fallback row where the sheet carries no row of the
-  account for that product. The rungs that answer take no quantity, so each
-  row is
+  account for that product. The rungs that answer take no quantity, so the
+  walk in row and an account's own rows are
   exactly what the engine answers online for any quantity when no rung 2
   rule applies, as of the branch's business date of the snapshot, which is
   the date the rows are computed at (the live counter prices a cost-derived
   row at its own now, so a vendor cost changed since is the "price changed
-  since the snapshot" case, 3.4). **Each row carries the unit the engine
+  since the snapshot" case, 3.4). **A fallback row is the level's answer,
+  not the account's**: it is what the engine answers for that account only
+  where the account has no contract and no category rule for that product,
+  and where it has one, the online counter answers that rule's price while
+  the offline line carries the level's price, marked "level price" on the
+  strip and the receipt. **Each row carries the unit the engine
   answered in**,
   because that unit is the rung's own and not one unit per product (ADR
   0006's rung table: a contract answers in its own `price_uom`, a level
@@ -849,9 +866,23 @@ returns, for the register's branch:
 
 It is stored server side (`pos_offline_snapshots`: id, register, epoch,
 content, digest) so a sale can name it and the server can verify against
-it. Only product lines sell offline: a kit, a charge code and a tally line
-are not in the snapshot, and the core refuses them offline, with the strip
-saying so.
+it.
+
+**What does not sell offline.** A **charge line** is refused: the snapshot
+carries no charge code master, so the core cannot price it, while the live
+counter takes the charge code's own default price or one the clerk types
+(`pos/service.go:384-413`). A **kit line** is refused: the snapshot carries
+the kit flag, so the core can tell a kit from a plain product, and it
+refuses the line because the kit's components and their per kit quantities
+are not in the snapshot, while online the components' stock is what moves
+(the server explodes the kit at the line's create or edit,
+`salesdoc/extend.go:66-91`, and the kit line itself is never allocated).
+The strip says so for both, at the counter, so the clerk hears it there and
+not at the sync. A **tallied line** does sell offline: the core completes the
+tally the way the engine does (ADR 0006 section 4.3), the linear feet from
+the clerk's rows and the display board feet from the cross section the
+snapshot carries, and the line's quantity is that linear feet; the shared
+fixture holds a tally case, so both sides answer the same feet.
 
 **The core holds the copy.** The shell fetches the snapshot, not the page:
 the Rust core asks the route over the origin it already knows, with the
@@ -909,7 +940,10 @@ pair each unit the product is sold in takes to its stocking unit
 conversion (ADR 0006 section 3.4). The core converts the line's quantity
 into the stocking unit with it and records `stock_uom` and `stock_quantity`
 on the line, signed with the sale; a conversion that is not exact is
-refused offline as the live counter refuses it (ADR 0006 section 3.4). The
+refused offline as the live counter refuses it (ADR 0006 section 3.4). That
+is the sale's own conversion, of the quantity the clerk sold, because the
+line is written then; a line written earlier and moved later converts its
+recorded stock quantity instead (the rule in 3.4). The
 server verifies both figures against the snapshot, except on a line a
 manager's restatement changed (3.4), where the audit row carries the
 figures, so the stock that moves
@@ -1133,9 +1167,19 @@ Server (Go, a named test database, `CI=true`):
   cost of goods on that figure, not the sale quantity in the sold unit; a
   line whose stocking unit changed after the snapshot goes to the queue as
   `stock_unit_changed`, a retry refuses it again, and the manager's
-  restatement posts it with the current stocking unit and the converted
-  quantity, the old and the new figures in the audit row and the line's
-  price untouched, while a conversion that is not exact leaves it open.
+  restatement posts it with the current stocking unit and the quantity its
+  **recorded stock quantity** converts to, the old and the new figures in
+  the audit row and the line's price untouched, while a line whose old unit
+  is no longer a row of the current set, or whose conversion is not exact,
+  leaves it open for the manager.
+- **A kit line and a tallied line:** a kit product is in the snapshot with
+  its kit flag, and a line naming it is refused at the counter with the
+  strip saying so, so no kit line reaches the sync and no kit's component
+  stock moves on a kit; a tallied line sells offline, the core completes
+  the tally from the clerk's rows and the snapshot's cross section, the
+  line's quantity is the tally's linear feet, the server stores the tally
+  rows with the line, and both sides of the shared fixture answer the same
+  feet.
 - **A genuine sale behind the default link:** a sale the clerk made for
   another customer that the replaced cart's default link caught posts as a
   separate sale when the manager clears the link, and posts nothing when
@@ -1311,6 +1355,9 @@ Client (vitest for the queue and cart; Playwright in
   removes appears as "needs a manager", and the till close waits.
 - **Disabled tenders:** card and store credit are disabled offline, and an
   account over its room is refused at the counter.
+- **A kit line:** a kit product is in the offline catalogue with its kit
+  flag, and adding it says that kits do not sell offline, so no kit line
+  reaches the queue.
 - **Reload offline:** the counter reloads with no network and the queue is
   still there (proves 5.2 and the Rust store).
 - **The worker follows the frame:** the desk registers the service worker
@@ -1335,7 +1382,12 @@ chain link itself, so a request that names them is refused. **A rolled back
 store:** a copy of the store taken after a sync and put back over the live
 one is refused: the core compares the store's sequence with the keychain's
 mark and refuses offline selling, and it writes the store, then the mark,
-then it signs. **The shared arithmetic:** the fixture file
+then it signs. **A kit line and a tally:** a line naming a kit product is
+refused by the core from its own copy of the snapshot's kit flag, with the
+strip saying so, and a tallied line is completed by the core from the
+clerk's rows and the snapshot's cross section, its quantity the tally's
+linear feet, the same feet the Go engine answers in the shared fixture.
+**The shared arithmetic:** the fixture file
 `testdata/offline-arithmetic.json` runs through the Rust core and through
 the Go engine, and both answer the same cents for the line extensions, the
 taxable flag, the tax, the tender sums and the change; the Go side runs it
@@ -1345,7 +1397,10 @@ from the other without a red test. The fixture holds the rounding cases on
 both sides of a half, a line in a unit other than its row's price unit, a
 contract price in its own unit, a cost-derived level in the unit it
 derives from, a stock conversion into the stocking unit, and a line whose
-conversion is not exact (refused by both).
+conversion is not exact (refused by both), a restatement of a line whose
+stocking unit changed (the old unit still a row of the current set, so its
+recorded stock quantity converts) and one whose old unit is gone (refused by
+both), and a tally's linear feet and board feet.
 **The capability:** the queue commands answer the Gable the shell loaded and
 refuse every other origin, and the grant carries the queue commands only.
 
@@ -1357,14 +1412,14 @@ data and security change and gets the project's money review.
 | Slice | What | Size |
 |---|---|---|
 | O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence, both partial so that they exclude the `sequence_reused`, `bad_signature` and `replay_mismatch` rows, section 2); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, the confirmed mark the sale carries, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
-| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, computed at the branch's business date, each row carrying the unit the engine answered in, the levels' rows for the branch's products as the fallback, the exact pair each unit a product is sold in takes to each of those price units and to the stocking unit, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device; the enrolment and revocation routes' authority (owner or admin, never a machine key, the counter PIN, audited); the pricing `Request` option that skips rung 2 and leaves the live path untouched. | 23 to 38 |
-| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the `replay_mismatch` row that advances nothing, is never read as the record of its id and counts for nothing in the drain test, the replaced cart's own register and session, the stale snapshot, the line's stock figures against the snapshot (not run on a line a manager's restatement changed), the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the two legs check the live path runs before its transaction, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 46 to 70 |
+| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, computed at the branch's business date, each row carrying the unit the engine answered in, the levels' rows for the branch's products as the fallback, the exact pair each unit a product is sold in takes to each of those price units and to the stocking unit, the kit flag and the unit set's cross section, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device; the enrolment and revocation routes' authority (owner or admin, never a machine key, the counter PIN, audited); the pricing `Request` option that skips rung 2 and leaves the live path untouched. | 24 to 40 |
+| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the `replay_mismatch` row that advances nothing, is never read as the record of its id and counts for nothing in the drain test, the replaced cart's own register and session, the stale snapshot, the line's stock figures against the snapshot (not run on a line a manager's restatement changed), the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the tally rows stored with the line, the two legs check the live path runs before its transaction, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 47 to 72 |
 | O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass and the branch day lock, write off, settled replaced cart, post as a separate sale, the restatement of the stock figures with its conversion and its audit row) under locks 0a and 0b, the unknown tail item as an open exception and its accept, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 24 to 40 |
-| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy, the keychain's last assigned sequence and chain head and the rollback they catch (the store written first, then the mark, then the sign), the line's stock figures; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 35 to 57 |
-| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
+| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy, the keychain's last assigned sequence and chain head and the rollback they catch (the store written first, then the mark, then the sign), the line's stock figures, the kit line it refuses from the snapshot's kit flag and the tally it completes from the clerk's rows and the snapshot's cross section; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 37 to 60 |
+| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip (the kit line it refuses at the counter), the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 45 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment with the counter PIN. | 13 to 22 |
 | P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
-| | **Total** | **193 to 305** |
+| | **Total** | **197 to 313** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.
 O2 and C1 also need ADR 0012's Tauri sign in slice (PR 195), the slice that
@@ -1388,7 +1443,11 @@ offline, so CP-05 does not gate it.
 - An offline sale prices at the engine's answer as known for its customer
   without rung 2; it may cost a customer a promotion, quantity break or job
   price the online counter would have given, and the strip and receipt say
-  so. Dealers who mind can keep offline off or set a low cap.
+  so. It may also cost a customer the contract or category rule price for a
+  product the account has never bought, where the sheet's per account rows
+  do not reach and the line prices at that account's level, marked "level
+  price" on the strip and the receipt. Dealers who mind can keep offline off
+  or set a low cap.
 - Account exposure can exceed a credit limit by the per account cap times
   the registers offline at once. This is the price of selling on account
   offline, set per branch.
@@ -1418,7 +1477,7 @@ offline, so CP-05 does not gate it.
   offline off; the `money_never_queues` code stays in the enum with that
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
-  manager screen, one shared fixture set. Estimated at 193 to 305 dev hour
+  manager screen, one shared fixture set. Estimated at 197 to 313 dev hour
   equivalents.
 
 **Open items** (left for later decisions):
