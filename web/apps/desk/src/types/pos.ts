@@ -98,6 +98,8 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
+    tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
     tenders: Tender[];
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/google/uuid"
 )
 
@@ -121,6 +122,11 @@ type Sale struct {
 	BuyerContactID   *uuid.UUID `json:"buyer_contact_id"`
 	PrintCount       int        `json:"print_count"`
 	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
+
+	// TaxExemption is the certificate that exempts this sale on the branch's
+	// business day (CP-10): why the tax is zero, so the counter can say it.
+	// Nil when no certificate covers the day.
+	TaxExemption *tax.ExemptionStanding `json:"tax_exemption,omitempty"`
 
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`

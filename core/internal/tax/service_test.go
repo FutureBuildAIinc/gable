@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,24 +17,15 @@ import (
 
 type mockExemptionRepo struct {
 	exemptions map[uuid.UUID][]TaxExemption
+	customers  map[uuid.UUID]bool
 }
 
 func newMockExemptionRepo() *mockExemptionRepo {
-	return &mockExemptionRepo{exemptions: make(map[uuid.UUID][]TaxExemption)}
+	return &mockExemptionRepo{exemptions: make(map[uuid.UUID][]TaxExemption), customers: make(map[uuid.UUID]bool)}
 }
 
 func (m *mockExemptionRepo) GetByCustomer(_ context.Context, customerID uuid.UUID) ([]TaxExemption, error) {
 	return m.exemptions[customerID], nil
-}
-
-func (m *mockExemptionRepo) GetActiveByCustomer(_ context.Context, customerID uuid.UUID) ([]TaxExemption, error) {
-	var active []TaxExemption
-	for _, ex := range m.exemptions[customerID] {
-		if ex.IsActive {
-			active = append(active, ex)
-		}
-	}
-	return active, nil
 }
 
 func (m *mockExemptionRepo) Create(_ context.Context, ex *TaxExemption) error {
@@ -51,6 +43,39 @@ func (m *mockExemptionRepo) Delete(_ context.Context, id uuid.UUID) error {
 		}
 	}
 	return nil
+}
+
+func (m *mockExemptionRepo) CustomerExists(_ context.Context, customerID uuid.UUID) (bool, error) {
+	return m.customers[customerID], nil
+}
+
+func (m *mockExemptionRepo) CustomerBranchDay(_ context.Context, _ uuid.UUID) (time.Time, error) {
+	return time.Now(), nil
+}
+
+func (m *mockExemptionRepo) CoveringNow(_ context.Context, customerID uuid.UUID) (*ExemptionStanding, error) {
+	now := time.Now()
+	for _, ex := range m.exemptions[customerID] {
+		if ex.IsActive && !ex.EffectiveDate.After(now) && (ex.ExpiryDate == nil || !ex.ExpiryDate.Before(now)) {
+			return &ExemptionStanding{CertificateNumber: ex.CertificateNumber}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockExemptionRepo) MarkInactive(_ context.Context, id uuid.UUID) (bool, error) {
+	for cid, exs := range m.exemptions {
+		for i := range exs {
+			if exs[i].ID == id {
+				if !exs[i].IsActive {
+					return false, errAlreadyEnded
+				}
+				m.exemptions[cid][i].IsActive = false
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // --- Tests ---
@@ -237,6 +262,7 @@ func TestSaveAndGetExemption(t *testing.T) {
 	svc := NewService(repo, nil, "", 0.0825, logger)
 
 	customerID := uuid.New()
+	repo.customers[customerID] = true
 	req := &CreateExemptionRequest{
 		CustomerID:        customerID,
 		ExemptReason:      "RESALE",
