@@ -230,6 +230,12 @@ jobs:
   # The App Shape conformance check (ADR-011): required paths, manifest fields,
   # the CLAUDE.md import, JSON validity, no stray root artefacts. Needs only
   # git and python3, so it runs in seconds and gates every pull request.
+  #
+  # The deploy recipe's own check runs here as well. It parses the compose
+  # file with `docker compose config` (which needs no daemon and pulls
+  # nothing), proves the recipe refuses to start without one of its required
+  # values, that no service publishes a host port and that every long running
+  # service has a health check. It starts nothing and builds nothing.
   shape:
     name: App Shape
     if: github.event_name != 'schedule'
@@ -240,6 +246,9 @@ jobs:
 
       - name: App Shape check
         run: bash scripts/check-shape.sh
+
+      - name: Deploy recipe check
+        run: bash deploy/check.sh
 
   # The Tauri workspace (tauri/): the shared core and the work, field and
   # pro profile shells, plus the desk shell until the work profile replaces

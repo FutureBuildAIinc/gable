@@ -21,6 +21,7 @@ ADR-011, which lives in the FutureBuild infra repository, not here.
 | [0009](0009-finer-admin-scopes.md) | Finer admin and users scopes | C5-1a |
 | [0010](0010-multi-company.md) | Multi company within one database | C5-3 |
 | [0011](0011-offline-counter.md) | The offline counter | CP-13 |
+| [0012](0012-staff-sign-in.md) | Staff sign in through an Appwrite deployment | S9 |
 
 ## Writing one
 
