@@ -2138,14 +2138,11 @@ describe('the counter hotkeys and their pinned legend', () => {
     expect(document.activeElement).toBe(q(el, 'catalog-search'));
     await key(el, 'q', { altKey: true });
     expect(document.activeElement).toBe(el.querySelector('[aria-label="Quantity of Item b"]'));
-    // the customer is named before the first line, so the lookup key is for an empty sale
+    // the account is named before or after the lines (CP-10), so the lookup
+    // key focuses the search either way
     await key(el, 'F3');
-    expect(document.activeElement).not.toBe(el.querySelector('#pos-customer-search'));
+    expect(document.activeElement).toBe(el.querySelector('#pos-customer-search'));
     el.remove();
-    const empty = await mount(sale({ lines: [] }));
-    await key(empty, 'F3');
-    expect(document.activeElement).toBe(empty.querySelector('#pos-customer-search'));
-    empty.remove();
   });
 
   it('never fires while a dialog of the app is open, and a bare letter is only typing', async () => {

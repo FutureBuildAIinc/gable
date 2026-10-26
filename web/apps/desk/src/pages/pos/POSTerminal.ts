@@ -552,7 +552,7 @@ export class POSTerminal extends LitElement {
     this._step = key;
   }
 
-  /** Back to a walk-in sale (only before the first line). */
+  /** Back to a walk-in sale (the tax follows the account now standing on it). */
   private async _clearCustomer() {
     if (!this._sale || this._sale.status !== 'open') return;
     try {
@@ -669,8 +669,8 @@ export class POSTerminal extends LitElement {
             </div>
             <button
               @click=${() => this._clearCustomer()}
-              ?disabled=${hasLines || finished || this._loading}
-              title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              ?disabled=${finished || this._loading}
+              title=${finished ? 'Start a new sale to change the customer' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Walk-in sale</button>
           </div>
@@ -722,7 +722,7 @@ export class POSTerminal extends LitElement {
           placeholder="Find by name or account number"
           aria-label="Find a customer by name or account number"
           .value=${this._custQuery}
-          ?disabled=${hasLines || this._till === null}
+          ?disabled=${this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
         ${this._till === null ? nothing : html`<div class="mt-1 text-xs text-slate-400">Name the customer, then add products</div>`}
@@ -948,8 +948,8 @@ export class POSTerminal extends LitElement {
       case 'add':
         return till && open;
       case 'customer':
-        // the lookup is off once the sale has a line: the customer is named first
-        return till && open && this._customer === null && !hasLines;
+        // the account is named before or after the lines (CP-10: the tax follows it)
+        return till && open && this._customer === null;
       case 'quantity':
         return open && hasLines;
       case 'next':
