@@ -19,6 +19,7 @@ package payment_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
@@ -523,83 +525,101 @@ func TestRunTerminalPollAndSweepRace(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
+	// The shared test database runs other packages' suites in parallel, and
+	// the counter suite's fixture cleanup empties the terminal tables whole,
+	// without the advisory lock; nothing the code under test deletes an
+	// intent, so a vanished row is that outside interference and the
+	// iteration runs again rather than reading a foreign state.
 	for i := 0; i < 20; i++ {
-		sale := uuid.New()
-		if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
+		if !raceOnce(t, db, ctx, branch, i) {
+			i--
+		}
+	}
+}
+
+// raceOnce runs one iteration of the race and answers false when an outside
+// suite deleted the leg mid flight (the iteration does not count).
+func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) bool {
+	t.Helper()
+	sale := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
 			(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
 			VALUES ($1, $2, $3, 0, 0, 0, 'OPEN', $4, 0, 1, 'USD', $5, NOW(), NOW())`,
-			sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
-			t.Fatalf("sale row: %v", err)
-		}
-		ledger := payment.NewTerminalLedger(db)
-		fs := newRunFake(t)
-		fs.fake.pollStep = func(_ string, poll int) (int, map[string]any) {
-			if poll < 2 {
-				return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
-			}
-			return 200, map[string]any{"status": "succeeded", "result": chargeResult("A", "TRX-RACE"+strconv.Itoa(i), "00", "VISA"), "updated_at": "2026-01-01T00:00:00Z"}
-		}
-		term := newRunDriver(t, fs, ledger)
-		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
-			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 100,
-			Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
-			LeaseUntil: time.Now().Add(40 * time.Millisecond)}
-		if err := ledger.Claim(ctx, in); err != nil {
-			t.Fatalf("claim: %v", err)
-		}
-		if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
-			t.Fatalf("dispatch move: %v %v", ok, err)
-		}
-		if _, err := term.Dispatch(ctx, payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind,
-			AmountCents: in.AmountCents, RegisterID: in.RegisterID, DeviceID: in.DeviceID,
-			IdempotencyKey: in.IdempotencyKey}); err != nil {
-			t.Fatalf("dispatch: %v", err)
-		}
-		answer := payment.TerminalAnswer{IntentID: in.ID, ProviderRef: "TRX-RACE" + strconv.Itoa(i),
-			Verdict: "authorized", Brand: "VISA", Last4: "4242", AuthCode: "00"}
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		contender := func(fn func()) {
-			wg.Add(1)
-			go func() { defer wg.Done(); <-start; fn() }()
-		}
-		contender(func() { _, _ = ledger.ApplyDeviceAnswer(ctx, answer) })
-		contender(func() { _, _ = ledger.ApplyDeviceAnswer(ctx, answer) })
-		contender(func() {
-			time.Sleep(40 * time.Millisecond)
-			_, _ = ledger.Sweep(ctx, time.Now().Add(time.Hour))
-		})
-		close(start)
-		wg.Wait()
-		deadline := time.Now().Add(3 * time.Second)
-		for {
-			got, err := ledger.Get(ctx, in.ID)
-			if err != nil {
-				t.Fatalf("get intent: %v", err)
-			}
-			final := got.State == payment.TerminalAuthorized || got.State == payment.TerminalLost
-			if final {
-				if got.State == payment.TerminalLost {
-					item, err := ledger.LostItemOfIntent(ctx, in.ID)
-					if err != nil {
-						t.Fatalf("lost item read: %v", err)
-					}
-					if item == nil {
-						t.Fatalf("iteration %d: the intent is lost with no manager item", i)
-					}
-					if item.LateVerdict != "" && item.LateVerdict != "authorized" {
-						t.Fatalf("iteration %d: the late verdict is %s", i, item.LateVerdict)
-					}
-				}
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("iteration %d: the intent never settled, it is %s", i, got.State)
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
+		t.Fatalf("sale row: %v", err)
 	}
+	ledger := payment.NewTerminalLedger(db)
+	fs := newRunFake(t)
+	fs.fake.pollStep = func(_ string, poll int) (int, map[string]any) {
+		if poll < 2 {
+			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+		}
+		return 200, map[string]any{"status": "succeeded", "result": chargeResult("A", "TRX-RACE"+strconv.Itoa(i), "00", "VISA"), "updated_at": "2026-01-01T00:00:00Z"}
+	}
+	term := newRunDriver(t, fs, ledger)
+	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 100,
+		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
+		LeaseUntil: time.Now().Add(40 * time.Millisecond)}
+	if err := ledger.Claim(ctx, in); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
+		t.Fatalf("dispatch move: %v %v", ok, err)
+	}
+	if _, err := term.Dispatch(ctx, payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind,
+		AmountCents: in.AmountCents, RegisterID: in.RegisterID, DeviceID: in.DeviceID,
+		IdempotencyKey: in.IdempotencyKey}); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	answer := payment.TerminalAnswer{IntentID: in.ID, ProviderRef: "TRX-RACE" + strconv.Itoa(i),
+		Verdict: "authorized", Brand: "VISA", Last4: "4242", AuthCode: "00"}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	contender := func(fn func()) {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; fn() }()
+	}
+	contender(func() { _, _ = ledger.ApplyDeviceAnswer(ctx, answer) })
+	contender(func() { _, _ = ledger.ApplyDeviceAnswer(ctx, answer) })
+	contender(func() {
+		time.Sleep(40 * time.Millisecond)
+		_, _ = ledger.Sweep(ctx, time.Now().Add(time.Hour))
+	})
+	close(start)
+	wg.Wait()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got, err := ledger.Get(ctx, in.ID)
+		if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+			return false
+		}
+		if err != nil {
+			t.Fatalf("get intent: %v", err)
+		}
+		final := got.State == payment.TerminalAuthorized || got.State == payment.TerminalLost
+		if final {
+			if got.State == payment.TerminalLost {
+				item, err := ledger.LostItemOfIntent(ctx, in.ID)
+				if err != nil {
+					t.Fatalf("lost item read: %v", err)
+				}
+				if item == nil {
+					t.Fatalf("iteration %d: the intent is lost with no manager item", i)
+				}
+				if item.LateVerdict != "" && item.LateVerdict != "authorized" {
+					t.Fatalf("iteration %d: the late verdict is %s", i, item.LateVerdict)
+				}
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("iteration %d: the intent never settled, it is %s", i, got.State)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+	return true
 }
