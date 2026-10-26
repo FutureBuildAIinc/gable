@@ -21,8 +21,9 @@ async function managerWithPin(request: APIRequestContext): Promise<{ staffNo: st
   const run = Date.now().toString(36).toUpperCase();
   const staffNo = `E2E-MGR-${run}`;
   const name = `E2E Manager ${run}`;
+  // the owner role may approve every act: an override, a pickup, a sign off
   const res = await request.post('/api/v1/admin/staff', {
-    data: { email: `e2e-mgr-${run}@example.com`, full_name: name, staff_no: staffNo, role: 'admin', active: true },
+    data: { email: `e2e-mgr-${run}@example.com`, full_name: name, staff_no: staffNo, role: 'owner', active: true },
   });
   expect(res.status(), await res.text()).toBe(201);
   const member = (await res.json()) as { id: string };
@@ -118,6 +119,8 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
   await page.getByTestId('tender-check').click();
   const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
   await page.getByLabel('Tender amount').fill(total.toFixed(2));
+  // the refused tender is not added: the words say it and the way is on
+  await page.getByRole('button', { name: 'Add as split tender' }).click();
   await expect(page.getByTestId('pos-check-over')).toBeVisible();
   await page.getByTestId('pos-check-ask-manager').click();
   await fillAppDialogPrompt(page, 'e2e: the manager knows this customer');
