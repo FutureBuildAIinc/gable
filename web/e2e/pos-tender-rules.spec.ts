@@ -125,13 +125,15 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
     await expect(page.getByTestId('counter-rules-saved')).toContainText('Counter rules saved');
 
     // The account this walk uses, held by the yard the desk session works
-    // (its stored branch), so the branch wall cannot refuse the page edit
-    // below; no check limit of its own yet, so the database wide rule
-    // governs it.
+    // (its stored branch pins the create, and the counter's sales at that
+    // same yard link it no further), so no second yard ever holds it and the
+    // shared customer rule cannot refuse the page edit below; no check limit
+    // of its own yet, so the database wide rule governs it.
     const yard = await page.evaluate(() => localStorage.getItem('gable_current_branch_id'));
     const run = Date.now().toString(36).toUpperCase();
     const res = await request.post('/api/v1/customers', {
-      data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}`, primary_branch_id: yard },
+      headers: yard ? { 'X-Branch-Id': yard } : {},
+      data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}` },
     });
     expect(res.status(), await res.text()).toBe(201);
     const account = (await res.json()) as { id: string; account_number: string };
@@ -177,7 +179,9 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
     await expect(page.getByTestId('account-check-limit')).toContainText('Counter rule');
     await page.getByRole('button', { name: 'Edit Profile' }).click();
     await page.getByLabel('Check limit (dollars)').fill('200.00');
+    const put = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/v1/customers/${account.id}` && r.request().method() === 'PUT');
     await page.getByRole('button', { name: 'Save changes' }).click();
+    expect((await put).status(), await (await put).text()).toBe(200);
     await expect(page.getByTestId('account-check-limit')).toContainText('$200.00');
 
     // The same $150 check to that account completes with the ID (the rest in
