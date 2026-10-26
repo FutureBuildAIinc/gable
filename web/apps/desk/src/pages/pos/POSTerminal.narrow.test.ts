@@ -129,3 +129,36 @@ describe('the counter below 900: the header fits a phone', () => {
     el.remove();
   });
 });
+
+describe('the counter below 768: the touch first working order', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('pins a pay bar under the body with the total and the Pay action', async () => {
+    const el = await mount(sale());
+    const bar = q(el, 'pos-pay-bar');
+    expect(bar).toBeTruthy();
+    expect(bar.className).toContain('min-[768px]:hidden');
+    expect(bar.textContent).toContain('$86.50');
+    const pay = bar.querySelector('[data-testid="pos-pay-bar-button"]') as HTMLButtonElement;
+    expect(pay).toBeTruthy();
+    expect(pay.className).toContain('min-h-14');
+    el.remove();
+  });
+
+  it('spans the fifth tender (store credit) across both columns below 768', async () => {
+    const el = await mount(sale());
+    (el as unknown as { _standing: unknown })._standing = {
+      customer_id: 'cu1', name: 'Test Builders', currency: 'USD', credit_limit_cents: null,
+      open_receivable_cents: 0, open_credit_memo_cents: 5000, available_credit_cents: null,
+      on_hold: false, terms_kind: 'due_on_receipt', named_buyer_required: false, buyers: [],
+      check_limit_cents: null, payment_options: [],
+      on_account: { verdict: 'allowed', reason: null, message: '', over_cents: null, ways_forward: [] },
+    };
+    await el.updateComplete;
+    const credit = q(el, 'tender-store_credit');
+    expect(credit).toBeTruthy();
+    expect(credit.className).toContain('col-span-2');
+    expect(credit.className).toContain('min-[768px]:col-span-1');
+    el.remove();
+  });
+});

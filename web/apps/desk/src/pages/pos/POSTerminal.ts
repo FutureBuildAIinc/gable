@@ -1941,7 +1941,7 @@ export class POSTerminal extends LitElement {
   /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
   private _renderItems() {
     return html`
-      <div class="w-full min-w-0 min-[900px]:w-[58%] min-[900px]:shrink-0 xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+      <div class="w-full min-w-0 min-[768px]:w-[52%] min-[768px]:shrink-0 xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
         <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}
           note=${this._sale?.status === 'completed' ? 'Add a product to start the next sale' : ''}></gable-pos-catalog>
       </div>`;
@@ -2062,7 +2062,7 @@ export class POSTerminal extends LitElement {
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account')
                     : m === 'store_credit' ? `The account holds ${money(this._standing?.open_credit_memo_cents ?? 0)} of store credit` : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
-                  class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'account' || m === 'store_credit' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
+                  class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'store_credit' ? 'col-span-2 min-[768px]:col-span-1 ' : ''}${m === 'account' || m === 'store_credit' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
                   ${tenderTitle(m)}
                 </button>`;
             })}
@@ -2206,7 +2206,7 @@ export class POSTerminal extends LitElement {
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
-      <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
+      <section class="rounded-xl border border-white/10 bg-slate-steel p-4" data-testid="pos-order-summary">
         <h2 class="text-lg font-bold text-white">Order summary</h2>
         <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
         ${productLines.length === 0 ? html`
@@ -2459,9 +2459,9 @@ export class POSTerminal extends LitElement {
               Ask an administrator to add a register for this yard, or switch to a yard that has one.
             </p>
           </div>` : html`
-        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[900px]:flex-row" data-testid="pos-body">
+        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[768px]:flex-row" data-testid="pos-body">
           ${this._renderItems()}
-          <div class="order-first flex w-full min-w-0 shrink-0 flex-col gap-3 min-[900px]:order-none min-[900px]:w-auto min-[900px]:flex-1" data-testid="pos-panels">
+          <div class="flex w-full min-w-0 shrink-0 flex-col gap-3 min-[768px]:w-auto min-[768px]:flex-1" data-testid="pos-panels">
             <section class="${this._panelClass(openKey === 'customer')} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-customer">
               ${this._panelHead('customer', 1, 'Customer', progress.customer, openKey === 'customer', customerValue)}
               <div id="pos-panel-customer-body" data-testid="panel-customer-body" ?hidden=${openKey !== 'customer'} class="px-4 pb-4">
@@ -2474,9 +2474,40 @@ export class POSTerminal extends LitElement {
             ${completed && sale ? this._renderSaleComplete(sale) : nothing}
             ${this._renderOrderSummary(sale, productLines, hasLines)}
           </div>
-        </div>`}
+        </div>
+        ${this._renderPayBar(sale, productLines)}`}
       </div>
     `;
+  }
+
+  /**
+   * The pinned pay bar, a phone affordance below 768 only: the line count
+   * and the total (one tap to the payment step), Pay at thumb height. At 768
+   * and wider the Pay button in the order summary card is the affordance.
+   */
+  private _renderPayBar(sale: Sale | null, productLines: SaleLine[]) {
+    if (!this._register) return nothing;
+    const total = sale?.total_cents ?? 0;
+    const canPay = this._canPay;
+    const label = this._loading ? 'Processing...' : `Pay ${fmt(total)}`;
+    return html`
+      <div class="flex shrink-0 items-stretch gap-2 border-t border-white/10 bg-slate-steel p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] min-[768px]:hidden" data-testid="pos-pay-bar">
+        <button type="button" data-testid="pos-pay-bar-summary"
+          title="Open the payment step"
+          @click=${() => {
+            this._step = 'payment';
+            this._open = 'payment';
+            this.querySelector('[data-testid="pos-panels"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+          class="flex min-h-14 flex-1 flex-col items-start justify-center rounded-lg border border-white/10 px-3 py-1 text-left">
+          <span class="text-xs text-slate-400" data-testid="pos-pay-bar-lines">${productLines.length} item${productLines.length === 1 ? '' : 's'}</span>
+          <span class="font-mono text-lg font-bold text-white" data-testid="pos-pay-bar-total">${fmt(total)}</span>
+        </button>
+        <button type="button" data-testid="pos-pay-bar-button" @click=${() => this._pay()} ?disabled=${!canPay}
+          class="min-h-14 w-[45%] shrink-0 rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
+          ${label}
+        </button>
+      </div>`;
   }
 }
 
