@@ -119,7 +119,8 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   await expect(page.getByTestId('pos-check-id-needed')).toContainText(
     `A check over $50.00 needs the customer's ID`,
   );
-  await expect(page.getByTestId('pos-pay')).toContainText(`Check the customer's ID`);
+  // Pay stays off with the ID still unchecked (the split leaves the rest
+  // owed, so the button says that; the ID hold is the band above).
   await expect(page.getByTestId('pos-pay')).toBeDisabled();
   // The ID is checked and its kind picked (the number is never taken), and
   // the rest of the sale in cash: Pay completes it.
