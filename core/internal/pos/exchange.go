@@ -289,7 +289,7 @@ func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines
 	if pricedTax != nil {
 		taxCents = int64(pricedTax.taxCents)
 	} else {
-		exempt, err := s.repo.CustomerExempt(ctx, *st.customerID)
+		exempt, err := s.exemptOn(ctx, *st.branchID, *st.customerID)
 		if err != nil {
 			return nil, err
 		}

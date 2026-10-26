@@ -110,6 +110,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/quotes/{id}/exposure/override":                   {KeyBranchClassConfined, "RowBranch(quote branch); TestKeyBranchPin_ExposureRoutes"},
 	"POST /api/v1/quotes/{id}/exposure/request-ack":                {KeyBranchClassConfined, "RowBranch(quote branch); TestKeyBranchPin_ExposureRoutes"},
 	"POST /api/v1/tax/exemptions":                                  {KeyBranchClassConfined, "CustomerBodyBranch; TestKeyBranchPin_CustomerConfinedWrites"},
+	"POST /api/v1/tax/exemptions/{id}/end":                         {KeyBranchClassConfined, "CustomerRowBranch; TestKeyBranchPin_CustomerConfinedWrites"},
 	"POST /api/v1/tax/preview":                                     {KeyBranchClassConfined, "CustomerBranch(body customer, when named); TestKeyBranchPin_CustomerConfinedReads"},
 	"POST /api/v1/users/{sub}/branches":                            {KeyBranchClassConfined, "BodyBranch or NamedBranch(branch_id); TestKeyBranchPin_UserGrants"},
 	"PUT /api/v1/branches/{id}":                                    {KeyBranchClassConfined, "NamedBranch(id); TestKeyBranchPin_LocationWrites"},

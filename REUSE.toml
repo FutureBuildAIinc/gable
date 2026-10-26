@@ -149,6 +149,7 @@ path = [
   ".gitignore",
   ".dockerignore",
   "docker-compose.yml",
+  "deploy/**",
   "Makefile",
   "manifest.yaml",
   "scripts/**",
