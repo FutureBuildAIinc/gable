@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -91,6 +92,10 @@ type Repository interface {
 	ShipTo(ctx context.Context, shipToID uuid.UUID) (snapshot *ShipToSnapshot, rate *string, err error)
 	BranchTaxRate(ctx context.Context, branchID uuid.UUID) (*string, error)
 	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// TaxZone resolves a place of receipt to the zone that covers it (CP-10),
+	// nil when no zone does: the resolver then falls through to the typed
+	// rate and the branch rate.
+	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
 
 	// The credit check reads documents, never customers.balance_due
 	// (ADR 0005 5.3).
@@ -672,16 +677,19 @@ func (r *PostgresRepository) InsertOrder(ctx context.Context, o *Order) error {
 			delivery_type, ship_to_id, ship_to_snapshot, customer_po, ordered_by_contact_id,
 			salesperson_id, scheduled_delivery_date,
 			subtotal, tax_amount, tax_rate, tax_exempt, tax_source, total_amount,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
 			created_at, updated_at, branch_id
 		) VALUES ($1, $2, $3, $4, $5, $6, 1, $7,
 			$8, $9, $10, $11, $12, $13, $14::date,
 			$15::numeric / 100, $16::numeric / 100, $17, $18, $19, $20::numeric / 100,
-			$21, $21, COALESCE($22::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
+			$21, $22, $23,
+			$24, $24, COALESCE($25::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 		o.ID, o.Number, o.CustomerID, o.QuoteID, o.JobID, string(o.Status), o.Currency,
 		string(o.DeliveryType), o.ShipToID, shipSnapshot, nullIfEmpty(o.CustomerPO), o.OrderedByContactID,
 		o.SalespersonID, dateArg(o.ScheduledDeliveryDate),
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents), o.CreatedAt.Time, branchArg)
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource),
+		o.CreatedAt.Time, branchArg)
 	if err != nil {
 		return mapWriteError(err, "failed to insert order")
 	}
@@ -689,6 +697,15 @@ func (r *PostgresRepository) InsertOrder(ctx context.Context, o *Order) error {
 		return err
 	}
 	return r.insertLines(ctx, o)
+}
+
+// ratePartsArg carries the zone's frozen rate parts, or NULL when no zone
+// answered.
+func ratePartsArg(parts []byte) any {
+	if len(parts) == 0 {
+		return nil
+	}
+	return parts
 }
 
 // rateArg renders the wire percent for storage, or NULL when the provider
@@ -808,12 +825,13 @@ func (r *PostgresRepository) ReplaceDraft(ctx context.Context, o *Order) error {
 			ordered_by_contact_id = $7, salesperson_id = $8, scheduled_delivery_date = $9::date,
 			subtotal = $10::numeric / 100, tax_amount = $11::numeric / 100, tax_rate = $12,
 			tax_exempt = $13, tax_source = $14, total_amount = $15::numeric / 100,
+			tax_zone_id = $16, tax_rate_parts = $17, tax_zone_source = $18,
 			revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,
 		o.ID, o.CustomerID, o.JobID, string(o.DeliveryType), o.ShipToID, nullIfEmpty(o.CustomerPO),
 		o.OrderedByContactID, o.SalespersonID, dateArg(o.ScheduledDeliveryDate),
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents))
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource))
 	if err != nil {
 		return mapWriteError(err, "failed to update order header")
 	}
@@ -840,12 +858,13 @@ func (r *PostgresRepository) SaveTransition(ctx context.Context, o *Order) error
 			ship_to_id = COALESCE($6, ship_to_id), ship_to_snapshot = COALESCE($7, ship_to_snapshot),
 			subtotal = $8::numeric / 100, tax_amount = $9::numeric / 100, tax_rate = $10,
 			tax_exempt = $11, tax_source = $12, total_amount = $13::numeric / 100,
+			tax_zone_id = $14, tax_rate_parts = $15, tax_zone_source = $16,
 			revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,
 		o.ID, string(o.Status), holdReasonArg(o.HoldReason), nullIfEmpty(o.HoldNote), tsArg(o.ConfirmedAt),
 		o.ShipToID, shipSnapshot,
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents))
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource))
 	if err != nil {
 		return mapWriteError(err, "failed to write order transition")
 	}
@@ -1209,6 +1228,20 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID uuid.UU
 		return nil, fmt.Errorf("failed to read branch tax rate: %w", err)
 	}
 	return rate, nil
+}
+
+// TaxZone resolves a place of receipt through Gable's own zone tables
+// (CP-10), through the context's executor so it runs as well inside a
+// transaction as out. No zone is not an error: it answers nil.
+func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error) {
+	zone, err := taxzone.Lookup(ctx, r.db, taxzone.LookupInput{Country: country, Postal: postal, Region: region, On: on})
+	if errors.Is(err, taxzone.ErrZoneNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return zone, nil
 }
 
 func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {

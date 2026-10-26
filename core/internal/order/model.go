@@ -113,6 +113,13 @@ type OrderSummary struct {
 	TaxSource      salesdoc.TaxSource `json:"tax_source"`
 	TotalCents     httpx.Cents        `json:"total_cents"`
 
+	// The zone that answered a delivered sale's tax, and the rate parts
+	// frozen at the sale (CP-10): never on the wire, the invoice carries
+	// them to the reader.
+	TaxZoneID     *uuid.UUID `json:"-"`
+	TaxRateParts  []byte     `json:"-"`
+	TaxZoneSource *string    `json:"-"`
+
 	// The margin fields of today, kept: costs read from the products at
 	// read time, all cents, the percentage a decimal string.
 	TotalCostCents       httpx.Cents `json:"total_cost_cents"`

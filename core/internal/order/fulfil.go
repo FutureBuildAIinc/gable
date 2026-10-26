@@ -5,6 +5,7 @@ package order
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -626,7 +627,7 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			if err != nil {
 				return err
 			}
-			inputs, err := s.taxInputs(ctx, cur, exempt)
+			inputs, zone, err := s.taxInputs(ctx, cur, exempt)
 			if err != nil {
 				return err
 			}
@@ -646,6 +647,18 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			inv.TaxRate = resolved.Rate
 			inv.TaxExempt = resolved.Source == salesdoc.TaxSourceExempt
 			inv.TaxSource = string(resolved.Source)
+			// The invoice records the zone that answered and the parts it
+			// was made of, frozen at the sale (CP-10): the zone row can
+			// change later, the invoice's rate may not.
+			if resolved.Source == salesdoc.TaxSourceZoneRate && zone != nil {
+				id := zone.ZoneID
+				inv.TaxZoneID = &id
+				if raw, merr := json.Marshal(zone); merr == nil {
+					inv.TaxRateParts = raw
+				}
+				src := zone.DataSource
+				inv.TaxZoneSource = &src
+			}
 		}
 		inv.SubtotalCents = int64(totals.SubtotalCents)
 		inv.TotalCents = inv.SubtotalCents + inv.TaxCents
