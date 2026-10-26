@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-    chargeRefusal, money, standingOf,
+    chargeRefusal, money, standingOf, holdStanding,
     verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal,
 } from './standing';
 import type { CounterCustomer, CounterStanding, WayForward } from '../../types/pos';
@@ -173,5 +173,48 @@ describe('check limits, store credit and the tenders offered', () => {
         expect(chargeRefusal(over, 100, 'PO-1', true)).toBeNull();
         expect(chargeRefusal(over, 100, '', true)).toMatch(/purchase order/);
         expect(chargeRefusal(over, 100, 'PO-1')).toMatch(/Over the credit limit/);
+    });
+});
+
+describe('an account held by a credit hold record', () => {
+    const holdWays = [way('pay_down', false, { message: 'Paying the balance does not lift a hold; accounts receivable releases it.' }), way('manager_override', true), way('switch_tender', true)];
+    const heldRecord: CounterStanding = {
+        ...allowed,
+        on_hold: true,
+        payment_options: ['cash', 'check', 'card'],
+        on_account: {
+            verdict: 'blocked', reason: 'account_hold', over_cents: null,
+            message: 'This account is on credit hold: past due 60 days. Nothing can be put on the account.',
+            ways_forward: holdWays,
+        },
+    };
+    it('states the hold in its own words on the standing line, the same blocked treatment the zero limit gets', () => {
+        expect(holdStanding(heldRecord)).toEqual({ tone: 'stop', text: 'On credit hold' });
+    });
+    it('carries the hold’s reason in the verdict line, and the ways forward never offer a pay down', () => {
+        expect(verdictLine(heldRecord)).toEqual({ tone: 'stop', text: heldRecord.on_account.message });
+        expect(waysForward(heldRecord).map((w) => w.kind)).toEqual(['manager_override', 'switch_tender']);
+        expect(holdWays[0].message).toMatch(/accounts receivable releases it/);
+    });
+    it('is not a held record when the verdict is another reason, allowed, or nothing was read', () => {
+        expect(holdStanding(blocked)).toBeNull();
+        expect(holdStanding(allowed)).toBeNull();
+        expect(holdStanding(null)).toBeNull();
+    });
+    it('is not a held record when only the sale is over the cap of a live override window: the on_hold flag says the account is not held', () => {
+        const overCap: CounterStanding = {
+            ...heldRecord,
+            on_hold: false,
+            on_account: {
+                verdict: 'blocked', reason: 'account_hold', over_cents: null,
+                message: 'The hold on this account is overridden up to 5.99 USD a sale: this sale asks 6.00 USD.',
+                ways_forward: holdWays,
+            },
+        };
+        expect(holdStanding(overCap)).toBeNull();
+        expect(verdictLine(overCap).text).toContain('overridden up to');
+    });
+    it('offers no account tender while the hold stands', () => {
+        expect(heldRecord.payment_options).not.toContain('account');
     });
 });

@@ -548,6 +548,9 @@ paths:
         customer), card_terminal, card_declined, tax_quote_stale,
         tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms
         (an account tender on an account whose terms are due on receipt),
+        account_hold (an account tender on an account the AR core holds: a
+        standing credit hold record, or an override window on it that has
+        passed or whose cap the sale is over),
         buyer_required, buyer_not_authorized, buyer_cap (the account's buyer
         roster), check_over_limit (a check over the customer's check limit,
         or the database wide one, unless a manager approved it for this
@@ -2042,12 +2045,15 @@ paths:
         The account as the counter reads it before a sale goes on it: the
         credit limit (null for no limit, 0 for no credit), the open
         receivable the credit check reads, the open credit memos (positive
-        store credit), the available credit, the hold flag as the counter has
-        it today (a limit of zero), the terms kind of the payment terms, whether
-        the account asks for a named buyer and its roster, the check limit that
-        governs it, the payment shapes the server takes from it now, and a
-        verdict on_account: allowed, or blocked with a reason (credit_hold,
-        credit_limit or cash_only_terms), the amount in words, and the three
+        store credit), the available credit, the hold flag (a limit of zero,
+        or a standing credit hold record the AR core placed), the terms kind
+        of the payment terms, whether the account asks for a named buyer and
+        its roster, the check limit that governs it, the payment shapes the
+        server takes from it now, and a verdict on_account: allowed, or
+        blocked with a reason (credit_hold, credit_limit, cash_only_terms or
+        account_hold: the AR core's standing hold record, with its reason in
+        the words and pay down unavailable, for paying the balance does not
+        lift a hold), the amount in words, and the three
         ways forward: pay_down (with the amount that would clear it),
         manager_override and switch_tender, each with whether it is available.
         amount_cents is the account portion the sale would put on the account
@@ -2095,7 +2101,8 @@ paths:
       description: >-
         One act for one sale: a manager (the admin or owner role, and a
         person other than the sale's own cashier) approves an on account sale
-        the verdict blocks (kind account: credit_hold or credit_limit, never
+        the verdict blocks (kind account: credit_hold, credit_limit or
+        account_hold, never
         the terms of a cash only account) or a check over the customer's
         check limit (kind check), with a reason and a cap in cents. The
         completion of that sale spends it, once: of any number of racing
@@ -2460,7 +2467,7 @@ components:
       required: [verdict, reason, message, over_cents, ways_forward]
       properties:
         verdict: {type: string, enum: [allowed, blocked]}
-        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override."}
+        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, account_hold, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked (account_hold: the AR core's standing hold record); manager_override when allowed by a live override."}
         message: {type: string, description: "The verdict in plain words, with the amount."}
         over_cents: {type: [integer, "null"], format: int64, description: "How far past the limit the sale puts the account (credit_limit only)."}
         ways_forward:

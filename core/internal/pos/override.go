@@ -207,7 +207,7 @@ func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UU
 	}
 	open += storeCredit
 	v := onAccountVerdict(verdictIn{currency: facts.Currency, creditLimit: facts.CreditLimitCents, open: open,
-		termsKind: facts.TermsKind, amount: amount})
+		termsKind: facts.TermsKind, amount: amount, hold: facts.Hold, now: s.now()})
 	if v.Verdict == VerdictAllowed {
 		return nil
 	}
