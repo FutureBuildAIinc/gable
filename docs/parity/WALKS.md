@@ -497,4 +497,54 @@ it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET 
    bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
    line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
 
+### CP-19: the scale at the counter (bulk materials)
+
+Proves: CP-19 (scale integration for bulk materials: the standard protocol behind an interface, the simulated
+scale, the weigh in and weigh out with the ticket on the line, the manual weight with its reason), across two
+yards: `KEL-MAIN` (`REG-01`) and `LK` (`REG-LK`). The local stack wires the simulated SMA scale
+(`POS_SCALE_SIMULATOR` defaults on in docker-compose; unset it to run without a scale), so the deck is driven
+with curl and the dealer's steps run in the desk. Run `curl` against <http://127.0.0.1:8080>.
+
+1. **A bulk product with a density.** Create one sold by the ton, its density on the record:
+   `curl -s -X POST -H 'Content-Type: application/json' -d '{"sku":"AGG-BASE","description":"Crushed base rock","stock_uom":"TON","base_price_ten_thousandths":300000,"density_lb_per_cy":"2700","density_volume_state":"loose"}' http://127.0.0.1:8080/api/v1/products`
+   answers 201 with `density_lb_per_cy` read back. Give it stock: in `make pg-shell`,
+   `insert into inventory (product_id, location_id, location, quantity, allocated) select id, (select id from locations where type='YARD' limit 1), 'Y', 500, 0 from products where sku='AGG-BASE';`
+   A dealer changing the figure later uses the product's density field (PATCH `/api/v1/products/<id>/density`
+   with the revision).
+2. **The scale reads.** `curl -s "http://127.0.0.1:8080/api/v1/pos/scale?register_id=REG-01"` answers the
+   branch's device (the simulated yard scale, its certificate field marked as a simulation) and the reading:
+   zero, at rest. Put the empty truck on the deck:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"weight_lb":"32000"}' http://127.0.0.1:8080/api/v1/pos/scale/simulator`,
+   then the same GET reads 32,000 lb.
+3. **Weigh in (Jordan Pike, Point of Sale at `REG-01`).** Open Till, then open the Scale panel: the reading
+   shows the deck. Type the truck's plate `DEMO-7` and Weigh in: the open tickets list gains ticket
+   `WT-000001` (or the next number of the run) at 32,000 lb, source scale, the device named on it.
+4. **Weigh out onto the line.** Load the truck:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"weight_lb":"44400"}' .../api/v1/pos/scale/simulator`.
+   Start a sale, add AGG-BASE, select the line, and in the Scale panel choose DEMO-7's open weigh in and Weigh
+   out. The line now reads 6.2 TON (12,400 lb net at 2,000 lb to the ton), carries the badge "NET 12400 lb"
+   with the weigh out's ticket number, and the ticket reads gross 44,400, tare 32,000, net 12,400, basis
+   double_draft: the net is Gable's subtraction of two gross readings, and the ticket says so.
+5. **The money and the paper.** Pay the sale in cash. The line total is $186.00 (6.2 tons at $30) plus the
+   branch's tax, and the printed 80mm receipt carries the ticket number with G 44400 / T 32000 / N 12400 under
+   the line. `GET /api/v1/pos/scale/tickets?register_id=REG-01` lists both tickets; the weigh in reads
+   completed.
+6. **A moving or overloaded scale refuses.** Drive the deck to a moving load:
+   `curl -s -X PUT -H 'Content-Type: application/json' -d '{"motion":true}' .../api/v1/pos/scale/simulator` and
+   weigh in: the answer is 409 `scale_reading_refused`, no number is handed over. The same for
+   `{"status":"over_capacity"}`. Clear with `{"motion":false,"status":"none","weight_lb":"0"}`.
+7. **The manual weight with its reason (second yard).** At `REG-LK` with the deck at zero: open a sale, add
+   AGG-BASE, select the line and in the Scale panel choose Enter weight by hand: 12,400 lb, reason "The scale
+   is not answering". The line weighs at 6.2 TON with the MAN WT badge, its ticket reads source manual with
+   the reason, and the receipt prints MAN WT. The reason is a closed list
+   (`GET /api/v1/pos/scale/manual-reasons`); an invented one is a 400. While the deck shows anything but zero
+   the entry is refused 409 `scale_not_zero` (Handbook 44's rule, checked at the point of entry).
+8. **A yard line needs the density.** Create a second product stocked by the cubic yard with no density
+   (`stock_uom":"CY"`), give it stock, and weigh a truck onto its line the same way: the weigh out is refused
+   409 `density_required`, and the counter says the product needs a pounds per cubic yard figure. Set the
+   density (step 1's PATCH) and the weigh out lands the yards (the net divided by the density).
+9. **The void keeps the number.** Weigh in a truck (`WT-...`), then in the ticket list void it with a reason:
+   the list keeps the row, status void, same number, and a weigh out against it answers 409. A ticket that
+   prices a line cannot be voided (`ticket_on_line`); the line goes first.
+
 None of the other walks of the plan are written yet; they land with their items.
