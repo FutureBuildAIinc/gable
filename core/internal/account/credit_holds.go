@@ -4,9 +4,11 @@
 package account
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -390,7 +392,7 @@ func (s *Service) ReleaseHold(ctx context.Context, id uuid.UUID, in HoldActIn) (
 	}
 	var out *CreditHold
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		hold, err := s.lockHold(ctx, id)
+		hold, err := s.getHold(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -398,6 +400,10 @@ func (s *Service) ReleaseHold(ctx context.Context, id uuid.UUID, in HoldActIn) (
 			return err
 		}
 		if err := s.lockCreditOrder(ctx, hold.CustomerID); err != nil {
+			return err
+		}
+		hold, err = s.lockHold(ctx, id)
+		if err != nil {
 			return err
 		}
 		if hold.Status == "released" {
@@ -454,7 +460,7 @@ func (s *Service) OverrideHold(ctx context.Context, id uuid.UUID, in HoldActIn) 
 	}
 	var out *CreditHold
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		hold, err := s.lockHold(ctx, id)
+		hold, err := s.getHold(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -462,6 +468,10 @@ func (s *Service) OverrideHold(ctx context.Context, id uuid.UUID, in HoldActIn) 
 			return err
 		}
 		if err := s.lockCreditOrder(ctx, hold.CustomerID); err != nil {
+			return err
+		}
+		hold, err = s.lockHold(ctx, id)
+		if err != nil {
 			return err
 		}
 		if hold.Status == "released" {
@@ -709,6 +719,53 @@ func (s *Service) EvaluateHolds(ctx context.Context, dryRun bool, only []uuid.UU
 // skips rather than doubles it.
 func (s *Service) applyHoldEvaluation(ctx context.Context, ev *HoldEvaluation, only []uuid.UUID, actor string) error {
 	return s.inTx(ctx, func(ctx context.Context) error {
+		now := s.now()
+		// Take step 1a (the customer's credit serialization lock) in
+		// ascending customer id order before any credit_holds or customers
+		// row is locked, for every customer whose override expires or whose
+		// hold the sweep places or lifts.
+		expCustomers, err := s.ex(ctx).Query(ctx, `
+			SELECT customer_id FROM credit_holds
+			WHERE status = 'OVERRIDDEN' AND override_until <= $1
+			  AND ($2::uuid[] IS NULL OR customer_id = ANY($2))`, now, uuidsOrNil(only))
+		if err != nil {
+			return fmt.Errorf("failed to read the expired credit hold overrides: %w", err)
+		}
+		seen := map[uuid.UUID]bool{}
+		var custIDs []uuid.UUID
+		addCust := func(id uuid.UUID) {
+			if !seen[id] {
+				seen[id] = true
+				custIDs = append(custIDs, id)
+			}
+		}
+		for expCustomers.Next() {
+			var cid uuid.UUID
+			if err := expCustomers.Scan(&cid); err != nil {
+				expCustomers.Close()
+				return fmt.Errorf("failed to scan an expired override customer: %w", err)
+			}
+			addCust(cid)
+		}
+		expCustomers.Close()
+		if err := expCustomers.Err(); err != nil {
+			return err
+		}
+		for i := range ev.WouldPlace {
+			addCust(ev.WouldPlace[i].CustomerID)
+		}
+		for i := range ev.WouldRelease {
+			addCust(ev.WouldRelease[i].CustomerID)
+		}
+		slices.SortFunc(custIDs, func(a, b uuid.UUID) int {
+			return bytes.Compare(a[:], b[:])
+		})
+		for _, cid := range custIDs {
+			if err := s.lockCreditOrder(ctx, cid); err != nil {
+				return err
+			}
+		}
+
 		// The elapsed overrides go back to active first: the window is over,
 		// the hold stands on its own again, and a lift planned against it is
 		// no longer behind a window.
@@ -716,8 +773,8 @@ func (s *Service) applyHoldEvaluation(ctx context.Context, ev *HoldEvaluation, o
 			UPDATE credit_holds SET status = 'ACTIVE', override_until = NULL, override_by = NULL,
 				override_reason = NULL, max_order_cents = NULL, updated_at = NOW()
 			WHERE status = 'OVERRIDDEN' AND override_until <= $1
-			  AND ($2::uuid[] IS NULL OR customer_id = ANY($2))
-			RETURNING id, customer_id`, s.now(), uuidsOrNil(only))
+			  AND customer_id = ANY($2)
+			RETURNING id, customer_id`, now, custIDs)
 		if err != nil {
 			return fmt.Errorf("failed to expire the credit hold overrides: %w", err)
 		}
