@@ -47,7 +47,8 @@ self hosting dealer cannot obtain.
   middleware, which answers 401 first, or runs in dev mode.
 - **Some handlers read `role` alone, or a UUID `sub`.** `callerRole` in
   `core/internal/order/handler.go` (line 100) and `caller` in
-  `core/internal/ap/handler.go` (line 80) read only `claims.Role`;
+  `core/internal/ap/handler.go` (line 80) read the role from `claims.Role`
+  alone (`caller` reads the subject as its actor as well);
   `userRole` in `core/internal/pricing/exposure_handler.go` (around line 444)
   reads `role`, else the first of `roles`. The hold release in
   `core/internal/order/service.go` (around line 1292) refuses only a non
@@ -64,7 +65,7 @@ self hosting dealer cannot obtain.
 - **Branches come from Gable's own table.** `core/pkg/middleware/branch.go`
   checks `X-Branch-Id` against `user_locations` rows keyed by the token's
   `sub` (a `TEXT` column); `owner` and `admin` may omit the header and reach
-  every branch; the list wall (`Wall`, ADR 0007 section 2.3) holds a list to
+  every branch; the list wall (`Wall`, ADR 0007 section 5.7) holds a list to
   the caller's grants. ADR 0010 derives a user's companies from the same
   grants, written by the audited users routes ADR 0009 scopes as
   `users:grants`.
@@ -133,12 +134,17 @@ self hosting dealer cannot obtain.
   returned as verified before that. The Google adapter takes the provider's
   own `email_verified` claim (`src/Appwrite/Auth/OAuth2/Google.php`), and
   the generic OIDC adapter takes the issuer's (`src/Appwrite/Auth/OAuth2/Oidc.php`).
-  The Microsoft provider's tenant is required from the 2.0.0 release on, and
-  before it the adapter fell back to `common`, which is every Entra tenant.
+  The Microsoft provider's tenant is required on every release Gable
+  supports: the adapter's `verifyCredentials` throws "Microsoft tenant is
+  required." when the tenant is empty. The `common` fallback that once
+  accepted every Entra tenant is gone (it is in the 1.8.0 and 1.9.0
+  adapters, and the 1.9.x patch line already requires a tenant).
 - **The version.** `GET /v1/health/version` answers the Appwrite version. The
-  route is public and needs no key (`app/controllers/api/health.php` in the
-  1.x releases; Appwrite's own compose file healthchecks that path from the
-  2.0.0 release on).
+  route is public and needs no key (on the 2.x line it is
+  `src/Appwrite/Platform/Modules/Health/Http/Health/Version/Get.php`, which
+  sets the path, labels it public and answers the version; in the 1.5.x to
+  1.8.x releases it is `app/controllers/api/health.php`). Appwrite's own
+  compose file healthchecks that path from the 2.0.0 release on.
 - **The line Gable targets.** The Appwrite 2.x line on PostgreSQL, and no
   other line: a 1.x Appwrite is refused at start, and the floor of section 8
   sits on the 2.x line. Every slice is proven on a local Appwrite pinned in
@@ -367,9 +373,11 @@ Gable's own session (section 2).
   again, and Appwrite now returns that member's user id and secret.
 - **Google has no such step.** Its adapter honours the provider's
   `email_verified` claim, so Appwrite links the sign in to the invited user
-  and marks the address verified, and it revokes that user's other
-  credentials while it does so: an invitee halfway through the recovery
-  proof who signs in with Google instead loses the recovery link. A generic
+  and marks the address verified. It revokes that user's other credentials
+  only from the 2.6.2 release on, so on the floor and on the release the
+  local proof runs (section 9) an invitee who signs in with Google halfway
+  through the recovery proof keeps that recovery link: it is bound to the
+  account it was issued for and expires as Appwrite sets it. A generic
   `oidc` provider behaves like Google when its issuer claims the address
   verified and like Microsoft when it does not, so the dealer must point it
   at an issuer that claims verified only for addresses it verified.
@@ -400,14 +408,16 @@ Gable's own session (section 2).
   same value in the query of the `success` and `failure` URLs (or the magic
   link's URL) it gives Appwrite; Appwrite appends the user id and secret to
   that URL and keeps the query. That query is the one place the state
-  travels: Appwrite's own `state` parameter, which later releases return
-  unchanged as the `state` query parameter, is not used, so the floor of
-  section 8 does not move for it. For the magic link the `state` binds the
-  link to the browser that asked for it, and the one time secret is what
-  authenticates it: the browser carries that secret in the link to Gable's
-  callback, as it does Appwrite's secret on the OAuth2 return, and only the
-  core spends it. Gable's callback refuses a missing, mismatched or
-  reused `state` before it exchanges anything. A one time secret Appwrite has
+  travels: Appwrite's own `state` parameter is not used, so the floor of
+  section 8 does not move for it. On the releases Gable supports that
+  parameter carries Appwrite's own login state, the success and failure URLs
+  and the token it hands back; only a later release returns a caller's value
+  back unchanged, and Gable needs no such echo. For the magic link the
+  `state` binds the link to the browser that asked for it, and the one time
+  secret is what authenticates it: the browser carries that secret in the
+  link to Gable's callback, as it does Appwrite's secret on the OAuth2
+  return, and only the core spends it. Gable's callback refuses a missing,
+  mismatched or reused `state` before it exchanges anything. A one time secret Appwrite has
   already exchanged is refused by Appwrite, and the callback answers the
   fixed refusal. A magic link opened on another device or browser fails the
   check by design: that is the protection against a link someone else sent
@@ -492,6 +502,17 @@ Gable's own session (section 2).
     outside the Team"). Gable never adopts an account someone else may have
     registered under the invitee's email, and never deletes one: resolving
     it is the Appwrite administrator's act.
+
+  Gable's invite and the `microsoft` method are two different onboards, and
+  one person can take only one of them. The invite creates the Appwrite
+  account, and on the 2.x line Appwrite then refuses a Microsoft sign in for
+  that address: the callback finds the invited user by the provider's email
+  and, because the Microsoft adapter reports no address as verified, takes
+  the refusal branch before any provider identity is created, so the next
+  sign in takes it as well. A dealer that allows `microsoft` therefore
+  onboards through the Appwrite console as section 4 describes, and Gable's
+  invite serves the dealers that sign in with email and password or the
+  magic link.
 
   For a user it created, the core adds the Team membership with the mapped
   roles (`teams.createMembership` with the API key, `teams.write`, which
@@ -628,12 +649,12 @@ In the Appwrite project the operator:
   settings, registering at the provider the redirect URI Appwrite shows
   there (Appwrite's own callback, not Gable's);
 - for `microsoft`, enters the dealer's own Entra tenant id in Appwrite's
-  Microsoft provider settings. Appwrite requires a tenant from 2.0.0 on,
-  and a tenant that accepts every Entra tenant is not an acceptable
-  configuration for Gable: the floor stops the takeover of an existing
-  account, and nothing else stops a person outside the dealer's tenant from
-  reaching the sign in at all, which would leave Appwrite making a user for
-  them;
+  Microsoft provider settings. Appwrite requires a tenant on every release
+  Gable supports, and a tenant that accepts every Entra tenant is not an
+  acceptable configuration for Gable: the floor stops the takeover of an
+  existing account, and nothing else stops a person outside the dealer's
+  tenant from reaching the sign in at all, which would leave Appwrite making
+  a user for them;
 - sets Appwrite's mail settings, for the magic link and the invitee's
   recovery email.
 
@@ -712,7 +733,9 @@ In the Appwrite project the operator:
   and so holds no `state` cookie, reaching the proof route, with the address
   proved, no Gable session issued and the answer to sign in; a pre registered
   account with the invitee's email, not a member, not adopted (the invite
-  refused with the admin facing reason, no membership added); an expired
+  refused with the admin facing reason, no membership added); a second invite
+  for a confirmed member refused as a duplicate, with the membership's roles
+  left as they were; an expired
   invite link failing cleanly and a resent invite working; a removed
   manager's PIN refused at once.
 - **Playwright** against the local Appwrite: sign in, sign out, and an
@@ -787,6 +810,14 @@ deferred and not counted.
   Microsoft until Appwrite reports verification for it, or telling a dealer
   that needs Microsoft today to use email and password or the magic link
   instead, are a decision on record for the principal.
+- **Which onboarding a dealer that allows Microsoft uses.** Gable's invite
+  creates the Appwrite account, and Appwrite then refuses a Microsoft sign in
+  for that address for good (section 6), so the two paths cannot serve the
+  same person. This record takes the console path for such a dealer, and
+  Gable's invite for the dealers that sign in with email and password or the
+  magic link; a dealer that wants both paths for one Team would need an
+  Appwrite side for the Microsoft members, which is a decision on record for
+  the principal.
 
 Passkeys are deferred to a later record; the hosted deployment's Appwrite
 project and key are an operator's setup, not a design choice.
