@@ -69,10 +69,15 @@ async function saleTotal(page: Page): Promise<number> {
   return Number(text.replace(/[$,\s]/g, ''));
 }
 
-/** Rings one unit at a time until the sale's total passes the cents named. */
+/** Rings one unit at a time until the sale's total passes the cents named, waiting for the summary to follow each line. */
 async function ringPast(page: Page, sku: string, cents: number) {
-  for (let i = 0; i < 40 && (await saleTotal(page)) <= cents; i++) await addOne(page, sku);
-  const total = await saleTotal(page);
+  let total = await saleTotal(page);
+  for (let i = 0; i < 40 && total <= cents; i++) {
+    const before = total;
+    await addOne(page, sku);
+    await expect.poll(() => saleTotal(page), { timeout: 10000 }).toBeGreaterThan(before);
+    total = await saleTotal(page);
+  }
   expect(total).toBeGreaterThan(cents);
   return total;
 }
