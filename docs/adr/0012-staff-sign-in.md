@@ -7,48 +7,69 @@
 
 Proposed for the Gable v1 refactor (item S9, the shell track's sign in row of
 `docs/parity/LBM-PARITY-MATRIX.md`, Ruling 4). It stands on ADR 0002 (machine
-keys), ADR 0004 (web session custody), ADR 0009 (finer admin scopes) and
-ADR 0010 (multi company). When its session slice lands, it supersedes the
-interim design of ADR 0004 (the `sessionStorage` handoff) by building that
-record's target (an `HttpOnly` cookie issued by the API), and both records
-then say so in their Status.
+keys), ADR 0004 (web session custody), ADR 0005 (the sales and money core),
+ADR 0009 (finer admin scopes) and ADR 0010 (multi company). When its session
+slice lands, it supersedes the interim design of ADR 0004 (the
+`sessionStorage` handoff) by building that record's target (an `HttpOnly`
+cookie issued by the API), and both records then say so in their Status.
 
 ## Context
 
 ### The ruling
 
 Gable signs staff in with the Auth and Teams services of an Appwrite
-deployment. That holds in two places: FutureBuild's hosted production, where
-the Appwrite deployment is the one behind a platform such as FB Console, and
-the community source version a dealer hosts, where the dealer runs its own
-Appwrite (self hosted, or Appwrite's own cloud). Nothing in this record may
-depend on a component a self hosting dealer cannot obtain.
+deployment. That holds in two places: FutureBuild's hosted production, which
+uses FutureBuild's own Appwrite deployment, and the community source version
+a dealer hosts, where the dealer runs its own Appwrite (self hosted, or
+Appwrite's own cloud). Nothing in this record may depend on a component a
+self hosting dealer cannot obtain.
 
 ### What the code does today
 
 - **The core verifies outside bearer tokens.** `core/internal/app/serve/serve.go`
-  (step 4, around lines 194 to 230) builds `middleware.NewAuthMiddleware` when
-  `JWKS_URL` is set. `core/pkg/middleware/auth.go` parses the bearer with the
-  JWKS key set, checks the issuer only when `AUTH_ISSUER` is set, checks no
-  audience, refuses a role bearing token with no subject, and puts the
-  `UserClaims` (`sub`, `email`, `roles`, `role`, `org_id`) in the context.
-- **Roles come from the token.** `RequireRole` admits a request when the
-  claims' `role` or any of `roles` is in the guard's list. The guards in
-  `serve.go` and `wire_branch_wall.go` use `owner`, `admin`, `sales`,
-  `finance`, `purchasing`, `warehouse`, `cashier`, `driver` and `user`.
-  With no claims and no machine key (dev mode), every guard passes.
+  (step 4, lines 207 to 228) builds `middleware.NewAuthMiddleware` when
+  `JWKS_URL` is set, runs with no staff authentication when `AUTH_MODE=dev`,
+  and exits otherwise. `core/pkg/middleware/auth.go` parses the bearer with
+  the JWKS key set, checks the issuer only when `AUTH_ISSUER` is set, checks
+  no audience, refuses a role bearing token with no subject, and puts the
+  `UserClaims` (`sub`, `email`, `roles`, `role`, `org_id`) in the context; a
+  request with no bearer is answered 401.
+- **The guards fail open on no claims.** `RequireRole` admits a request when
+  the claims' `role` or any of `roles` is in the guard's list, and passes a
+  request with no claims and no machine key ("dev mode"). The branch
+  middleware (`branch.go`, around line 204) and the counter override
+  (`core/internal/pos/override.go`, around line 212) are permissive on no
+  claims too. Today that is safe only because step 4 either mounts the JWT
+  middleware, which answers 401 first, or runs in dev mode.
+- **Some handlers read `role` alone, or a UUID `sub`.** `callerRole` in
+  `core/internal/order/handler.go` (line 100) and `caller` in
+  `core/internal/ap/handler.go` (line 80) read only `claims.Role`;
+  `userRole` in `core/internal/pricing/exposure_handler.go` (around line 444)
+  reads `role`, else the first of `roles`. The hold release in
+  `core/internal/order/service.go` (around line 1292) refuses only a non
+  empty role outside the finance roles. Four readers parse `sub` as a UUID:
+  `cashierOf` (`core/internal/pos/handler.go`, line 251), `userID`
+  (`exposure_handler.go`, line 417), `core/internal/reporting/handler.go`
+  (line 259) and `core/internal/bankrecon/service.go` (line 362); the counter
+  override's "a manager other than the sale's cashier" check compares the
+  sale's cashier UUID with the approver's `sub`.
+- **The guards' roles.** The guards in `serve.go` and `wire_branch_wall.go`
+  use `owner`, `admin`, `sales`, `finance`, `purchasing`, `warehouse`,
+  `cashier`, `driver`, and `user` once (the `/uploads/` route, `serve.go`
+  line 1183).
 - **Branches come from Gable's own table.** `core/pkg/middleware/branch.go`
   checks `X-Branch-Id` against `user_locations` rows keyed by the token's
-  `sub`; `owner` and `admin` may omit the header and reach every branch; the
-  list wall (`Wall`, ADR 0007 section 2.3) holds a list to the caller's
-  grants. ADR 0010 derives a user's companies from the same grants. The
-  grants are written by the audited users routes ADR 0009 scopes as
+  `sub` (a `TEXT` column); `owner` and `admin` may omit the header and reach
+  every branch; the list wall (`Wall`, ADR 0007 section 2.3) holds a list to
+  the caller's grants. ADR 0010 derives a user's companies from the same
+  grants, written by the audited users routes ADR 0009 scopes as
   `users:grants`.
 - **The staff roster is a separate thing.** `core/internal/staff` owns the
   `staff` and `module_grants` tables (an email, a free text role label, an
-  active flag, module grants for an integration). Its own package doc says a
-  staff row is distinct from a JWT `sub` user.
-- **The web has no sign in flow.** Nothing under `web/` holds an
+  active flag, module grants for an integration). The `Staff` type comment
+  (`core/internal/staff/model.go`, line 34) says a staff row is distinct from
+  a JWT `sub` user.
+- **The web has no staff sign in flow.** Nothing under `web/` holds an
   `authorization_endpoint`, a `code_verifier` or a `redirect_uri`.
   `web/packages/auth` holds session custody (ADR 0004: a token in memory plus
   a tab scoped `sessionStorage` record), the dev persona session, the 401
@@ -56,14 +77,20 @@ depend on a component a self hosting dealer cannot obtain.
   read from the public `GET /api/v1/auth/config`.
 - **The sign in methods exist only as a list.** `core/internal/signinmethods`
   holds the dealer's allowlist of six codes (`email_password`, `passkey`,
-  `magic_link`, `google`, `microsoft`, `oidc`). Its `Start` (`service.go`,
-  lines 227 to 238) answers `StartNoRoute` for email and password and
-  `StartNotImplemented` for the other five.
+  `magic_link`, `google`, `microsoft`, `oidc`), with an issuer URL and client
+  id stored on the `oidc` row. Its `Start` (`service.go`, lines 227 to 238)
+  answers `StartNoRoute` for email and password and `StartNotImplemented` for
+  the other five. The config's `start_url` for `email_password` is the portal
+  login (`formStartAction` in `model.go`, line 84).
 - **The one server sign in is the contractor portal's**
   (`POST /api/portal/v1/login`, with its own middleware in
-  `core/pkg/middleware/portal_auth.go`). Staff have none.
+  `core/pkg/middleware/portal_auth.go` and its own per address limit,
+  `StrictRateLimit`, `serve.go` line 1082). The front door's email and
+  password form posts there today. Staff have none.
 - **The persona cards run on `AUTH_MODE=dev`,** which the local
-  `docker-compose.yml` sets and which disables staff authentication.
+  `docker-compose.yml` and the CI workflow set. Nothing in the binary knows
+  whether it runs in the local stack: the release image (`core/Dockerfile`)
+  and the local image are the same build.
 - **The Tauri shells already hold tokens safely.** `tauri/core/src/tokens.rs`
   keeps an access and a refresh token in the OS keychain, exposes only the
   access token over IPC, and clears both at sign out. The desk shell
@@ -72,41 +99,41 @@ depend on a component a self hosting dealer cannot obtain.
 ### What Appwrite offers
 
 - **Auth.** Email and password, magic URL, email one time password, OAuth2
-  providers (Google, Microsoft and a generic `oidc` provider among them),
-  passkeys in recent releases, custom tokens, and multi factor
+  providers, passkeys in recent releases, custom tokens, and multi factor
   authentication: https://appwrite.io/docs/products/auth
 - **Server side sessions.** A server holding an API key with
-  `sessions.write` creates the session itself (email and password, or the
-  OAuth2 token flow with a `state` check) and keeps the session secret on
-  its own side: https://appwrite.io/docs/products/auth/server-side-rendering
+  `sessions.write` creates the session itself and keeps the session secret on
+  its own side: https://appwrite.io/docs/products/auth/server-side-rendering .
+  Appwrite's own OAuth2 flow sends the person's browser to Appwrite's
+  endpoints (Appwrite's URL, then the provider, then Appwrite's callback).
+- **Custom tokens.** A server holding `users.write` mints a one time secret
+  for a user (`users.createToken`), and `account.createSession` exchanges it
+  for a session: https://appwrite.io/docs/products/auth/custom-token
 - **JWTs.** `account.createJWT` returns a short lived token that a server
   passes back to Appwrite with `setJWT` to act as the user:
   https://appwrite.io/docs/products/auth/jwt . Appwrite publishes no JWKS for
-  it: the token is signed HS256 with the Appwrite server's own master
-  secret, so only Appwrite can verify it.
+  it: Appwrite's source signs it HS256 with a server secret
+  (`app/controllers/api/account.php` in the `appwrite/appwrite` repository),
+  so only Appwrite can verify it.
 - **Teams.** A team has memberships; each membership carries a list of role
   strings; an `owner` role is reserved by Appwrite for those who may invite
-  and remove members; an invitation is a membership the invitee confirms:
-  https://appwrite.io/docs/products/auth/teams
-- **Custom tokens.** A server mints a one time secret for a user and the
-  client exchanges it for a session:
-  https://appwrite.io/docs/products/auth/custom-token
+  and remove members: https://appwrite.io/docs/products/auth/teams . A
+  membership created by a client is an invitation by email that the invitee
+  confirms; one created by a server with an API key is added at once, with
+  no email.
+- **Rate limits** do not apply to calls made with an API key:
+  https://appwrite.io/docs/advanced/platform/rate-limits
 - **Self hosting.** A Docker host (Docker Compose) or the Helm chart; the
   documented minimum is two CPU cores and 4 GB of memory:
   https://appwrite.io/docs/advanced/self-hosting and
   https://appwrite.io/docs/advanced/self-hosting/installation
 
-### What an OIDC bridge in front of Appwrite would be
+### An OIDC bridge in front of Appwrite
 
-Appwrite is not an OIDC provider. Signing staff in through OIDC therefore
-means running a separate issuer in front of Appwrite: a bridge with its own
-sign in form, its own database, signing keys and their rotation, that checks
-the person against Appwrite and issues OIDC tokens. Such a bridge, as an
-operator would typically build one for a few web tools, serves confidential
-web clients with exact `https` redirect URIs, signs ID tokens and publishes a
-JWKS, may issue opaque access tokens, and carries Team membership at most as
-a list of ids. Gable does not publish one, so a self hosting dealer would
-have none to run.
+Appwrite is not an OIDC provider. Signing staff in through OIDC would mean
+running a separate issuer in front of Appwrite, with its own sign in form,
+database, signing keys and rotation. Gable publishes none, so a self hosting
+dealer would have none to run.
 
 Whichever path this record takes, the first build slice proves it end to end
 on a local Appwrite before anything relies on it.
@@ -120,129 +147,202 @@ deployment signs staff in; the web runs an authorization code flow with PKCE;
 the core verifies the issuer's tokens through its existing JWKS check.
 
 - A self hosting dealer would have to run an OIDC issuer in front of its
-  Appwrite. Appwrite is not itself an OIDC provider, and Gable publishes no
-  bridge, so the dealer has nothing to run. Gable would have to
-  publish and maintain a bridge of its own: a second identity service with
-  its own database, signing keys and rotation, which is more than this item
-  can carry and more than a dealer should host.
-- The JWKS check "fits" only the signature. The bridge's access tokens are
-  opaque; using its ID token as the API bearer is the wrong token for the
-  job. Its tokens carry no roles, so `RequireRole` would refuse every staff
-  request until the core looked roles up itself, and the core checks no
-  audience today.
-- A bridge of the usual kind serves confidential web clients only, so the
-  shells (loopback or a custom scheme, public clients) and the methods its
-  own form does not offer would each need more bridge work.
-- Teams map only to "may sign in": the `groups` claim has Team ids and no
-  membership roles.
+  Appwrite, and Gable publishes none. Gable would have to publish and
+  maintain one: a second identity service with its own database, signing
+  keys and rotation, which is more than this item can carry and more than a
+  dealer should host.
+- The JWKS check fits only the signature: the core checks no audience, and
+  the roles and branches Gable needs would still have to be looked up by the
+  core.
+- The shells (public clients returning to a loopback address or a custom
+  scheme) and every method beyond the issuer's own form would each need more
+  issuer work.
 
 **(b) Appwrite directly.** Gable talks to Appwrite's own Auth and Teams APIs.
 
 - A self hosting dealer deploys Appwrite (one documented install) and Gable,
   and nothing else. FutureBuild's hosted production points the same settings
   at its own Appwrite deployment.
-- Every ruled method is an Appwrite method (section 4), so the six codes of
-  `signinmethods` map onto Appwrite without a second identity service.
+- Appwrite holds the accounts, the sessions and the Teams for every method
+  (section 4), so no second identity service exists.
 - Teams give roles, not just membership (section 5).
-- The core cannot verify Appwrite's JWT locally: it is HS256 under the
-  Appwrite server's master secret, which no relying service may hold.
-  Calling Appwrite to validate on every API request would put Appwrite on
-  the hot path of every staff request and on the counter's. So the core
-  talks to Appwrite at sign in and at refresh only, and holds its own
-  session in between (section 2).
+- The core cannot verify Appwrite's JWT locally (section "What Appwrite
+  offers"). Calling Appwrite on every API request would put Appwrite on the
+  hot path of every staff request and on the counter's. So the core talks to
+  Appwrite at sign in and at refresh only, and holds its own session in
+  between (section 2).
 
-**Recommendation: (b), with Appwrite called by the core.** It is the only
-option a self hosting dealer can run from what Gable publishes, it covers the
-ruled methods, and it lets Teams carry roles.
+**Decision: (b), with the core as Gable's only Appwrite client.** It is the
+only option a self hosting dealer can run from what Gable publishes, it
+covers the ruled methods, and it lets Teams carry roles. The bridge is out of
+Gable's path entirely.
 
 ### 2. The core holds the session
 
-The core is Gable's one relying party on Appwrite. The browser and the shells
-never hold an Appwrite session or an Appwrite JWT.
+The core is Gable's one relying party on Appwrite. No browser script and no
+shell ever calls Appwrite, and neither ever holds an Appwrite session, an
+Appwrite JWT or an Appwrite secret.
 
-- **Sign in.** The core opens an Appwrite session through Appwrite's server
-  side pattern (an API key holding `sessions.write`), reads the account, reads
-  the user's membership in the dealer's Team (section 5), and then ends the
-  Appwrite session at once. Nothing Appwrite issued is stored. A person who
-  is not a confirmed member with at least one mapped role is refused with the
-  one fixed answer every refusal gives.
-- **The core's session.** A new table, `staff_sessions`, keyed by a random
-  session id that is stored only as a hash, holds the subject, the client
-  kind (`web` or `shell`), the roles read at sign in, the creation and last
-  use, an idle limit and an absolute limit (both settings), and a revoked
-  flag. Writes to it carry the concurrency test the brief requires.
-- **The request path.** A session middleware resolves the session to the
-  same `middleware.UserClaims` the JWT path fills (`sub`, `email`, `roles`),
-  so `RequireRole`, the branch middleware, the list wall and ADR 0010's
-  company derivation run unchanged. Machine keys dispatch by shape before
-  anything else, exactly as ADR 0002 section 1 says.
-- **Refresh.** When the session's role snapshot is older than a setting, the
-  core re-reads the membership and the user's status with its API key. A
-  definite answer that the person is no longer a member, holds no mapped
-  role, or is blocked revokes the session; an Appwrite answer that is not
-  definite (unreachable, an error) keeps the session on its old snapshot
-  until the absolute limit, so a brief Appwrite outage does not close the
-  counter. Role changes therefore take effect at the next refresh, not on
-  the next request.
+- **Sign in.** The core opens an Appwrite session server side (section 4
+  gives the call per method), reads the account and the user's membership in
+  the dealer's Team (section 5) with its API key, and then ends the Appwrite
+  session at once, acting as the user on that session's own secret. Nothing
+  Appwrite issued is stored. The core refuses, with the one fixed answer
+  every refusal gives, a person whose membership is unconfirmed or absent,
+  whose user is blocked or deleted, or who holds no mapped role (Appwrite's
+  `owner` alone, or only unknown roles).
+- **A fresh session every time.** Every sign in issues a new random session
+  id from a cryptographic source; any session id the client sent is ignored
+  and never reused (no fixation).
+- **The core's session.** A new table, `staff_sessions`, keyed by the hash of
+  the session id (the id itself is never stored), holds the subject, the
+  Appwrite user id, the client kind (`web` or `shell`), the roles read at the
+  last membership read and when that read was made, the creation and last
+  use, an idle limit, an absolute limit, and a revoked flag. Writes to it
+  carry the concurrency test the repository requires (pool size 4, three
+  contenders).
+- **The request path, fail closed.** The auth layer dispatches in this order:
+  a machine key by its `sk_live_` shape (ADR 0002 section 1, unchanged); a
+  shell access token by its own fixed prefix (section 3); the session cookie;
+  and, until slice 8 retires it, a JWT on the JWKS path. A valid session or
+  shell token fills `middleware.UserClaims` with `sub`, `email` and `roles`;
+  `role` is always empty. Outside the public paths, a request with none of
+  these, or with an unknown, revoked, idle expired or absolutely expired
+  session, is answered 401 before any handler runs; it never reaches a guard
+  with no claims. Step 4 of `serve.go` mounts this middleware whenever the
+  Appwrite settings are present, and the exit stays for a core with neither
+  Appwrite settings nor the dev build (section 7).
+- **Readers of `role` alone change in slice 2.** Because a session sets
+  `roles` only, no handler may depend on `role`: `callerRole`
+  (`order/handler.go`), `caller` (`ap/handler.go`) and `userRole`
+  (`pricing/exposure_handler.go`) move to `middleware.ClaimsHaveAnyRole` over
+  both fields, so a decision never depends on which field, or which order of
+  `roles`, a person's roles arrive in; and the hold release in
+  `order/service.go` refuses an empty role when a person's claims are
+  present (ADR 0005 section 5.2 holds it to admin, owner and finance). Every
+  `claims.Role` reader is found by a grep in that slice and covered by a
+  test.
+- **The subject is a UUID.** `sub` is the name based UUID (version 5) over a
+  fixed Gable namespace and `<projectId>:<userId>`. Every reader that parses
+  `sub` as a UUID (`cashierOf`, `userID`, the reporting and bankrecon
+  authors) keeps working, the counter override's "other than the sale's
+  cashier" comparison holds, `user_locations` and the audit log key to it as
+  they key to `sub` today, and the session row keeps the Appwrite user id for
+  refresh. The same Appwrite user always yields the same `sub`.
+- **Refresh.** When the session's last membership read is older than a
+  setting, the core re-reads the membership and the user's status with its
+  API key. A definite answer that the person is no longer a member, holds no
+  mapped role, or is blocked or deleted revokes the session; changed roles
+  replace the snapshot. An answer that is not definite (Appwrite unreachable,
+  an error) keeps the session on its snapshot, so a brief Appwrite outage
+  does not close the counter, but only until the snapshot reaches a maximum
+  age (its own setting, shorter than the absolute limit); past it the
+  session is refused until a definite read succeeds.
 - **Sign out** revokes the core's session and clears the client's copy.
   There is no Appwrite session to end, because none outlived the sign in.
-- **The subject.** `sub` is `appwrite:<projectId>:<userId>`, so a subject from
-  this path can never collide with one from an outside OIDC issuer, and
-  `user_locations` and the audit log key to it as they key to `sub` today.
+- **Brute force.** Appwrite's own rate limits do not apply to the core's API
+  key calls, so the core limits its own routes: the staff sign in per client
+  address and per email, and the shell's code redemption and refresh per
+  client address, refusing past the limit with the same fixed answer plus
+  `Retry-After`. The portal login keeps its own limiter.
+- **Audit.** Sign in, every refusal (with the attempted email and a fixed
+  reason, never the password), sign out, a revocation at refresh (removal,
+  block or deletion), a shell refresh token rotation and a reuse that
+  revokes a family each write one row through the existing audit logger
+  (`serve.go`, step 3c), with the actor's `sub` where there is one and the
+  client kind.
 
 ### 3. Custody, web and shells
 
 - **Web.** The sign in answer sets the session id as an `HttpOnly`, `Secure`,
-  `SameSite=Strict` cookie on the API's origin: ADR 0004's target. Both
-  bundles send it with `credentials: 'same-origin'`; a state changing request
-  must also carry a custom header the core checks (the CSRF control ADR 0004
-  names). `@gable/auth` keeps only display data (name, roles, home yard);
-  the `sessionStorage` handoff and the token in memory are deleted. A 401
-  still fires `gable:session-expired`, and the panel offers sign in again.
-  The content security policy keeps `connect-src 'self'`: the browser never
-  talks to Appwrite.
+  `SameSite=Strict` cookie on the API's origin with `Path=/` and no `Domain`
+  attribute: ADR 0004's target. The path is `/` and not `/api` because the
+  guarded `/uploads/` route sits outside `/api`. Both bundles send it with
+  `credentials: 'same-origin'`; a state changing request must also carry a
+  custom header the core checks (the CSRF control ADR 0004 names), which a
+  cross site form cannot set. `@gable/auth` keeps only display data (name,
+  roles, home yard); the `sessionStorage` handoff and the token in memory are
+  deleted. A 401 still fires `gable:session-expired`, and the panel offers
+  sign in again.
 - **Shells (Tauri).** A shell is a public client of the core, not of
   Appwrite. Email and password is posted from the shell's own door to the
   core. Every redirect method opens the system browser on the core's start
-  route with a PKCE challenge; the core runs the Appwrite flow and finishes
-  by redirecting to the shell with a one time code, through the `gable`
-  deep link where the profile registers it, or a loopback address the shell
-  listens on for that one sign in where it does not. The shell redeems the
-  code with its PKCE verifier for an opaque access token and a refresh
-  token, which `tauri/core/src/tokens.rs` keeps in the OS keychain as it
-  does today. The shell's access token is resolved by the same session
-  middleware; its refresh token rotates on use.
+  route with a PKCE challenge (S256) and the shell's return target; the core
+  runs the sign in and finishes by redirecting to the shell with a one time
+  code. The core accepts as the return target only the registered `gable`
+  scheme with its fixed callback path, or `http://127.0.0.1:<port>` or
+  `http://[::1]:<port>` with the fixed callback path and any port, never any
+  other URL. The shell redeems the code once, before it expires, with its
+  PKCE verifier, for an access token and a refresh token, which
+  `tauri/core/src/tokens.rs` keeps in the OS keychain as it does today. The
+  access token is an opaque random value with a fixed prefix of its own
+  (distinct from `sk_live_`), resolved to the shell's row in
+  `staff_sessions`. The refresh token rotates on use; presenting a rotated
+  refresh token again revokes the whole family.
 - **Machine keys are unchanged** (ADR 0002): still `sk_live_` bearers, still
   scoped, still refused on the key management routes.
 
 ### 4. The sign in methods
 
 The six codes of `signinmethods` stay the dealer's allowlist and the door's
-runtime config; each maps to an Appwrite method the dealer also enables in
-its Appwrite project:
+runtime config. **No browser script and no shell talks to Appwrite for any
+method, and no person's browser is sent to an Appwrite URL**: every exchange
+with Appwrite is the core's, server to server. Appwrite's own OAuth2 flow
+would send the browser to Appwrite's endpoints, so it is not used; the
+provider leg is the core's, and Appwrite still holds the account, the
+session and the Team.
 
-| Gable code | Appwrite method | Core route |
+| Gable code | Who talks to whom | Appwrite calls (the core's) |
 |---|---|---|
-| `email_password` | email and password session | `POST /api/v1/auth/sign-in` |
-| `magic_link` | magic URL token, then session | start route, then the core's callback |
-| `google` | OAuth2 token flow, provider `google` | start route, then the core's callback |
-| `microsoft` | OAuth2 token flow, provider `microsoft` | start route, then the core's callback |
-| `oidc` | OAuth2 token flow, provider `oidc` (the dealer's own issuer, configured in Appwrite) | start route, then the core's callback |
-| `passkey` | Appwrite passkeys | deferred: not built by this record |
+| `email_password` | browser or shell to the core: `POST /api/v1/auth/sign-in` | `account.createEmailPasswordSession` |
+| `google` | browser to the core's start route, then to the provider, back to the core's callback | provider code flow with PKCE, run by the core; then `users.createToken` and `account.createSession` for the matched user |
+| `microsoft` | as `google` | as `google` |
+| `oidc` | as `google`, against the dealer's own issuer | as `google` |
+| `magic_link` | the core asks Appwrite to email a link whose target is the core's callback | `account.createMagicURLToken` with the core's callback as its URL; then `account.createSession` |
+| `passkey` | deferred: not built by this record | none |
 
-Order: `email_password` first; then `google` and `microsoft`; then
-`magic_link` and `oidc` on the same start and callback route. **The browser
-never talks to Appwrite directly, for any method**: every exchange with
-Appwrite is the core's. The start route (`signinmethods.Start`) stops
-answering `not_implemented` for a method as its slice lands. Every callback checks a `state` bound to a cookie
-on the core's origin before it exchanges anything, as Appwrite's own guide
-requires. The `oidc` code covers a dealer that wants its own identity
-provider: it is configured in Appwrite, not in Gable.
+- **Order:** `email_password` first; then `google` and `microsoft`; then
+  `magic_link` and `oidc` on the same start and callback route. The start
+  route (`signinmethods.Start`) stops answering `not_implemented` for a
+  method as its slice lands.
+- **The door's config changes.** In slice 3 the staff config's `start_url`
+  for `email_password` becomes `/api/v1/auth/sign-in`, with a config test. The
+  portal's own login page posts to `/api/portal/v1/login` directly, as it
+  does today, and does not read this config.
+- **Matching a provider identity to an Appwrite user.** The core verifies
+  the provider's ID token (issuer, audience, signature against the
+  provider's published keys, nonce, expiry), then finds the Appwrite user by
+  email (`users.list`): only an email the provider asserts verified, and for
+  `microsoft` only from the tenant the dealer names. A first match records
+  the provider's issuer and subject against the Appwrite user id in a Gable
+  table, and later sign ins match on that pair, so a changed email at the
+  provider never moves a person. The core never creates an Appwrite user at
+  sign in: a person with no Appwrite account, or not in the Team, is refused.
+- **Provider settings.** The `oidc` row's stored issuer URL and client id are
+  live: they name the dealer's own issuer. Google and Microsoft use their
+  well known issuers with a client id the dealer configures. Every client
+  secret is an environment value the operator injects, never a database row.
+- **The `state` check.** Every redirect method's start sets a `state` (and a
+  nonce for the provider leg) in a cookie that is `HttpOnly`, `Secure`,
+  `SameSite=Lax` (the return is a cross site top level navigation, on which
+  a Strict cookie is not sent), single use, short lived, and cleared at the
+  callback. The callback refuses a missing, mismatched or reused `state`
+  before it exchanges anything. A magic link carries its `state` in the link
+  and is checked against the cookie of the browser that asked for it, so a
+  link opened on another device or browser fails by design: that is the
+  protection against a link someone else sent signing a person into the
+  sender's account.
+- **The first page after a callback.** The callback sets the Strict session
+  cookie and redirects to the desk. That navigation ends a cross site chain,
+  so the Strict cookie may not ride the document request; the desk is a
+  static bundle that needs none, and its first API fetch is same site and
+  carries the cookie.
 
 ### 5. Teams, roles and branches
 
 - **One Team per dealer deployment.** The core is configured with one Team id;
-  membership in it is what makes a person staff. Branches are not Teams.
+  confirmed membership in it is what makes a person staff. Branches are not
+  Teams.
 - **Membership roles map to Gable roles by a fixed prefix:** `gable-owner`,
   `gable-admin`, `gable-sales`, `gable-finance`, `gable-purchasing`,
   `gable-warehouse`, `gable-cashier`, `gable-driver`. The core strips the
@@ -251,45 +351,65 @@ provider: it is configured in Appwrite, not in Gable.
   the Team and owning the dealership stay separate facts, and a Team shared
   with other applications cannot grant a Gable role by accident. The role
   list is a code constant tested against the guards, so a role a guard names
-  and the mapping misses fails a test.
+  and the mapping misses fails a test. The one guard naming `user` (the
+  `/uploads/` route) is widened in slice 2 to every mapped staff role, and
+  `user` leaves the vocabulary.
 - **Branches stay in Gable.** Branch grants and the home branch stay rows of
   `user_locations`, written through the audited users routes, keyed by the
   new `sub`. Per branch Teams were weighed and refused: they would copy an
   audited Gable table into a second store, lose the home branch, and change
   ADR 0010's derivation of companies. `owner` and `admin` keep their every
   branch reach without a header.
-- **The staff roster is linked, not merged.** A `staff` row may carry the
-  `sub` of the person it describes (a nullable column), so the integration
-  module grants and the sign in identity name the same person; the roster
-  stays the integration surface ADR 0009's `admin:staff` scopes.
+- **The staff roster is linked, not merged, from slice 2.** A `staff` row
+  carries the `sub` of the person it describes (a nullable column, unique
+  when set), so the integration module grants, the counter PIN and the sign
+  in identity name the same person; the roster stays the surface ADR 0009's
+  `admin:staff` scope covers.
 
-### 6. Inviting and removing staff
+### 6. Inviting, changing and removing staff
 
 - **Invite.** From Gable's admin, an `owner` or `admin` invites by email with
-  roles and branches. The core creates the Team membership with its API key
-  (`teams.write`) and Appwrite's invitation email whose link lands on a
-  Gable page that confirms the membership; the branch grants are written in
-  the same act. A dealer may also invite in its Appwrite console; Gable then
-  sees the person at first sign in, with roles and no branches until one is
-  granted.
-- **Remove.** Gable's admin removes the membership through the API and
-  revokes the person's core sessions in the same act. A removal made in the
-  Appwrite console takes effect at the person's next refresh (section 2).
-  Blocking the Appwrite user does the same.
-- Both acts write audit rows and outbox events as the users routes do.
+  roles and branches. The core finds the Appwrite user by email or creates it
+  with no password (`users.create`, `users.write`), adds the Team membership
+  with the mapped roles (`teams.createMembership` with the API key,
+  `teams.write`, which Appwrite adds at once, confirmed, with no email), and
+  writes the branch grants in the same act. For a dealer that allows
+  `email_password`, the core then starts Appwrite's account recovery for the
+  invitee (`account.createRecovery`, `sessions.write`) with its URL on a
+  Gable page; the person sets a password there, the page posts it to the
+  core, and the core completes the recovery (`account.updateRecovery`). A
+  dealer that allows only redirect methods skips the recovery: the person
+  signs in with the provider whose verified email matches. Appwrite sends
+  the recovery email, so the dealer's Appwrite needs its mail settings. A
+  dealer may also add members in its Appwrite console; Gable then sees the
+  person at first sign in, with roles and no branches until one is granted.
+- **Change roles.** Gable's admin updates the membership's roles
+  (`teams.updateMembership`, `teams.write`) and re-reads the person's open
+  sessions at once.
+- **Remove.** Gable's admin removes the membership
+  (`teams.deleteMembership`, `teams.write`) and revokes the person's core
+  sessions in the same act. A removal or block made in the Appwrite console
+  takes effect at the person's next refresh (section 2).
+- Each act writes audit rows and outbox events as the users routes do.
 
 ### 7. Dev mode, the PIN step up and the JWKS path
 
-- **`AUTH_MODE=dev` stays for the quick local stack only.** The core refuses
-  to start with both dev mode and Appwrite settings, and refuses dev mode in
-  any build that is not the local compose stack, as it refuses a missing
-  `JWKS_URL` today. The demo people of S13 become seeded users of the local
-  Appwrite, so the walks sign in for real.
-- **The counter PIN step up is a separate ruled slice and stays beside this.**
-  A manager's PIN at the terminal authorizes one act under the cashier's
-  session; it is not a sign in and opens no session. The core checks, at the
-  step up, that the manager's own `sub` holds a role the act requires from
-  its latest membership read.
+- **`AUTH_MODE=dev` exists only in a dev build.** The dev bypass is compiled
+  only under a build tag (`devauth`) that the local compose build and the CI
+  test commands set, and that the release image's build in `core/Dockerfile`
+  never sets. A binary built without the tag exits at start when
+  `AUTH_MODE=dev` is set; a dev build exits when both dev mode and the
+  Appwrite settings are set. A test builds without the tag and asserts the
+  exit. The demo people of S13 become seeded users of the local Appwrite, so
+  the walks sign in for real.
+- **The counter PIN step up stays as ruled beside this.** A manager's PIN at
+  the terminal (hashed, per staff member, set on the staff screen) authorizes
+  one act under the cashier's session; it is not a sign in and opens no
+  session. Under an Appwrite session it keys on the manager's staff row and
+  that row's linked `sub` (slice 2), and the core reads the manager's
+  membership live with its API key at the step up: a money act, so any
+  answer that is not definite refuses, and a removed or blocked manager's PIN
+  is refused at once.
 - **The JWKS path retires.** It stays only until slice 1 proves Appwrite end
   to end (a test issuer for the counter's second person proofs uses it until
   then); slice 8 then removes it, so Gable has one staff sign in path.
@@ -297,31 +417,53 @@ provider: it is configured in Appwrite, not in Gable.
 ### 8. Configuration
 
 The core reads `APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`, `APPWRITE_TEAM_ID`
-and `APPWRITE_API_KEY` (scopes `sessions.write`, `users.read`, `teams.read`,
-`teams.write`, injected by the operator, never committed or logged). The
-dealer registers Gable's origin, and each shell's deep link or loopback, as
-platforms in its Appwrite project, enables the methods it allows, and adds
-the OAuth2 provider credentials in Appwrite. `GET /api/v1/auth/config` keeps
-answering public facts only.
+and `APPWRITE_API_KEY`. The key holds `sessions.write` (sessions, recovery,
+magic URL), `users.read` (status, the email match), `users.write` (custom
+tokens, the invitee's user), `teams.read` and `teams.write`; it is injected
+by the operator, never committed or logged. The redirect methods add each
+provider's client id and an injected client secret. Appwrite's endpoint need
+only be reachable from the core, for every method: no browser goes there. The
+dealer registers Gable's origin as a platform in its Appwrite project (for
+the magic link and recovery URLs). `GET /api/v1/auth/config` keeps answering
+public facts only.
 
 ### 9. Tests
 
 - **A local Appwrite in a container**, started by a compose file for CI and
   for the lead's walks, with a setup script that creates the project, the
-  Team, the platforms and one seeded user per role through the API. CI runs
+  Team, the platform and one seeded user per role through the API. CI runs
   it in its own job on the paths it guards, because the stack is heavy.
-- **Core unit tests** against a stub Appwrite (no network): sign in, refusal
-  shapes, membership and status at refresh, the definite and the indefinite
-  answers, revocation on removal, the subject shape.
-- **Role and branch mapping tests:** every `gable-` role to its Gable role,
-  Appwrite's `owner` and unknown roles to nothing, every role a guard names
-  covered by the mapping, branch grants unchanged under the new `sub`.
-- **Session tests:** idle and absolute limits, rotation of shell refresh
-  tokens, the CSRF header, the concurrency test at pool size 4 with three
-  contenders on the session table.
-- **Token verification tests** for the paths that remain: the JWKS path's
-  existing tests, machine keys by shape, and a session id that is not a JWT
-  never reaching the JWT parser.
+- **Fail closed:** no cookie, an unknown, a revoked, an idle expired and an
+  absolutely expired session each answer 401 on a guarded route and never
+  pass through; the core with Appwrite settings and no JWKS starts with the
+  session middleware mounted; dev mode with Appwrite settings exits; a build
+  without `devauth` exits on `AUTH_MODE=dev`.
+- **Sign in refusals,** each with the one fixed answer: an unconfirmed
+  membership, a blocked user, a deleted user, a member with only Appwrite's
+  `owner` or only unknown roles, a non member.
+- **Roles and subjects:** every `gable-` role to its Gable role; every role a
+  guard names covered by the mapping; a `sales` session cannot release a
+  hold; a `["sales","finance"]` session's exposure view does not depend on
+  the order of `roles`; no handler reads `role` alone; the `sub` is the same
+  UUID for the same user; `cashierOf` and the other UUID readers resolve it;
+  a cashier who is also an admin cannot approve the override on their own
+  sale; branch grants hold under the new `sub`.
+- **Sessions:** a new session id on every sign in and a presented id
+  ignored; the idle, absolute and snapshot age limits; a definite removal or
+  block revoking at refresh; the CSRF header missing refused, and a cross
+  site request carrying it refused by the cookie; the concurrency test on
+  the session table.
+- **Redirect methods:** the `state` cookie missing, mismatched, reused, and
+  sent as Lax; a provider ID token with a wrong issuer, audience, nonce or an
+  unverified email refused; no match creating no user.
+- **Shells:** a wrong PKCE verifier, a reused one time code, an expired code,
+  a return target other than the registered scheme or loopback, and a
+  rotated refresh token reused revoking the family.
+- **Limits and audit:** the sign in limit per address and per email, the
+  redemption and refresh limits; one audit row per event of section 2.
+- **Invite and PIN:** an invited person with no prior Appwrite account
+  reaching a first sign in through the recovery page; a removed manager's
+  PIN refused at once.
 - **Playwright** against the local Appwrite: sign in, sign out, and an
   expired session showing the panel; one walk per redirect method as it
   lands.
@@ -330,31 +472,36 @@ answering public facts only.
 
 | Slice | What it proves or builds | Dev hours |
 |---|---|---|
-| 1 | The local Appwrite proof: the compose file and setup script, and a Go integration test that signs a seeded user in by email and password server side, reads the account and the membership, maps the roles, ends the session, and is refused for a non member. Nothing else starts until it is green. | 6 to 10 |
-| 2 | The core: the Appwrite client, `staff_sessions` with its migration, the sign in, refresh and sign out routes, the session middleware filling `UserClaims`, the configuration checks, and the unit and concurrency tests. | 10 to 14 |
-| 3 | The web: the door's form against the core, cookie custody, the handoff deleted, the CSRF header, the session expired panel, and the Playwright sign in, sign out and expiry specs. | 6 to 10 |
-| 4 | The redirect methods: magic link, Google, Microsoft and `oidc` through Appwrite, the start route and the callback with its `state` check. | 6 to 10 |
+| 1 | The local Appwrite proof: the compose file and setup script, and a Go integration test that signs a seeded user in by email and password server side, reads the account and the membership, maps the roles, ends the session as the user, mints and redeems a custom token, and is refused for a non member. Nothing else starts until it is green. | 6 to 10 |
+| 2 | The core: the Appwrite client, `staff_sessions` with its migration, the sign in, refresh and sign out routes, the fail closed session middleware, the UUID `sub`, the `role` readers changed, the `user` guard widened, the roster link, the limits, the audit rows, the configuration checks, and their tests. | 14 to 20 |
+| 3 | The web: the door's form and config against the core, cookie custody, the handoff deleted, the CSRF header, the session expired panel, and the Playwright sign in, sign out and expiry specs. | 6 to 10 |
+| 4 | The redirect methods: the provider leg for `google` and `microsoft`, then `magic_link` and `oidc`, the identity match table, the start route and the callback with its `state` check. | 8 to 12 |
 | 5 | The shells: the system browser, the deep link or loopback return, PKCE redemption, refresh rotation, keychain custody. | 6 to 10 |
-| 6 | Invite and remove from Gable's admin, with branch grants in the same act, and the staff roster link. | 6 to 8 |
-| 7 | The demo people as seeded Appwrite users, and dev mode narrowed. | 3 to 5 |
+| 6 | Invite with the recovery page, role change and remove from Gable's admin, with branch grants in the same act. | 6 to 10 |
+| 7 | The demo people as seeded Appwrite users, and the `devauth` build tag. | 4 to 6 |
 | 8 | The JWKS path retired (`JWKS_URL`, `AUTH_ISSUER`, its middleware branch and tests), once slice 1 is green. | 2 to 4 |
-| | **Total** | **45 to 71** |
+| | **Total** | **52 to 82** |
 
-Order: slices 1, 2, 3 and 7 first (staff sign in on the web, the demo people), then 8, 4, 5 and 6. Slice 4 builds
-`google` and `microsoft` before `magic_link` and `oidc`. Passkeys are deferred and not counted.
+Order: slices 1, 2, 3 and 7 first (staff sign in on the web, the demo
+people), then 8, 4, 5 and 6. Slice 4 builds `google` and `microsoft` before
+`magic_link` and `oidc`. Passkeys are deferred and not counted.
 
 ## Consequences
 
-- A dealer hosting Gable runs Appwrite beside it and nothing more; FutureBuild
-  points the same four settings at its own Appwrite deployment.
-- Gable depends on Appwrite at sign in and at refresh, not on every request.
-  An Appwrite outage stops new sign ins and lets running sessions live on
-  their last snapshot until their absolute limit.
+- A dealer hosting Gable runs Appwrite beside it and nothing more, and
+  Appwrite's endpoint need not face staff browsers; FutureBuild points the
+  same settings at its own Appwrite deployment.
+- Gable depends on Appwrite at sign in, at refresh and at the PIN step up,
+  not on every request. An Appwrite outage stops new sign ins and step ups
+  and lets running sessions live on their snapshot until its maximum age.
 - A removed person keeps access until the next refresh when removed outside
   Gable, and loses it at once when removed through Gable.
-- The core gains a session table and an Appwrite client; `RequireRole`, the
-  branch walls and ADR 0010 are untouched because the session fills the same
-  claims.
+- The core gains a session table, an identity match table, an Appwrite
+  client and the provider leg of the redirect methods. `RequireRole`, the
+  branch walls and ADR 0010 are untouched; the handlers that read `role`
+  alone change in slice 2.
+- Appwrite's own OAuth2 provider settings go unused: the dealer configures
+  Google, Microsoft or its own issuer for Gable instead.
 - ADR 0004's interim exposure (a token readable by script) ends for staff on
   the web when slice 3 lands.
 - The total exceeds the matrix's re-sized S9 estimate (16 to 24).
