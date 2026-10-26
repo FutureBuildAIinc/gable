@@ -56,14 +56,18 @@ export class TillMovementDialog extends LitElement {
     }
 
     private async record(approvalToken?: string) {
-        const plan = planMovement(this.form);
+        // a pickup spent on a step up approval names no taker: the manager is
+        // named by the approval, never typed, so that one plan refusal is
+        // lifted on the token path and taken_by is not sent
+        const withToken = approvalToken !== undefined;
+        const plan = planMovement(withToken && this.form.kind === 'pickup' ? { ...this.form, takenBy: 'by approval' } : this.form)
         if (!plan.ok) {
             this.refusal = { field: plan.field, message: plan.message };
             await this.updateComplete;
             (this.querySelector(`[data-testid="movement-${plan.field}"]`) as HTMLElement | null)?.focus();
             return;
         }
-        const request = approvalToken === undefined
+        const request = !withToken
             ? plan.request
             : { kind: plan.request.kind, amount_cents: plan.request.amount_cents, note: plan.request.note, approval_token: approvalToken };
         try {

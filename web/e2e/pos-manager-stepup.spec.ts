@@ -116,7 +116,8 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
 
   // A check over the one dollar limit: the words say it, with the way on.
   await page.getByTestId('tender-check').click();
-  await page.getByLabel('Tender amount').fill('50.00');
+  const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
+  await page.getByLabel('Tender amount').fill(total.toFixed(2));
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   await expect(page.getByTestId('pos-check-over')).toBeVisible();
   await page.getByTestId('pos-check-ask-manager').click();
