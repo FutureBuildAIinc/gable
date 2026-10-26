@@ -356,7 +356,7 @@ describe('Staff tab — the global AI_LM kill switch', () => {
   })
 })
 
-describe("Staff tab — the manager's counter PIN", () => {
+describe("Staff tab: the manager's counter PIN", () => {
   /** The row of the roster member named. */
   function rowOf(el: TechAdminPage, name: string): HTMLElement {
     const row = Array.from(el.querySelectorAll('tbody tr')).find((tr) => text(tr).includes(name))
@@ -371,6 +371,7 @@ describe("Staff tab — the manager's counter PIN", () => {
     const dlg = document.querySelector('gable-app-dialog')
     const input = dlg?.querySelector<HTMLInputElement>('[data-dialog-input]') ?? null
     if (!input) throw new Error('no PIN prompt opened')
+    expect(input.type).toBe('password')
     input.value = value
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
@@ -422,6 +423,8 @@ describe("Staff tab — the manager's counter PIN", () => {
     serve({ staff: roster().map((s) => (s.id === YUKI ? { ...s, counter_pin_set: true, locked: true } : s)) })
     const el2 = await openStaffTab()
     expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-locked"]')).not.toBeNull()
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-clear"]')).not.toBeNull()
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-set-new"]')).not.toBeNull()
     rowOf(el2, 'Yuki Tan').querySelector<HTMLButtonElement>('[data-testid="staff-pin-unlock"]')!.click()
     await flush()
     await update(el2, {})

@@ -13,39 +13,44 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 // seedManager puts one roster row on the staff table with a counter PIN and
 // answers its id, name and staff number.
-func seedManager(t *testing.T, f *fixture, role, pin string) (string, string, string) {
+func seedManager(t *testing.T, f *fixture, role, pin string) (string, string, string, string) {
 	t.Helper()
 	return seedManagerAs(t, f, uuid.NewString(), role, pin)
 }
 
 // seedManagerAs puts a roster row on the staff table under an explicit id
-// (a subject a sale or drawer may already name), with a counter PIN.
-func seedManagerAs(t *testing.T, f *fixture, id, role, pin string) (string, string, string) {
+// (a subject a sale or drawer may already name), with a counter PIN. It
+// answers the id, the name, the staff number and the email.
+func seedManagerAs(t *testing.T, f *fixture, id, role, pin string) (string, string, string, string) {
 	t.Helper()
 	name := "Manager " + id[:8]
 	staffNo := "STF-" + id[:8]
+	email := "mgr-" + id[:8] + "@example.com"
 	hash, err := staff.HashCounterPIN(pin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, f.db, `INSERT INTO staff (id, email, full_name, staff_no, role, active, counter_pin_hash, counter_pin_set_at)
 		VALUES ($1::uuid, $2, $3, $4, $5, TRUE, $6, NOW())`,
-		id, "mgr-"+id[:8]+"@example.com", name, staffNo, role, hash)
+		id, email, name, staffNo, role, hash)
 	t.Cleanup(func() {
 		mustExec(t, f.db, `DELETE FROM pos_step_up_approvals WHERE manager_staff_id = $1::uuid`, id)
 		mustExec(t, f.db, `DELETE FROM staff WHERE id = $1::uuid`, id)
 	})
-	return id, name, staffNo
+	return id, name, staffNo, email
 }
 
 // openTillBy opens the fixture register's drawer as the cashier subject
@@ -77,10 +82,18 @@ func (f *fixture) ensureTillClosed() {
 		map[string]any{"counted_by_method": map[string]any{"cash": expected}}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 }
 
-// stepUp asks a manager's approval at the terminal, as the caller given.
+// stepUp asks a manager's approval at the terminal, as the caller given. An
+// override names the kind and the cap the manager approves.
 func (f *fixture) stepUp(act, manager, pin, target string, amount any, headers ...string) resp {
+	return f.stepUpKind(act, "", manager, pin, target, amount, headers...)
+}
+
+func (f *fixture) stepUpKind(act, kind, manager, pin, target string, amount any, headers ...string) resp {
 	f.t.Helper()
 	body := map[string]any{"act": act, "manager": manager, "pin": pin, "target_id": target}
+	if kind != "" {
+		body["kind"] = kind
+	}
 	if amount != nil {
 		body["amount_cents"] = amount
 	}
@@ -103,7 +116,7 @@ func TestCP04_StepUpApprovesOverrideByPIN(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	cashier := uuid.NewString()
 	sale := f.startSaleBy(cashier, &f.customerID)
-	_, mgrName, staffNo := seedManager(t, f, "admin", "7361")
+	mgrID, mgrName, staffNo, _ := seedManager(t, f, "admin", "7361")
 
 	// the cashier is no manager: the claims path alone refuses them
 	if r := f.override(sale, "account", "cashier tries", 100, "cashier", cashier); r.status != http.StatusForbidden {
@@ -111,7 +124,7 @@ func TestCP04_StepUpApprovesOverrideByPIN(t *testing.T) {
 	}
 	// the step up: the manager picked by staff number, the PIN typed at the
 	// terminal, the cashier's own session asking
-	r := f.stepUp("override", staffNo, "7361", sale, nil, "X-Test-Role", "cashier", "X-Test-Sub", cashier)
+	r := f.stepUpKind("override", "account", staffNo, "7361", sale, 100, "X-Test-Role", "cashier", "X-Test-Sub", cashier)
 	if r.status != http.StatusCreated {
 		t.Fatalf("step up = %d: %s", r.status, r.raw)
 	}
@@ -128,10 +141,11 @@ func TestCP04_StepUpApprovesOverrideByPIN(t *testing.T) {
 	if got := str(t, ov.body, "approved_by"); got != mgrName {
 		t.Errorf("approved_by = %q, want the manager's name %q", got, mgrName)
 	}
-	// the audit row names the manager
+	// the audit row names the manager: the staff id as its user (the subject
+	// shaped column the users picker reads) and the name beside it
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.override.approved'
-		AND entity_id = $1::uuid AND user_id = $2`, sale, mgrName); got != 1 {
-		t.Errorf("%d override audit rows by the manager's name, want 1", got)
+		AND entity_id = $1::uuid AND user_id = $2 AND changes->>'manager_name' = $3`, sale, mgrID, mgrName); got != 1 {
+		t.Errorf("%d override audit rows by the manager's staff id and name, want 1", got)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.step_up.approved' AND entity_id = $1::uuid`, sale); got != 1 {
 		t.Errorf("%d step up audit rows, want 1", got)
@@ -145,9 +159,9 @@ func TestCP04_StepUpWrongPINLocksAfterFive(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
-	mgrID, _, staffNo := seedManager(t, f, "admin", "5581")
+	mgrID, _, staffNo, _ := seedManager(t, f, "admin", "5581")
 	for i := 0; i < 5; i++ {
-		r := f.stepUp("override", staffNo, "0000", sale, nil)
+		r := f.stepUpKind("override", "account", staffNo, "0000", sale, 100)
 		if r.status != http.StatusForbidden {
 			t.Fatalf("wrong PIN %d = %d, want 403: %s", i, r.status, r.raw)
 		}
@@ -156,7 +170,7 @@ func TestCP04_StepUpWrongPINLocksAfterFive(t *testing.T) {
 		}
 	}
 	// even the right PIN is refused now: the lock stands
-	r := f.stepUp("override", staffNo, "5581", sale, nil)
+	r := f.stepUpKind("override", "account", staffNo, "5581", sale, 100)
 	if r.status != http.StatusForbidden {
 		t.Fatalf("the locked PIN's right answer = %d, want 403: %s", r.status, r.raw)
 	}
@@ -173,37 +187,97 @@ func TestCP04_StepUpWrongPINLocksAfterFive(t *testing.T) {
 		t.Errorf("locked=%v failures=%d, want true 5", locked, failures)
 	}
 	// an unknown manager answers the same plain refusal, never which part
-	if r := f.stepUp("override", "NO-SUCH-MGR", "5581", sale, nil); r.status != http.StatusForbidden ||
+	if r := f.stepUpKind("override", "account", "NO-SUCH-MGR", "5581", sale, 100); r.status != http.StatusForbidden ||
 		r.body["error"].(map[string]any)["message"] != "That PIN is not right" {
 		t.Errorf("an unknown manager = %d: %s, want the plain refusal", r.status, r.raw)
 	}
+	// an amount on an act that carries none is refused before anything is
+	// minted: a minted approval must always be spendable
+	sale2 := f.startSaleBy(uuid.NewString(), &f.customerID)
+	if r := f.stepUp("signoff", staffNo, "5581", sale2, 100); r.status != http.StatusBadRequest {
+		t.Errorf("a sign up with an amount = %d, want 400: %s", r.status, r.raw)
+	}
 	// an admin unlocks on the staff screen and the PIN works again
 	mustExec(t, f.db, `UPDATE staff SET counter_pin_locked = FALSE, counter_pin_failures = 0 WHERE id = $1::uuid`, mgrID)
-	if r := f.stepUp("override", staffNo, "5581", sale, nil); r.status != http.StatusCreated {
+	if r := f.stepUpKind("override", "account", staffNo, "5581", sale, 100); r.status != http.StatusCreated {
 		t.Errorf("after the unlock = %d: %s", r.status, r.raw)
 	}
 }
 
-// RULE: the manager cannot approve their own sale.
+// RULE: the manager cannot approve their own sale, under real sign in (where
+// the auth subject is a distinct id and the email links the caller to the
+// roster row) or when the subject itself names the roster row.
 func TestCP04_StepUpRefusesCashierApprovingOwnSale(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	mgrID, _, staffNo := seedManager(t, f, "admin", "8142")
-	// the manager's own staff id is the sale's cashier: a subject may be the
-	// roster row's id, its staff number or its email
-	sale := f.startSaleBy(mgrID, &f.customerID)
-	r := f.stepUp("override", staffNo, "8142", sale, nil)
+	mgrID, _, staffNo, mgrEmail := seedManager(t, f, "admin", "8142")
+	// under real sign in the auth subject is NOT the staff row's id
+	cashierSub := uuid.NewString()
+	if cashierSub == mgrID {
+		t.Fatal("subject collided with staff id")
+	}
+	f.ensureTill()
+	startR := f.do("POST", "/api/v1/pos/transactions",
+		map[string]any{"register_id": f.register, "cashier_id": cashierSub, "customer_id": f.customerID.String()},
+		"X-Test-Role", "admin", "X-Test-Sub", cashierSub, "X-Test-Email", mgrEmail)
+	if startR.status != http.StatusCreated {
+		t.Fatalf("start sale = %d: %s", startR.status, startR.raw)
+	}
+	sale := str(t, startR.body, "id")
+
+	// the claims path refuses the manager on their own sale
+	if r := f.do("POST", "/api/v1/pos/transactions/"+sale+"/overrides",
+		map[string]any{"kind": "account", "reason": "own sale", "cap_cents": 100},
+		"X-Test-Role", "admin", "X-Test-Sub", cashierSub, "X-Test-Email", mgrEmail); r.status != http.StatusForbidden {
+		t.Fatalf("claims path own sale = %d, want 403: %s", r.status, r.raw)
+	}
+	// the step up refuses the same manager when they are the caller at the terminal
+	r := f.stepUpKind("override", "account", staffNo, "8142", sale, 100,
+		"X-Test-Role", "admin", "X-Test-Sub", cashierSub, "X-Test-Email", mgrEmail)
 	if r.status != http.StatusForbidden {
-		t.Fatalf("own sale = %d, want 403: %s", r.status, r.raw)
+		t.Fatalf("own sale as caller = %d, want 403: %s", r.status, r.raw)
 	}
 	if got := r.body["error"].(map[string]any)["message"]; got != "A manager cannot approve their own sale" {
 		t.Errorf("own sale message = %v", got)
 	}
-	// another manager is free to
-	_, _, otherNo := seedManager(t, f, "admin", "6039")
-	if r := f.stepUp("override", otherNo, "6039", sale, nil); r.status != http.StatusCreated {
+	// and even when another cashier is at the terminal, the sale's cashier is
+	// resolved to the manager's staff id, so the manager still cannot approve
+	// the sale they rang
+	r = f.stepUpKind("override", "account", staffNo, "8142", sale, 100,
+		"X-Test-Role", "cashier", "X-Test-Sub", uuid.NewString(), "X-Test-Email", "other-cashier@example.com")
+	if r.status != http.StatusForbidden {
+		t.Fatalf("own sale under another caller = %d, want 403: %s", r.status, r.raw)
+	}
+	if got := r.body["error"].(map[string]any)["message"]; got != "A manager cannot approve their own sale" {
+		t.Errorf("own sale message = %v", got)
+	}
+	// another manager is free to approve it
+	_, _, otherNo, _ := seedManager(t, f, "admin", "6039")
+	if r := f.stepUpKind("override", "account", otherNo, "6039", sale, 100,
+		"X-Test-Role", "admin", "X-Test-Sub", cashierSub, "X-Test-Email", mgrEmail); r.status != http.StatusCreated {
 		t.Errorf("another manager = %d: %s", r.status, r.raw)
 	}
+}
+
+// RULE: under real sign in the cashier's subject is an opaque id that never
+// equals the roster row's; the caller's own email names the person all the
+// same, and the manager who is the caller is the one person refused.
+func TestCP04_StepUpRefusesTheCallerWhoIsTheManager(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mgrID, _, staffNo, mgrEmail := seedManager(t, f, "admin", "1946")
+	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
+	// the cashier's subject is nothing like the staff id, but the claims
+	// carry the manager's email: the person at the terminal is the manager
+	r := f.stepUpKind("override", "account", staffNo, "1946", sale, 100,
+		"X-Test-Role", "cashier", "X-Test-Sub", uuid.NewString(), "X-Test-Email", mgrEmail)
+	if r.status != http.StatusForbidden {
+		t.Fatalf("the caller who is the manager = %d, want 403: %s", r.status, r.raw)
+	}
+	if got := r.body["error"].(map[string]any)["message"]; got != "A manager cannot approve their own sale" {
+		t.Errorf("own sale message = %v", got)
+	}
+	_ = mgrID
 }
 
 // RULE: the act's approving roles bind the step up: an override needs an
@@ -213,8 +287,8 @@ func TestCP04_StepUpRoleRequired(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
-	_, _, noRole := seedManager(t, f, "cashier", "3927")
-	if r := f.stepUp("override", noRole, "3927", sale, nil); r.status != http.StatusForbidden {
+	_, _, noRole, _ := seedManager(t, f, "cashier", "3927")
+	if r := f.stepUpKind("override", "account", noRole, "3927", sale, 100); r.status != http.StatusForbidden {
 		t.Errorf("a cashier stepping up for an override = %d, want 403: %s", r.status, r.raw)
 	}
 	// the picker's list holds only the roles the act admits
@@ -236,8 +310,8 @@ func TestCP04_ApprovalSingleUseRightActRightTarget(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 	cashier := uuid.NewString()
 	sale := f.startSaleBy(cashier, &f.customerID)
-	_, mgrName, staffNo := seedManager(t, f, "admin", "6294")
-	token := tokenOf(t, f.stepUp("override", staffNo, "6294", sale, nil))
+	_, mgrName, staffNo, _ := seedManager(t, f, "owner", "6294")
+	token := tokenOf(t, f.stepUpKind("override", "account", staffNo, "6294", sale, 100))
 	post := func(saleID, tok string) resp {
 		return f.do("POST", "/api/v1/pos/transactions/"+saleID+"/overrides",
 			map[string]any{"kind": "account", "reason": "agreed", "cap_cents": 100, "approval_token": tok},
@@ -250,21 +324,45 @@ func TestCP04_ApprovalSingleUseRightActRightTarget(t *testing.T) {
 	if r := post(sale, token); r.status != http.StatusConflict {
 		t.Errorf("replay = %d, want 409: %s", r.status, r.raw)
 	}
-	// another sale's target is refused
+	// another sale's approval is refused, on a fresh sale that holds no
+	// override of its own (the sale's own rules must not be the refusal)
 	other := f.startSaleBy(cashier, &f.customerID)
-	token2 := tokenOf(t, f.stepUp("override", staffNo, "6294", other, nil))
-	if r := post(sale, token2); r.status != http.StatusConflict {
-		t.Errorf("another sale's approval = %d, want 409: %s", r.status, r.raw)
+	third := f.startSaleBy(cashier, &f.customerID)
+	token2 := tokenOf(t, f.stepUpKind("override", "account", staffNo, "6294", other, 100))
+	if r := post(third, token2); r.status != http.StatusConflict ||
+		r.body["error"].(map[string]any)["code"] != "step_up_spent" {
+		t.Errorf("another sale's approval = %d: %s, want 409 step_up_spent", r.status, r.raw)
+	}
+	// an override approval binds the kind and the cap the manager saw:
+	// spending a cap 100 account approval with cap 101 or as check is refused
+	saleTerms := f.startSaleBy(cashier, &f.customerID)
+	termsToken := tokenOf(t, f.stepUpKind("override", "account", staffNo, "6294", saleTerms, 100))
+	if r := f.do("POST", "/api/v1/pos/transactions/"+saleTerms+"/overrides",
+		map[string]any{"kind": "account", "reason": "higher cap", "cap_cents": 101, "approval_token": termsToken},
+		"X-Test-Role", "cashier", "X-Test-Sub", cashier); r.status != http.StatusConflict ||
+		r.body["error"].(map[string]any)["code"] != "step_up_spent" {
+		t.Errorf("cap 101 on cap 100 approval = %d: %s, want 409 step_up_spent", r.status, r.raw)
+	}
+	if r := f.do("POST", "/api/v1/pos/transactions/"+saleTerms+"/overrides",
+		map[string]any{"kind": "check", "reason": "wrong kind", "cap_cents": 100, "approval_token": termsToken},
+		"X-Test-Role", "cashier", "X-Test-Sub", cashier); r.status != http.StatusConflict ||
+		r.body["error"].(map[string]any)["code"] != "step_up_spent" {
+		t.Errorf("check on account approval = %d: %s, want 409 step_up_spent", r.status, r.raw)
+	}
+	if r := post(saleTerms, termsToken); r.status != http.StatusCreated {
+		t.Errorf("matching kind and cap after refused mismatches = %d: %s, want 201", r.status, r.raw)
 	}
 	// an expired approval is refused
-	token3 := tokenOf(t, f.stepUp("override", staffNo, "6294", other, nil))
+	token3 := tokenOf(t, f.stepUpKind("override", "account", staffNo, "6294", other, 100))
 	sum := sha256.Sum256([]byte(token3))
 	mustExec(t, f.db, `UPDATE pos_step_up_approvals SET expires_at = NOW() - INTERVAL '1 minute'
 		WHERE token_hash = $1`, hex.EncodeToString(sum[:]))
 	if r := post(other, token3); r.status != http.StatusConflict {
 		t.Errorf("expired approval = %d, want 409: %s", r.status, r.raw)
 	}
-	// the wrong act is refused: a sign off cannot spend a pickup approval
+	// the act binding bites on its own: a sign off approval (no amount, no
+	// kind) minted for this drawer is not spendable as a pickup of the same
+	// drawer with no amount either, everything but the act equal
 	if r := f.setThreshold(300); r.status != http.StatusOK {
 		t.Fatalf("set threshold = %d: %s", r.status, r.raw)
 	}
@@ -273,10 +371,18 @@ func TestCP04_ApprovalSingleUseRightActRightTarget(t *testing.T) {
 	if r := f.closeAs(sessionID, 9699, uuid.NewString()); r.status != http.StatusOK {
 		t.Fatalf("close = %d: %s", r.status, r.raw)
 	}
-	pickupToken := tokenOf(t, f.stepUp("pickup", staffNo, "6294", sessionID, 500))
+	signoffToken := tokenOf(t, f.stepUp("signoff", staffNo, "6294", sessionID, nil))
+	tokenSum := sha256.Sum256([]byte(signoffToken))
+	stepUpRepo := pos.NewRepository(f.db)
+	if _, spent, err := stepUpRepo.ConsumeStepUpApproval(context.Background(), "pickup", "", uuid.MustParse(sessionID), nil,
+		hex.EncodeToString(tokenSum[:])); err != nil || spent {
+		t.Errorf("a sign off approval spent as a pickup: spent=%v err=%v, want false nil (the act alone refuses it)", spent, err)
+	}
+	// and the same token under the right act works: the refusal above was
+	// the act, nothing else
 	if r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/signoff",
-		map[string]any{"reason": "x", "approval_token": pickupToken}); r.status != http.StatusConflict {
-		t.Errorf("the wrong act = %d, want 409: %s", r.status, r.raw)
+		map[string]any{"reason": "counted twice", "approval_token": signoffToken}); r.status != http.StatusOK {
+		t.Errorf("the right act on the same target = %d, want 200: %s", r.status, r.raw)
 	}
 	_ = mgrName
 }
@@ -294,7 +400,7 @@ func TestCP08_PickupTakerByPIN(t *testing.T) {
 	if r := f.stepUp("pickup", "STF-"+cashier[:8], "2846", sessionID, 1000); r.status != http.StatusForbidden {
 		t.Fatalf("the drawer's cashier taking the pickup = %d, want 403: %s", r.status, r.raw)
 	}
-	_, mgrName, staffNo := seedManager(t, f, "owner", "1739")
+	_, mgrName, staffNo, _ := seedManager(t, f, "owner", "1739")
 	token := tokenOf(t, f.stepUp("pickup", staffNo, "1739", sessionID, 1000))
 	r := f.movement(sessionID, map[string]any{"kind": "pickup", "amount_cents": 1000, "approval_token": token}, cashier)
 	if r.status != http.StatusCreated {
@@ -325,14 +431,14 @@ func TestCP08_SignoffByPIN(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("close = %d: %s", r.status, r.raw)
 	}
-	_, mgrName, staffNo := seedManager(t, f, "finance", "4517")
+	_, mgrName, staffNo, _ := seedManager(t, f, "finance", "4517")
 	// the closer cannot sign off their own count by PIN
-	_, _, closerNo := seedManagerAs(t, f, closer, "finance", "9028")
+	_, _, closerNo, _ := seedManagerAs(t, f, closer, "finance", "9028")
 	if r := f.stepUp("signoff", closerNo, "9028", sessionID, nil); r.status != http.StatusForbidden {
 		t.Fatalf("the closer signing off = %d, want 403: %s", r.status, r.raw)
 	}
 	// the cashier cannot either
-	_, _, cashierNo := seedManagerAs(t, f, cashier, "finance", "3381")
+	_, _, cashierNo, _ := seedManagerAs(t, f, cashier, "finance", "3381")
 	if r := f.stepUp("signoff", cashierNo, "3381", sessionID, nil); r.status != http.StatusForbidden {
 		t.Fatalf("the cashier signing off = %d, want 403: %s", r.status, r.raw)
 	}
@@ -366,8 +472,8 @@ func TestCP04_ThreeActsRacingOneApprovalExactlyOneWins(t *testing.T) {
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	cashier := uuid.NewString()
 	sale := f.startSaleBy(cashier, &f.customerID)
-	_, _, staffNo := seedManager(t, f, "admin", "5053")
-	token := tokenOf(t, f.stepUp("override", staffNo, "5053", sale, nil))
+	_, _, staffNo, _ := seedManager(t, f, "admin", "5053")
+	token := tokenOf(t, f.stepUpKind("override", "account", staffNo, "5053", sale, 100))
 	statuses := make([]int, 3)
 	var wg sync.WaitGroup
 	for i := range statuses {
@@ -393,5 +499,94 @@ func TestCP04_ThreeActsRacingOneApprovalExactlyOneWins(t *testing.T) {
 	}
 	if won != 1 {
 		t.Errorf("statuses = %v, want exactly one winner", statuses)
+	}
+}
+
+// RULE (the lane rule on transactions, and the lock's own): many wrong PINs
+// at once count no more than the lock's five, the PIN ends locked, and no
+// approval is minted on a PIN that locked while the ask was in flight.
+func TestCP04_ConcurrentWrongPINsCountNoMoreThanTheLock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	sale := f.startSaleBy(uuid.NewString(), &f.customerID)
+	mgrID, _, staffNo, _ := seedManager(t, f, "admin", "6813")
+	results := make([]resp, 20)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = f.stepUpKind("override", "account", staffNo, "0000", sale, 100)
+		}(i)
+	}
+	wg.Wait()
+	refused, lockedCount := 0, 0
+	for i, r := range results {
+		if r.status != http.StatusForbidden {
+			t.Errorf("wrong try %d = %d, want 403", i, r.status)
+			continue
+		}
+		switch r.body["error"].(map[string]any)["code"] {
+		case "step_up_refused":
+			refused++
+		case "step_up_locked":
+			lockedCount++
+		}
+	}
+	if refused > 5 {
+		t.Errorf("concurrent wrong tries verified %d PINs (step_up_refused), want at most the lock's 5 (locked=%d)", refused, lockedCount)
+	}
+	var failures int
+	var locked bool
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT counter_pin_failures, counter_pin_locked FROM staff WHERE id = $1::uuid`, mgrID).Scan(&failures, &locked); err != nil {
+		t.Fatal(err)
+	}
+	if failures > 5 {
+		t.Errorf("concurrent wrong tries counted %d failures, want at most the lock's 5", failures)
+	}
+	if !locked {
+		t.Error("the PIN did not end locked")
+	}
+	// and the locked PIN mints nothing
+	if r := f.stepUpKind("override", "account", staffNo, "6813", sale, 100); r.status != http.StatusForbidden {
+		t.Errorf("the right PIN on the locked row = %d, want 403: %s", r.status, r.raw)
+	}
+}
+
+// RULE (the claims path stays): the variance pair's own guard admits every
+// role the claims path allowed, beside the counter's own, so a signed in
+// finance manager keeps the queue and the sign off and a cashier reaches
+// them to spend a manager's step up approval.
+func TestCP04_TheVariancePairKeepsFinanceAndAdmitsTheCounter(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mux := http.NewServeMux()
+	pos.NewHandler(f.service).RegisterRoutes(mux, nil, nil,
+		middleware.RequireRole("admin", "owner", "cashier", "finance"))
+	srv := httptest.NewServer(roleClaims(mux))
+	t.Cleanup(srv.Close)
+	do := func(role string) int {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/pos/till/signoffs", nil)
+		req.Header.Set("X-Test-Role", role)
+		req.Header.Set("X-Test-Sub", uuid.NewString())
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := do("finance"); got != http.StatusOK {
+		t.Errorf("the queue for finance = %d, want 200 (the claims path keeps it)", got)
+	}
+	if got := do("owner"); got != http.StatusOK {
+		t.Errorf("the queue for owner = %d, want 200", got)
+	}
+	if got := do("cashier"); got != http.StatusOK {
+		t.Errorf("the queue for a cashier = %d, want 200 (the step up needs it)", got)
+	}
+	if got := do("sales"); got != http.StatusForbidden {
+		t.Errorf("the queue for sales = %d, want 403", got)
 	}
 }

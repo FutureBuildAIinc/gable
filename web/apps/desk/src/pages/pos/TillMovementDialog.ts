@@ -88,6 +88,7 @@ export class TillMovementDialog extends LitElement {
             this.refusal = { field: 'amount', message: 'Enter the amount first' };
             return;
         }
+        this.form = { ...this.form, takenBy: '' };
         this.refusal = null;
         this.failure = '';
         this.asking = true;
@@ -158,6 +159,7 @@ export class TillMovementDialog extends LitElement {
                 <gable-step-up-dialog act="pickup" target-id=${this.sessionId}
                     .amountCents=${dollarsToCents(this.form.amount)}
                     heading="A manager takes the pickup"
+                    .detail=${`Take ${fmt(dollarsToCents(this.form.amount))} from the drawer`}
                     @step-up-cancel=${() => { this.asking = false; }}
                     @step-up-approved=${async (e: CustomEvent<{ token: string }>) => { this.asking = false; await this.record(e.detail.token); }}></gable-step-up-dialog>
             ` : nothing}

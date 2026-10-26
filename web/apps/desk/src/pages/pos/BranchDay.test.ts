@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import './BranchDay';
+import { authCustody } from '@gable/auth';
 import './TillSignoffQueue';
 import type { GableBranchDay } from './BranchDay';
 import type { GableTillSignoffQueue } from './TillSignoffQueue';
@@ -257,6 +258,25 @@ describe('the sign off queue', () => {
     expect(post?.body).toEqual({ reason: 'recounted, the till roll agrees', approval_token: 'tok-1' });
     expect(el.querySelector('[data-testid="signoff-s-1"]')).toBeNull();
     expect(text(q(el, '[data-testid="signoff-empty"]'))).toContain('No counted drawer waits');
+  });
+
+  it('a signed in finance manager signs off as themselves, with no PIN dialog', async () => {
+    const roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['finance']);
+    let queue = [pending];
+    handler = (method) => (method === 'POST' ? ((queue = []), jsonResponse({ session: { ...pending, status: 'closed' } })) : jsonResponse({ items: queue, next_cursor: null, limit: 50 }));
+    const el = await mountAsync<GableTillSignoffQueue>('gable-till-signoff-queue');
+    const reason = q<HTMLInputElement>(el, '[data-testid="signoff-reason-s-1"]');
+    reason.value = 'mine to accept';
+    reason.dispatchEvent(new Event('input', { bubbles: true }));
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
+    await flush();
+    await update(el, {});
+    // the claims path, not the step up: no token, no dialog
+    const post = requests.find((r) => r.method === 'POST');
+    expect(post?.body).toEqual({ reason: 'mine to accept' });
+    expect(el.querySelector('gable-step-up-dialog')).toBeNull();
+    roles.mockRestore();
   });
 
   it('shows the server\'s refusal when the signer is the closer', async () => {

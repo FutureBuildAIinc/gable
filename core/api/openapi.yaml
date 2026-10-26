@@ -32956,10 +32956,28 @@ components:
       required: [act, manager, pin, target_id]
       properties:
         act: {type: string, enum: [override, pickup, signoff]}
+        kind: {type: string, enum: [account, check, refund_method], description: "The override's kind; required when the act is an override, absent otherwise. The approval binds it."}
         manager: {type: string, description: "The manager's staff number or staff id."}
         pin: {type: string, description: "The manager's counter PIN. Verified in constant time, never logged."}
         target_id: {type: string, format: uuid, description: "The act's target: the sale (an override) or the till session (a pickup, a sign off)."}
-        amount_cents: {type: integer, format: int64, minimum: 1, description: "The pickup's amount; required for a pickup, absent otherwise. The approval binds it."}
+        amount_cents: {type: integer, format: int64, minimum: 1, description: "The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it."}
+      allOf:
+        - if:
+            properties: {act: {const: override}}
+          then:
+            required: [kind, amount_cents]
+        - if:
+            properties: {act: {const: pickup}}
+          then:
+            required: [amount_cents]
+            not: {required: [kind]}
+        - if:
+            properties: {act: {const: signoff}}
+          then:
+            not:
+              anyOf:
+                - required: [kind]
+                - required: [amount_cents]
     PosStepUpApproval:
       type: object
       required: [token, manager_name, expires_at]

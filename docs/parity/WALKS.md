@@ -413,8 +413,9 @@ The walk proves the approval is the manager's own, whoever is signed in at the t
    (`select approved_by from pos_account_overrides order by created_at desc limit 1;`), and so does its audit row.
    The manager cannot approve their own sale: a sale rung up under the manager's own login is refused with
    "A manager cannot approve their own sale".
-4. **One approval, one act.** The approval token is spent by its one act: replaying it, spending it on another sale,
-   or after its few minutes have passed is refused ("This approval is used up or expired: ask the manager again").
+4. **One approval, one act.** The approval token is spent by its one act: replaying it, spending it on another sale or
+   different terms, or after its few minutes have passed is refused ("This approval does not cover this, is used up or
+   expired: ask the manager again").
 5. **A pickup taken by the manager's PIN.** In Drawer Cash pick Pickup, type the amount and press "Ask the manager
    taking it": the manager picks themselves and types the PIN. The movement records with the manager as the taker
    (`select taken_by from till_movements where kind='pickup' order by created_at desc limit 1;`), and the same

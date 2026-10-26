@@ -16,8 +16,8 @@ import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-c
 const PIN = '4481';
 const WRONG_PIN = '9999';
 
-/** A manager on the roster with a counter PIN set through the admin API. */
-async function managerWithPin(request: APIRequestContext): Promise<{ staffNo: string; name: string }> {
+/** A manager on the roster, with an optional counter PIN set through the admin API. */
+async function createManager(request: APIRequestContext, withPin = true): Promise<{ staffNo: string; name: string }> {
   const run = Date.now().toString(36).toUpperCase();
   const staffNo = `E2E-MGR-${run}`;
   const name = `E2E Manager ${run}`;
@@ -27,8 +27,10 @@ async function managerWithPin(request: APIRequestContext): Promise<{ staffNo: st
   });
   expect(res.status(), await res.text()).toBe(201);
   const member = (await res.json()) as { id: string };
-  const pin = await request.put(`/api/v1/admin/staff/${member.id}/counter-pin`, { data: { pin: PIN } });
-  expect(pin.status(), await pin.text()).toBe(200);
+  if (withPin) {
+    const pin = await request.put(`/api/v1/admin/staff/${member.id}/counter-pin`, { data: { pin: PIN } });
+    expect(pin.status(), await pin.text()).toBe(200);
+  }
   return { staffNo, name };
 }
 
@@ -93,7 +95,7 @@ async function stepUp(page: Page, pin: string, staffNo: string) {
 }
 
 test('the manager step up: PIN set on the staff screen, an over limit check approved by PIN', async ({ page, request }) => {
-  const manager = await managerWithPin(request);
+  const manager = await createManager(request, false);
   // An account whose check limit is one dollar: any real check is over it.
   const run = Date.now().toString(36).toUpperCase();
   const accountRes = await request.post('/api/v1/customers', {
@@ -102,9 +104,18 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
   expect(accountRes.status(), await accountRes.text()).toBe(201);
   const account = (await accountRes.json()) as { id: string; name: string; account_number: string };
 
-  // The staff screen: the PIN is set (through the admin API, as the screen does)
-  // and the roster says so.
+  // The staff screen: an admin sets the manager's counter PIN on the Staff tab
+  // and the roster says Set.
   await signIn(page, 'POS Step Up E2E');
+  await page.goto('/admin');
+  await page.getByRole('button', { name: 'Staff', exact: true }).click();
+  const mgrRow = page.locator('tbody tr', { hasText: manager.name });
+  await expect(mgrRow.getByTestId('staff-pin-none')).toBeVisible();
+  await mgrRow.getByTestId('staff-pin-set-new').click();
+  await fillAppDialogPrompt(page, PIN);
+  await answerAppDialog(page, 'Set PIN');
+  await expect(mgrRow.getByTestId('staff-pin-set')).toBeVisible();
+
   const product = await stockedProduct(request);
   await openCounter(page);
 
@@ -153,7 +164,7 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
 });
 
 test('a pickup taken and a held variance signed off by the manager\'s PIN', async ({ page, request }) => {
-  const manager = await managerWithPin(request);
+  const manager = await createManager(request, true);
   await signIn(page, 'POS Step Up B E2E');
   await openCounter(page);
 
@@ -163,7 +174,7 @@ test('a pickup taken and a held variance signed off by the manager\'s PIN', asyn
   await page.getByTestId('movement-amount').fill('20.00');
   await page.getByTestId('movement-ask-manager').click();
   await stepUp(page, PIN, manager.staffNo);
-  await expect(page.getByText(/Pickup of \$20\.00 recorded/)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(`Pickup of $20.00 recorded by ${manager.name}`)).toBeVisible({ timeout: 15000 });
   const current = (await (await request.get('/api/v1/pos/till/current')).json()) as { id: string };
   const movements = (await (await request.get(`/api/v1/pos/till/${current.id}/movements`)).json()) as {
     items: { kind: string; taken_by: string | null }[];

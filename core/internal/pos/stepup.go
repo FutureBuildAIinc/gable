@@ -24,12 +24,21 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
+// pinVerifySem bounds concurrent Argon2id checks so a burst of step up calls
+// cannot saturate CPU cores while waiting on row locks.
+var pinVerifySem = make(chan struct{}, 4)
+
 // verifyStepUpPIN is the staff package's constant time check: the hash and
 // the PIN never meet anywhere else.
-func verifyStepUpPIN(hash, pin string) bool { return staff.VerifyCounterPIN(hash, pin) }
+func verifyStepUpPIN(hash, pin string) bool {
+	pinVerifySem <- struct{}{}
+	defer func() { <-pinVerifySem }()
+	return staff.VerifyCounterPIN(hash, pin)
+}
 
 // The acts a step up can approve, lowercase on the wire (ADR 0001).
 const (
@@ -123,13 +132,25 @@ func (m *StepUpManager) isSubject(sub string) bool {
 	return false
 }
 
-// StepUpIn is a parsed step up request.
+// StepUpIn is a parsed step up request. The manager approves exactly what it
+// names: an override's kind and cap, a pickup's amount. The act refuses a
+// request whose terms differ.
 type StepUpIn struct {
 	Act         string
+	Kind        string
 	Manager     string
 	PIN         string
 	TargetID    uuid.UUID
 	AmountCents *int64
+}
+
+// StepUpCaller is the signed in person asking, from their claims: at the
+// terminal the caller is the act's own cashier (the sale they are ringing,
+// the drawer they are working), so a manager who is the caller is the one
+// person the act's rules refuse.
+type StepUpCaller struct {
+	Subject string
+	Email   string
 }
 
 // StepUpApproval is the wire answer of a verified step up: the token the one
@@ -152,6 +173,7 @@ type StepUpManagerSummary struct {
 // stepUpRequest is POST /api/v1/pos/step-up.
 type stepUpRequest struct {
 	Act         *string         `json:"act"`
+	Kind        *string         `json:"kind"`
 	Manager     *string         `json:"manager"`
 	PIN         *string         `json:"pin"`
 	TargetID    string          `json:"target_id"`
@@ -182,6 +204,9 @@ func (r *stepUpRequest) parse() (*StepUpIn, error) {
 	} else {
 		out.TargetID = id
 	}
+	if r.Kind != nil {
+		out.Kind = *r.Kind
+	}
 	if n, ok := v.Int("amount_cents", r.AmountCents, false); ok {
 		v.Check(n > 0, "amount_cents", "must be greater than zero")
 		out.AmountCents = &n
@@ -189,55 +214,107 @@ func (r *stepUpRequest) parse() (*StepUpIn, error) {
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
-	if out.Act == StepUpActPickup && out.AmountCents == nil {
-		return nil, httpx.BadRequest("one or more fields failed validation",
-			httpx.FieldError{Field: "amount_cents", Message: "is required when the act is a pickup"})
+	// the manager approves the terms the act will spend: an override names
+	// its kind and its cap, a pickup its amount, and no other act carries an
+	// amount (a minted approval must always be spendable)
+	switch out.Act {
+	case StepUpActOverride:
+		if out.Kind != OverrideAccount && out.Kind != OverrideCheck && out.Kind != OverrideRefundMethod {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "kind", Message: "is required when the act is an override: account, check or refund_method"})
+		}
+		if out.AmountCents == nil {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "amount_cents", Message: "is required when the act is an override: the cap the manager approves"})
+		}
+	case StepUpActPickup:
+		if out.Kind != "" {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "kind", Message: "only an override names a kind"})
+		}
+		if out.AmountCents == nil {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "amount_cents", Message: "is required when the act is a pickup"})
+		}
+	default:
+		if out.Kind != "" {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "kind", Message: "only an override names a kind"})
+		}
+		if out.AmountCents != nil {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "amount_cents", Message: "only a pickup or an override carries an amount"})
+		}
 	}
 	return out, nil
 }
 
 // StepUp verifies a manager's counter PIN and mints the single use approval
-// for one act and one target. The PIN's failure count and lock live on the
-// staff row; the token is stored only as its SHA-256 hash.
-func (s *Service) StepUp(ctx context.Context, in *StepUpIn) (*StepUpApproval, error) {
-	m, ok, err := s.repo.FindStepUpManager(ctx, in.Manager)
-	if err != nil {
-		return nil, err
+// for one act, one target and the terms the manager saw. The PIN's failure
+// count and lock live on the staff row; the token is stored only as its
+// SHA-256 hash. The caller is the person at the terminal; a manager who is
+// the caller is the one person the act's rules refuse.
+func (s *Service) StepUp(ctx context.Context, in *StepUpIn, caller *StepUpCaller) (*StepUpApproval, error) {
+	var callerSub, callerEmail string
+	if caller != nil {
+		callerSub, callerEmail = caller.Subject, caller.Email
 	}
-	// an unknown manager, an inactive one and a missing PIN all answer the
-	// same plain refusal: the answer never says which part was wrong
-	if !ok || !m.Active || !m.HasPIN {
-		return nil, stepUpRefused()
-	}
-	if m.Locked {
-		return nil, stepUpLocked()
-	}
-	if !verifyStepUpPIN(m.Hash, in.PIN) {
-		if err := s.inTx(ctx, func(ctx context.Context) error {
-			return s.repo.RecordStepUpFailure(ctx, m.ID, stepUpMaxFailures)
-		}); err != nil {
-			return nil, err
-		}
-		return nil, stepUpRefused()
-	}
-	if !roleAllowed(stepUpRoles(in.Act), m.Role) {
-		return nil, stepUpRole(in.Act)
-	}
-	if err := s.checkStepUpTarget(ctx, in, m); err != nil {
-		return nil, err
-	}
-	token, err := newStepUpToken()
-	if err != nil {
-		return nil, err
-	}
-	hash := stepUpTokenHash(token)
-	expires := s.now().Add(stepUpExpiry)
-	err = s.inTx(ctx, func(ctx context.Context) error {
-		// a verified PIN clears the failure count: the lock is for five in a row
-		if err := s.repo.ResetStepUpFailures(ctx, m.ID); err != nil {
+	var approval *StepUpApproval
+	var stepUpErr error
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		// lock the manager's roster row first so concurrent wrong tries against
+		// the same manager queue on the row lock and stop at the fifth try
+		m, ok, err := s.repo.FindStepUpManagerForUpdate(ctx, in.Manager)
+		if err != nil {
 			return err
 		}
-		if err := s.repo.InsertStepUpApproval(ctx, in.Act, in.TargetID, in.AmountCents, hash, m.ID, m.FullName, expires); err != nil {
+		// an unknown manager, an inactive one and a missing PIN all answer the
+		// same plain refusal: the answer never says which part was wrong
+		if !ok || !m.Active || !m.HasPIN {
+			stepUpErr = stepUpRefused()
+			return nil
+		}
+		if m.Locked {
+			stepUpErr = stepUpLocked()
+			return nil
+		}
+		if !verifyStepUpPIN(m.Hash, in.PIN) {
+			if err := s.repo.RecordStepUpFailure(ctx, m.ID, stepUpMaxFailures); err != nil {
+				return err
+			}
+			stepUpErr = stepUpRefused()
+			return nil
+		}
+		if !roleAllowed(stepUpRoles(in.Act), m.Role) {
+			stepUpErr = stepUpRole(in.Act)
+			return nil
+		}
+		// under real sign in the cashier's subject is not the roster row's id:
+		// the caller's own claims (subject and email) name the person the act's
+		// rules refuse, whatever the subject's shape
+		if m.isSubject(callerSub) || (callerEmail != "" && strings.EqualFold(m.Email, callerEmail)) {
+			stepUpErr = stepUpOwn(in.Act)
+			return nil
+		}
+		if err := s.checkStepUpTarget(ctx, in, m); err != nil {
+			stepUpErr = err
+			return nil
+		}
+		token, err := newStepUpToken()
+		if err != nil {
+			return err
+		}
+		hash := stepUpTokenHash(token)
+		expires := s.now().Add(stepUpExpiry)
+		unlocked, err := s.repo.ResetStepUpFailuresUnlocked(ctx, m.ID)
+		if err != nil {
+			return err
+		}
+		if !unlocked {
+			stepUpErr = stepUpLocked()
+			return nil
+		}
+		if err := s.repo.InsertStepUpApproval(ctx, in.Act, in.Kind, in.TargetID, in.AmountCents, hash, m.ID, m.FullName, expires); err != nil {
 			return err
 		}
 		if s.auditLog != nil {
@@ -248,12 +325,31 @@ func (s *Service) StepUp(ctx context.Context, in *StepUpIn) (*StepUpApproval, er
 				return err
 			}
 		}
+		approval = &StepUpApproval{Token: token, ManagerName: m.FullName, ExpiresAt: httpx.TimestampOf(expires)}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &StepUpApproval{Token: token, ManagerName: m.FullName, ExpiresAt: httpx.TimestampOf(expires)}, nil
+	if stepUpErr != nil {
+		return nil, stepUpErr
+	}
+	return approval, nil
+}
+
+// StaffIDByEmail resolves a signed in user's email to their roster row's id
+// when one exists, so the counter's cashier and actor fields name the same
+// staff id the step up picker and person rules use.
+func (s *Service) StaffIDByEmail(ctx context.Context, email string) uuid.UUID {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return uuid.Nil
+	}
+	m, ok, err := s.repo.FindStepUpManager(ctx, email)
+	if err != nil || !ok {
+		return uuid.Nil
+	}
+	return m.ID
 }
 
 // checkStepUpTarget holds the acts' own person rules at the step up: the
@@ -302,19 +398,28 @@ func (s *Service) StepUpManagers(ctx context.Context, act string) ([]StepUpManag
 	return s.repo.ListStepUpManagers(ctx, stepUpRoles(act))
 }
 
+// StepUpManagerRef names the manager an approval carried: the name the act's
+// own columns record, and the staff id its audit row and its person rules
+// use.
+type StepUpManagerRef struct {
+	Name    string
+	StaffID string
+}
+
 // consumeStepUpApproval spends one approval inside the act's own
-// transaction: the right act, the right target, the right amount, unexpired
-// and unconsumed. The answer names the manager the act records.
-func (s *Service) consumeStepUpApproval(ctx context.Context, act string, target uuid.UUID, amountCents *int64, token string) (string, error) {
-	name, ok, err := s.repo.ConsumeStepUpApproval(ctx, act, target, amountCents, stepUpTokenHash(strings.TrimSpace(token)))
+// transaction: the right act, the right target, the terms the manager saw
+// (an override's kind and cap, a pickup's amount), unexpired and
+// unconsumed. The answer names the manager the act records.
+func (s *Service) consumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64, token string) (StepUpManagerRef, error) {
+	ref, ok, err := s.repo.ConsumeStepUpApproval(ctx, act, kind, target, amountCents, stepUpTokenHash(strings.TrimSpace(token)))
 	if err != nil {
-		return "", err
+		return StepUpManagerRef{}, err
 	}
 	if !ok {
-		return "", &httpx.Error{Status: http.StatusConflict, Code: "step_up_spent",
-			Message: "This approval is used up or expired: ask the manager again"}
+		return StepUpManagerRef{}, &httpx.Error{Status: http.StatusConflict, Code: "step_up_spent",
+			Message: "This approval does not cover this, is used up or expired: ask the manager again"}
 	}
-	return name, nil
+	return ref, nil
 }
 
 // roleAllowed reports whether the staff role is one the act admits,
@@ -360,7 +465,11 @@ func (h *Handler) StepUpHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	approval, err := h.service.StepUp(r.Context(), in)
+	caller := &StepUpCaller{}
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		caller.Subject, caller.Email = claims.Subject, claims.Email
+	}
+	approval, err := h.service.StepUp(r.Context(), in, caller)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

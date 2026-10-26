@@ -483,7 +483,7 @@ func (h *Handler) PreviewExchange(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) exchange(w http.ResponseWriter, r *http.Request, preview bool) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}

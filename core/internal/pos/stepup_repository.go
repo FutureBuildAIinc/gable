@@ -20,16 +20,31 @@ import (
 // spent by the acts. Every statement runs through the caller's executor, so
 // a consumption inside an act's transaction is that transaction's own.
 
-// FindStepUpManager reads one roster row by staff id or staff number, the
-// two ways a screen names a manager. The counter PIN hash is read here and
-// never leaves the server.
+// FindStepUpManager reads one roster row by staff id, staff number or email.
+// The counter PIN hash is read here and never leaves the server.
 func (r *PostgresRepository) FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error) {
-	var m StepUpManager
-	err := r.ex(ctx).QueryRow(ctx, `
+	return r.findStepUpManager(ctx, manager, false)
+}
+
+// FindStepUpManagerForUpdate reads and locks one roster row FOR UPDATE inside
+// the step up transaction so concurrent PIN tries against the same manager
+// serialize on the row lock and cannot race past the five try lock.
+func (r *PostgresRepository) FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error) {
+	return r.findStepUpManager(ctx, manager, true)
+}
+
+func (r *PostgresRepository) findStepUpManager(ctx context.Context, manager string, forUpdate bool) (*StepUpManager, bool, error) {
+	q := `
 		SELECT id, full_name, COALESCE(staff_no, ''), email, role, active,
 		       (counter_pin_hash IS NOT NULL), counter_pin_locked, COALESCE(counter_pin_hash, '')
 		FROM staff
-		WHERE id::text = LOWER($1) OR LOWER(COALESCE(staff_no, '')) = LOWER($1) LIMIT 1`, manager).
+		WHERE id::text = LOWER($1) OR LOWER(COALESCE(staff_no, '')) = LOWER($1) OR LOWER(email) = LOWER($1)
+		LIMIT 1`
+	if forUpdate {
+		q += ` FOR UPDATE`
+	}
+	var m StepUpManager
+	err := r.ex(ctx).QueryRow(ctx, q, manager).
 		Scan(&m.ID, &m.FullName, &m.StaffNo, &m.Email, &m.Role, &m.Active, &m.HasPIN, &m.Locked, &m.Hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
@@ -73,11 +88,13 @@ func lowerAll(in []string) []string {
 }
 
 // RecordStepUpFailure counts one wrong PIN and locks the PIN at max in a
-// row, one update so two wrong tries at once cannot both pass the threshold.
+// row. One update holds both the count and the lock, and the count is capped
+// at max, so any number of concurrent wrong tries together count no more
+// than the lock's own five.
 func (r *PostgresRepository) RecordStepUpFailure(ctx context.Context, id uuid.UUID, max int) error {
 	tag, err := r.ex(ctx).Exec(ctx, `
-		UPDATE staff SET counter_pin_failures = counter_pin_failures + 1,
-			counter_pin_locked = (counter_pin_failures + 1 >= $2), updated_at = NOW()
+		UPDATE staff SET counter_pin_failures = LEAST(counter_pin_failures + 1, $2),
+			counter_pin_locked = (LEAST(counter_pin_failures + 1, $2) >= $2), updated_at = NOW()
 		WHERE id = $1`, id, max)
 	if err != nil {
 		return fmt.Errorf("failed to count the wrong PIN: %w", err)
@@ -88,23 +105,30 @@ func (r *PostgresRepository) RecordStepUpFailure(ctx context.Context, id uuid.UU
 	return nil
 }
 
-// ResetStepUpFailures clears the count on a verified PIN.
-func (r *PostgresRepository) ResetStepUpFailures(ctx context.Context, id uuid.UUID) error {
-	_, err := r.ex(ctx).Exec(ctx,
-		`UPDATE staff SET counter_pin_failures = 0 WHERE id = $1 AND counter_pin_failures <> 0`, id)
-	if err != nil {
-		return fmt.Errorf("failed to clear the PIN failures: %w", err)
+// ResetStepUpFailuresUnlocked clears the count on a verified PIN, and
+// answers whether the row was still unlocked: five wrong tries raced in
+// between leave the PIN locked and no approval may be minted on it.
+func (r *PostgresRepository) ResetStepUpFailuresUnlocked(ctx context.Context, id uuid.UUID) (bool, error) {
+	var reset bool
+	err := r.ex(ctx).QueryRow(ctx,
+		`UPDATE staff SET counter_pin_failures = 0 WHERE id = $1 AND NOT counter_pin_locked RETURNING TRUE`, id).Scan(&reset)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
 	}
-	return nil
+	if err != nil {
+		return false, fmt.Errorf("failed to clear the PIN failures: %w", err)
+	}
+	return reset, nil
 }
 
 // InsertStepUpApproval mints one approval: the token only as its SHA-256
-// hash, bound to the act, the target, the manager and the expiry.
-func (r *PostgresRepository) InsertStepUpApproval(ctx context.Context, act string, target uuid.UUID,
+// hash, bound to the act, its terms (an override's kind, the amount the
+// manager approved), the target, the manager and the expiry.
+func (r *PostgresRepository) InsertStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID,
 	amountCents *int64, tokenHash string, managerID uuid.UUID, managerName string, expires time.Time) error {
 	_, err := r.ex(ctx).Exec(ctx, `
-		INSERT INTO pos_step_up_approvals (act, target_id, amount_cents, token_hash, manager_staff_id, manager_name, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, act, target, amountCents, tokenHash, managerID, managerName, expires)
+		INSERT INTO pos_step_up_approvals (act, kind, target_id, amount_cents, token_hash, manager_staff_id, manager_name, expires_at)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8)`, act, kind, target, amountCents, tokenHash, managerID, managerName, expires)
 	if err != nil {
 		return fmt.Errorf("failed to mint the approval: %w", mapWriteError(err))
 	}
@@ -112,13 +136,15 @@ func (r *PostgresRepository) InsertStepUpApproval(ctx context.Context, act strin
 }
 
 // ConsumeStepUpApproval spends one approval: the token's hash, the act, the
-// target and (for a pickup) the amount must all match, the row must be live
-// and unexpired. The subquery locks the row it picks FOR UPDATE SKIP LOCKED
-// and the outer WHERE tests consumed_at again, so of any number of racing
-// acts exactly one spends it; the others find nothing.
-func (r *PostgresRepository) ConsumeStepUpApproval(ctx context.Context, act string, target uuid.UUID,
-	amountCents *int64, tokenHash string) (string, bool, error) {
-	var name string
+// kind and the amount the manager approved, and the target must all match,
+// and the row must be live and unexpired. The subquery locks the row it
+// picks FOR UPDATE SKIP LOCKED and the outer WHERE tests consumed_at again,
+// so of any number of racing acts exactly one spends it; the others find
+// nothing. The answer carries the manager's name (the act's own columns) and
+// staff id (its audit row and person rules).
+func (r *PostgresRepository) ConsumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID,
+	amountCents *int64, tokenHash string) (StepUpManagerRef, bool, error) {
+	var ref StepUpManagerRef
 	err := r.ex(ctx).QueryRow(ctx, `
 		UPDATE pos_step_up_approvals SET consumed_at = NOW()
 		WHERE id = (
@@ -127,14 +153,15 @@ func (r *PostgresRepository) ConsumeStepUpApproval(ctx context.Context, act stri
 			FOR UPDATE SKIP LOCKED)
 			AND consumed_at IS NULL
 			AND act = $2 AND target_id = $3
-			AND amount_cents IS NOT DISTINCT FROM $4::bigint
+			AND kind IS NOT DISTINCT FROM NULLIF($4, '')
+			AND amount_cents IS NOT DISTINCT FROM $5::bigint
 			AND expires_at > NOW()
-		RETURNING manager_name`, tokenHash, act, target, amountCents).Scan(&name)
+		RETURNING manager_name, manager_staff_id::text`, tokenHash, act, target, kind, amountCents).Scan(&ref.Name, &ref.StaffID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
+		return StepUpManagerRef{}, false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("failed to spend the approval: %w", err)
+		return StepUpManagerRef{}, false, fmt.Errorf("failed to spend the approval: %w", err)
 	}
-	return name, true, nil
+	return ref, true, nil
 }

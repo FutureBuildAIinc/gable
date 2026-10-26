@@ -64,14 +64,16 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 		return nil, err
 	}
 	var out *TillReport
+	var stepUpManager StepUpManagerRef
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if approvalToken != "" {
 			// the manager's PIN already spoke: one use, this act, this session
-			manager, err := s.consumeStepUpApproval(ctx, StepUpActSignoff, sessionID, nil, approvalToken)
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActSignoff, "", sessionID, nil, approvalToken)
 			if err != nil {
 				return err
 			}
-			actor = manager
+			actor = manager.Name
+			stepUpManager = manager
 		}
 		if err := s.repo.LockTillSession(ctx, sessionID, true); err != nil {
 			return err
@@ -92,7 +94,8 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 			if session.ClosedBy != nil {
 				closer = *session.ClosedBy
 			}
-			if strings.EqualFold(actor, closer) || strings.EqualFold(actor, session.CashierID.String()) {
+			if strings.EqualFold(actor, closer) || strings.EqualFold(actor, session.CashierID.String()) ||
+				(stepUpManager.StaffID != "" && (strings.EqualFold(stepUpManager.StaffID, closer) || strings.EqualFold(stepUpManager.StaffID, session.CashierID.String()))) {
 				return conflict("signoff_same_person",
 					"the person who closed the drawer, or its cashier, cannot sign off its variance: a different manager must")
 			}
@@ -134,10 +137,15 @@ func (s *Service) SignOffTill(ctx context.Context, sessionID uuid.UUID, reason, 
 			return err
 		}
 		if s.auditLog != nil {
+			auditUser, changes := actor, map[string]any{"register_id": session.RegisterID, "over_short_cents": overShort,
+				"reason": reason, "closed_by": derefString(session.ClosedBy)}
+			if stepUpManager.StaffID != "" {
+				auditUser = stepUpManager.StaffID
+				changes["manager_name"] = stepUpManager.Name
+			}
 			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action: "pos.till.signed_off", EntityType: "till_session", EntityID: sessionID, UserID: actor,
-				Changes: map[string]any{"register_id": session.RegisterID, "over_short_cents": overShort,
-					"reason": reason, "closed_by": derefString(session.ClosedBy)}}); err != nil {
+				Action: "pos.till.signed_off", EntityType: "till_session", EntityID: sessionID, UserID: auditUser,
+				Changes: changes}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}

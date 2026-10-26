@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { posService } from '../../services/POSService.ts';
+import { authCustody } from '@gable/auth';
 import './StepUpDialog';
 import { ApiError } from '../../services/apiError.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
@@ -55,11 +56,22 @@ export class GableTillSignoffQueue extends LitElement {
         }
     }
 
-    /** The Sign off button: a reason is asked first, then the manager steps up. */
+    /**
+     * The Sign off button: a reason is asked first. A manager signed in here
+     * with the role (finance or owner) signs off as themselves, the claims
+     * path; anyone else asks a manager to step up with their own counter PIN.
+     */
     private signOff(s: TillSession) {
         const reason = (this.reasons[s.id] ?? '').trim();
         if (reason === '') {
             this.failures = { ...this.failures, [s.id]: 'Say why the variance is accepted.' };
+            return;
+        }
+        const roles = authCustody.roles ?? [];
+        const sub = authCustody.subject;
+        const ownDrawer = sub !== null && (s.cashier_id === sub || s.closed_by === sub);
+        if ((roles.includes('finance') || roles.includes('owner')) && !ownDrawer) {
+            void this._signOff(s);
             return;
         }
         this.asking = s;
@@ -119,6 +131,7 @@ export class GableTillSignoffQueue extends LitElement {
             ${this.asking !== null ? html`
                 <gable-step-up-dialog act="signoff" target-id=${this.asking.id}
                     heading="A manager signs off the variance"
+                    .detail=${`Release the variance of ${formatCents(this.asking.over_short_cents ?? 0)} on register ${this.asking.register_id}`}
                     @step-up-cancel=${() => { this.asking = null; }}
                     @step-up-approved=${async (e: CustomEvent<{ token: string; managerName: string }>) => {
                         const s = this.asking;

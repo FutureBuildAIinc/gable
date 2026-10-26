@@ -102,14 +102,18 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 		return nil, err
 	}
 	var out *AccountOverride
+	var stepUpManager StepUpManagerRef
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if approvalToken != "" {
-			// the manager's PIN already spoke: one use, this act, this sale
-			manager, err := s.consumeStepUpApproval(ctx, StepUpActOverride, saleID, nil, approvalToken)
+			// the manager's PIN already spoke: one use, this act, this sale,
+			// the kind and the cap the manager saw and approved
+			cap := in.CapCents
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActOverride, in.Kind, saleID, &cap, approvalToken)
 			if err != nil {
 				return err
 			}
-			approver = manager
+			approver = manager.Name
+			stepUpManager = manager
 		}
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
 			return err
@@ -127,7 +131,8 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 		} else if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot approve an override on a %s sale", sale.Status.Status()))
 		}
-		if strings.EqualFold(sale.CashierID.String(), approver) {
+		if strings.EqualFold(sale.CashierID.String(), approver) ||
+			(stepUpManager.StaffID != "" && strings.EqualFold(sale.CashierID.String(), stepUpManager.StaffID)) {
 			return httpx.Forbidden("a manager other than the sale's own cashier approves an override")
 		}
 		if in.Kind == OverrideAccount && sale.CustomerID == nil {
@@ -138,10 +143,18 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 			return err
 		}
 		if s.auditLog != nil {
+			// a step up's audit row carries the manager's staff id as its
+			// user (the subject shaped column the users picker reads) and
+			// the name beside it
+			user, changes := approver, map[string]any{"override_id": o.ID, "kind": o.Kind, "cap_cents": o.CapCents,
+				"reason": o.Reason, "approved_by": o.ApprovedBy, "cashier_id": sale.CashierID, "customer_id": sale.CustomerID}
+			if stepUpManager.StaffID != "" {
+				user = stepUpManager.StaffID
+				changes["manager_name"] = stepUpManager.Name
+			}
 			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action: "pos.override.approved", EntityType: "pos_transaction", EntityID: saleID, UserID: approver,
-				Changes: map[string]any{"override_id": o.ID, "kind": o.Kind, "cap_cents": o.CapCents, "reason": o.Reason,
-					"cashier_id": sale.CashierID, "customer_id": sale.CustomerID}}); err != nil {
+				Action: "pos.override.approved", EntityType: "pos_transaction", EntityID: saleID, UserID: user,
+				Changes: changes}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
@@ -165,7 +178,7 @@ func (s *Service) consumeOverride(ctx context.Context, saleID uuid.UUID, kind st
 	// two persons spend a refund_method override: the manager who approved it
 	// cannot also be the one whose return or exchange consumes it. The error
 	// rolls the consumption back with the caller's transaction.
-	if kind == OverrideRefundMethod && actor != "" && actor != devApprover && strings.EqualFold(actor, o.ApprovedBy) {
+	if kind == OverrideRefundMethod && s.sameStaffAsApprover(ctx, actor, o.ApprovedBy) {
 		return false, httpx.Forbidden("a manager who approved a refund_method override cannot also make the cash return")
 	}
 	if s.auditLog != nil {
@@ -250,7 +263,7 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 				httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
 				return
 			}
-			approver = claims.Subject
+			approver = h.actorFrom(r)
 		}
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -264,6 +277,23 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusCreated, o)
+}
+
+// sameStaffAsApprover reports whether actor and approvedBy name the same
+// person, even when approvedBy holds the manager's display name from a step up
+// approval and actor holds the roster row's id or subject.
+func (s *Service) sameStaffAsApprover(ctx context.Context, actor, approvedBy string) bool {
+	if actor == "" || actor == devApprover || approvedBy == "" {
+		return false
+	}
+	if strings.EqualFold(actor, approvedBy) {
+		return true
+	}
+	m, ok, err := s.repo.FindStepUpManager(ctx, actor)
+	if err != nil || !ok {
+		return false
+	}
+	return strings.EqualFold(m.FullName, approvedBy) || m.isSubject(approvedBy)
 }
 
 // checkBuyer is the buyer roster rule: an account that asks for a named

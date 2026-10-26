@@ -120,6 +120,12 @@ func (s *Service) SetCounterPIN(ctx context.Context, id uuid.UUID, pin string, a
 		if err := s.repo.SetCounterPIN(ctx, id, hash); err != nil {
 			return err
 		}
+		// the staff answer moves with the PIN facts, so a client holding the
+		// document on its revision sees the change through the revision
+		// (ADR 0001 section 11)
+		if err := s.repo.BumpStaffRevision(ctx, id); err != nil {
+			return err
+		}
 		cur, err := s.repo.Get(ctx, id)
 		if err != nil {
 			return notFound(err)
@@ -148,6 +154,9 @@ func (s *Service) ClearCounterPIN(ctx context.Context, id uuid.UUID, actor strin
 		if err := s.repo.ClearCounterPIN(ctx, id); err != nil {
 			return err
 		}
+		if err := s.repo.BumpStaffRevision(ctx, id); err != nil {
+			return err
+		}
 		cur, err := s.repo.Get(ctx, id)
 		if err != nil {
 			return notFound(err)
@@ -173,14 +182,21 @@ func (s *Service) UnlockCounterPIN(ctx context.Context, id uuid.UUID, actor stri
 		if err := s.repo.LockStaff(ctx, id); err != nil {
 			return notFound(err)
 		}
+		before, err := s.repo.Get(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
 		if err := s.repo.UnlockCounterPIN(ctx, id); err != nil {
+			return err
+		}
+		if err := s.repo.BumpStaffRevision(ctx, id); err != nil {
 			return err
 		}
 		cur, err := s.repo.Get(ctx, id)
 		if err != nil {
 			return notFound(err)
 		}
-		if err := s.auditPIN(ctx, "staff.counter_pin_unlocked", id, actor, map[string]any{"was_locked": true}); err != nil {
+		if err := s.auditPIN(ctx, "staff.counter_pin_unlocked", id, actor, map[string]any{"was_locked": before.CounterPinLocked}); err != nil {
 			return err
 		}
 		out = cur

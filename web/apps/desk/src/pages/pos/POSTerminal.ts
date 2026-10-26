@@ -466,10 +466,11 @@ export class POSTerminal extends LitElement {
 
   /**
    * A manager approves this one sale (an account sale the verdict blocks, or a
-   * check over the limit), with a reason and a cap. The manager steps up at
-   * this terminal with their own counter PIN (CP-04): the reason is asked
-   * first, then the PIN dialog, and the approval the PIN mints is spent by
-   * this one sale's override.
+   * check over the limit), with a reason and a cap. A manager signed in here
+   * with the role approves as themselves (the claims path); anyone else asks
+   * the manager to step up with their own counter PIN (CP-04), and the
+   * approval the PIN mints is spent by this one sale's override, bound to the
+   * kind and the cap the manager saw.
    */
   private async _askManager(kind: 'account' | 'check', capCents: number) {
     const sale = this._sale;
@@ -480,7 +481,33 @@ export class POSTerminal extends LitElement {
     });
     if (!reason) return;
     this._error = null;
+    const roles = authCustody.roles ?? [];
+    const sub = authCustody.subject;
+    if (kind === 'account' || kind === 'check') {
+      if ((roles.includes('admin') || roles.includes('owner')) && (!sub || sale.cashier_id !== sub)) {
+        await this._recordOverride(sale, kind, reason, capCents);
+        return;
+      }
+    }
     this._stepUp = { kind, reason, capCents };
+  }
+
+  /** Records the override, with a manager's approval token when the PIN minted one. */
+  private async _recordOverride(sale: Sale, kind: 'account' | 'check', reason: string, capCents: number, approvalToken?: string, managerName?: string) {
+    try {
+      this._error = null;
+      const approval = await posService.approveOverride(sale.id, kind, reason, capCents, approvalToken);
+      if (kind === 'check') {
+        this._checkApprovedCents = approval.cap_cents;
+        this._checkOverWords = null;
+      }
+      await this._syncStanding();
+      this._success = managerName ? `Approved by ${managerName}` : 'Approved for this sale';
+      if (this._errorTimer) clearTimeout(this._errorTimer);
+      this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
+    } catch (err: unknown) {
+      this._error = apiErrorMessage(err, 'Failed to record the approval');
+    }
   }
 
   /** The PIN dialog's approval completes the override the cashier asked for. */
@@ -489,28 +516,20 @@ export class POSTerminal extends LitElement {
     const sale = this._sale;
     this._stepUp = null;
     if (!ask || !sale) return;
-    try {
-      this._error = null;
-      const approval = await posService.approveOverride(sale.id, ask.kind, ask.reason, ask.capCents, detail.token);
-      if (ask.kind === 'check') {
-        this._checkApprovedCents = approval.cap_cents;
-        this._checkOverWords = null;
-      }
-      await this._syncStanding();
-      this._success = `Approved by ${detail.managerName}`;
-      if (this._errorTimer) clearTimeout(this._errorTimer);
-      this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
-    } catch (err: unknown) {
-      this._error = apiErrorMessage(err, 'Failed to record the approval');
-    }
+    await this._recordOverride(sale, ask.kind, ask.reason, ask.capCents, detail.token, detail.managerName);
   }
 
-  /** The step up dialog, over everything, whatever panel is open. */
+  /** The step up dialog, over everything, whatever panel is open. The
+   * manager sees the kind and the cap they are approving. */
   private _renderStepUp() {
     if (!this._stepUp || !this._sale) return nothing;
     return html`
-      <gable-step-up-dialog act="override" target-id=${this._sale.id}
+      <gable-step-up-dialog act="override" .kind=${this._stepUp.kind} .amountCents=${this._stepUp.capCents}
+        target-id=${this._sale.id}
         heading=${this._stepUp.kind === 'account' ? 'A manager approves this sale on account' : 'A manager approves this check'}
+        .detail=${this._stepUp.kind === 'account'
+          ? `Approve ${fmt(this._stepUp.capCents)} on account for this sale`
+          : `Approve a check of ${fmt(this._stepUp.capCents)} for this sale`}
         @step-up-cancel=${() => { this._stepUp = null; }}
         @step-up-approved=${(e: CustomEvent<{ token: string; managerName: string }>) => void this._onStepUpApproved(e.detail)}></gable-step-up-dialog>
     `;
@@ -1674,7 +1693,8 @@ export class POSTerminal extends LitElement {
 
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
-    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
+    const by = m.kind === 'pickup' && m.taken_by ? ` by ${m.taken_by}` : '';
+    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded${by}`;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }

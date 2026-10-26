@@ -29,7 +29,7 @@ const svc = vi.hoisted(() => ({
   emailReceipt: vi.fn(),
   standing: vi.fn(),
   approveOverride: vi.fn(),
-  stepUpManagers: vi.fn(),
+  stepUpManagers: vi.fn().mockResolvedValue([]),
   stepUp: vi.fn(),
   captureSignature: vi.fn(),
   returnReasons: vi.fn(),
@@ -43,6 +43,7 @@ vi.mock('../../services/POSService', async (orig) => {
   return { ...real, posService: svc };
 });
 
+import { authCustody } from '@gable/auth';
 import './POSTerminal';
 import './StepUpDialog';
 import type { POSTerminal } from './POSTerminal';
@@ -118,6 +119,7 @@ async function mount(s: Sale): Promise<POSTerminal> {
   svc.currentTill.mockResolvedValue({ id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 });
   svc.startSale.mockResolvedValue(s);
   svc.returnReasons.mockResolvedValue(reasons);
+  svc.stepUpManagers.mockResolvedValue([]);
   const el = document.createElement('gable-pos-terminal') as POSTerminal;
   document.body.appendChild(el);
   await flush();
@@ -214,6 +216,26 @@ describe('can this sale go on account? the standing line and its ways forward', 
     expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'agreed on the phone', 1198, 'tok-1');
     expect(q(el, 'pos-verdict-line').textContent).toContain('A manager approved this sale on account');
     expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('a signed in owner approves as themselves, with no PIN dialog', async () => {
+    const roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['owner']);
+    svc.approveOverride.mockResolvedValue({ id: 'o2', sale_id: 's1', kind: 'account', approved_by: 'owner-sub', reason: 'phone', cap_cents: 1198, created_at: '', consumed_at: null });
+    svc.standing.mockResolvedValue(standing({
+      on_account: { verdict: 'allowed', reason: 'manager_override', message: 'A manager approved this sale on account up to 11.98 USD.', over_cents: null, ways_forward: [] },
+    }));
+    const el = await withAccount(blockedStanding());
+    q(el, 'pos-way-manager_override').click();
+    await flush();
+    await typeIntoAppDialog('as the owner here');
+    await answerAppDialog(true);
+    await flush();
+    await el.updateComplete;
+    // the claims path, not the step up: no token, no dialog
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'as the owner here', 1198, undefined);
+    expect(el.querySelector('gable-step-up-dialog')).toBeNull();
+    roles.mockRestore();
     el.remove();
   });
 

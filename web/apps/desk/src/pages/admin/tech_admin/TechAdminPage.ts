@@ -479,7 +479,7 @@ export class TechAdminPage extends LitElement {
     private async _handleSetPin(member: StaffMember) {
         const pin = await promptDialog({
             title: `Set ${member.full_name}'s counter PIN`,
-            label: 'New PIN (4 to 8 digits)', required: true, confirmLabel: 'Set PIN',
+            label: 'New PIN (4 to 8 digits)', required: true, confirmLabel: 'Set PIN', masked: true,
         });
         if (!pin) return;
         try {
@@ -966,6 +966,8 @@ export class TechAdminPage extends LitElement {
                                             ${member.locked ? html`
                                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-500/10 text-amber-400" data-testid="staff-pin-locked">Locked</span>
                                                 <button data-testid="staff-pin-unlock" @click=${() => this._handleUnlockPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Unlock</button>
+                                                <button data-testid="staff-pin-clear" @click=${() => this._handleClearPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Clear</button>
+                                                <button data-testid="staff-pin-set-new" @click=${() => this._handleSetPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Change</button>
                                             ` : member.counter_pin_set ? html`
                                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gable-green/10 text-gable-green" data-testid="staff-pin-set">Set</span>
                                                 <button data-testid="staff-pin-set-new" @click=${() => this._handleSetPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Change</button>

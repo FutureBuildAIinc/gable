@@ -171,15 +171,22 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 			return conflict("register_without_branch", "the session's register belongs to no branch")
 		}
 		takenBy := ""
+		var stepUpManager StepUpManagerRef
 		if in.Kind == MovementPickup && approvalToken != "" {
 			// the taker is a manager who stepped up with their own PIN at
 			// this terminal: the approval is spent here, this session, this
 			// amount, and names the taker the row records
 			amount := int64(in.AmountCents)
-			takenBy, err = s.consumeStepUpApproval(ctx, StepUpActPickup, sessionID, &amount, approvalToken)
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActPickup, "", sessionID, &amount, approvalToken)
 			if err != nil {
 				return err
 			}
+			if strings.EqualFold(session.CashierID.String(), manager.StaffID) {
+				return conflict("pickup_needs_second_person",
+					"a pickup is cash taken by a second person: the cashier cannot take it alone")
+			}
+			takenBy = manager.Name
+			stepUpManager = manager
 		} else if in.Kind == MovementPickup {
 			taker := strings.TrimSpace(in.TakenBy)
 			cashier := session.CashierID.String()
@@ -240,6 +247,9 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 			return err
 		}
 		if s.auditLog != nil {
+			// a step up taker's audit row carries the manager's staff id as
+			// its user and the name beside it (taken_by holds the name)
+			auditUser := actor
 			changes := map[string]any{"kind": string(m.Kind), "amount_cents": int64(m.AmountCents),
 				"till_session_id": sessionID, "register_id": m.RegisterID}
 			if m.ReasonCode != nil {
@@ -248,8 +258,12 @@ func (s *Service) RecordMovement(ctx context.Context, sessionID uuid.UUID, in Mo
 			if m.TakenBy != nil {
 				changes["taken_by"] = *m.TakenBy
 			}
+			if stepUpManager.StaffID != "" {
+				auditUser = stepUpManager.StaffID
+				changes["manager_name"] = stepUpManager.Name
+			}
 			if err := s.auditLog.Log(ctx, audit.Entry{Action: "pos.till.movement", EntityType: "till_movement",
-				EntityID: m.ID, UserID: actor, Changes: changes}); err != nil {
+				EntityID: m.ID, UserID: auditUser, Changes: changes}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}

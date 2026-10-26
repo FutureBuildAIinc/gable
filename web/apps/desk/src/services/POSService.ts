@@ -336,9 +336,13 @@ export const posService = {
         return Array.isArray(page.items) ? page.items : [];
     },
 
-    /** A manager approves at the counter with their own PIN; one act spends the answer. */
+    /**
+     * A manager approves at the counter with their own PIN; one act spends
+     * the answer. An override names the kind and the cap the manager
+     * approves, a pickup its amount.
+     */
     async stepUp(act: 'override' | 'pickup' | 'signoff', manager: string, pin: string, targetId: string,
-        amountCents?: number): Promise<StepUpApproval> {
+        amountCents?: number, kind?: 'account' | 'check' | 'refund_method'): Promise<StepUpApproval> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/step-up`, {
                 method: 'POST',
@@ -346,6 +350,7 @@ export const posService = {
                 body: JSON.stringify({
                     act, manager, pin, target_id: targetId,
                     ...(amountCents !== undefined ? { amount_cents: amountCents } : {}),
+                    ...(kind !== undefined ? { kind } : {}),
                 }),
             }),
             'Failed to ask the manager',

@@ -16914,6 +16914,11 @@ export interface components {
         PosStepUpRequest: {
             /** @enum {string} */
             act: "override" | "pickup" | "signoff";
+            /**
+             * @description The override's kind; required when the act is an override, absent otherwise. The approval binds it.
+             * @enum {string}
+             */
+            kind?: "account" | "check" | "refund_method";
             /** @description The manager's staff number or staff id. */
             manager: string;
             /** @description The manager's counter PIN. Verified in constant time, never logged. */
@@ -16925,10 +16930,10 @@ export interface components {
             target_id: string;
             /**
              * Format: int64
-             * @description The pickup's amount; required for a pickup, absent otherwise. The approval binds it.
+             * @description The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it.
              */
             amount_cents?: number;
-        };
+        } & (unknown & unknown & unknown);
         PosStepUpApproval: {
             /** @description The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash. */
             token: string;

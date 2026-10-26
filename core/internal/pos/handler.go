@@ -102,6 +102,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		}
 		return resolveGuard(handler)
 	}
+	// The variance pair's own guard: every role the claims path allowed
+	// (finance and owner, the resolve mount's) plus the counter's own, so a
+	// cashier can reach the queue and spend a manager's step up approval
+	// (CP-04 slice 3) while a signed in finance manager loses nothing.
+	signoffMount := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 2 && roleGuard[2] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[2](handler).ServeHTTP(w, r)
+			}
+		}
+		return guard(handler)
+	}
 
 	// The sale lifecycle
 	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
@@ -142,13 +154,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/movements", guard(h.CreateMovement))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/movements", guard(h.ListMovements))
-	// The variance sign off (CP-08): the queue and the release are behind the
-	// counter's own guard, because a manager may step up with their counter
-	// PIN at the terminal (CP-04 slice 3); the claims path keeps the finance
-	// and owner rule in the handler itself, and the policy routes keep the
+	// The variance sign off (CP-08): the queue and the release sit behind the
+	// variance pair's own guard (the counter's roles plus finance, the claims
+	// path's own), because a manager may step up with their counter PIN at
+	// the terminal (CP-04 slice 3); the claims path keeps the finance and
+	// owner rule in the handler itself, and the policy routes keep the
 	// resolve mount's.
-	mux.HandleFunc("GET /api/v1/pos/till/signoffs", guard(h.ListPendingSignoffs))
-	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", guard(h.SignOffTill))
+	mux.HandleFunc("GET /api/v1/pos/till/signoffs", signoffMount(h.ListPendingSignoffs))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", signoffMount(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
 
@@ -251,14 +264,20 @@ func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // cashierOf resolves the acting cashier from the JWT, refusing a machine
-// key.
-func cashierOf(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+// key. When the caller's email matches a roster row, the roster row's id is
+// the cashier id so the counter's person rules compare like with like.
+func (h *Handler) cashierOf(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	if refuseMachineKeyCashier(w, r) {
 		return uuid.Nil, false
 	}
-	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
-		if id, err := uuid.Parse(claims.Subject); err == nil {
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if id := h.service.StaffIDByEmail(r.Context(), claims.Email); id != uuid.Nil {
 			return id, true
+		}
+		if claims.Subject != "" {
+			if id, err := uuid.Parse(claims.Subject); err == nil {
+				return id, true
+			}
 		}
 	}
 	return uuid.Nil, true
@@ -272,7 +291,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // StartTransaction is POST /pos/transactions.
 func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -339,7 +358,7 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	// An item change carries no cashier identity of its own (ADR 0002
 	// section 4): a key holding pos scopes works it; the acting subject, if
 	// any, is the audit attribution.
-	sale, err := h.service.AddLine(r.Context(), id, parsed, actorFrom(r))
+	sale, err := h.service.AddLine(r.Context(), id, parsed, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -371,7 +390,7 @@ func (h *Handler) ChangeItemQuantity(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.ChangeLineQuantity(r.Context(), id, itemID, qty, r.Header.Get("If-Match"), revision, actorFrom(r))
+	sale, err := h.service.ChangeLineQuantity(r.Context(), id, itemID, qty, r.Header.Get("If-Match"), revision, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -419,7 +438,7 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, actorFrom(r))
+	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -445,7 +464,7 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.VoidSale(r.Context(), id, r.Header.Get("If-Match"), revision, reason, actorFrom(r))
+	sale, err := h.service.VoidSale(r.Context(), id, r.Header.Get("If-Match"), revision, reason, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -625,7 +644,7 @@ func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.AttachCustomer(r.Context(), id, *in, actorFrom(r))
+	sale, err := h.service.AttachCustomer(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -673,7 +692,7 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 
 // OpenTill is POST /pos/till/open.
 func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -792,7 +811,7 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 	}
 	// The close carries no cashier identity of its own either (ADR 0002
 	// section 4): the counted drawer is posted by the acting subject.
-	report, err := h.service.CloseTill(r.Context(), id, counted, notes, actorFrom(r))
+	report, err := h.service.CloseTill(r.Context(), id, counted, notes, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -841,7 +860,7 @@ func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
 
 // CreateReturn is POST /pos/returns.
 func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
-	cashierID, ok := cashierOf(w, r)
+	cashierID, ok := h.cashierOf(w, r)
 	if !ok {
 		return
 	}
@@ -930,7 +949,7 @@ func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	resolved, err := h.service.ResolveRefundIntent(r.Context(), id, *in, actorFrom(r))
+	resolved, err := h.service.ResolveRefundIntent(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -967,7 +986,7 @@ func (h *Handler) PaybackRefundIntent(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	paid, err := h.service.PaybackRefundIntent(r.Context(), id, *in, actorFrom(r))
+	paid, err := h.service.PaybackRefundIntent(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -975,9 +994,13 @@ func (h *Handler) PaybackRefundIntent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, paid)
 }
 
-// actorFrom reads the acting user's subject for audit rows.
-func actorFrom(r *http.Request) string {
+// actorFrom reads the acting user's identity for audit rows and person rules:
+// the roster row's id when the signed in email matches one, or the JWT subject.
+func (h *Handler) actorFrom(r *http.Request) string {
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		if id := h.service.StaffIDByEmail(r.Context(), claims.Email); id != uuid.Nil {
+			return id.String()
+		}
 		return claims.Subject
 	}
 	return ""

@@ -83,6 +83,9 @@ func TestCP04_SetAndClearCounterPIN(t *testing.T) {
 	if !st.CounterPinSet || st.CounterPinLocked {
 		t.Errorf("the staff answer says counter_pin_set=%v locked=%v, want true false", st.CounterPinSet, st.CounterPinLocked)
 	}
+	if st.Revision != 2 {
+		t.Errorf("revision after first SetCounterPIN = %d, want 2", st.Revision)
+	}
 
 	// a second set of a different PIN stores a different salt and hash
 	if _, err := svc.SetCounterPIN(ctx, st.ID, "9173", "admin-sub"); err != nil {
@@ -122,6 +125,9 @@ func TestCP04_SetAndClearCounterPIN(t *testing.T) {
 	}
 	if cleared.CounterPinSet || cleared.CounterPinLocked {
 		t.Errorf("after the clear counter_pin_set=%v locked=%v, want false false", cleared.CounterPinSet, cleared.CounterPinLocked)
+	}
+	if cleared.Revision != 4 {
+		t.Errorf("revision after ClearCounterPIN = %d, want 4", cleared.Revision)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT counter_pin_hash, counter_pin_set_at, counter_pin_failures, counter_pin_locked
 		FROM staff WHERE id = $1`, st.ID).Scan(&hash, &setAt, &failures, &locked); err != nil {
@@ -164,6 +170,9 @@ func TestCP04_UnlockCounterPIN(t *testing.T) {
 	if unlocked.CounterPinLocked || !unlocked.CounterPinSet {
 		t.Errorf("after the unlock locked=%v set=%v, want false true (the hash stands)", unlocked.CounterPinLocked, unlocked.CounterPinSet)
 	}
+	if unlocked.Revision != 3 {
+		t.Errorf("revision after UnlockCounterPIN = %d, want 3", unlocked.Revision)
+	}
 	var failures int
 	var locked bool
 	if err := db.Pool.QueryRow(ctx, `SELECT counter_pin_failures, counter_pin_locked FROM staff WHERE id = $1`, st.ID).Scan(&failures, &locked); err != nil {
@@ -172,8 +181,15 @@ func TestCP04_UnlockCounterPIN(t *testing.T) {
 	if failures != 0 || locked {
 		t.Error("the unlock left the failures or the lock")
 	}
-	if n := countRows(t, db, `SELECT count(*) FROM audit_log WHERE action = 'staff.counter_pin_unlocked' AND entity_id = $1`, st.ID); n != 1 {
-		t.Errorf("%d audit rows for the unlock, want 1", n)
+	if n := countRows(t, db, `SELECT count(*) FROM audit_log WHERE action = 'staff.counter_pin_unlocked' AND entity_id = $1 AND (changes->>'was_locked')::boolean = TRUE`, st.ID); n != 1 {
+		t.Errorf("%d audit rows for the unlock with was_locked=true, want 1", n)
+	}
+	// unlocking again when not locked records was_locked=false
+	if _, err := svc.UnlockCounterPIN(ctx, st.ID, "admin-sub"); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM audit_log WHERE action = 'staff.counter_pin_unlocked' AND entity_id = $1 AND (changes->>'was_locked')::boolean = FALSE`, st.ID); n != 1 {
+		t.Errorf("%d audit rows for the unlock with was_locked=false, want 1", n)
 	}
 }
 

@@ -12,9 +12,10 @@
 -- A verified PIN mints one single use approval: an opaque token handed to the
 -- cashier's screen and stored here only as its SHA-256 hash, bound to one act
 -- (an override, a pickup's taker, a till sign off), one target (the sale, the
--- till session), the manager who approved, and an expiry a few minutes ahead.
--- The act's own transaction consumes it: one use, the right act and target
--- only, never replayed.
+-- till session), what the manager saw and approved (an override's kind and
+-- cap; a pickup's amount), the manager who approved, and an expiry a few
+-- minutes ahead. The act's own transaction consumes it: one use, the right
+-- act, target and terms only, never replayed.
 
 ALTER TABLE staff
     ADD COLUMN IF NOT EXISTS counter_pin_hash TEXT,
@@ -25,6 +26,7 @@ ALTER TABLE staff
 CREATE TABLE IF NOT EXISTS pos_step_up_approvals (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     act              TEXT NOT NULL CHECK (act IN ('override', 'pickup', 'signoff')),
+    kind             TEXT CHECK (kind IS NULL OR kind IN ('account', 'check', 'refund_method')),
     target_id        UUID NOT NULL,
     amount_cents     BIGINT CHECK (amount_cents IS NULL OR amount_cents > 0),
     token_hash       TEXT NOT NULL CHECK (btrim(token_hash) <> ''),
