@@ -350,7 +350,8 @@ export const posService = {
     },
 
     /** Names the sale's customer (before the first line), purchase order, job and buyer. */
-    async attachCustomer(        saleId: string,
+    async attachCustomer(
+        saleId: string,
         input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null; buyer_contact_id?: string | null },
     ): Promise<Sale> {
         const response = await expectOk(

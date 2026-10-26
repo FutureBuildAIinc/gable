@@ -2782,7 +2782,7 @@ describe('the dealer check ID rule at the counter', () => {
     expect(q(el, 'pos-check-id-needed').textContent)
       .toContain(`A check over $50.00 needs the customer's ID`);
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
-    expect(q(el, 'pos-pay').textContent).toContain('Check the customer\u2019s ID');
+    expect(q(el, 'pos-pay').textContent).toContain("Check the customer's ID");
     expect(svc.completeSale).not.toHaveBeenCalled();
     await checkTheID(el);
     expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
@@ -2791,6 +2791,22 @@ describe('the dealer check ID rule at the counter', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
       [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+    el.remove();
+  });
+
+  it('warns a walk-in at entry when the check is over the dealer wide limit the same read carries', async () => {
+    svc.settings.mockResolvedValue(
+      { revision: 2, rules: { check_limit_cents: 10000, check_id_required: { mode: 'never', over_cents: null } } });
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '150.00');
+    expect(q(el, 'pos-check-limit').textContent).toContain('Check limit $100.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    expect(q(el, 'pos-check-over').textContent).toContain('over the check limit');
+    expect(svc.completeSale).not.toHaveBeenCalled();
     el.remove();
   });
 

@@ -83,6 +83,9 @@ export class POSTerminal extends LitElement {
   // The dealer's check ID rule (never by default; a read failure reads as
   // never: the server holds the rule itself at the completion).
   @state() private _idRule: CheckIDRule | null = null;
+  // The dealer's database wide check limit from the same read, so a walk-in
+  // (no standing of its own) is warned at entry, not first at the server.
+  @state() private _dealerCheckLimitCents: number | null = null;
 
   // The linear panels: the sale's current step and the one panel open (or none).
   @state() private _step: PanelKey = 'customer';
@@ -170,13 +173,15 @@ export class POSTerminal extends LitElement {
     void this._loadIDRule();
   }
 
-  /** Reads the dealer's check ID rule; a read failure leaves it never (the server still holds it). */
+  /** Reads the dealer's check ID rule and check limit; a read failure leaves them off (the server still holds both). */
   private async _loadIDRule() {
     try {
       const s = await posService.settings();
       this._idRule = s.rules.check_id_required;
+      this._dealerCheckLimitCents = s.rules.check_limit_cents;
     } catch {
       this._idRule = null;
+      this._dealerCheckLimitCents = null;
     }
   }
 
@@ -1212,7 +1217,7 @@ export class POSTerminal extends LitElement {
       if (why) return why;
     }
     if (entry.method === 'check') {
-      const overLimit = checkRefusal(this._standing, null, entry.amount_cents);
+      const overLimit = checkRefusal(this._standing, this._dealerCheckLimitCents, entry.amount_cents);
       const approved = this._checkApprovedCents !== null && entry.amount_cents <= this._checkApprovedCents;
       if (overLimit && !approved) {
         // said beside Ask a manager as well as in the band
@@ -2132,7 +2137,7 @@ export class POSTerminal extends LitElement {
   /** The check number, the ID checked and its kind (never an ID number), and a check over the limit with its way forward. */
   private _renderCheckExtras() {
     const isCheck = this._tenderMethod === 'check';
-    const limit = this._standing?.check_limit_cents ?? null;
+    const limit = this._standing?.check_limit_cents ?? this._dealerCheckLimitCents;
     const amount = this._entry?.amount_cents ?? this._owedCents;
     const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, amount) : null;
     return html`
@@ -2218,7 +2223,7 @@ export class POSTerminal extends LitElement {
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
-      : plan.ok && idHold !== null ? 'Check the customer\u2019s ID'
+      : plan.ok && idHold !== null ? "Check the customer's ID"
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
       : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`

@@ -126,10 +126,10 @@ export class GableCounterRules extends LitElement {
         return html`
             <div class="space-y-6">
                 <div>
-                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                        ${icon(ShieldCheck, 20, 'w-5 h-5 text-gable-green')}
+                    <h1 class="text-3xl font-bold text-white flex items-center gap-2">
+                        ${icon(ShieldCheck, 24, 'w-6 h-6 text-gable-green')}
                         Counter rules
-                    </h2>
+                    </h1>
                     <p class="text-slate-400 text-sm mt-1">
                         The rules every register of the dealer holds a check to. A customer's own check limit wins over the
                         database wide one. Only the kind of ID is ever kept, never its number.
@@ -160,9 +160,9 @@ export class GableCounterRules extends LitElement {
                         ${d.idMode === 'over_amount' ? html`
                             <div class="pl-6">
                                 <label class="block space-y-1">
-                                    <span class="text-xs uppercase tracking-wider text-slate-400">Checks over (dollars)</span>
+                                    <span class="block text-xs uppercase tracking-wider text-slate-400">Checks over (dollars)</span>
                                     <input type="text" inputmode="decimal" name="id-over" data-testid="counter-rules-id-over"
-                                        placeholder="50.00" .value=${d.idOver}
+                                        placeholder="Amount the rule starts at" .value=${d.idOver}
                                         @input=${(e: Event) => { this._draft = { ...d, idOver: (e.target as HTMLInputElement).value }; }}
                                         class="${FIELD_CLASS} font-mono max-w-48" />
                                     ${this._fieldErrors['rules.check_id_required.over_cents']
