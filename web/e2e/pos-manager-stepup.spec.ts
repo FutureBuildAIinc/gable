@@ -179,6 +179,7 @@ test('a pickup taken and a held variance signed off by the manager\'s PIN', asyn
   // every field the drawer expects must be counted: cash at 60 (the drawer
   // holds 80 of it after the float and the pickup), the rest at nothing
   const counts = page.getByRole('spinbutton');
+  await expect(counts.first()).toBeVisible();
   for (let i = 0; i < await counts.count(); i++) {
     await counts.nth(i).fill(i === 0 ? '60.00' : '0.00');
   }
