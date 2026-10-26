@@ -2007,7 +2007,7 @@ func (r *PostgresRepository) WalkInCustomer(ctx context.Context) (uuid.UUID, str
 func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error) {
 	var f CustomerFacts
 	var limit *int64
-	var holdReason *string
+	var holdStatus, holdReason *string
 	var holdUntil *time.Time
 	var holdMax *int64
 	// the standing hold record rides the same read, with the meaning the AR
@@ -2019,14 +2019,14 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
 			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
 			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
-			h.reason, h.override_until, h.max_order_cents
+			h.status, h.reason, h.override_until, h.max_order_cents
 		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
 		LEFT JOIN LATERAL (
-			SELECT reason, override_until, max_order_cents FROM credit_holds
+			SELECT status, reason, override_until, max_order_cents FROM credit_holds
 			WHERE customer_id = c.id AND status IN ('ACTIVE', 'OVERRIDDEN')
 			ORDER BY placed_at DESC LIMIT 1) h ON TRUE
 		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
-		&f.NamedBuyerRequired, &f.CheckLimitCents, &holdReason, &holdUntil, &holdMax)
+		&f.NamedBuyerRequired, &f.CheckLimitCents, &holdStatus, &holdReason, &holdUntil, &holdMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -2035,7 +2035,11 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	}
 	f.CreditLimitCents = limit
 	if holdReason != nil {
-		f.Hold = &standingHold{reason: *holdReason, overrideUntil: holdUntil, maxOrderCents: holdMax}
+		var st string
+		if holdStatus != nil {
+			st = *holdStatus
+		}
+		f.Hold = &standingHold{status: st, reason: *holdReason, overrideUntil: holdUntil, maxOrderCents: holdMax}
 	}
 	return f, nil
 }

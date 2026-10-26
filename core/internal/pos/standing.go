@@ -69,6 +69,7 @@ type OnAccountVerdict struct {
 // manager's window: override_until and, with it, the most one sale may put
 // on the account inside that window.
 type standingHold struct {
+	status        string
 	reason        string
 	overrideUntil *time.Time
 	maxOrderCents *int64
@@ -80,6 +81,9 @@ type standingHold struct {
 func (h *standingHold) standing(now time.Time) bool {
 	if h == nil {
 		return false
+	}
+	if h.status == "ACTIVE" {
+		return true
 	}
 	return h.overrideUntil == nil || !h.overrideUntil.After(now)
 }
@@ -221,7 +225,7 @@ type AccountStanding struct {
 	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
 	OpenCreditMemoCents  httpx.Cents  `json:"open_credit_memo_cents"`
 	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
-	// OnHold is the hold the counter has today: a credit limit of zero.
+	// OnHold is a credit limit of zero or a standing credit hold record.
 	OnHold             bool         `json:"on_hold"`
 	TermsKind          string       `json:"terms_kind"`
 	NamedBuyerRequired bool         `json:"named_buyer_required"`
