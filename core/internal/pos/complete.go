@@ -200,7 +200,6 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 	}
 	// The check an ACCOUNT tender owes, read before the card is charged (a
-	// The check an ACCOUNT tender owes, read before the card is charged (a
 	// refusal must never move money at the terminal); the transaction repeats
 	// it under the customer's credit lock and spends the manager override.
 	if accountPortion > 0 {

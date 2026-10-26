@@ -1901,4 +1901,3 @@ func TestWire_SharedCustomerContactAuthorityGuardAndCreateAudit(t *testing.T) {
 		t.Fatalf("after owner PUT: audit rows = %v, want 4 contact.authority_changed", actions)
 	}
 }
-
