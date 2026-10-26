@@ -95,7 +95,7 @@ Optional values, all with a default:
 | `GABLE_PG_VOLUME` | `gable_postgres_data` | The name of the data volume. Give a second deployment on the same host its own name. |
 | `TRUSTED_PROXIES` | empty | The platform's proxy network, as CIDRs or addresses, separated by commas. Set it so every visitor gets their own rate limit budget instead of sharing one with every other visitor. |
 | `RATE_LIMIT_PER_MINUTE` | `120` | The API's request limit per caller address. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TLS` | empty | Mail. Left empty, the report runs and its result is logged instead of being delivered, and the platform says so on the screen. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TLS` | empty | Mail. Left empty, the report runs and its result is logged instead of being delivered, and the report's screen says that the delivery was logged and not sent. |
 | `DEMO_SEED_ONCE` | `1` | The seed's memory. With it on, the seed runs on the first start only. |
 | `DEMO_SEED_FORCE` | empty | `1` asks for a reseed on purpose. |
 | `POSTGRES_USER`, `POSTGRES_DB` | `gable_user`, `gable_db` | The database's user and name. |
@@ -119,7 +119,7 @@ the internet and a deployment running with `AUTH_MODE=dev`.
 
 ### 6. The first deploy
 
-The platform builds the three images, runs `migrate` once, and then starts
+The platform builds the images, runs `migrate` once, and then starts
 `core`, `worker` and `web`. The `migrate` service's log says that the
 migrations were applied and that the demo data was seeded. The domain
 answers with the front door, and the desk signs in with a persona.
