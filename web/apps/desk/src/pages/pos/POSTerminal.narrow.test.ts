@@ -50,7 +50,11 @@ function sale(over: Partial<Sale> = {}): Sale {
     customer_id: null, currency: 'USD', subtotal_cents: 8000, tax_cents: 650, total_cents: 8650,
     change_cents: 0, till_session_id: 't', status: 'open', invoice_id: null, completed_at: null,
     created_at: '', customer_po: null, job_id: null, tenders: [],
-    lines: [],
+    lines: [{
+      id: 'a', position: 1, line_type: 'product', parent_line_id: null, product_id: 'p-a',
+      charge_code_id: null, charge_code: null, sku: 'SKU-A', description: 'Item A',
+      quantity: '1', uom: 'EA', unit_price_ten_thousandths: 500000, line_total_cents: 5000,
+    }],
     ...over,
   } as unknown as Sale;
 }
@@ -161,4 +165,35 @@ describe('the counter below 768: the touch first working order', () => {
     expect(credit.className).toContain('min-[768px]:col-span-1');
     el.remove();
   });
+});
+
+describe('the money guard at the yard (offline)', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('refuses Pay with the field shell\'s own words when the connection is gone, and completes nothing', async () => {
+    const el = await mount(sale());
+    (el as unknown as { _online: boolean })._online = false;
+    await chooseCashLike(el);
+    q(el, 'pos-pay').click();
+    await el.updateComplete;
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('money never queues');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps the guard on the pinned pay bar too', async () => {
+    const el = await mount(sale());
+    (el as unknown as { _online: boolean })._online = false;
+    await chooseCashLike(el);
+    q(el, 'pos-pay-bar-button').click();
+    await el.updateComplete;
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('money never queues');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  async function chooseCashLike(target: POSTerminal) {
+    (target as unknown as { _tenderMethod: string })._tenderMethod = 'cash';
+    await target.updateComplete;
+  }
 });

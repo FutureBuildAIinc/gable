@@ -24,6 +24,14 @@ import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+
+/**
+ * The money guard at the yard: the field shell's own offline words, so a
+ * handheld sale is refused the way the shell's banner refuses, not with a
+ * generic failure. Offline selling is the work shell's alone (ADR 0011).
+ */
+const YARD_OFFLINE_REFUSAL =
+  'You are offline; the shell and its apps need the connection, and money never queues.';
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
@@ -142,6 +150,12 @@ export class POSTerminal extends LitElement {
   @state() private _showMovement = false;
   /** The Till menu on a handheld: the till's money controls live behind it below 900. */
   @state() private _tillMenu = false;
+  /** The connection, for the money guard: a yard sale never queues offline. */
+  @state() private _online = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+  private _onConnection = () => {
+    this._online = navigator.onLine;
+  };
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -162,6 +176,8 @@ export class POSTerminal extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener('gable:branch-changed', this._onYardChanged);
+    window.addEventListener('online', this._onConnection);
+    window.addEventListener('offline', this._onConnection);
     this.addEventListener('pos-catalog-add', this._onCatalogAdd);
     document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
@@ -389,6 +405,8 @@ export class POSTerminal extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener('gable:branch-changed', this._onYardChanged);
+    window.removeEventListener('online', this._onConnection);
+    window.removeEventListener('offline', this._onConnection);
     this.removeEventListener('pos-catalog-add', this._onCatalogAdd);
     document.removeEventListener('keydown', this._onHotkey);
     this._registerSeq++;
@@ -1256,6 +1274,14 @@ export class POSTerminal extends LitElement {
   /** Pay: the added tenders plus the entry when they do not cover the total. */
   private async _pay() {
     if (!this._sale) return;
+    // The money guard at the yard: money never queues offline (the field
+    // shell's own words). Offline selling is the work shell's alone, never
+    // the field shell's (ADR 0011's first ruling), so Pay is refused here
+    // before anything dials.
+    if (!this._online) {
+      this._error = YARD_OFFLINE_REFUSAL;
+      return;
+    }
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return;
     // the entry is read once: the words below and the plan are about the same tender
