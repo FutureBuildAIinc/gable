@@ -130,8 +130,9 @@ test('the counter: an account that requires a job is charged only with a job pic
 
   // A job picked: the charge is offered and the sale completes on the job.
   // The Job select lives in the Customer panel, which the move to Payment
-  // collapsed; the refusal's own shortcut reopens it.
-  await page.getByTestId('pos-refusal-customer').click();
+  // collapsed, so the panel's own head reopens it.
+  await page.getByTestId('panel-customer-toggle').click();
+  await expect(page.locator('#pos-job')).toBeVisible();
   await pickOptionByValue(page.locator('#pos-job'), account.job_id);
   await openPayment(page);
   await expect(charge).toBeEnabled();
