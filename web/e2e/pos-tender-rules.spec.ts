@@ -112,6 +112,15 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   await page.getByTestId('counter-rules-save').click();
   await expect(page.getByTestId('counter-rules-saved')).toContainText('Counter rules saved');
 
+  // The account this walk uses: no check limit of its own yet, so the
+  // database wide rule governs it.
+  const run = Date.now().toString(36).toUpperCase();
+  const res = await request.post('/api/v1/customers', {
+    data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}` },
+  });
+  expect(res.status(), await res.text()).toBe(201);
+  const account = (await res.json()) as { id: string; account_number: string };
+
   // At the counter: a $60 check is held until the ID is checked.
   await openCounter(page);
   const total = await ringPast(page, product.sku, 6000);
@@ -133,10 +142,11 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
 
-  // A $150 check is over the $100 database wide limit: the counter says so
-  // and the sale is not completed.
+  // A $150 check is over the $100 database wide limit: naming the account,
+  // the counter says so and the sale is not completed.
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
+  await nameAccount(page, account.account_number);
   await addOne(page, product.sku);
   await payByCheck(page, 150, true);
   await page.getByRole('button', { name: 'Add as split tender' }).click();
@@ -146,12 +156,6 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   await expect(page.getByTestId('pos-complete')).toHaveCount(0);
 
   // The account's own page: a $200 check limit on one account.
-  const run = Date.now().toString(36).toUpperCase();
-  const res = await request.post('/api/v1/customers', {
-    data: { account_number: `E2E-CP04-${run}`, name: `E2E Counter Rules ${run}` },
-  });
-  expect(res.status(), await res.text()).toBe(201);
-  const account = (await res.json()) as { id: string; account_number: string };
   await page.goto(`/accounts/${account.id}`);
   await expect(page.getByTestId('account-check-limit')).toContainText('Counter rule');
   await page.getByRole('button', { name: 'Edit Profile' }).click();
