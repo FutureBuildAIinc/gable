@@ -5,9 +5,9 @@
 
 ## Status
 
-Proposed for the Gable v1 refactor (item S9, the shell track's sign in row of
-`docs/parity/LBM-PARITY-MATRIX.md`, Ruling 4). It becomes accepted when the
-lead merges it after review. It stands on ADR 0002 (machine
+Accepted for the Gable v1 refactor (item S9, the shell track's sign in row of
+`docs/parity/LBM-PARITY-MATRIX.md`, Ruling 4), merged after its independent
+reviews. It stands on ADR 0002 (machine
 keys), ADR 0004 (web session custody), ADR 0005 (the sales and money core),
 ADR 0009 (finer admin scopes) and ADR 0010 (multi company). When its session
 slice lands, it supersedes the interim design of ADR 0004 (the
