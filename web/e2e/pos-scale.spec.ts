@@ -71,6 +71,18 @@ async function createScaleProduct(request: APIRequestContext): Promise<string> {
     },
   });
   expect(res.status(), await res.text()).toBe(201);
+  const product = (await res.json()) as { id: string };
+
+  // Stock it at the counter's branch: the completion issues what the line
+  // sells, and a product with no row cannot be sold.
+  const locations = (await (
+    await request.get('/api/v1/locations?limit=200')
+  ).json()) as { items: { id: string; code: string | null }[] };
+  const branch = locations.items.find((l) => l.code === 'KEL-MAIN') ?? locations.items[0];
+  const stock = await request.post('/api/v1/inventory/adjust', {
+    data: { product_id: product.id, location_id: branch.id, quantity: 500, reason: 'e2e scale stock', is_delta: false },
+  });
+  expect(stock.ok(), await stock.text()).toBe(true);
   return sku;
 }
 
