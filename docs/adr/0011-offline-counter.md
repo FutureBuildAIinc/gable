@@ -292,6 +292,17 @@ runs today, and changing it would change every live sale; any mismatch
 between that listing and the body is ADR 0005's to settle, not this
 record's.
 
+**The close reads the exception rows without a row lock.** `CloseTill` takes
+the session `FOR UPDATE` and then looks at the register's open exceptions
+(`pos_offline_exceptions`, slice O1). A resolution takes them the other way
+round (0b, the exception row `FOR UPDATE`, then the session `FOR SHARE`),
+so the close's look must be a plain read that takes no row lock, and it
+comes after the close holds the session. Then the close never waits for
+0b, and the two orders cannot deadlock: the close either sees the exception
+and refuses (`offline_exception_open`), or the exception write waits for
+the session and lands after the close, which is then a late post case
+(3.4).
+
 **The replaced cart.** If the replaced sale is no longer OPEN or HELD, or
 any terminal intent of it is still open, the offline sale is refused to the
 queue as `replaced_sale_settled` and **nothing is voided**: a manager reads
@@ -347,6 +358,8 @@ what it cannot post or cannot verify:
 | The branch day is closed | Refused to the queue. |
 | The business date falls in a closed fiscal period (`gl.ErrPeriodClosed`, `period_closed`) | Refused to the queue; resolved by late post. |
 | A product, customer or register that no longer exists or is outside the syncing user's wall (`out_of_wall`) | Refused to the queue. |
+| A session that belongs to another register (`out_of_wall`) | Refused to the queue. |
+| A sale whose cashier is not the session's own cashier (`cashier_mismatch`) | Refused to the queue. |
 | The replaced live cart is settled or has an open terminal intent (`replaced_sale_settled`) | Refused to the queue; nothing voided. |
 | A price, a tax figure or a line's taxable flag (`tax_flag_unverified`) that does not match the snapshot, a cap exceeded, a tender not allowed offline, tenders that do not add up, a bad signature, a broken chain, a revoked device, an unknown snapshot, a replay mismatch, a reused sequence | Refused to the queue (sections 2 and 6). |
 | A sequence gap, or a link that does not meet the chain head (`broken_chain`) | The items after it are held without posting and re-offered automatically on each sync until the link arrives (chain paragraph below); a gap still open at the till close is a manager item, and an accepted gap leaves a `sequence_gap` item naming the missing numbers. |
@@ -395,16 +408,29 @@ the next sale's link verifies against it.
 - A held item whose link has not arrived when its till session is to close
   is an open exception like any other: `CloseTill` refuses
   (`offline_exception_open`) and a manager resolves it, either by write off
-  or by accept, which advances the mark over it with a `sequence_gap` item
-  naming the missing number.
+  or by accept. An accept advances the high mark over the missing number,
+  the one case where the mark moves without a verified item (the manager's
+  decision stands in for the sale), and leaves a `sequence_gap` item naming
+  it. The chain head does not move over the gap, because a synthetic item
+  has no signature to verify. The chain restarts instead: the next item the
+  server takes at the high mark plus one, a new sale or a held item
+  re-offered, is checked by its own signature and by its sequence, and its
+  own link is adopted as the new chain head, because the predecessor that
+  link names is the sale the gap covers. From that point the chain verifies
+  as before. So a register whose gap was accepted can sell offline again.
 - A `sequence_reused` item repeats a number already placed and advances
   nothing.
-- A verified item whose number is **below the mark because a manager
+- A verified item whose number is **at or below the mark because a manager
   accepted that gap** (no other `id` holds the number, so it is not
   `sequence_reused`, and it is not the mark plus one) goes to the queue as
   `late_after_gap`, open for retry or late post, and the matching
   `sequence_gap` item is closed as found in the same transaction. It is
-  never left held, so it never blocks a later day close.
+  never left held, so it never blocks a later day close: the manager's
+  accept already covers the predecessor its link names, so the item is
+  judged on its own signature and never waits for a predecessor. It moves
+  neither the high mark nor the chain head, because its number is at or
+  below the mark and the ordinary advance rule does not reach it. It still
+  posts (by retry or by late post), and its amount still leaves the room.
 
 **Who resolves it, where.** A manager (an owner or admin other than the
 cashier, never a machine key: the rule `override.go` already applies) at the
@@ -495,7 +521,12 @@ business day other than its till session's.
   invoice number;
 - on reconnect, the sync runs by itself and the strip reads "Sent 12, 1
   needs a manager"; the till close button waits until the queue is empty
-  and says why.
+  and says why;
+- when the shell cannot take a new snapshot, the strip says that too and
+  says why: the item that waits (a held sale or a bad copy) with its
+  number, and that the register keeps selling on the snapshot it holds
+  until the item is answered; a copy that never comes is settled by
+  re-enrolling the register (5.1).
 
 ### 5. The client
 
@@ -505,8 +536,41 @@ app's data directory, each row sealed with an AEAD key held in the OS
 keychain under the existing custody rules (`custody.rs`: fail closed, no
 file fallback). The page reaches it through named Tauri commands behind the
 same origin fence as the token commands (`fence.rs`). The device signing key
-(section 6.1) lives in the keychain beside it. The work shell's capability
-file grants only these commands, by name.
+(section 6.1) lives in the keychain beside it, and it never leaves the
+keychain: it does not cross the IPC, so no page holds it and no page asks
+for a signature over figures it chose itself.
+
+**The capability for the Gable the shell loaded.** The work shell's
+capability file grants the app's own origin, and it grows by the queue
+commands only. The Gable the window loaded is a remote origin, and Tauri
+grants a remote URL only through a capability's `remote` list: a capability
+without one answers the app's own origin alone, so a webview on a remote
+URL gets no IPC at all, the two token commands included. The URL is known
+only at run time (`shell::configured_url`, `tauri/core/src/shell.rs`), so a
+capability file fixed at build time cannot name it. C1 therefore adds, at
+start up, a capability for that one Gable: the window `main`, `local` off,
+the queue commands and the two token commands the override path needs as
+well, and nothing else. Its `remote` list names that Gable's origin and the
+paths the shell serves on it (the URL the window loaded, and the desk's
+`/pos`), so a page elsewhere on the dealer's host is outside the grant and
+the token command reaches no page that does not already hold the token. The
+fence names the same origin: `tauri/core/src/shell.rs` puts the override's
+origin with the bundled ones, so the grant and the fence agree on where the
+commands answer. Tauri builds a capability at run time for exactly this
+(`Manager::add_capability`, on by default), and C1's Rust test proves the
+grant: the queue commands answer the Gable the shell loaded and refuse
+every other origin.
+
+**What the Rust side decides.** The page sends a cart, never a signature
+request: the lines, the quantities, the customer and the tender. The Rust
+core keeps its own copy of the snapshot (5.4), prices each line from the
+bound price key, computes the tax, applies the room, the caps and the
+queue figures, assigns the sequence and the chain link, writes the sale to
+the sealed store, and only then signs it. A sale whose figures differ from
+what the core derives is refused, and the core signs nothing it did not
+derive itself. That is what makes the grant above safe: the whole Gable
+shares it, so any script running on that Gable can ask for a sale, but not
+for a sale the rules would not allow.
 
 **A missing store refuses offline selling.** If the keychain holds an
 enrolment (the device key and its epoch) but the queue file is missing,
@@ -535,10 +599,23 @@ Options weighed:
 **5.2 The page while offline.** An offline register runs the work shell
 loading the dealer's running Gable (`GABLE_WORK_URL`), so the shell, the
 desk and the API share that one origin, as `web/apps/work-shell/src/config.ts`
-requires and as nginx serves them in the browser (`web/nginx.conf`). A
-reload with no connection would then show nothing, so the desk bundle gains
-a service worker on that origin that precaches its assets for the `/pos`
-route only (no API response is cached by it). Bundling the desk into the
+requires and as nginx serves them in the browser (`web/nginx.conf`).
+**Offline selling is enabled only in that case**: the embedded front door
+bundle holds no `/pos` route, so a shell that loads the bundle has no
+counter to sell with, and the counter says so. The setting is the
+`GABLE_WORK_URL` environment variable today (`tauri/gable-work/src/lib.rs`),
+read once at start up; it is not a setting the dealer's enrolment writes.
+C1 replaces it with the enrolled device's own setting (the origin the
+register was enrolled against), and the shell refuses offline selling while
+the window loads the bundle.
+
+A reload with no connection would then show nothing, so the desk bundle
+gains a service worker on that origin that precaches its assets for the
+`/pos` route only (no API response is cached by it). The desk registers
+that worker only when it runs as the shell's frame: the frame carries
+`framed_by=work_shell` (`web/packages/design-system/src/framed.ts`), and a
+desk open in a browser tab at the dealer installs nothing, so a browser
+session never serves a stale desk bundle. Bundling the desk into the
 app's `frontendDist` is rejected: the page's origin would become the app's,
 every API call would cross origins, and the framed protocol's one origin
 rule would break. Slice C1 proves the service worker in each shell's
@@ -630,6 +707,14 @@ It is stored server side (`pos_offline_snapshots`: id, register, epoch,
 content, digest) so a sale can name it and the server can verify against
 it.
 
+**The core holds the copy.** The shell fetches the snapshot, not the page:
+the Rust core asks the route over the origin it already knows, with the
+access token it already holds in the keychain, and keeps the snapshot
+sealed in its own store beside the queue. The page asks the core for what
+it displays (the catalogue, the price sheet, the cached accounts, the
+caps) and never holds a copy of its own that it could change, so the copy
+the core prices from and signs against is the one the server issued.
+
 Only rung 2 is skipped offline: its pricing rules, which are promotions,
 quantity breaks and job overrides (job prices). An offline sale prices a
 cached account at its precomputed sheet price and a walk in sale at the walk
@@ -651,12 +736,13 @@ server derives the key from the sale's customer and the snapshot, and a
 line priced under any other key the snapshot holds is `price_unverified`,
 so a signed sale cannot price an account at a lower key.
 
-**Freshness.** The device fetches a snapshot when the till opens (offline
+**Freshness.** The shell fetches a snapshot when the till opens (offline
 selling requires a snapshot fetched since the session opened), and refetches
 whenever the snapshot route's ETag moves, checked while online (ADR 0001
 section 11's revision headers), but only once its queue has drained (6.2:
 the server refuses a snapshot as `queue_not_drained` while the register
-holds unanswered items). A snapshot older than the session never sells.
+holds items the server has not recorded). A snapshot older than the session
+never sells.
 
 ### 6. Security
 
@@ -694,6 +780,17 @@ so a refused sale never breaks the chain for the sales after it.
   it cannot, the stolen tokens reach only what that user may do online,
   which disabling the user stops; offline, the caps alone bound what the
   device can put on accounts.
+- **A script on the Gable's own origin.** The shell's window runs the
+  dealer's own Gable, so every page on that origin shares the capability
+  C1 adds for it (5.1). A cross site script flaw in any Gable page, not
+  only the counter, could therefore ask the shell to sign a sale. It
+  cannot: the Rust core derives the prices, the tax, the room, the caps
+  and the queue figures from its own copy of the snapshot, assigns the
+  sequence and the chain link itself, and signs only what it derived, so a
+  script can ask for a sale the rules allow and for nothing else. The
+  private key stays in the keychain and never crosses the IPC. What is
+  left is the script hygiene of the dealer's own Gable, which this record
+  does not otherwise touch.
 
 **6.2 Prices in the queue.** The server never reprices an offline sale. It
 verifies each line's unit price against the price the named snapshot gave
@@ -717,19 +814,29 @@ under the old one are still on the device, invisible to the server. So:
   only when every queued item has been answered by the server (posted,
   refused or held), and the snapshot request carries the device's high
   sequence; the server refuses to issue a snapshot while that number is
-  above its own high mark (`queue_not_drained`). If a snapshot is taken
-  anyway (a device that lies), the device's own rule is to subtract its
-  queued account and queue totals from the new snapshot's room, and the
-  server's rule below catches what remains.
+  above the highest sequence it has recorded for that register in either
+  table (a posted sale, or an exception row, a held row counted), and
+  while the register holds an open `bad_signature` row of its own epoch
+  (`queue_not_drained`). **Answered and recorded are one test**, so the
+  device's rule and the server's rule cannot disagree. An item that
+  advances nothing is still recorded, and a held item is an open
+  exception, so it does not wait. A bad copy is the one case that waits,
+  because the server cannot trust its figures and the true sale of that
+  number may still be on the device: the true sale arrives at the next
+  sync and supersedes the bad row, and if it never comes (a restored
+  store), the register is re-enrolled (5.1) and its epoch starts clean.
+  If a snapshot is taken anyway (a device that lies), the device's own
+  rule is to subtract its queued account and queue totals from the new
+  snapshot's room, and the server's rule below catches what remains.
 - **The server's room spans snapshots.** For any snapshot S, an account's
   room is S's room at issue less every offline account tender of the
   register on that account that the server recorded after S was issued,
-  whatever snapshot it names, posted or refused, and less the register's
-  open account exceptions recorded before S (refused, not yet resolved, in
-  no open receivable, and a Retry or Accept can still post them). S's room
-  at issue is itself computed less those open exceptions. A sale is checked
-  against the room of the snapshot it names, by that rule. Over the room is
-  `cap_exceeded`.
+  whatever snapshot it names, posted or refused. S's room at issue is
+  itself computed less the register's open account exceptions recorded
+  before S (refused, not yet resolved, in no open receivable, and a Retry
+  or Accept can still post them), and those exceptions are counted once,
+  there. A sale is checked against the room of the snapshot it names, by
+  that rule. Over the room is `cap_exceeded`.
 
 The stated bound (the per account cap times the registers offline) then
 holds across batches and snapshots.
@@ -738,11 +845,19 @@ holds across batches and snapshots.
 register holds unsynced, which is what a lost device would take with it.
 They count the items still waiting, never the posted ones: each signed
 sale carries the device's queue count and queue total at the moment of the
-sale, the server checks those figures against the snapshot's caps and
-against the sequence (the count cannot be below the sales of the register
-not yet answered when the item was made), and it adds the register's open
-and held exception items. A register that has synced more sales than the
-queue count cap keeps selling offline.
+sale, and the last high mark the server confirmed to the device (every
+sync answer carries that mark back). The server checks the confirmed mark
+against its own mark at sync (a device that claims a mark the server never
+gave it is refused, `queue_mark_unverified`), and checks that the queue
+count is at least the sale's sequence less that confirmed mark, because
+the sales after the confirmed mark were not yet answered when the item
+was made. It then checks the count against the count cap and the total
+against the total cap, and adds the register's open and held exception
+items to the count it holds. The bound the server can prove is the count
+times the per sale cap, since the count is what the sequence pins down;
+the total is the device's own figure, and it only has to be under the cap.
+A register that has synced more sales than the queue count cap keeps
+selling offline.
 
 **6.3 Who may sync.** The sync is a person's act, never a machine key
 (`refuseMachineKey`): a signed in user holding the counter's write grant
@@ -752,8 +867,12 @@ current device key. A user cannot sync another register's queue without that
 register's device. The session named must belong to the register, and each
 sale's cashier must equal that session's `cashier_id`
 (`core/migrations/075_till_sessions_pos_payments.sql`): a cashier change is
-online only (section 1), so an offline sale has no other cashier. No role
-history is needed.
+online only (section 1), so an offline sale has no other cashier. A session
+of another register is refused `out_of_wall`, and a cashier that does not
+match the session's own is refused `cashier_mismatch` (3.4). The first is
+reachable; the second only if a session's cashier were ever changed, which
+nothing does today (the only updates to `till_sessions` set the status, the
+close columns and the sign off columns). No role history is needed.
 
 **6.4 Audit rows and events** (ADR 0003: every event in the posting
 transaction, written last):
@@ -791,7 +910,9 @@ Server (Go, a named test database, `CI=true`):
   taxable flag carried false against the snapshot (`tax_flag_unverified`),
   cap exceeded, bad signature, revoked device, unknown snapshot, a card or
   store credit tender in a signed offline item (`tender_not_offline`, no
-  payment written), tenders that do not add up (`tender_mismatch`)) proves
+  payment written), tenders that do not add up (`tender_mismatch`), a
+  session of another register (`out_of_wall`), a cashier that is not the
+  session's own (`cashier_mismatch`)) proves
   the exception row,
   no posting, and the till close and day close refusals while it is open;
   one per resolution proves the posting and, for the late post, the ledger
@@ -828,12 +949,26 @@ Server (Go, a named test database, `CI=true`):
   Forced past that (the test issues the snapshot directly), the next account
   sale under the new snapshot that, with the earlier one, crosses the room
   is `cap_exceeded` once both sync.
+- **The drain rule and the snapshot refusal:** a register holding one item
+  the server recorded (a held sale whose predecessor is missing) is
+  answered when it asks for a new snapshot, because the item is recorded
+  and its amount is in the room. A register holding an open
+  `bad_signature` row is refused `queue_not_drained` until the true sale
+  of that number arrives and supersedes the row; a register whose true
+  sale never comes is re-enrolled (5.1) and asks again on its new epoch.
 - **Queue caps count only what waits:** a register that syncs more sales
   than the queue count cap under one snapshot keeps selling offline; an
-  item whose signed queue figures exceed the caps is `cap_exceeded`.
+  item whose signed queue figures exceed the caps is `cap_exceeded`. A
+  sale whose signed confirmed mark is above the server's own mark is
+  `queue_mark_unverified`, and so is one whose signed queue count is
+  below its sequence less the confirmed mark (the count cannot be below
+  the sales that were not yet answered when the item was made).
 - **Late after a gap:** a manager accepts a gap; the missing sale then
   arrives verified: it is `late_after_gap` in the queue, the `sequence_gap`
-  item reads found, and the next day close is not blocked.
+  item reads found, and the next day close is not blocked. The register
+  sells offline again after the accept: its next sale is at the high mark
+  plus one, its own link is adopted as the new chain head, and the sale
+  after that verifies against it.
 - **The drawer and the Z report:** an offline sale posted into an open
   session moves that till report's expected cash by its cash tender and,
   at the close, the Z report by one sale; a late posted sale moves neither
@@ -898,6 +1033,12 @@ Client (vitest for the queue and cart; Playwright in
   account over its room is refused at the counter.
 - **Reload offline:** the counter reloads with no network and the queue is
   still there (proves 5.2 and the Rust store).
+- **The worker follows the frame:** the desk registers the service worker
+  only when it runs as the shell's frame (`framed_by=work_shell`), and a
+  desk open in a browser tab at the dealer installs nothing.
+- **A refused snapshot says why:** the strip names the item that waits and
+  its number, and says the register keeps selling on the snapshot it holds
+  until the item is answered.
 - **Two registers:** two work shell contexts on two registers, both offline,
   both sync; the receipts' offline references and the invoice numbers are
   unique.
@@ -905,7 +1046,13 @@ Client (vitest for the queue and cart; Playwright in
 Rust (`tauri/core` unit tests): sealing and unsealing, a refused keychain
 fails closed, the sequence never repeats across a crash between write and
 print, a missing or stale store under a live enrolment refuses offline
-selling, the fence refuses a foreign origin.
+selling, the fence refuses a foreign origin. **The sign path:** a sign
+request whose price differs from the core's own copy of the snapshot is
+refused, and so is one whose tax figure, price key or customer differs; the
+core assigns the sequence and the chain link itself, so a request that
+names them is refused. **The capability:** the queue commands answer the
+Gable the shell loaded and refuse every other origin, and the grant carries
+the queue commands only.
 
 ### 8. The build plan
 
@@ -914,15 +1061,15 @@ data and security change and gets the project's money review.
 
 | Slice | What | Size |
 |---|---|---|
-| O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
-| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, its storage and its size measured on the demo seed. | 17 to 27 |
-| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures), the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room, the OPEN to ABANDONED transition, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests. | 39 to 57 |
-| O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass, write off, settled replaced cart) under locks 0a and 0b, and the till close and day close refusals with their race test. | 18 to 30 |
-| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin proven in each webview, and the "do not reload" warning where one refuses it. | 18 to 30 |
-| C2 | The counter's offline mode in `POSTerminal.ts`: the snapshot cache, the local cart, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, pricing, tax and tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 34 to 50 |
+| O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, the confirmed mark the sale carries, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
+| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 17 to 27 |
+| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests. | 41 to 60 |
+| O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass, write off, settled replaced cart) under locks 0a and 0b, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 19 to 31 |
+| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 28 to 44 |
+| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines and tender the page holds and whose prices, tax and caps the Rust core answers (5.1), the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment. | 12 to 20 |
 | P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
-| | **Total** | **160 to 248** |
+| | **Total** | **169 to 260** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.
 
@@ -957,13 +1104,18 @@ offline, so CP-05 does not gate it.
 - Tax on offline sales is booked as charged at the branch rate. A dealer on
   the external provider sees offline sales tagged `OFFLINE_RATE`, ready for
   the provider commit when that lands.
-- The Tauri work shell gains its first local data store and its first
-  signing key; its capability file grows by the queue commands only.
+- The Tauri work shell gains its first local data store, its first signing
+  key and its first copy of a snapshot; its capability file grows by the
+  queue commands only, and a capability for the Gable it loaded is added at
+  run time for that Gable alone.
+- Offline, the prices, the tax, the caps and the sequence are the Rust
+  core's and not the page's: the page asks and displays. A script on the
+  dealer's own Gable can ask for a sale, but only one the rules allow.
 - The S6 tests that assert 409 for every batch narrow to branches with
   offline off; the `money_never_queues` code stays in the enum with that
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
-  manager screen. Estimated at 160 to 248 dev hour equivalents.
+  manager screen. Estimated at 169 to 260 dev hour equivalents.
 
 **Open items** (left for later decisions):
 
