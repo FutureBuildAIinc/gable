@@ -405,6 +405,7 @@ export class GableFieldShell extends LitElement {
               html`<iframe
                 data-testid="app-frame"
                 title=${current.name}
+                allow="camera"
                 src=${framedAddress(state.currentPath)}
                 class="block w-full h-full border-0 bg-deep-space"
               ></iframe>`,

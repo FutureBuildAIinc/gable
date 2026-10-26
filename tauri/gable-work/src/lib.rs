@@ -159,8 +159,16 @@ mod tests {
             "geolocation",
             "core:default",
         ] {
-            assert!(!CAPABILITY.contains(banned), "{banned} must not be granted");
+            assert!(!perms.contains(&banned), "{banned} must not be granted");
         }
+    }
+
+    #[test]
+    fn the_platform_camera_permission_is_stated_for_the_scanner() {
+        // A tablet on the Work profile can scan at the counter: the same
+        // web API camera, and the same OS usage description wiring.
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("NSCameraUsageDescription"));
     }
 
     #[test]

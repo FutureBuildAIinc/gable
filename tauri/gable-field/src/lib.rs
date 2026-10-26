@@ -161,8 +161,17 @@ mod tests {
             "geolocation",
             "core:default",
         ] {
-            assert!(!CAPABILITY.contains(banned), "{banned} must not be granted");
+            assert!(!perms.contains(&banned), "{banned} must not be granted");
         }
+    }
+
+    #[test]
+    fn the_platform_camera_permission_is_stated_for_the_scanner() {
+        // The scanner asks for the camera through the webview's own web API
+        // (getUserMedia); the OS usage description is the wiring, not a
+        // Tauri grant, and Tauri merges this file into the bundle's plist.
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("NSCameraUsageDescription"));
     }
 
     #[test]
