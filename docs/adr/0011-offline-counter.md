@@ -572,6 +572,20 @@ derive itself. That is what makes the grant above safe: the whole Gable
 shares it, so any script running on that Gable can ask for a sale, but not
 for a sale the rules would not allow.
 
+**The core's arithmetic is the server's arithmetic.** The core computes the
+line extension and the tax the way the server does: exact integer
+arithmetic over the scale 4 quantities, with one rounding each (ADR 0006
+section 1 rules R3 and R4 for the extension, ADR 0005 section 3 for the
+tax; the server's `httpx.Extend` and `salesdoc.TaxAt`), never a float and
+never through text. Two implementations of one rule have to agree to the
+cent, so one fixture file of sales (the prices, the quantities, the units
+and the rates, with the rounding cases on both sides of a half and a line
+in a unit other than the price unit) runs through the Go engine and the
+Rust core, and both must answer the same cents for the line extensions,
+the taxable flag, the tax, the tender sums and the change (section 7). The
+page is not in that loop: it computes no figure of a sale (5.3), so a
+sale's figures come from the core alone.
+
 **A missing store refuses offline selling.** If the keychain holds an
 enrolment (the device key and its epoch) but the queue file is missing,
 unreadable or older than the high mark the server last confirmed to it, the
@@ -677,10 +691,16 @@ page does depends on what it last sent:
   resolve it first", and the page clears the state only after it has read
   the cart and its intents online.
 
-A sale started offline is local from its first line. The local cart prices,
-taxes and checks tenders from the snapshot only, with the same arithmetic
-package the counter already uses for display, and stores the sale, signed,
-in one local write with its sequence number before the receipt prints.
+A sale started offline is local from its first line, and the Rust core plays
+the server's part locally. The page holds the cart's lines, their units,
+their quantities, the customer and the tender; the core prices the cart as
+the clerk builds it, from its own copy of the snapshot (5.1, 5.4), and at
+the tender it derives the totals, the tax, the caps and the tender sums,
+assigns the sequence and the chain link, writes the sale to the sealed
+store and signs it, in one local write, before the receipt prints. The
+page computes no figure of a sale for itself and holds no signing key: it
+sends the cart and displays what the core answers, so the figures on the
+screen are the figures the sale is signed with.
 
 **5.4 The snapshot.** A new `GET /api/v1/pos/offline/snapshot?register_id=`
 returns, for the register's branch:
@@ -688,7 +708,10 @@ returns, for the register's branch:
 - the products with their unit, price unit, taxable flag and on hand at the
   branch (the `GetProductCatalog` query, branch scoped, widened with the
   taxable flag and the price unit it does not select today; its walk in
-  price column is replaced by the sheet below);
+  price column is replaced by the sheet below), and with the exact pair
+  each unit the product is sold in takes to that price unit, so a line in
+  any of the product's sale units is extended exactly as the live counter
+  extends it;
 - a price sheet keyed by price key: `walkin`, the engine's answer for the
   walk in customer (the customer row `priceLine` prices a walk in sale for,
   so the offline walk in price is the online one), and, for each cached
@@ -727,6 +750,16 @@ each account has bought, with the level price as that account's fallback.
 Where a line prices at that fallback, the strip adds "Level price: this
 account's own price is not on this register" beside the line, and the
 receipt marks the line "level price".
+
+**Units.** A line offline is sold in any unit the product is sold in, as
+live. The snapshot carries the price unit and, per unit the product is sold
+in, the exact pair that unit takes to it, precomputed by the server from
+the product's unit set (the pair the engine resolves, ADR 0006 section 3.3),
+and the core extends the line with that pair. A unit with no exact pair to
+the price unit is not in the snapshot, and the core refuses that line
+offline as the live counter refuses it (ADR 0006 section 3.4). The pairs are
+exact decimals, never factors (ADR 0006 section 1 rule R1), so the
+extension is exact until its one rounding.
 
 **The price key is bound to the customer.** A sale's price key is not the
 device's choice: for a cached account it is that account's own key (its
@@ -818,8 +851,9 @@ under the old one are still on the device, invisible to the server. So:
   table (a posted sale, or an exception row, a held row counted), and
   while the register holds an open `bad_signature` row of its own epoch
   (`queue_not_drained`). **Answered and recorded are one test**, so the
-  device's rule and the server's rule cannot disagree. An item that
-  advances nothing is still recorded, and a held item is an open
+  device's rule and the server's rule cannot disagree except for a bad
+  copy, which waits until the true sale of that number arrives. An item
+  that advances nothing is still recorded, and a held item is an open
   exception, so it does not wait. A bad copy is the one case that waits,
   because the server cannot trust its figures and the true sale of that
   number may still be on the device: the true sale arrives at the next
@@ -917,6 +951,11 @@ Server (Go, a named test database, `CI=true`):
   no posting, and the till close and day close refusals while it is open;
   one per resolution proves the posting and, for the late post, the ledger
   balancing to the money counted.
+- **The shared arithmetic:** the fixture file
+  `testdata/offline-arithmetic.json` runs through the Go engine, and its
+  answers are the ones the Rust core must match (the Rust test runs the
+  same file). The Go side owns the fixture and its expected cents; the Rust
+  side reads the same file and nothing else.
 - **No re-decision** (3.1): after the snapshot, each of these changes and
   the sale still posts at the recorded figures, with no override spent: the
   account put on hold, its limit lowered, its terms set to due on receipt;
@@ -1050,9 +1089,17 @@ selling, the fence refuses a foreign origin. **The sign path:** a sign
 request whose price differs from the core's own copy of the snapshot is
 refused, and so is one whose tax figure, price key or customer differs; the
 core assigns the sequence and the chain link itself, so a request that
-names them is refused. **The capability:** the queue commands answer the
-Gable the shell loaded and refuse every other origin, and the grant carries
-the queue commands only.
+names them is refused. **The shared arithmetic:** the fixture file
+`testdata/offline-arithmetic.json` runs through the Rust core and through
+the Go engine, and both answer the same cents for the line extensions, the
+taxable flag, the tax, the tender sums and the change; the Go side runs it
+as a Go test (`core/internal/salesdoc`), the Rust side as a Rust test, and
+the fixture file is the only thing the two share, so neither can drift
+from the other without a red test. The fixture holds the rounding cases on
+both sides of a half, a line in a unit other than the price unit, and a
+line whose conversion is not exact (refused by both). **The capability:**
+the queue commands answer the Gable the shell loaded and refuse every
+other origin, and the grant carries the queue commands only.
 
 ### 8. The build plan
 
@@ -1062,21 +1109,21 @@ data and security change and gets the project's money review.
 | Slice | What | Size |
 |---|---|---|
 | O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, the confirmed mark the sale carries, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
-| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 17 to 27 |
-| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests. | 41 to 60 |
+| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, the exact pair each unit a product is sold in takes to its price unit, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 18 to 29 |
+| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 42 to 62 |
 | O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass, write off, settled replaced cart) under locks 0a and 0b, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 19 to 31 |
-| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 28 to 44 |
-| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines and tender the page holds and whose prices, tax and caps the Rust core answers (5.1), the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
+| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the core's exact arithmetic (the extension with the snapshot's pairs, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 31 to 49 |
+| C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment. | 12 to 20 |
 | P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
-| | **Total** | **169 to 260** |
+| | **Total** | **174 to 269** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.
 
 **Nothing must come before the section's other slices.** The ruled order
 (slices S01 to S11 first) suits this design: S04 (the ID rule and check
 limit), S01 (credit hold) and S11 (cash rounding, CP-18) each change what
-the snapshot must carry and what the local cart must compute, so building
+the snapshot must carry and what the core must derive, so building
 after them avoids building the offline rules twice. Card is out of scope
 offline, so CP-05 does not gate it.
 
@@ -1110,12 +1157,15 @@ offline, so CP-05 does not gate it.
   run time for that Gable alone.
 - Offline, the prices, the tax, the caps and the sequence are the Rust
   core's and not the page's: the page asks and displays. A script on the
-  dealer's own Gable can ask for a sale, but only one the rules allow.
+  dealer's own Gable can ask for a sale, but only one the rules allow. The
+  core's arithmetic is the server's arithmetic, kept in step by the one
+  fixture set both sides run.
 - The S6 tests that assert 409 for every batch narrow to branches with
   offline off; the `money_never_queues` code stays in the enum with that
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
-  manager screen. Estimated at 169 to 260 dev hour equivalents.
+  manager screen, one shared fixture set. Estimated at 174 to 269 dev hour
+  equivalents.
 
 **Open items** (left for later decisions):
 
