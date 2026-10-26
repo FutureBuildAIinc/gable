@@ -136,6 +136,22 @@ describe('payPlan, the branch cash rounding rule (CP-18)', () => {
     if (plan.ok) expect(plan.changeCents).toBe(0);
   });
 
+  it('accepts the rounded cash on a round down and computes change from the rounded figure', () => {
+    // $1.07 rounds down to $1.05: the drawer keeps $1.05, so $1.05 settles the
+    // sale with no change and $2.00 gives $0.95 of change.
+    const exact = payPlan(107, [], t('cash', 105), CASH_ROUNDING_NEAREST_5);
+    expect(exact.ok).toBe(true);
+    if (exact.ok) expect(exact.changeCents).toBe(0);
+
+    const added = payPlan(107, [t('cash', 105)], null, CASH_ROUNDING_NEAREST_5);
+    expect(added.ok).toBe(true);
+    if (added.ok) expect(added.changeCents).toBe(0);
+
+    const withChange = payPlan(107, [], t('cash', 200), CASH_ROUNDING_NEAREST_5);
+    expect(withChange.ok).toBe(true);
+    if (withChange.ok) expect(withChange.changeCents).toBe(95);
+  });
+
   it('rounds the cash leg of a split, not the whole sale', () => {
     // The card takes $0.50 exactly; the cash leg of $0.53 rounds up to $0.55,
     // so the $0.60 tendered leaves $0.05 of change.

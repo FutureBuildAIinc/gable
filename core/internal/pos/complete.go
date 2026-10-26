@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
-	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -186,6 +185,23 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	totals := salesdoc.SumTotals(preLines)
 	total := int64(totals.SubtotalCents) + int64(estimate.taxCents)
 	change := totalTendered - total
+	preRoundingMode, err := s.repo.BranchCashRoundingMode(ctx, pre.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	if preRoundingMode == RoundingNearest5Cents && cashTendered > 0 {
+		cashLegExact := cashTendered - change
+		if cashLegExact > 0 {
+			cashLegRounded, preDiff := RoundCash(cashLegExact)
+			if preDiff != 0 {
+				change = cashTendered - cashLegRounded
+				if change < 0 {
+					return nil, conflict("insufficient_tender",
+						fmt.Sprintf("the cash due is %d cents once the branch rounds it to the nearest five cents, and the tenders carry %d", cashLegRounded, cashTendered))
+				}
+			}
+		}
+	}
 	if change < 0 {
 		return nil, conflict("insufficient_tender",
 			fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total, totalTendered))
@@ -780,23 +796,14 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 					Last4: charges[i].Last4, Brand: charges[i].Brand, AuthCode: charges[i].AuthCode}
 			}
 			// The cash leg settles the exact cash the sale needs: the rounded
-			// cash less the difference the drawer keeps as the branch's
-			// rounding income. Every other cash payment keeps its whole
-			// amount, and the carrier gives up the difference.
+			// cash less the signed difference the drawer keeps as the branch's
+			// rounding income or loss. Every other cash payment keeps its
+			// whole amount, and the carrier takes the difference on its entry.
 			applied := amount
 			roundingOnPayment := int64(0)
-			if t.Method == TenderCash && i == roundingCarrier {
-				if roundingDiff > 0 {
-					// The branch took the rounding as its income: the payment
-					// carries the rounded cash, the invoice takes the exact
-					// share, and the difference rides on the payment entry as
-					// the rounding income.
-					roundingOnPayment = roundingDiff
-					applied = amount - roundingDiff
-				}
-				// A round-down leaves the invoice a cent or two short: the
-				// whole payment applies and the write off below closes the
-				// rest, booking the loss the branch ate.
+			if t.Method == TenderCash && i == roundingCarrier && roundingDiff != 0 {
+				roundingOnPayment = roundingDiff
+				applied = amount - roundingDiff
 			}
 			if applied < 0 {
 				applied = 0
@@ -849,20 +856,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				})}); err != nil {
 				return err
 			}
-		}
-		// A cash sale the branch rounded down leaves the invoice a cent or two
-		// short: the branch ate the difference it did not collect. The write
-		// off closes the invoice and books that loss in one entry, against the
-		// cash rounding loss account.
-		if roundingDiff < 0 {
-			fx, err := s.ar.WriteOff(ctx, account.WriteOffIn{
-				InvoiceID: inv.ID, AmountCents: -roundingDiff, AccountCode: gl.AccountCodeRoundingLoss,
-				Reason: "Cash rounding down", Actor: actor, On: date,
-			})
-			if err != nil {
-				return err
-			}
-			mergeEffects(&fxAll, fx)
 		}
 		if err := s.repo.CompleteSale(ctx, saleID, inv.ID, int64(totals.SubtotalCents), taxCents, total, change); err != nil {
 			return err

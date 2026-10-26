@@ -1150,7 +1150,20 @@ export class POSTerminal extends LitElement {
 
   /** What is still owed once the added tenders are taken (never negative). */
   private get _owedCents(): number {
-    return Math.max((this._sale?.total_cents ?? 0) - this._tenderedSoFar, 0);
+    const total = this._sale?.total_cents ?? 0;
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    if (pendingCash > 0) {
+      const otherLegs = this._pendingTenders
+        .filter((t) => t.method !== 'cash')
+        .reduce((s, t) => s + t.amount_cents, 0);
+      const cashNeeded = roundCashFor(this._roundingMode, Math.max(total - otherLegs, 0)).rounded;
+      if (pendingCash >= cashNeeded) {
+        return 0;
+      }
+    }
+    return Math.max(total - this._tenderedSoFar, 0);
   }
 
   /**
@@ -1173,7 +1186,7 @@ export class POSTerminal extends LitElement {
       // tender does not cover is still a cash leg. A card sale that covers
       // the total has no cash leg at all, and no rounding.
       const typed = dollarsToCents(this._tenderAmount.trim());
-      const covered = Number.isFinite(typed) && typed > 0 ? typed : Math.max(total - otherLegs, 0);
+      const covered = Number.isFinite(typed) && typed > 0 ? typed : this._owedCents;
       return Math.max(total - otherLegs - covered, 0);
     }
     return Math.max(total - otherLegs, 0);
@@ -1200,10 +1213,13 @@ export class POSTerminal extends LitElement {
     // store credit defaults to what the account holds, up to what is owed
     // Cash defaults to what the drawer keeps, which the branch's rounding
     // rule may move (CP-18); the other methods default to what is owed.
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
     const fallback = this._tenderMethod === 'store_credit'
       ? storeCreditOffer(this._standing, this._owedCents)
       : this._tenderMethod === 'cash'
-        ? this._cashDueCents
+        ? Math.max(this._cashDueCents - pendingCash, 0)
         : this._owedCents;
     const cents = text === '' ? fallback : dollarsToCents(text);
     if (isNaN(cents) || cents <= 0) return null;

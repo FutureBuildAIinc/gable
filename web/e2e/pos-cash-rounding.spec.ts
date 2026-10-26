@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -176,19 +177,31 @@ test.afterAll(async ({ playwright }) => {
 let restore: ((request: APIRequestContext) => Promise<void>) | null = null;
 
 test('the counter: the branch rounds the cash, and the receipt says so', async ({ page, request }) => {
-  // The branch carries the rule before the desk reads it: the counter's
-  // branch context is loaded at sign in.
   const branch = await counterBranch(request);
   const before = branch;
   restore = async (req: APIRequestContext) => {
-    await setBranchRule(req, before, 'OFF', before.default_tax_rate);
+    const latest = await counterBranch(req);
+    await setBranchRule(req, latest, before.cash_rounding_mode, before.default_tax_rate);
   };
-  await setBranchRule(request, branch, 'NEAREST_5_CENTS', 0);
+  await setBranchRule(request, branch, 'OFF', 0);
 
   const cents = await pricedProduct(request, branch.id, '1.03');
   const card = await pricedProduct(request, branch.id, '1.07');
 
   await signIn(page, 'POS Rounding E2E');
+
+  // Turn the cash rounding rule on for the branch on the Branches screen.
+  await page.goto('/admin/branches');
+  const row = page.locator('tr', { hasText: branch.code });
+  await row.locator('button[title="Edit"]').click();
+  await pickOption(page.getByTestId('branch-cash-rounding'), 'Nearest five cents');
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'branch-cash-rounding.png'), fullPage: true });
+  const saved = page.waitForResponse(
+    (r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === `/api/v1/branches/${branch.id}` && r.ok(),
+  );
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await saved;
+
   await openCounter(page);
 
   // A $1.03 sale paid in cash: the drawer keeps $1.05, so the counter asks

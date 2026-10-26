@@ -102,7 +102,7 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 			name, address, city, state, zip, phone,
 			tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE($16,TRUE))
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE(NULLIF($14,''),'OFF'),$15,COALESCE($16,TRUE))
 		RETURNING ` + locationColumns
 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // The branch editor's own cash rounding rule (CP-18): a branch turns the rule

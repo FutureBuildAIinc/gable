@@ -40,8 +40,16 @@ export function payPlan(
     if (totalCents > 0 && addedNonCash > totalCents) {
         return { ok: false, owedCents: 0, over: 'added' };
     }
+    const neededFor = (list: TenderIn[]) => {
+        const other = nonCash(list);
+        const cash = cashSum(list);
+        if (cash > 0 && totalCents > other) {
+            return other + roundCashFor(rounding, totalCents - other).rounded;
+        }
+        return totalCents;
+    };
     let tenders = added;
-    if (sum(added) < totalCents && entry !== null && entry.amount_cents > 0) {
+    if (sum(added) < neededFor(added) && entry !== null && entry.amount_cents > 0) {
         if (entry.method !== 'cash' && addedNonCash + entry.amount_cents > totalCents) {
             // The limit a typed card, check or account tender must stay under:
             // the total less the other non cash tenders already added.
@@ -55,8 +63,9 @@ export function payPlan(
     // cash, and the change is what the cash tendered holds over it.
     const cashDue = roundCashFor(rounding, totalCents - nonCash(tenders)).rounded;
     const cashTendered = cashSum(tenders);
+    const needed = neededFor(tenders);
     const change = cashTendered - cashDue;
-    if (totalCents <= 0 || tenders.length === 0 || tendered < totalCents || change < 0) {
+    if (totalCents <= 0 || tenders.length === 0 || tendered < needed || change < 0) {
         const owed = Math.max(totalCents - tendered, 0);
         // With the rule on, the cash the drawer wants is the rounded figure,
         // so that is what the counter asks for; with the rule off the sale's

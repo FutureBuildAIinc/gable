@@ -12,6 +12,7 @@ package pos_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -152,6 +153,28 @@ func TestCP18_CashOnlyRounded(t *testing.T) {
 		t.Errorf("the rounding loss = %d cents, want none", got)
 	}
 
+	// A cash total of $1.07 rounds down to $1.05: the drawer keeps $1.05,
+	// the branch books the two cents as its rounding loss, and the invoice
+	// closes as PAID.
+	downSale, _ := f.saleAtPrice(107)
+	r = f.completeSale(downSale, tender("cash", 105))
+	if r.status != http.StatusOK {
+		t.Fatalf("the rounded-down cash sale = %d: %s", r.status, r.raw)
+	}
+	if got := f.cashPayment(downSale); got != 105 {
+		t.Errorf("the rounded-down cash payment = %d cents, want 105", got)
+	}
+	if got := f.accountBalance("5045"); got != 2 {
+		t.Errorf("the rounding loss = %d cents, want a debit of two", got)
+	}
+	if got := f.accountBalance("4010"); got != -210 {
+		t.Errorf("the revenue = %d cents, want a credit of 210", got)
+	}
+	invStatus := f.scalar(`SELECT i.status FROM invoices i JOIN pos_transactions t ON t.invoice_id = i.id WHERE t.id = $1`, downSale)
+	if invStatus != "PAID" {
+		t.Errorf("the rounded-down sale's invoice status = %v, want PAID", invStatus)
+	}
+
 	// A card sale settles to the exact cent: the rule moves the cash only.
 	cardSale, _ := f.saleAtPrice(107)
 	r = f.completeSale(cardSale, tender("card", 107))
@@ -163,6 +186,25 @@ func TestCP18_CashOnlyRounded(t *testing.T) {
 	}
 	if got := f.accountBalance("4095"); got != -2 {
 		t.Errorf("the rounding income = %d cents after a card sale, want the two cents of the cash sale", got)
+	}
+	if got := f.accountBalance("5045"); got != 2 {
+		t.Errorf("the rounding loss = %d cents after a card sale, want the two cents of the rounded-down cash sale", got)
+	}
+
+	// A check sale also settles to the exact cent.
+	checkSale, _ := f.saleAtPrice(102)
+	r = f.completeSale(checkSale, tender("check", 102))
+	if r.status != http.StatusOK {
+		t.Fatalf("the check sale = %d: %s", r.status, r.raw)
+	}
+	if got := f.paymentCents(checkSale, "CHECK"); got != 102 {
+		t.Errorf("the check payment = %d cents, want the exact 102", got)
+	}
+	if got := f.accountBalance("4095"); got != -2 {
+		t.Errorf("the rounding income = %d cents after a check sale, want the two cents of the cash sale", got)
+	}
+	if got := f.accountBalance("5045"); got != 2 {
+		t.Errorf("the rounding loss = %d cents after a check sale, want the two cents of the rounded-down cash sale", got)
 	}
 	f.assertARInvariants(t)
 }
@@ -266,6 +308,41 @@ func TestCP18_RoundingPostedBalanced(t *testing.T) {
 	if debit != credit {
 		f.t.Errorf("the payment entry does not balance: %d debits, %d credits", debit, credit)
 	}
+
+	// Round-down ($1.06 -> $1.05): the payment entry debits 1010 for 105 and
+	// 5045 for 1 against 2200 for 106, and balances.
+	downSaleID, _ := f.saleAtPrice(106)
+	r = f.completeSale(downSaleID, tender("cash", 105))
+	if r.status != http.StatusOK {
+		t.Fatalf("complete round-down = %d: %s", r.status, r.raw)
+	}
+	downPayID := f.scalar(`SELECT p.id::text FROM payments p JOIN pos_tenders t ON t.payment_id = p.id
+		WHERE t.transaction_id = $1 AND p.method = 'CASH' AND p.status = 'POSTED'`, downSaleID)
+	downID, ok := downPayID.(string)
+	if !ok {
+		f.t.Fatalf("the round-down cash payment id reads %T", downPayID)
+	}
+	downEntries, downLegs := f.legsFor(downID)
+	if downEntries != 1 {
+		f.t.Fatalf("the round-down cash payment posted %d entries, want 1", downEntries)
+	}
+	downCash, ok := downLegs["1010"]
+	if !ok || downCash.debit != 105 {
+		f.t.Errorf("the round-down cash leg = %+v, want a debit of 105", downCash)
+	}
+	loss, ok := downLegs["5045"]
+	if !ok || loss.debit != 1 {
+		f.t.Errorf("the rounding loss leg = %+v, want a debit of one cent", loss)
+	}
+	var downDebit, downCredit int64
+	for _, l := range downLegs {
+		downDebit += l.debit
+		downCredit += l.credit
+	}
+	if downDebit != downCredit {
+		f.t.Errorf("the round-down payment entry does not balance: %d debits, %d credits", downDebit, downCredit)
+	}
+	f.assertARInvariants(t)
 }
 
 // RULE: the till's expected cash is the rounded cash, so the drawer variance
@@ -349,6 +426,53 @@ func TestCP18_ReturnRefundsExactPaysRounded(t *testing.T) {
 	}
 	if got := f.accountBalance("2020"); got != 0 {
 		t.Errorf("the tax = %d cents after the return, want none", got)
+	}
+	if got := f.tillExpectedCash(); got != 0 {
+		t.Errorf("the till expected cash = %d cents after the full return, want 0", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE: three concurrent rounded cash sales at pool size 4 serialize cleanly,
+// book every rounding leg, keep the till's expected cash exact, and preserve
+// the AR subledger invariants.
+func TestCP18_ConcurrentRoundedCashSales(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+
+	prices := []int64{103, 107, 104}
+	sales := make([]string, len(prices))
+	for i, p := range prices {
+		sales[i], _ = f.saleAtPrice(p)
+	}
+	statuses := make([]int, len(prices))
+	var wg sync.WaitGroup
+	for i := range sales {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			statuses[i] = f.completeSale(sales[i], tender("cash", 105)).status
+		}(i)
+	}
+	wg.Wait()
+	for i, st := range statuses {
+		if st != http.StatusOK {
+			t.Fatalf("contender %d status = %d, want 200", i, st)
+		}
+	}
+	if got := f.tillExpectedCash(); got != 315 {
+		t.Errorf("the till expects %d cents of cash across the three sales, want 315", got)
+	}
+	if got := f.accountBalance("4095"); got != -3 {
+		t.Errorf("the rounding income = %d cents, want a credit of 3", got)
+	}
+	if got := f.accountBalance("5045"); got != 2 {
+		t.Errorf("the rounding loss = %d cents, want a debit of 2", got)
+	}
+	if got := f.accountBalance("4010"); got != -314 {
+		t.Errorf("the revenue = %d cents, want a credit of 314", got)
 	}
 	f.assertARInvariants(t)
 }
