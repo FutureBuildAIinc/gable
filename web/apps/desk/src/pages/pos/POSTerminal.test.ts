@@ -2769,7 +2769,7 @@ describe('return a past sale', () => {
 
   const fullSale = (over: Partial<Sale> = {}): Sale => sale({
     id: 'past1', number: 'POS-000042', revision: 2, status: 'completed', total_cents: 12500,
-    lines: [line('a', 7500), line('b', 5000)], ...over,
+    lines: [line('a', 7500), line('b', 5000)] as unknown as Sale['lines'], ...over,
   });
 
   it('opens the search panel, searches, and renders results', async () => {
@@ -2839,7 +2839,7 @@ describe('return a past sale', () => {
     const el = await mount(sale());
     q(el, 'return-search-open').click();
     await el.updateComplete;
-    q(el, 'return-search-query').value = 'POS-000042';
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
     q(el, 'return-search-query').dispatchEvent(new Event('input'));
     q(el, 'return-search-submit').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -2860,7 +2860,7 @@ describe('return a past sale', () => {
     const el = await mount(sale());
     q(el, 'return-search-open').click();
     await el.updateComplete;
-    q(el, 'return-search-query').value = 'POS-000042';
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
     q(el, 'return-search-query').dispatchEvent(new Event('input'));
     q(el, 'return-search-submit').click();
     await new Promise((r) => setTimeout(r, 0));
