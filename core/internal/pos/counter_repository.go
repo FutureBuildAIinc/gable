@@ -388,3 +388,42 @@ func (r *PostgresRepository) LinkExchange(ctx context.Context, returnID, saleID 
 	}
 	return nil
 }
+
+// TintChargeCents reads the dealer's flat tint charge per container (row
+// CP-16): none set means no charge, the dominant retail model folding the
+// tint into the shelf price.
+func (r *PostgresRepository) TintChargeCents(ctx context.Context) (int64, error) {
+	var value *string
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = 'pos.tint_charge_cents'`).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to read the tint charge setting: %w", err)
+	}
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return 0, nil
+	}
+	n, perr := strconv.ParseInt(strings.TrimSpace(*value), 10, 64)
+	if perr != nil || n < 0 {
+		return 0, fmt.Errorf("the pos.tint_charge_cents setting is not a whole number of cents from 0 up")
+	}
+	return n, nil
+}
+
+// TintedNoReturn reads the tinted no return policy: off unless the setting
+// holds true, because the rule is a dealer policy and the large retailers
+// run it both ways.
+func (r *PostgresRepository) TintedNoReturn(ctx context.Context) (bool, error) {
+	var value *string
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = 'pos.tinted_no_return'`).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read the tinted no return setting: %w", err)
+	}
+	return value != nil && strings.TrimSpace(*value) == "true", nil
+}

@@ -449,6 +449,27 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 			text.NewCol(3, b.style.UnitPrice(*line.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
 			text.NewCol(3, b.style.Money(line.LineTotal), props.Text{Size: 9, Align: align.Right}),
 		)
+		// The tint block (row CP-16) under its line: the colour, the base,
+		// the container size and the colorant amounts, so the invoice lets
+		// the customer reorder the colour.
+		if line.Tint != nil {
+			head := fmt.Sprintf("Tint: %s", line.Tint.ColorName)
+			if line.Tint.ColorCode != "" {
+				head += fmt.Sprintf(" (%s)", line.Tint.ColorCode)
+			}
+			head += fmt.Sprintf("  base %s  size %s", line.Tint.BaseCode, line.Tint.ContainerSizeCode)
+			m.AddRow(5, text.NewCol(12, head, props.Text{Size: 8}))
+			for _, c := range line.Tint.Components {
+				m.AddRow(4, text.NewCol(12,
+					fmt.Sprintf("  %s %s  %s", c.ColorantCode, c.ColorantName, c.Amount.String()),
+					props.Text{Size: 8}))
+			}
+			if line.Tint.TintChargeCents != nil && *line.Tint.TintChargeCents > 0 {
+				m.AddRow(4, text.NewCol(12,
+					fmt.Sprintf("  Tint charge: %s", b.style.Money(*line.Tint.TintChargeCents)),
+					props.Text{Size: 8}))
+			}
+		}
 	}
 
 	// Subtotal and tax are shown separately, or the line extensions visibly do

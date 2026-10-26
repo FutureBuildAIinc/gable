@@ -563,6 +563,27 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			cost := ref.AverageCost
 			line.CostSource, line.StockingUnitCost = &source, &cost
 		}
+
+		// A paint line's tint (row CP-16): the line price is the base price
+		// plus the dealer's tint rule, a flat charge per container the
+		// dealer sets (0 when the tint is folded into the shelf price, the
+		// dominant retail model). The charge rides the tint record so the
+		// documents show it as its own amount.
+		if pl.Tint != nil {
+			charge, err := s.repo.TintChargeCents(ctx)
+			if err != nil {
+				return line, out, err
+			}
+			if charge > 0 {
+				c := httpx.Cents(charge)
+				pl.Tint.TintChargeCents = &c
+				if line.UnitPrice != nil {
+					p := *line.UnitPrice + httpx.Price(charge*100)
+					line.UnitPrice = &p
+				}
+			}
+			line.Tint = pl.Tint
+		}
 	}
 	if pl.DiscountPercent != nil {
 		pct := *pl.DiscountPercent

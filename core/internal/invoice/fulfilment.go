@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -38,6 +39,9 @@ type FulfilmentLine struct {
 	BoardThicknessIn   *int64 // scale 4, a tallied line's cross section
 	BoardWidthIn       *int64
 	TallyRows          []TallyRowInput
+	// Tint is a paint line's tint record (row CP-16), frozen on the invoice
+	// line exactly as the counter sold it.
+	Tint               *salesdoc.LineTint
 	UnitPrice          *int64 // scale 4
 	PricedUnitPrice    *int64 // scale 4: what the engine resolved
 	PriceSource        string

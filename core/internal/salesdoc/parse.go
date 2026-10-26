@@ -41,6 +41,36 @@ type LineRequest struct {
 	VendorID         *string         `json:"vendor_id"`
 	SpecialOrderCost json.RawMessage `json:"special_order_unit_cost_ten_thousandths"`
 	Tally            *TallyRequest   `json:"tally"`
+	Tint             *TintRequest    `json:"tint"`
+}
+
+// TintRequest is a paint line's tint as the counter sends it: the colour and
+// base text the documents print, the formula it came from, and the colorant
+// amounts as actually mixed (a rescaled amount the counter overrode lands
+// here as its own value, never the derived one).
+type TintRequest struct {
+	FormulaID          *string              `json:"formula_id"`
+	ColorCode          *string              `json:"color_code"`
+	ColorName          *string              `json:"color_name"`
+	BaseCode           *string              `json:"base_code"`
+	ContainerSizeCode  *string              `json:"container_size_code"`
+	Rescaled           *bool                `json:"rescaled"`
+	TintChargeCents    json.RawMessage      `json:"tint_charge_cents"`
+	Components         []TintComponentRequest `json:"components"`
+}
+
+// TintComponentRequest is one colorant of a requested tint.
+type TintComponentRequest struct {
+	ColorantCode *string              `json:"colorant_code"`
+	ColorantName *string              `json:"colorant_name"`
+	Amount       tintAmountRequest    `json:"amount"`
+}
+
+type tintAmountRequest struct {
+	WholeOZ     *int `json:"whole_oz"`
+	Coarse      *int `json:"increments_coarse"`
+	Fine        *int `json:"increments_fine"`
+	Denominator *int `json:"unit_denominator"`
 }
 
 // ParsedLine is one validated request line: the numbers parsed, the defaults
@@ -71,6 +101,8 @@ type ParsedLine struct {
 	TallyRows        []TallyRow // nil when the request sent no tally
 	// HasQuantity is false when the quantity comes from the line's tally.
 	HasQuantity bool
+	// Tint is the paint line's tint record, nil when the request sent none.
+	Tint *LineTint
 }
 
 // chargeCodePattern is a charge code: one to sixteen uppercase letters,
@@ -249,6 +281,14 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (ParsedLine, bool) 
 		}
 	}
 
+	// The paint tint record (row CP-16): parsed here, priced by the document
+	// that holds the line.
+	if l.Tint != nil {
+		if t, ok := l.Tint.parse(v, path+".tint"); ok {
+			d.Tint = t
+		}
+	}
+
 	// The price. Absent means the document prices the line (a stocked
 	// product through the engine, a charge from its code's default); present
 	// it is an override on a stocked product line (ADR 0005 section 2.3),
@@ -355,6 +395,7 @@ func (l *LineRequest) parseText(v *httpx.Validator, path string, d ParsedLine, b
 		{"vendor_id", l.VendorID != nil},
 		{"special_order_unit_cost_ten_thousandths", !isAbsent(l.SpecialOrderCost)},
 		{"tally", l.Tally != nil},
+		{"tint", l.Tint != nil},
 	} {
 		v.Check(!f.present, path+"."+f.name, "is a priced field: a text line carries only a description")
 	}
@@ -366,6 +407,73 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// parse validates a paint line's tint request: the colour name and the
+// container size are required (the documents print them), each component's
+// amount must be a whole count of one of the trade's dispense units, and the
+// tint charge, when the request carries one, is a non negative whole number
+// of cents.
+func (t *TintRequest) parse(v *httpx.Validator, path string) (*LineTint, bool) {
+	before := len(detailsOf(v))
+	out := &LineTint{Components: []TintComponent{}}
+	if id, ok := v.UUID(path+".formula_id", t.FormulaID, false); ok {
+		out.FormulaID = &id
+	}
+	if t.ColorCode != nil {
+		out.ColorCode = strings.TrimSpace(*t.ColorCode)
+	}
+	if t.ColorName != nil {
+		out.ColorName = strings.TrimSpace(*t.ColorName)
+	}
+	if t.BaseCode != nil {
+		out.BaseCode = strings.TrimSpace(*t.BaseCode)
+	}
+	if t.ContainerSizeCode != nil {
+		out.ContainerSizeCode = strings.TrimSpace(*t.ContainerSizeCode)
+	}
+	v.Required(path+".color_name", out.ColorName)
+	v.Required(path+".container_size_code", out.ContainerSizeCode)
+	if t.Rescaled != nil {
+		out.Rescaled = *t.Rescaled
+	}
+	if !isAbsent(t.TintChargeCents) {
+		if n, ok := v.Int(path+".tint_charge_cents", t.TintChargeCents, true); ok {
+			v.Check(n >= 0, path+".tint_charge_cents", "a tint charge is never negative")
+			c := httpx.Cents(n)
+			out.TintChargeCents = &c
+		}
+	}
+	for i := range t.Components {
+		cpath := fmt.Sprintf("%s.components[%d]", path, i)
+		c := &t.Components[i]
+		comp := TintComponent{}
+		if c.ColorantCode != nil {
+			comp.ColorantCode = strings.TrimSpace(*c.ColorantCode)
+		}
+		if c.ColorantName != nil {
+			comp.ColorantName = strings.TrimSpace(*c.ColorantName)
+		}
+		v.Required(cpath+".colorant_code", comp.ColorantCode)
+		if c.Amount.Denominator != nil {
+			comp.Amount.Denominator = *c.Amount.Denominator
+		}
+		if c.Amount.WholeOZ != nil {
+			comp.Amount.WholeOZ = *c.Amount.WholeOZ
+		}
+		if c.Amount.Coarse != nil {
+			comp.Amount.Coarse = *c.Amount.Coarse
+		}
+		if c.Amount.Fine != nil {
+			comp.Amount.Fine = *c.Amount.Fine
+		}
+		if err := comp.Amount.Validate(); err != nil {
+			v.Check(false, cpath+".amount.unit_denominator", err.Error())
+			continue
+		}
+		out.Components = append(out.Components, comp)
+	}
+	return out, len(detailsOf(v)) == before
 }
 
 // detailsOf reads how many field errors the validator holds.

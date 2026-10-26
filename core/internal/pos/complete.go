@@ -591,6 +591,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 					fl.TallyRows = append(fl.TallyRows, invoice.TallyRowInput{Pieces: r.Pieces, LengthFT: int64(r.LengthFT)})
 				}
 			}
+			fl.Tint = b.Tint
 			invoiceLineOf[b.ID] = fl.ID
 			if b.PricedUnitPrice != nil {
 				p := int64(*b.PricedUnitPrice)

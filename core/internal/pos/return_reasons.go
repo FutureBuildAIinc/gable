@@ -16,6 +16,11 @@ import (
 // the return.
 const ReasonOther = "other"
 
+// ReasonMisTint is the mis tint return reason (row CP-16): the store mixed
+// the wrong colour, so the tinted line returns where a customer choice
+// return of it is refused.
+const ReasonMisTint = "mis_tint"
+
 // returnReason is one entry of the closed list of return reasons.
 type returnReason struct {
 	Code  string
@@ -34,6 +39,9 @@ var returnReasons = []returnReason{
 	{"ordered_wrong", "Ordered the wrong item"},
 	{"changed_mind", "Changed their mind"},
 	{"overbought", "Bought too much"},
+	// The mis tint (row CP-16): the store mixed the wrong colour, so the
+	// tinted can comes back where a customer choice return of it is refused.
+	{"mis_tint", "Mis tint (the store's error)"},
 	{ReasonOther, "Other (needs a note)"},
 }
 

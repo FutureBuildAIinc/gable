@@ -246,6 +246,12 @@ type Repository interface {
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
 	ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error)
 	RestockingFeeBps(ctx context.Context) (map[string]int, error)
+	// TintChargeCents reads the dealer's flat tint charge per container (row
+	// CP-16), 0 when none is set.
+	TintChargeCents(ctx context.Context) (int64, error)
+	// TintedNoReturn reads the dealer's tinted no return policy (row CP-16):
+	// off by default, because the rule is a dealer policy and not a law.
+	TintedNoReturn(ctx context.Context) (bool, error)
 	LockStock(ctx context.Context, productIDs []uuid.UUID, branchID uuid.UUID) error
 	LinkExchange(ctx context.Context, returnID, saleID uuid.UUID, method RefundMethod) error
 	InsertOverride(ctx context.Context, o *AccountOverride) error
@@ -603,6 +609,39 @@ func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lin
 		if err := r.insertTallyRows(ctx, l.ID, l.Tally); err != nil {
 			return err
 		}
+		if err := r.insertLineTint(ctx, l.ID, l.Tint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertLineTint writes one counter line's tint record (row CP-16): the
+// colour and base text, the formula it came from, and the amounts actually
+// sold frozen as child rows, in the same transaction as the line itself.
+func (r *PostgresRepository) insertLineTint(ctx context.Context, lineID uuid.UUID, t *salesdoc.LineTint) error {
+	if t == nil {
+		return nil
+	}
+	var id uuid.UUID
+	if err := r.ex(ctx).QueryRow(ctx, `
+		INSERT INTO paint_line_tints (counter_line_id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric / 100)
+		RETURNING id`,
+		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
+		t.Rescaled, centsArg(t.TintChargeCents)).Scan(&id); err != nil {
+		return fmt.Errorf("failed to add the line's tint: %w", mapWriteError(err))
+	}
+	for i, c := range t.Components {
+		if _, err := r.ex(ctx).Exec(ctx, `
+			INSERT INTO paint_line_tint_components (line_tint_id, position, colorant_code, colorant_name,
+				whole_oz, increments_coarse, increments_fine, unit_denominator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, i, c.ColorantCode, c.ColorantName, c.Amount.WholeOZ, c.Amount.Coarse,
+			c.Amount.Fine, c.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to add the tint's colorant: %w", mapWriteError(err))
+		}
 	}
 	return nil
 }
@@ -687,7 +726,88 @@ func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]
 	if err := r.attachTallyRows(ctx, out); err != nil {
 		return nil, err
 	}
+	if err := r.attachLineTints(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// attachLineTints reads every line's tint record (row CP-16) with its frozen
+// components, so the sale's lines read back exactly what was mixed.
+func (r *PostgresRepository) attachLineTints(ctx context.Context, lines []salesdoc.Line) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT counter_line_id, id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, ROUND(tint_charge_cents * 100)::bigint
+		FROM paint_line_tints WHERE counter_line_id = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to read the lines' tints: %w", err)
+	}
+	defer rows.Close()
+	byTint := map[uuid.UUID]*salesdoc.LineTint{}
+	lineOf := map[uuid.UUID]uuid.UUID{}
+	var tintIDs []uuid.UUID
+	for rows.Next() {
+		var lineID, tintID uuid.UUID
+		t := &salesdoc.LineTint{Components: []salesdoc.TintComponent{}}
+		var charge int64
+		if err := rows.Scan(&lineID, &tintID, &t.FormulaID, &t.ColorCode, &t.ColorName, &t.BaseCode,
+			&t.ContainerSizeCode, &t.Rescaled, &charge); err != nil {
+			return fmt.Errorf("failed to scan a line tint: %w", err)
+		}
+		if charge > 0 {
+			c := httpx.Cents(charge)
+			t.TintChargeCents = &c
+		}
+		byTint[tintID] = t
+		lineOf[tintID] = lineID
+		tintIDs = append(tintIDs, tintID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(tintIDs) == 0 {
+		return nil
+	}
+	compRows, err := r.ex(ctx).Query(ctx, `
+		SELECT line_tint_id, colorant_code, colorant_name, whole_oz, increments_coarse,
+			increments_fine, unit_denominator
+		FROM paint_line_tint_components WHERE line_tint_id = ANY($1)
+		ORDER BY line_tint_id, position`, tintIDs)
+	if err != nil {
+		return fmt.Errorf("failed to read the tints' colorants: %w", err)
+	}
+	defer compRows.Close()
+	for compRows.Next() {
+		var tintID uuid.UUID
+		var comp salesdoc.TintComponent
+		if err := compRows.Scan(&tintID, &comp.ColorantCode, &comp.ColorantName, &comp.Amount.WholeOZ,
+			&comp.Amount.Coarse, &comp.Amount.Fine, &comp.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to scan a tint colorant: %w", err)
+		}
+		if t, ok := byTint[tintID]; ok {
+			t.Components = append(t.Components, comp)
+		}
+	}
+	if err := compRows.Err(); err != nil {
+		return fmt.Errorf("failed to walk the tints' colorants: %w", err)
+	}
+	idxOf := map[uuid.UUID]int{}
+	for i := range lines {
+		idxOf[lines[i].ID] = i
+	}
+	for tintID, t := range byTint {
+		if i, ok := idxOf[lineOf[tintID]]; ok {
+			lines[i].Tint = t
+		}
+	}
+	return nil
 }
 
 // attachTallyRows reads every line's tally rows (ADR 0006 section 4.2) into
@@ -814,11 +934,13 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee, created_at)
+				stock_uom, stock_quantity, unit_price, line_total, restock, sale_line_id, reason_code, restocking_fee,
+				mis_tint, tinted_return, created_at)
 			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $13, -($14::numeric / 10000), $8::numeric / 10000, $9::numeric / 100, $10, $11,
-				$15, $16::numeric / 100, NOW())`,
+				$15, $16::numeric / 100, $17, $18, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity), reasonOf(l.ReasonCode), int64(l.RestockingFeeCents))
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType, l.StockUOM, qtyArg(l.StockQuantity), reasonOf(l.ReasonCode), int64(l.RestockingFeeCents),
+			l.MisTint, l.TintedReturn)
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}

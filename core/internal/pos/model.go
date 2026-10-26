@@ -218,6 +218,11 @@ type ReturnLine struct {
 	// its reason withheld from the line's refund.
 	ReasonCode         string      `json:"reason_code"`
 	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+	// MisTint marks the mis tint return (row CP-16): the store's own error.
+	// TintedReturn marks a returned line whose sale carried a tint, so the
+	// can goes to the mistint rack, never back into saleable stock.
+	MisTint      bool `json:"mis_tint"`
+	TintedReturn bool `json:"tinted_return"`
 
 	// The pair, price unit and stocking unit the line carries, read by the
 	// memo line's and return line's inserts; internal, never on the wire.

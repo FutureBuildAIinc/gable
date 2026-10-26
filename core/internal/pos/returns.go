@@ -65,6 +65,12 @@ type returnLinePriced struct {
 	// feeCents is the restocking fee withheld from this line's refund, set
 	// with the totals (resolveReturnMoney).
 	feeCents int64
+	// misTint marks the mis tint return (row CP-16): the store's own error,
+	// accepted where a customer choice return of a tinted line is refused.
+	// tinted marks a returned line whose sale carried a tint, so the can
+	// goes to the mistint rack and never back into saleable stock.
+	misTint bool
+	tinted  bool
 	uom      string
 	stockUOM *string
 	stockQty *httpx.Quantity
@@ -270,6 +276,13 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 	// quantity belongs in one line.
 	seenLine := map[uuid.UUID]bool{}
 	resolved := make([]ReturnLineIn, len(in.Lines))
+	tintPolicy := false
+	if in.OriginalSaleID != nil {
+		var policyErr error
+		if tintPolicy, policyErr = s.repo.TintedNoReturn(ctx); policyErr != nil {
+			return nil, policyErr
+		}
+	}
 	for i := range in.Lines {
 		rl := in.Lines[i]
 		if rl.SaleLineID != nil {
@@ -281,6 +294,15 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			src, ok := byID[*rl.SaleLineID]
 			if !ok {
 				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "names no line of the original sale")
+			}
+			// The tinted no return rule (row CP-16): a tinted can goes back
+			// on no shelf, so the counter refuses its return while the
+			// dealer's policy is on, unless the store mixed the wrong colour
+			// (a mis tint, the accepted exception everywhere).
+			if src.Tint != nil && tintPolicy && rl.ReasonCode != ReasonMisTint {
+				return nil, conflict("tinted_no_return",
+					"this line was tinted to order and is not returnable: a tinted can goes back on no shelf"+
+						" (return it as a mis tint when the store mixed the wrong colour)")
 			}
 			if rl.UnitPrice != nil {
 				return nil, invalid(fmt.Sprintf("lines[%d].unit_price_ten_thousandths", i),
@@ -359,7 +381,8 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bo
 			perUnit := httpx.Price(divRound(int64(*src.LineTotal)*1_000_000, int64(*src.Quantity)))
 			p := returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, perUnit)),
 				taxable: src.Taxable, saleLine: &src, perUnit: perUnit,
-				chargeCodeID: src.ChargeCodeID, lineType: string(src.LineType)}
+				chargeCodeID: src.ChargeCodeID, lineType: string(src.LineType),
+				misTint: rl.ReasonCode == ReasonMisTint, tinted: src.Tint != nil}
 			up := perUnit
 			p.in.UnitPrice = &up
 			priced = append(priced, p)
@@ -1095,6 +1118,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				StockUOM: stockUOM, StockQuantity: stockQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
 				ReasonCode: reasonOf(p.in.ReasonCode), RestockingFeeCents: httpx.Cents(p.feeCents),
+				MisTint: p.misTint, TintedReturn: p.tinted,
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 				LineType: lineType, ChargeCodeID: p.chargeCodeID,
 			})
