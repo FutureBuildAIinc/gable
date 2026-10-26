@@ -228,19 +228,22 @@ func (f DepositFacts) FullyInvoiced() bool { return f.BilledCents >= f.TotalCent
 
 // OrderDepositFacts locks the order row and reads what a deposit's rules
 // need: the order's status and total, the money already taken on it and what
-// its invoices have billed. The lock is the caller's own transaction's (the
-// executor is the transaction's when the caller is inside one), and the sums
-// run as their own statement after the lock is held: under READ COMMITTED a
-// locked row's own columns are re-read on release but a subquery over other
-// tables keeps the statement's first snapshot, so one statement would let
-// two racing deposits both pass the balance rule. With the sums read after
-// the lock, the second transaction's fresh statement sees the first's
-// committed deposit.
+// its invoices have billed. The lock is FOR NO KEY UPDATE, the order lock of
+// ADR 0005 section 11 step 1 (as order.LockOrder takes it): it serializes
+// every act on the order yet stays compatible with the FOR KEY SHARE a
+// foreign key insert takes on the row, so a deposit neither waits behind one
+// nor deadlocks a payment that names the same order. The sums run as their
+// own statement after the lock is held: under READ COMMITTED a locked row's
+// own columns are re-read on release but a subquery over other tables keeps
+// the statement's first snapshot, so one statement would let two racing
+// deposits both pass the balance rule. With the sums read after the lock,
+// the second transaction's fresh statement sees the first's committed
+// deposit.
 func (r *Repository) OrderDepositFacts(ctx context.Context, orderID uuid.UUID) (DepositFacts, error) {
 	var f DepositFacts
 	e := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT o.status, ROUND(o.total_amount * 100)::bigint
-		FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID).Scan(&f.Status, &f.TotalCents)
+		FROM orders o WHERE o.id = $1 FOR NO KEY UPDATE`, orderID).Scan(&f.Status, &f.TotalCents)
 	if e != nil {
 		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
 	}

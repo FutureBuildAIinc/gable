@@ -324,9 +324,17 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 	var out *Payment
 	var effects *account.Effects
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		if in.OrderID != nil && len(in.Applications) == 0 {
-			if err := s.checkDeposit(ctx, *in.OrderID, in.AmountCents); err != nil {
-				return err
+		if in.OrderID != nil {
+			// The cash this payment would leave unapplied is held against
+			// the order as a deposit, whatever applications it also carries.
+			var applied int64
+			for _, a := range in.Applications {
+				applied += a.AmountCents
+			}
+			if held := in.AmountCents - applied; held > 0 {
+				if err := s.checkDeposit(ctx, *in.OrderID, held); err != nil {
+					return err
+				}
 			}
 		}
 		on := time.Time{}
@@ -373,10 +381,12 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 }
 
 // checkDeposit holds the deposit rules (CP-07), inside the caller's
-// transaction on a locked order: a deposit only on an order that can still
-// be billed, and never past its balance due after the deposits already
-// taken.
-func (s *Service) checkDeposit(ctx context.Context, orderID uuid.UUID, amountCents int64) error {
+// transaction on a locked order: cash held against an order only on an
+// order that can still be billed, and never past its balance due after the
+// deposits already taken. The amount judged is the cash that would stay
+// unapplied, so a payment that names the order and settles its invoice is
+// not refused while its leftover cash is.
+func (s *Service) checkDeposit(ctx context.Context, orderID uuid.UUID, heldCents int64) error {
 	facts, err := s.repo.OrderDepositFacts(ctx, orderID)
 	if err != nil {
 		return err
@@ -386,7 +396,7 @@ func (s *Service) checkDeposit(ctx context.Context, orderID uuid.UUID, amountCen
 		return httpx.Conflict("this order is cancelled: no deposit can be taken on it")
 	case facts.FullyInvoiced():
 		return httpx.Conflict("this order is fully invoiced: no deposit can be taken on it")
-	case facts.DepositedCents+amountCents > facts.TotalCents:
+	case facts.DepositedCents+heldCents > facts.TotalCents:
 		return httpx.Conflict("the deposit is larger than the order's balance due after deposits")
 	}
 	return nil

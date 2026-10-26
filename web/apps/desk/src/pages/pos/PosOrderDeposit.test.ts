@@ -30,7 +30,7 @@ import { mount, q, update } from '../../test/dom';
 const summary = (over: Partial<OrderSummary> = {}): OrderSummary => ({
   id: 'ord-1',
   number: 'SO-000042',
-  branch_id: 'b-1',
+  branch_id: 'b-reg',
   customer_id: 'cu1',
   customer_name: 'Ridgeview Framing',
   quote_id: null,
@@ -103,7 +103,7 @@ function submitDeposit(root: ParentNode) {
   q<HTMLFormElement>(dialog, 'form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 }
 
-describe('gable-pos-order-deposit — the counter action', () => {
+describe('gable-pos-order-deposit - the counter action', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     orders.listOrders.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
@@ -143,19 +143,31 @@ describe('gable-pos-order-deposit — the counter action', () => {
     el.remove();
   });
 
-  it('keeps the register\'s branch on the deposit when the sale carries none', async () => {
-    const el = await mount<GablePosOrderDeposit>('gable-pos-order-deposit', {
+  it('refuses an order of another branch in words, and books the deposit in the order\'s own branch', async () => {
+    // the picked order belongs to another branch: refused, nothing posted
+    orders.getOrder.mockResolvedValue(detail({ branch_id: 'b-other' }));
+    const el = await open();
+    await pickFirst(el);
+    await update(el, {});
+    expect(q(el, '[data-testid="pos-deposit-refusal"]').textContent).toContain('another branch');
+    expect(payments.createPayment).not.toHaveBeenCalled();
+    el.remove();
+
+    // and with no register branch in context, the deposit still rides the
+    // order\'s own branch
+    orders.getOrder.mockResolvedValue(detail());
+    const el2 = await mount<GablePosOrderDeposit>('gable-pos-order-deposit', {
       isOpen: true,
       customerId: 'cu1',
       branchId: '',
     });
-    await update(el, {});
-    await pickFirst(el);
-    await typeAmount(el, '10');
-    submitDeposit(el);
-    await update(el, {});
-    expect(payments.createPayment.mock.calls[0][0].branch_id).toBe('b-1');
-    el.remove();
+    await update(el2, {});
+    await pickFirst(el2);
+    await typeAmount(el2, '10');
+    submitDeposit(el2);
+    await update(el2, {});
+    expect(payments.createPayment.mock.calls[0][0].branch_id).toBe('b-reg');
+    el2.remove();
   });
 
   it('refuses a deposit past the order\'s balance due after deposits without calling the route', async () => {

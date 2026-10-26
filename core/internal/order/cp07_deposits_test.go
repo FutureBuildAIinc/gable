@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
@@ -444,7 +445,7 @@ func TestCP07_DepositOnVoidedOrderRefused(t *testing.T) {
 // land: the check runs inside the payment's transaction on a locked order.
 func TestCP07_DepositContendersCannotBothPassTheBalance(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	db := testutil.RequireDB(t)
+	db := testutil.RequireDBMaxConns(t, 4)
 
 	f := newFixture(t, db)
 	f.serveOrdersAndPayments()
@@ -478,5 +479,167 @@ func TestCP07_DepositContendersCannotBothPassTheBalance(t *testing.T) {
 	}
 	if created != 1 {
 		t.Errorf("%d of 3 contending deposits of 4000 on a 5988 order landed, want exactly 1: %v", created, statuses)
+	}
+}
+
+// RULE (ADR 0005 section 11 step 1): the deposit takes the order row with
+// FOR NO KEY UPDATE, which stays compatible with the FOR KEY SHARE a foreign
+// key insert takes on the row, so a deposit never waits behind one and never
+// deadlocks a payment that names the same order.
+func TestCP07_DepositDoesNotWaitBehindAnOrderKeyShare(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.create()
+	id := str(t, r.body, "id")
+	f.transition(id, 1, "confirmed")
+
+	// Hold the order's key share the way the allocation subscriber's request
+	// insert takes it, then take a deposit: it must answer at once.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		err := db.RunInTx(context.Background(), func(ctx context.Context) error {
+			// The lock belongs to this transaction: it goes through the
+			// executor the context resolves, never the pool.
+			if _, err := db.GetExecutor(ctx).Exec(ctx, `SELECT 1 FROM orders WHERE id = $1 FOR KEY SHARE`, id); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+		if err != nil {
+			t.Errorf("hold the key share: %v", err)
+		}
+	}()
+	<-held
+	defer close(release)
+	done := make(chan resp, 1)
+	go func() { done <- f.takeDeposit(id, 100, "cash") }()
+	select {
+	case r := <-done:
+		if r.status != http.StatusCreated {
+			t.Fatalf("the deposit behind a key share = %d: %s, want 201", r.status, r.raw)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatalf("the deposit waited behind a FOR KEY SHARE on the order row (ADR 0005 section 11 step 1 wants FOR NO KEY UPDATE)")
+	}
+}
+
+// RULE: a deposit and a payment that names the same order with an
+// application race without deadlocking: the clerk sees two payments, never a
+// 500.
+func TestCP07_DepositAndAnOrderedPaymentDoNotDeadlock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+	lineID := str(t, f.bodyOfLine(t, id), "id")
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer",
+		"lines": []map[string]any{{"order_line_id": lineID, "quantity": "5"}}})
+	if r.status != http.StatusCreated {
+		t.Fatalf("fulfil half = %d: %s", r.status, r.raw)
+	}
+	inv := invoiceIDOf(t, r)
+
+	var wg sync.WaitGroup
+	statuses := make([]int, 2)
+	start := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		res := f.doUnique("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": id,
+			"amount_cents": 100, "method": "cash",
+		}, "req-cp07-dl-a")
+		statuses[0] = res.status
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		res := f.doUnique("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": id,
+			"amount_cents": 500, "method": "check",
+			"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 500}},
+		}, "req-cp07-dl-b")
+		statuses[1] = res.status
+	}()
+	close(start)
+	wg.Wait()
+	for i, s := range statuses {
+		if s != http.StatusCreated {
+			t.Errorf("contender %d = %d, want 201 (a deadlock on the order row shows as a 500)", i, s)
+		}
+	}
+}
+
+// RULE: the cash of a payment that names an order and carries applications
+// obeys the deposit rules too, judged on the part that stays unapplied: the
+// same money is not refused one way and held the other.
+func TestCP07_UnappliedCashOfAnOrderedPaymentHonoursTheDepositRules(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer"})
+	if r.status != http.StatusCreated {
+		t.Fatalf("fulfil = %d: %s", r.status, r.raw)
+	}
+	inv := invoiceIDOf(t, r)
+
+	// The whole order is invoiced: a deposit is refused...
+	r = f.takeDeposit(id, 1000, "cash")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit on the fully invoiced order = %d, want 409", r.status)
+	}
+	// ...and the same cash is not let in as the unapplied part of a payment
+	// that names the order: 1000 applied, 2000 left over.
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": id,
+		"amount_cents": 3000, "method": "check",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 1000}},
+	}, "req-cp07-app-rule")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a payment leaving unapplied cash on the fully invoiced order = %d: %s, want 409", r.status, r.raw)
+	}
+	// A payment fully applied to the order's invoice is a payment, not a
+	// deposit: it lands.
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": id,
+		"amount_cents": 1000, "method": "cash",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 1000}},
+	}, "req-cp07-app-ok")
+	if r.status != http.StatusCreated {
+		t.Fatalf("a payment fully applied to the order's invoice = %d: %s, want 201", r.status, r.raw)
+	}
+	if got := num(t, r.body, "unapplied_cents"); got != 0 {
+		t.Errorf("the fully applied payment holds %d unapplied, want 0", got)
 	}
 }

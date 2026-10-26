@@ -43,7 +43,7 @@ function submit(el: GableDepositModal): CreatePaymentRequest | null {
   return saved.mock.calls.length ? saved.mock.calls[0][0] as CreatePaymentRequest : null
 }
 
-describe('gable-deposit-modal — cents out', () => {
+describe('gable-deposit-modal - cents out', () => {
   it('posts integer cents with the order named, the customer and branch, and no applications', async () => {
     const el = await open(84_662)
     await typeAmount(el, '400')
@@ -82,7 +82,7 @@ describe('gable-deposit-modal — cents out', () => {
   })
 })
 
-describe('gable-deposit-modal — the refusals', () => {
+describe('gable-deposit-modal - the refusals', () => {
   it('refuses an amount under a cent in words', async () => {
     const el = await open(84_662)
     await typeAmount(el, '0')

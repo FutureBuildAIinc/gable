@@ -25,11 +25,14 @@ export class GablePosOrderDeposit extends LitElement {
 
   @property({ type: Boolean, attribute: 'is-open' }) isOpen = false;
   @property({ type: String, attribute: 'customer-id' }) customerId = '';
+  /** The register's branch: the deposit is booked in the order's own branch,
+   *  and an order of another branch is refused here, not silently rebooked. */
   @property({ type: String, attribute: 'branch-id' }) branchId = '';
 
   @state() private _orders: OrderSummary[] = [];
   @state() private _loading = false;
   @state() private _picked: Order | null = null;
+  @state() private _refusal = '';
 
   updated(changed: Map<string, unknown>) {
     if ((changed.has('isOpen') && this.isOpen) || (changed.has('customerId') && this.isOpen)) {
@@ -58,8 +61,14 @@ export class GablePosOrderDeposit extends LitElement {
 
   private async _pick(id: string) {
     this._picked = null;
+    this._refusal = '';
     try {
-      this._picked = await OrderService.getOrder(id);
+      const order = await OrderService.getOrder(id);
+      if (this.branchId && order.branch_id !== this.branchId) {
+        this._refusal = 'This order belongs to another branch: take its deposit there.';
+        return;
+      }
+      this._picked = order;
     } catch {
       ToastService.show('Failed to read the order', 'error');
     }
@@ -102,7 +111,7 @@ export class GablePosOrderDeposit extends LitElement {
               .isOpen=${true}
               .orderId=${this._picked.id}
               .customerId=${this.customerId}
-              .branchId=${this.branchId || this._picked.branch_id}
+              .branchId=${this._picked.branch_id}
               .balanceDueCents=${this._picked.balance_due_after_deposits_cents}
               @save=${(e: CustomEvent<CreatePaymentRequest>) => void this._takeDeposit(e.detail)}
               @close=${() => this._close()}
@@ -127,6 +136,7 @@ export class GablePosOrderDeposit extends LitElement {
                 `)}
               </div>
             `}
+            ${this._refusal ? html`<p class="mt-4 text-sm text-red-400" role="alert" data-testid="pos-deposit-refusal">${this._refusal}</p>` : nothing}
             <div class="mt-6 flex justify-end">
               <button type="button" @click=${this._close} class="px-4 py-2 text-sm text-zinc-300 hover:text-white transition-colors">Close</button>
             </div>
