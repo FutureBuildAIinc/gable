@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -130,7 +131,7 @@ type Repository interface {
 	// Z-reports
 	CreateZReport(ctx context.Context, z *ZReport) error
 	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
-	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
+	ListZReports(ctx context.Context, registerID string, date string) ([]ZReport, error)
 
 	// LockCustomerCredit serializes the acts that read one customer's
 	// credit exposure (section 11, step 1a: the same advisory lock the
@@ -226,7 +227,11 @@ type Repository interface {
 	// SetSaleAccount names the customer, currency, purchase order and job of
 	// an open sale and moves its revision.
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
-	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// CustomerExemption reads the certificate that exempts a sale on day
+	// (the branch's business day) through tax.ExemptionCovering: the one
+	// window rule the counter's totals, its completion and the order path
+	// share. Nil when no certificate exempts that day.
+	CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	// The counter's account sale reads and writes (migration 126): the open
 	// store credit, the database wide check limit, the buyer roster and the
@@ -2044,10 +2049,8 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	return f, nil
 }
 
-func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	var exempt bool
-	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND is_active)`, customerID).Scan(&exempt)
-	return exempt, err
+func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	return tax.ExemptionCovering(ctx, r.ex(ctx), customerID, day)
 }
 
 func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error) {

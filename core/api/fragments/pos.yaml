@@ -2631,6 +2631,12 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        tax_exemption:
+          type: [object, "null"]
+          description: "Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day."
+          properties:
+            certificate_number: {type: string, description: "The certificate's number as the counter shows it."}
+            expiry_day: {type: string, description: "The certificate's last day, YYYY-MM-DD; absent when it does not expire."}
         lines:
           type: array
           items:
@@ -3060,7 +3066,7 @@ components:
         limit: {type: integer}
     PosTillReport:
       type: object
-      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, movements, movement_totals_by_kind]
+      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, refunds_by_method, movements, movement_totals_by_kind]
       properties:
         session:
           $ref: "#/components/schemas/PosTillSession"
@@ -3081,6 +3087,10 @@ components:
         expected_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
+        refunds_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. Always present on a live read; a Z report frozen before the figure existed carries none in its stored payload."
         over_short_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
