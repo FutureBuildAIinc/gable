@@ -230,17 +230,83 @@ the `migrate` service has to finish before the others start.
   implementation, and the worklist and the export say on screen that the
   dealer confirms each filing with its own adviser.
 
+## Running from prebuilt images
+
+The recipe above builds the images on the host. When the host must not build
+(a shared server whose capacity belongs to other work, a throttled
+workstation), run the same recipe from images that were built elsewhere: the
+repository's `publish-images` workflow builds them on GitHub and pushes them
+to GHCR under the organization, and `deploy/compose.images.yml` runs them. It
+is the same recipe: the same services, the same environment values (every one
+of the six above, with the same refusals), the same health checks, the same
+seed once guard. Only the source of the images changes.
+
+### 1. Build the images
+
+Dispatch the workflow by hand with the commit to build:
+
+```bash
+gh workflow run publish-images.yml -f ref=<commit>
+```
+
+The workflow is dispatch only: it never runs on a push, a schedule or a pull
+request. It checks out that commit, resolves its full sha, and pushes three
+images, all tagged with that sha:
+
+- `ghcr.io/futurebuildaiinc/gable-core:<sha>`: the one core binary, used by
+  the `migrate`, `core` and `worker` services;
+- `ghcr.io/futurebuildaiinc/gable-web:<sha>`: the web image built WITHOUT the
+  persona sign in (the customer's web);
+- `ghcr.io/futurebuildaiinc/gable-web:demo-<sha>`: the same web image built
+  WITH `VITE_AUTH_DEV_MODE=true` (the demo's web).
+
+The run's summary lists the three image refs with their digests. No secret is
+printed or stored.
+
+### 2. Point the platform at the images file
+
+Set the compose file path to `deploy/compose.images.yml` and add two values to
+the environment:
+
+| Value | What it is |
+|---|---|
+| `GABLE_IMAGE_TAG` | Required. The commit sha the images were built for (the `<sha>` above). The file refuses to start without it. |
+| `GABLE_WEB_TAG_PREFIX` | Empty by default (the customer's web, built without the persona sign in). The demo sets it to `demo-`, so the web service runs `ghcr.io/futurebuildaiinc/gable-web:demo-<sha>`. |
+
+Everything else is the recipe as written above: the demo variant sets the same
+four demo values (including `AUTH_MODE=dev`, with the same warning), the
+customer variant leaves them unset and sets `JWKS_URL`. A deployment upgrade
+is: dispatch the workflow for the new commit, change `GABLE_IMAGE_TAG`, deploy
+again. The `migrate` service applies the new migrations before the others
+start, and the volume keeps the data.
+
+The `web` service still mounts the repository's `web/nginx-local-api.conf`,
+so the platform keeps its checkout of this repository at the same commit; only
+the building moved to the workflow.
+
+### 3. The pull credential
+
+If the GHCR packages are private, the platform cannot pull the images until
+the repository owner (who owns the packages) sets up a read only pull
+credential for the platform's host and adds it where the platform keeps its
+registry credentials. That credential belongs to the platform's own settings,
+set by the repository owner: **never put a credential in this repository.**
+With the packages public, no credential is needed.
+
 ## The check
 
-`deploy/check.sh` is the recipe's static check. It starts nothing, builds
+`deploy/check.sh` is the recipe's static check, for `deploy/compose.yml` and
+`deploy/compose.images.yml` both. It starts nothing, builds
 nothing and reaches nothing:
 
 ```bash
 bash deploy/check.sh
 ```
 
-It proves that the compose file parses, that it refuses to start when one of
-the six required values is missing, that no service publishes a host port,
-that every long running service has a health check, that the images are
-built from this repository's own Dockerfiles, and that the customer variant
-passes `JWKS_URL` and `AUTH_ISSUER` to `core`.
+It proves that each compose file parses, that it refuses to start when one of
+the six required values is missing (the images file also refuses without
+`GABLE_IMAGE_TAG`), that no service publishes a host port,
+that every long running service has a health check, that `deploy/compose.yml`
+builds from this repository's own Dockerfiles while `deploy/compose.images.yml`
+runs prebuilt image refs pinned to the required tag, and that the customer
+variant passes `JWKS_URL` and `AUTH_ISSUER` to `core`.
