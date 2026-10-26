@@ -6746,7 +6746,7 @@ export interface paths {
         };
         /**
          * The counter's dealer rules
-         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
          */
         get: operations["posSettingsGet"];
         /**
@@ -16917,13 +16917,13 @@ export interface components {
                 check_limit_cents: number | null;
                 check_id_required: {
                     /**
-                     * @description Never asks for an ID; every_check asks on every check; over_amount asks on checks over the figure.
+                     * @description Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale.
                      * @enum {string}
                      */
                     mode: "never" | "every_check" | "over_amount";
                     /**
                      * Format: int64
-                     * @description The figure an over_amount rule names; null on the other two.
+                     * @description The figure an over_amount rule names, read against the sale's checks in total; null on the other two.
                      */
                     over_cents: number | null;
                 };
