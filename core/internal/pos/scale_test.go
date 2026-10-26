@@ -553,3 +553,69 @@ func TestWeighedLineRefusesAQuantityEdit(t *testing.T) {
 		t.Errorf("quantity edit of a weighed line = %d, want a refusal: %s", r.status, r.raw)
 	}
 }
+
+// The printed receipt carries the ticket: the consecutive number, the gross,
+// tare and net, and the Handbook 44 marking when the weight was typed.
+func TestWeighedSaleReceiptPrintsTheTicket(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withScale(), withRealThermalReceipts())
+	productID := f.bulkProduct(t, "TON", "30.00", "")
+	f.scale.SetWeightStableMilli(32000000, scale.UnitPound)
+	in := f.weighIn("TRUCK-R")
+	saleID := f.startSale(nil)
+	added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	f.scale.SetWeightStableMilli(44400000, scale.UnitPound)
+	out := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+		"sale_id": saleID, "line_id": str(t, firstLineOf(t, added.body), "id"), "weigh_in_ticket_id": str(t, in.body, "id"),
+		"revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if out.status != http.StatusOK {
+		t.Fatalf("weigh out = %d: %s", out.status, out.raw)
+	}
+	ticketNumber := str(t, out.body["ticket"].(map[string]any), "ticket_number")
+	cur := f.getSale(t, saleID)
+	if r := f.completeSale(saleID, tender("cash", num(t, cur, "total_cents"))); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	printed := f.printReceipt(saleID, "layout=thermal80")
+	if printed.status != http.StatusOK {
+		t.Fatalf("print = %d: %s", printed.status, printed.raw)
+	}
+	for _, want := range []string{ticketNumber, "G 44400", "T 32000", "N 12400"} {
+		if !strings.Contains(string(printed.raw), want) {
+			t.Errorf("the receipt misses %q", want)
+		}
+	}
+	if strings.Contains(string(printed.raw), "MAN WT") {
+		t.Error("a scale reading prints no manual marking")
+	}
+}
+
+func TestManualWeightReceiptPrintsTheMarking(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withRealThermalReceipts())
+	productID := f.bulkProduct(t, "TON", "30.00", "")
+	saleID := f.startSale(nil)
+	added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/items/"+str(t, firstLineOf(t, added.body), "id")+"/weight",
+		map[string]any{"weight_lb": "12400", "reason": "scale_offline", "revision": rev(t, added)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("manual weight = %d: %s", r.status, r.raw)
+	}
+	ticketNumber := str(t, firstLineOf(t, r.body), "scale_ticket_number")
+	cur := f.getSale(t, saleID)
+	if c := f.completeSale(saleID, tender("cash", num(t, cur, "total_cents"))); c.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", c.status, c.raw)
+	}
+	printed := f.printReceipt(saleID, "layout=thermal80")
+	if printed.status != http.StatusOK {
+		t.Fatalf("print = %d: %s", printed.status, printed.raw)
+	}
+	for _, want := range []string{"MAN WT", ticketNumber, "N 12400"} {
+		if !strings.Contains(string(printed.raw), want) {
+			t.Errorf("the receipt misses %q", want)
+		}
+	}
+}

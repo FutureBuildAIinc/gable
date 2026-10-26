@@ -83,7 +83,9 @@ type ThermalReceipt struct {
 
 // ThermalLine is one sold line as the paper prints it: the product's own
 // SKU and description, the quantity with its unit, the unit price with its
-// price unit, and the extension in cents.
+// price unit, and the extension in cents. A weighed line (CP-19) also
+// carries its ticket number and the gross, tare and net the ticket proves;
+// a typed weight prints the Handbook 44 marking MAN WT.
 type ThermalLine struct {
 	SKU         string
 	Description string
@@ -92,6 +94,12 @@ type ThermalLine struct {
 	UnitPrice   httpx.Price
 	PriceUOM    string
 	LineTotal   httpx.Cents
+
+	ScaleTicket   string
+	WeightGrossLb *httpx.Quantity
+	WeightTareLb  *httpx.Quantity
+	WeightNetLb   *httpx.Quantity
+	ManualWeight  bool
 }
 
 // ThermalTender is one tender leg: the method, the amount tendered, the
@@ -205,6 +213,21 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 		ext := b.style.Money(l.LineTotal)
 		rightSide := qty + "    " + price + "    " + ext
 		add(thermalRowTiny, text.NewCol(thermalGridSize, rightSide, props.Text{Size: 7, Align: align.Right}))
+		// The weighed line's ticket line (CP-19): the marking the handbook
+		// names for a typed weight, the ticket number, and the gross, tare
+		// and net the ticket proves.
+		if l.ScaleTicket != "" {
+			mark := ""
+			if l.ManualWeight {
+				mark = "MAN WT "
+			}
+			weigh := ""
+			if l.WeightGrossLb != nil && l.WeightTareLb != nil && l.WeightNetLb != nil {
+				weigh = "  G " + l.WeightGrossLb.WireString() + " lb  T " + l.WeightTareLb.WireString() +
+					" lb  N " + l.WeightNetLb.WireString() + " lb"
+			}
+			add(thermalRowTiny, text.NewCol(thermalGridSize, mark+l.ScaleTicket+weigh, props.Text{Size: 7, Align: align.Right}))
+		}
 	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 
