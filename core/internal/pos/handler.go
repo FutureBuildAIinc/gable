@@ -758,6 +758,7 @@ func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
 		report.TenderedByMethod = map[string]int64{}
 		report.SalesTotalCents = 0
 		report.ChangeCents = 0
+		report.RefundsByMethod = map[string]int64{}
 		report.MovementTotalsByKind = map[string]int64{}
 		report.Movements = []TillMovement{}
 	}
@@ -813,14 +814,13 @@ func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	date := time.Now()
-	if d := q.Get("date"); d != "" {
-		parsed, err := time.Parse("2006-01-02", d)
-		if err != nil {
+	// no date is each report's branch's today, read in the branch's own zone
+	date := q.Get("date")
+	if date != "" {
+		if _, err := time.Parse("2006-01-02", date); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
-		date = parsed
 	}
 	list, err := h.service.ListZReports(r.Context(), q.Get("register_id"), date)
 	if err != nil {
