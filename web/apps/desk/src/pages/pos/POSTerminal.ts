@@ -1192,6 +1192,11 @@ export class POSTerminal extends LitElement {
    * changes nothing.
    */
   private get _roundingMode(): CashRoundingMode | null {
+    const regBranchId = this._register?.branch_id;
+    if (regBranchId) {
+      const regBranch = branchContext.branches.find((b) => b.id === regBranchId);
+      if (regBranch?.cash_rounding_mode) return regBranch.cash_rounding_mode;
+    }
     return branchContext.current?.cash_rounding_mode ?? null;
   }
 
