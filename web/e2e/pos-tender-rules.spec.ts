@@ -21,13 +21,16 @@ async function signIn(page: Page, name: string) {
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
 }
 
-/** A product with stock at the branch and a price, for the counter search. */
+/** The stocked product with the highest price, so a few units cover the checks this walk takes. */
 async function stockedProduct(request: APIRequestContext): Promise<{ sku: string }> {
   const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string }[];
+    items: { id: string; sku: string; base_price_ten_thousandths: number }[];
   };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
+  const priced = products.items
+    .filter((p) => !p.sku.startsWith('E2E-'))
+    .map((p) => ({ ...p, price: Number(p.base_price_ten_thousandths) || 0 }))
+    .sort((a, b) => b.price - a.price);
+  for (const p of priced) {
     const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
       items: { location_name: string; available: string }[];
     };
