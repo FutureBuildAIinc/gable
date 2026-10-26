@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { fillAppDialogPrompt } from './app-controls';
+import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-controls';
 
 /**
  * The manager step up at the terminal (CP-04, with CP-08's pickup and sign
@@ -84,9 +84,9 @@ async function openPayment(page: Page) {
 }
 
 /** Types the PIN on the step up dialog's keypad and approves. */
-async function stepUp(page: Page, pin: string) {
+async function stepUp(page: Page, pin: string, staffNo: string) {
   await expect(page.getByTestId('step-up-dialog')).toBeVisible();
-  await page.getByTestId('step-up-manager').selectOption({ index: 1 });
+  await pickOptionByValue(page.getByTestId('step-up-manager'), staffNo);
   for (const d of pin) await page.getByTestId(`step-up-key-${d}`).click();
   await page.getByTestId('step-up-approve').click();
 }
@@ -121,12 +121,13 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
   await expect(page.getByTestId('pos-check-over')).toBeVisible();
   await page.getByTestId('pos-check-ask-manager').click();
   await fillAppDialogPrompt(page, 'e2e: the manager knows this customer');
+  await answerAppDialog(page, 'Approve');
 
   // The wrong PIN is refused in plain words; the right one approves and the
   // manager is named.
-  await stepUp(page, WRONG_PIN);
+  await stepUp(page, WRONG_PIN, manager.staffNo);
   await expect(page.getByTestId('step-up-refusal')).toContainText('That PIN is not right');
-  await stepUp(page, PIN);
+  await stepUp(page, PIN, manager.staffNo);
   await expect(page.getByText(`Approved by ${manager.name}`)).toBeVisible({ timeout: 15000 });
 
   // The sale completes on the check the manager approved.
@@ -159,7 +160,7 @@ test('a pickup taken and a held variance signed off by the manager\'s PIN', asyn
   await page.getByTestId('movement-kind-pickup').click();
   await page.getByTestId('movement-amount').fill('20.00');
   await page.getByTestId('movement-ask-manager').click();
-  await stepUp(page, PIN);
+  await stepUp(page, PIN, manager.staffNo);
   await expect(page.getByText(/Pickup of \$20\.00 recorded/)).toBeVisible({ timeout: 15000 });
   const current = (await (await request.get('/api/v1/pos/till/current')).json()) as { id: string };
   const movements = (await (await request.get(`/api/v1/pos/till/${current.id}/movements`)).json()) as {
@@ -182,6 +183,6 @@ test('a pickup taken and a held variance signed off by the manager\'s PIN', asyn
   const reason = queue.locator('input[type="text"]').first();
   await reason.fill('e2e: counted twice, short accepted');
   await queue.getByRole('button', { name: 'Sign off' }).click();
-  await stepUp(page, PIN);
+  await stepUp(page, PIN, manager.staffNo);
   await expect(page.getByText(new RegExp(`signed off by ${manager.name}`))).toBeVisible({ timeout: 15000 });
 });
