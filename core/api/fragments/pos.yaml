@@ -2368,7 +2368,7 @@ components:
     PosReturnReasonCode:
       type: string
       description: "The closed lowercase list of return reasons; an absent reason is other."
-      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, mis_tint, other]
     PosWayForward:
       type: object
       required: [kind, available, message]
@@ -2679,7 +2679,7 @@ components:
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit
         (with its component lines), charge and text lines, the priced fields
         null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -2713,6 +2713,11 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null on every other line.
         created_at: {type: string, format: date-time}
     PosTender:
       type: object
@@ -2768,7 +2773,7 @@ components:
     PosReturnLine:
       type: object
       description: One returned line, its quantity and extension negative.
-      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents]
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents, mis_tint, tinted_return]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -2781,6 +2786,8 @@ components:
         restock: {type: boolean}
         reason_code: {$ref: "#/components/schemas/PosReturnReasonCode"}
         restocking_fee_cents: {type: integer, format: int64, description: "The fee this line's reason withheld from its refund, half even to the cent."}
+        mis_tint: {type: boolean, description: "The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned."}
+        tinted_return: {type: boolean, description: "A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock."}
     PosTillSession:
       type: object
       description: >-

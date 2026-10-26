@@ -41,7 +41,7 @@ type LineRequest struct {
 	VendorID         *string         `json:"vendor_id"`
 	SpecialOrderCost json.RawMessage `json:"special_order_unit_cost_ten_thousandths"`
 	Tally            *TallyRequest   `json:"tally"`
-	Tint             *TintRequest    `json:"tint"`
+	Tint             *TintRequest    `json:"tint,omitempty"`
 }
 
 // TintRequest is a paint line's tint as the counter sends it: the colour and

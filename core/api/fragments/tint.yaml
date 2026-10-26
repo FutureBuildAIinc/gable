@@ -642,3 +642,25 @@ components:
       type: object
       properties:
         tint_charge_cents: { type: integer }
+
+    LineTint:
+      type: object
+      description: A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed.
+      required: [formula_id, color_code, color_name, base_code, container_size_code, rescaled, tint_charge_cents, components]
+      properties:
+        formula_id: {type: [string, "null"], format: uuid}
+        color_code: {type: string}
+        color_name: {type: string}
+        base_code: {type: string}
+        container_size_code: {type: string}
+        rescaled: {type: boolean, description: True when the amounts were rescaled to this size; the counter may override any of them.}
+        tint_charge_cents: {type: [integer, "null"], format: int64}
+        components:
+          type: array
+          items:
+            type: object
+            required: [colorant_code, colorant_name, amount]
+            properties:
+              colorant_code: {type: string}
+              colorant_name: {type: string}
+              amount: { $ref: '#/components/schemas/TintAmount' }

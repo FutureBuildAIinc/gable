@@ -213,6 +213,7 @@
             "stock_uom": "PCS",
             "tally": null,
             "taxable": true,
+            "tint": null,
             "unit_price_ten_thousandths": 47500,
             "uom": "PCS",
             "uom_qty": "1",
