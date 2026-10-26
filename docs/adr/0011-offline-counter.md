@@ -242,6 +242,7 @@ side it falls on:
 | Tax quote fingerprint | `tax_quote_stale` | Replaced: no provider call; the recorded tax is verified against the snapshot (3.3) |
 | Customer exemption and branch rate | `CustomerExempt`, `BranchTaxRate`, `tax_rate_not_configured` | Replaced: the snapshot's exemption flag and rate |
 | Nothing due, tender short, change only from cash, legs sum | `no_tender_due`, `insufficient_tender`, `change_from_cash`, `legs_do_not_sum` | Live: arithmetic over the recorded figures; a failure is `tender_mismatch` to the queue |
+| At most one account leg and one store credit leg | `legsRefusal` (`one_account_leg`, `one_store_credit_leg`), in `CompleteSale` before the transaction | Live: the sync runs the same check before the transaction, where the live path runs it, and refuses the item to the queue as `one_account_leg`; a store credit leg is refused earlier as `tender_not_offline` (section 1) |
 | Walk in on account | `walk_in_account` | Live (the device never offers it; a failure is a forged item) |
 | PO required | `po_required` | Replaced: the snapshot's PO flag; a PO present when the snapshot required one |
 | Buyer roster | `checkBuyer` | Replaced: the snapshot's roster |
@@ -360,6 +361,7 @@ what it cannot post or cannot verify:
 | A product, customer or register that no longer exists or is outside the syncing user's wall (`out_of_wall`) | Refused to the queue. |
 | A session that belongs to another register (`out_of_wall`) | Refused to the queue. |
 | A sale whose cashier is not the session's own cashier (`cashier_mismatch`) | Refused to the queue. |
+| A sale with two account legs (`one_account_leg`) | Refused to the queue. |
 | The replaced live cart is settled or has an open terminal intent (`replaced_sale_settled`) | Refused to the queue; nothing voided. |
 | A price, a tax figure or a line's taxable flag (`tax_flag_unverified`) that does not match the snapshot, a cap exceeded, a tender not allowed offline, tenders that do not add up, a bad signature, a broken chain, a revoked device, an unknown snapshot, a replay mismatch, a reused sequence | Refused to the queue (sections 2 and 6). |
 | A sequence gap, or a link that does not meet the chain head (`broken_chain`) | The items after it are held without posting and re-offered automatically on each sync until the link arrives (chain paragraph below); a gap still open at the till close is a manager item, and an accepted gap leaves a `sequence_gap` item naming the missing numbers. |
@@ -579,10 +581,11 @@ section 1 rules R3 and R4 for the extension, ADR 0005 section 3 for the
 tax; the server's `httpx.Extend` and `salesdoc.TaxAt`), never a float and
 never through text. Two implementations of one rule have to agree to the
 cent, so one fixture file of sales (the prices, the quantities, the units
-and the rates, with the rounding cases on both sides of a half and a line
-in a unit other than the price unit) runs through the Go engine and the
-Rust core, and both must answer the same cents for the line extensions,
-the taxable flag, the tax, the tender sums and the change (section 7). The
+and the rates, with the rounding cases on both sides of a half, a line in
+a unit other than the price unit and a contract price in its own unit)
+runs through the Go engine and the Rust core, and both must answer the same
+cents for the line extensions, the taxable flag, the tax, the tender sums and
+the change (section 7). The
 page is not in that loop: it computes no figure of a sale (5.3), so a
 sale's figures come from the core alone.
 
@@ -627,8 +630,9 @@ A reload with no connection would then show nothing, so the desk bundle
 gains a service worker on that origin that precaches its assets for the
 `/pos` route only (no API response is cached by it). The desk registers
 that worker only when it runs as the shell's frame: the frame carries
-`framed_by=work_shell` (`web/packages/design-system/src/framed.ts`), and a
-desk open in a browser tab at the dealer installs nothing, so a browser
+`gable-framed=work-shell` (`FRAMED_PARAM` and `FRAMED_BY_WORK_SHELL`,
+`web/packages/design-system/src/framed.ts`), and a desk open in a browser
+tab at the dealer installs nothing, so a browser
 session never serves a stale desk bundle. Bundling the desk into the
 app's `frontendDist` is rejected: the page's origin would become the app's,
 every API call would cross origins, and the framed protocol's one origin
@@ -708,18 +712,20 @@ returns, for the register's branch:
 - the products with their unit, price unit, taxable flag and on hand at the
   branch (the `GetProductCatalog` query, branch scoped, widened with the
   taxable flag and the price unit it does not select today; its walk in
-  price column is replaced by the sheet below), and with the exact pair
-  each unit the product is sold in takes to that price unit, so a line in
-  any of the product's sale units is extended exactly as the live counter
-  extends it;
+  price column is replaced by the sheet below), and with the units the
+  product is sold in;
 - a price sheet keyed by price key: `walkin`, the engine's answer for the
   walk in customer (the customer row `priceLine` prices a walk in sale for,
   so the offline walk in price is the online one), and, for each cached
   account, the server's own resolution of ADR 0006 rungs 1, 3 and 4 per
   product (its contract, else its category rules, account then profile then
-  level, else its level), precomputed in the product's price unit. Rungs 1,
-  3 and 4 take no quantity, so each row is exactly what the engine answers
-  online for any quantity when no rung 2 rule applies;
+  level, else its level). Rungs 1, 3 and 4 take no quantity, so each row is
+  exactly what the engine answers online for any quantity when no rung 2
+  rule applies. **Each row carries the unit the engine answered in**,
+  because that unit is the rung's own and not one unit per product (ADR
+  0006's rung table: a contract answers in its own `price_uom`, a level
+  price in its own, a cost-derived level in the unit it derives from), and
+  the core extends the line with the pair that unit takes (Units below);
 - the branch tax rate;
 - the cached accounts (the branch's accounts with an `allowed` verdict: id,
   name, account number, terms kind, credit limit, open receivable, check
@@ -752,13 +758,15 @@ account's own price is not on this register" beside the line, and the
 receipt marks the line "level price".
 
 **Units.** A line offline is sold in any unit the product is sold in, as
-live. The snapshot carries the price unit and, per unit the product is sold
-in, the exact pair that unit takes to it, precomputed by the server from
-the product's unit set (the pair the engine resolves, ADR 0006 section 3.3),
-and the core extends the line with that pair. A unit with no exact pair to
-the price unit is not in the snapshot, and the core refuses that line
-offline as the live counter refuses it (ADR 0006 section 3.4). The pairs are
-exact decimals, never factors (ADR 0006 section 1 rule R1), so the
+live. The snapshot carries, per product, the price units its sheet rows
+answer in, and per price unit the exact pair each unit the product is sold
+in takes to it, precomputed by the server from the product's unit set (the
+pair the engine resolves, ADR 0006 section 3.3). A line is extended with
+the pair of the price unit its own row answers in, which is the pair the
+engine builds for that answer (ADR 0006 section 3.3). A unit with no exact
+pair to that price unit is not in the snapshot, and the core refuses that
+line offline as the live counter refuses it (ADR 0006 section 3.4). The
+pairs are exact decimals, never factors (ADR 0006 section 1 rule R1), so the
 extension is exact until its one rounding.
 
 **The price key is bound to the customer.** A sale's price key is not the
@@ -828,7 +836,10 @@ so a refused sale never breaks the chain for the sales after it.
 **6.2 Prices in the queue.** The server never reprices an offline sale. It
 verifies each line's unit price against the price the named snapshot gave
 for that product and the sale's price key, and each line's extension by the
-arithmetic of ADR 0006 section 5.4. A mismatch refuses the sale as
+arithmetic of ADR 0005 section 2.4 and ADR 0001 section 7a, with the pair
+the snapshot carries for that price unit and the line's unit (one rounding,
+half away from zero, and no rounding before it, ADR 0006 section 5.4). A
+mismatch refuses the sale as
 `price_unverified` (exception queue, the manager accepts or writes off). A
 sale naming a snapshot that was not issued to its register and epoch is
 refused as `snapshot_unknown`. Each recorded line's taxable flag must be
@@ -951,6 +962,13 @@ Server (Go, a named test database, `CI=true`):
   no posting, and the till close and day close refusals while it is open;
   one per resolution proves the posting and, for the late post, the ledger
   balancing to the money counted.
+- **The price key is the customer's:** a signed sale for account A that
+  carries account B's price key, and a walk in sale that carries an account
+  key, are both refused `price_unverified` and post nothing, so a signed
+  sale cannot price an account at another account's price.
+- **Two account legs:** a signed sale carrying two account legs is refused
+  `one_account_leg` to the queue and posts nothing, the check the live
+  counter makes before its transaction.
 - **The shared arithmetic:** the fixture file
   `testdata/offline-arithmetic.json` runs through the Go engine, and its
   answers are the ones the Rust core must match (the Rust test runs the
@@ -988,6 +1006,11 @@ Server (Go, a named test database, `CI=true`):
   Forced past that (the test issues the snapshot directly), the next account
   sale under the new snapshot that, with the earlier one, crosses the room
   is `cap_exceeded` once both sync.
+- **Two registers on one account:** two registers on one branch sell to one
+  account, each under the per account cap. Each register's room is its own:
+  neither is reduced by the other's recorded tenders, so each may take the
+  whole cap, and the branch's exposure is at most the cap times the two
+  registers offline, the figure the settings screen shows.
 - **The drain rule and the snapshot refusal:** a register holding one item
   the server recorded (a held sale whose predecessor is missing) is
   answered when it asks for a new snapshot, because the item is recorded
@@ -1073,7 +1096,7 @@ Client (vitest for the queue and cart; Playwright in
 - **Reload offline:** the counter reloads with no network and the queue is
   still there (proves 5.2 and the Rust store).
 - **The worker follows the frame:** the desk registers the service worker
-  only when it runs as the shell's frame (`framed_by=work_shell`), and a
+  only when it runs as the shell's frame (`gable-framed=work-shell`), and a
   desk open in a browser tab at the dealer installs nothing.
 - **A refused snapshot says why:** the strip names the item that waits and
   its number, and says the register keeps selling on the snapshot it holds
@@ -1096,10 +1119,11 @@ taxable flag, the tax, the tender sums and the change; the Go side runs it
 as a Go test (`core/internal/salesdoc`), the Rust side as a Rust test, and
 the fixture file is the only thing the two share, so neither can drift
 from the other without a red test. The fixture holds the rounding cases on
-both sides of a half, a line in a unit other than the price unit, and a
-line whose conversion is not exact (refused by both). **The capability:**
-the queue commands answer the Gable the shell loaded and refuse every
-other origin, and the grant carries the queue commands only.
+both sides of a half, a line in a unit other than the price unit, a
+contract price in its own unit, a cost-derived level in the unit it
+derives from, and a line whose conversion is not exact (refused by both).
+**The capability:** the queue commands answer the Gable the shell loaded and
+refuse every other origin, and the grant carries the queue commands only.
 
 ### 8. The build plan
 
@@ -1109,14 +1133,14 @@ data and security change and gets the project's money review.
 | Slice | What | Size |
 |---|---|---|
 | O1 | Migration: `pos_offline_policy`, `pos_register_devices`, `pos_offline_snapshots`, `pos_offline_exceptions` (unique `sale_id`, unique register, epoch and sequence); on `pos_transactions` the epoch, sequence, offline reference, snapshot id, signature digest, `offline_session_id`, `replaces_sale_id` (a UUID referencing `pos_transactions(id)`, indexed for the replaced cart lookup), the declaration columns `different_customer` and `unknown_cart_id`, the device's queue count and total, the confirmed mark the sale carries, and the unique index; the `OFFLINE_RATE` tax source and its CHECK constraints widened; the `ABANDONED` sale status in the status CHECK and the wire enum. Policy read and write routes with audit. Contract rows. | 12 to 18 |
-| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, the exact pair each unit a product is sold in takes to its price unit, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 18 to 29 |
-| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 42 to 62 |
+| O2 | Device enrolment and revocation routes (with the session revocation of 6.1); the snapshot route (refusing `queue_not_drained`) with the precomputed account price sheet, each row carrying the unit the engine answered in, the exact pair each unit a product is sold in takes to each of those price units, its storage and its size measured on the demo seed; the confirmed mark every sync answer carries back to the device. | 19 to 31 |
+| O3 | The sync rebuilt: the offline verdict in `completeSaleTx` (3.1), verification (signature, chain over every verified item, snapshot price, tax and each line's taxable flag, the account room across batches and snapshots, the signed queue figures and the confirmed mark they are checked against), the drain test against the highest sequence the server has recorded, the replaced cart lock and check, duplicates across both tables (bad signature rows not counted, superseded), the strict chain with held `broken_chain` items re-offered automatically under a savepoint, the chain restart after an accepted gap, `late_after_gap`, the price key bound to the customer, `sequence_reused`, the exception write repeating the duplicate check under 0a and the session lock, open account exceptions subtracted from the room once, the two session rules of 6.3, the OPEN to ABANDONED transition, the two legs check the live path runs before its transaction, the delete of the three step path in `sync.go`. Concurrency, numbering and no re-decision tests, and the Go half of the shared arithmetic fixture. | 43 to 64 |
 | O4 | The exception list, its resolutions (retry, accept, late post with no session and the cash and check reclass, write off, settled replaced cart) under locks 0a and 0b, the close reading the exception rows without a row lock, and the till close and day close refusals with their race test. | 19 to 31 |
-| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the core's exact arithmetic (the extension with the snapshot's pairs, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 31 to 49 |
+| C1 | The Rust queue store, keychain keys, signing, commands and fence in `tauri/core` and `tauri/gable-work`; the core's own copy of the snapshot, its pricing, its tax, the room, the caps and the queue figures, and the sequence and chain link it assigns itself; the sign path that refuses a sale whose figures differ from that copy; the core's exact arithmetic (the extension with the snapshot's pairs for the unit the row answers in, the tax, the tender sums), its half of the shared arithmetic fixture, so it agrees with the server to the cent; the capability added at run time for the Gable the shell loaded, and the enrolment's own setting that replaces the `GABLE_WORK_URL` environment variable; the refusal to sell offline when the store is missing under a live enrolment; the service worker for `/pos` on the running Gable's origin, registered only in the shell's frame and proven in each webview, and the "do not reload" warning where one refuses it. | 32 to 51 |
 | C2 | The counter's offline mode in `POSTerminal.ts`: the local cart, whose lines, units, quantities and tender the page holds and whose every figure the Rust core answers (5.1, 5.3), the page computing none of them, the result unknown cart with the default `replaces_sale_id`, the "different customer" declaration and the waiting till close, the tender rules, the banner and strip, the offline receipt, the sync driver with the drain before any snapshot refresh and the reconnect handling of an unknown cart, the signed queue figures and the confirmed mark, the drain before close. `work-offline` keeps its fence and names the counter's queue as the one exception. | 30 to 44 |
 | C3 | The manager screens: offline exceptions on the branch day page, the counter's offline settings, device enrolment. | 12 to 20 |
 | P1 | The Playwright and two register proofs of section 7, the walk in `docs/parity/WALKS.md`, the parity row and the superseded documents of the Status updated. | 10 to 16 |
-| | **Total** | **174 to 269** |
+| | **Total** | **177 to 275** |
 
 O1 to O4 can run beside C1. C2 needs O2 and C1; C3 needs O4; P1 is last.
 
@@ -1146,8 +1170,11 @@ offline, so CP-05 does not gate it.
 - The invoice series stays gapless and server minted; offline receipts
   carry a register reference until sync. A jurisdiction that requires an
   invoice number on the customer's receipt at the moment of sale would need
-  per register invoice series (ADR 0005 section 4.1's named escape), a
-  later decision.
+  a per register invoice series, which is an amendment to ADR 0005 section
+  4.1: its named escape is one series per branch (`invoice:<branch code>`),
+  and a per register series (`invoice:<branch code>:<register id>`) would
+  have to keep that counter's gaplessness, never a sequence. A later
+  decision.
 - Tax on offline sales is booked as charged at the branch rate. A dealer on
   the external provider sees offline sales tagged `OFFLINE_RATE`, ready for
   the provider commit when that lands.
@@ -1164,13 +1191,19 @@ offline, so CP-05 does not gate it.
   offline off; the `money_never_queues` code stays in the enum with that
   meaning.
 - New surface to maintain: four tables, three routes, one shell module, one
-  manager screen, one shared fixture set. Estimated at 174 to 269 dev hour
+  manager screen, one shared fixture set. Estimated at 177 to 275 dev hour
   equivalents.
 
 **Open items** (left for later decisions):
 
 - Per register invoice series, for a jurisdiction that requires an invoice
-  number on the receipt at the moment of sale (ADR 0005 section 4.1).
+  number on the receipt at the moment of sale. It needs ADR 0005 section 4.1
+  amended: that escape is one series per branch (`invoice:<branch code>`) and
+  never a sequence, and a per register series
+  (`invoice:<branch code>:<register id>`) would keep that counter's
+  gaplessness.
 - Card offline, if the card processor later documents store and forward.
 - Promotions, quantity breaks and job prices offline, if dealers ask for
   them.
+- Offline prices include category rules (rung 3); item 224 named contract,
+  level and walk in prices; the principal confirms or narrows this.
