@@ -7,6 +7,9 @@
  * ApiError, so a page can show the message, the field details and the stale revision.
  */
 import type {
+    Alert,
+    AlertPage,
+    AlertRequest,
     Contact,
     ContactPage,
     ContactRequest,
@@ -46,6 +49,15 @@ export interface ListChildParams {
     includeTotal?: boolean;
 }
 
+/** The alerts list's parameters: the platform three and the state it holds. */
+export interface ListAlertsParams {
+    /** The state the list holds: the open alerts (the default), the ended ones, or both. */
+    state?: 'open' | 'ended' | 'all';
+    limit?: number;
+    cursor?: string | null;
+    includeTotal?: boolean;
+}
+
 function toQuery(entries: [string, string | undefined | null][]): string {
     const q = new URLSearchParams();
     for (const [k, v] of entries) if (v !== undefined && v !== null && v !== '') q.set(k, v);
@@ -67,6 +79,15 @@ export function buildCustomerQuery(params: ListCustomersParams = {}): string {
 export function buildChildQuery(params: ListChildParams = {}): string {
     return toQuery([
         ['is_active', params.isActive === undefined || params.isActive === null ? undefined : String(params.isActive)],
+        ['limit', params.limit ? String(params.limit) : undefined],
+        ['cursor', params.cursor],
+        ['include', params.includeTotal ? 'total' : undefined],
+    ]);
+}
+
+export function buildAlertQuery(params: ListAlertsParams = {}): string {
+    return toQuery([
+        ['state', params.state],
         ['limit', params.limit ? String(params.limit) : undefined],
         ['cursor', params.cursor],
         ['include', params.includeTotal ? 'total' : undefined],
@@ -331,8 +352,41 @@ export const CustomerService = {
         );
     },
 
-    // Reference lists
+    // Alerts: the office's notes and warnings for the counter and the order desk
 
+    async listAlerts(customerId: string, params: ListAlertsParams = {}): Promise<AlertPage> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts${buildAlertQuery(params)}`),
+            'Failed to fetch alerts',
+        );
+        return response.json();
+    },
+
+    async addAlert(customerId: string, request: AlertRequest): Promise<Alert> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(request),
+            }),
+            'Failed to add alert',
+        );
+        return response.json();
+    },
+
+    /** An alert is ended, not deleted: the row stays for the audit trail. The revision travels in If-Match. */
+    async endAlert(customerId: string, alertId: string, revision: number): Promise<Alert> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts/${alertId}/end`, {
+                method: 'POST',
+                headers: { 'If-Match': ifMatch(revision) },
+            }),
+            'Failed to end alert',
+        );
+        return response.json();
+    },
+
+    // Reference lists
     /** Active terms by default, because only active terms can be newly assigned; pass isActive: null for all of them. */
     async listPaymentTerms(params: ListChildParams = {}): Promise<PaymentTermsRecordPage> {
         const { isActive = true, ...rest } = params;

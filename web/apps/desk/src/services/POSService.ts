@@ -207,13 +207,18 @@ export const posService = {
         return response.json();
     },
 
-    /** The money moment: the tenders in cents on the sale's revision. */
-    async completeSale(saleId: string, revision: number, tenders: TenderIn[]): Promise<Sale> {
+    /**
+     * The money moment: the tenders in cents on the sale's revision. The
+     * acknowledged alerts are the customer's counter alerts the clerk read and
+     * said so about; a warning that asks to be acknowledged and is not named
+     * here is refused with 409 alert_unacknowledged.
+     */
+    async completeSale(saleId: string, revision: number, tenders: TenderIn[], acknowledgedAlertIds: string[] = []): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/complete`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
-                body: JSON.stringify({ tenders }),
+                body: JSON.stringify({ tenders, acknowledged_alert_ids: acknowledgedAlertIds }),
             }),
             'Failed to complete the sale',
         );

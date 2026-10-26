@@ -70,6 +70,8 @@ export class POSTerminal extends LitElement {
   // Can this sale go on account? The server's read of the account (its verdict,
   // the buyer roster, the check limit, the store credit), and the buyer named.
   @state() private _standing: CounterStanding | null = null;
+  /** The counter alerts the clerk has read and said so about on this sale. */
+  @state() private _acknowledgedAlerts: string[] = [];
   @state() private _buyerId = '';
   // The check being entered: its number, the ID checked and its kind; and the
   // largest check a manager approved for this sale (null: none).
@@ -515,6 +517,7 @@ export class POSTerminal extends LitElement {
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: c.id });
       this._customer = c;
       this._standing = null;
+      this._acknowledgedAlerts = [];
       this._buyerId = '';
       this._resetTender();
       this._custQuery = '';
@@ -560,6 +563,7 @@ export class POSTerminal extends LitElement {
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: null });
       this._customer = null;
       this._standing = null;
+      this._acknowledgedAlerts = [];
       this._buyerId = '';
       this._resetTender();
       this._poText = '';
@@ -650,6 +654,46 @@ export class POSTerminal extends LitElement {
       </div>`;
   }
 
+  /**
+   * The customer's alerts at the counter: a note is a quiet line, a warning is
+   * a banner, and a warning that asks to be acknowledged says so until the
+   * clerk has read it.
+   */
+  private _renderAlerts() {
+    const alerts = this._standing?.alerts ?? [];
+    if (alerts.length === 0) return nothing;
+    return html`
+      <div class="mt-2 space-y-1" data-testid="pos-alerts">
+        ${alerts.map((a) => {
+          const acknowledged = this._acknowledgedAlerts.includes(a.id);
+          if (a.kind === 'warning') {
+            return html`
+              <div class="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-100" data-testid="pos-alert-warning" data-alert-id=${a.id}>
+                <span class="font-semibold">Warning:</span> ${a.text}
+                ${a.acknowledge_required
+                  ? html`<div class="mt-1 ${acknowledged ? 'text-amber-300' : 'text-amber-200/90'}" data-testid="pos-alert-ack">
+                      ${acknowledged ? 'Read and acknowledged' : 'The counter must read this before the sale is taken.'}
+                    </div>`
+                  : nothing}
+              </div>`;
+          }
+          return html`
+            <div class="rounded border border-white/10 bg-slate-steel/40 px-2 py-1.5 text-xs text-slate-300" data-testid="pos-alert-note" data-alert-id=${a.id}>
+              <span class="font-semibold">Note:</span> ${a.text}
+            </div>`;
+        })}
+      </div>`;
+  }
+
+  /**
+   * The warning the clerk has not read yet, if any: the one that asks to be
+   * acknowledged and is not on the sale's list of acknowledgements.
+   */
+  private _pendingAcknowledgement() {
+    const alerts = this._standing?.alerts ?? [];
+    return alerts.find((a) => a.acknowledge_required && !this._acknowledgedAlerts.includes(a.id)) ?? null;
+  }
+
   private _renderCustomerPanel() {
     const sale = this._sale;
     // A completed sale's lines are no bar: naming a customer starts the next sale.
@@ -678,6 +722,7 @@ export class POSTerminal extends LitElement {
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}
+          ${this._renderAlerts()}
           ${this._renderBuyerPick(finished)}
           <div class="mt-3 grid grid-cols-2 items-start gap-2">
             <div class="${c.jobs.length > 0 ? '' : 'col-span-2'}">
@@ -753,6 +798,7 @@ export class POSTerminal extends LitElement {
       this._pendingTenders = [];
       this._customer = null;
       this._standing = null;
+      this._acknowledgedAlerts = [];
       this._buyerId = '';
       this._custQuery = '';
       this._custResults = [];
@@ -1281,6 +1327,19 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    // A warning that asks to be acknowledged is read at the counter first: the
+    // clerk says so, and the acknowledgement goes on the sale with it.
+    const pending = this._pendingAcknowledgement();
+    if (pending) {
+      const read = await confirmDialog({
+        title: 'This customer has a warning',
+        body: pending.text,
+        confirmLabel: 'I have read this',
+        cancelLabel: 'Not now',
+      });
+      if (!read) return;
+      this._acknowledgedAlerts = [...this._acknowledgedAlerts, pending.id];
+    }
     await this._completeSale(plan.tenders);
   }
 
@@ -1295,7 +1354,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
-      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
+      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts);
       // the sale completed on the card: the waiting card has nothing left to say
       this._dismissCardWait();
       this._sale = completed;

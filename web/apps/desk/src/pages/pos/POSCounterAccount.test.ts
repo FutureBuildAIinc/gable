@@ -78,6 +78,7 @@ const standing = (over: Partial<CounterStanding> = {}): CounterStanding => ({
   terms_kind: 'net_days', named_buyer_required: false, buyers: [], check_limit_cents: null,
   payment_options: ['cash', 'check', 'card', 'account'],
   on_account: { verdict: 'allowed', reason: '', message: '', over_cents: null, ways_forward: [] },
+  alerts: [],
   ...over,
 });
 
@@ -304,7 +305,7 @@ describe('a check, its ID and its limit', () => {
     await flush();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'check', amount_cents: 1198, reference: '1042', id_checked: true, id_type: 'drivers_license' },
-    ]);
+    ], []);
     expect(el.querySelector('input[name*="number" i]')).toBeNull();
     el.remove();
   });
@@ -352,7 +353,7 @@ describe('a check, its ID and its limit', () => {
     expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'check', 'regular customer', 1198);
     q(el, 'pos-pay').click();
     await flush();
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'check', amount_cents: 1198 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'check', amount_cents: 1198 }], []);
     el.remove();
   });
 
@@ -400,7 +401,7 @@ describe('store credit as a tender', () => {
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'store_credit', amount_cents: 599 },
       { method: 'cash', amount_cents: 599 },
-    ]);
+    ], []);
     el.remove();
   });
 

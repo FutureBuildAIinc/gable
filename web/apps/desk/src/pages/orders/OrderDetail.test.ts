@@ -104,6 +104,32 @@ describe('gable-order-detail - the order contract', () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
+  it('shows the customer alerts marked for orders, and only those, read only', async () => {
+    const customerID = order().customer_id
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/alerts')) {
+        return jsonResponse({
+          items: [
+            { id: 'a1', customer_id: customerID, kind: 'note', text: 'Call before the delivery', show_at_counter: true, show_at_orders: true, acknowledge_required: false, created_by: 'office', created_at: '2026-08-11T14:00:00Z', ended_by: null, ended_at: null, revision: 1 },
+            { id: 'a2', customer_id: customerID, kind: 'warning', text: 'Needs a PO on every order', show_at_counter: true, show_at_orders: false, acknowledge_required: true, created_by: 'office', created_at: '2026-08-11T14:00:00Z', ended_by: null, ended_at: null, revision: 1 },
+          ],
+          next_cursor: null,
+          limit: 200,
+        })
+      }
+      return jsonResponse(order())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const alerts = el.querySelectorAll('[data-testid="order-alert"]')
+    expect(alerts.length).toBe(1)
+    expect(text(el)).toContain('Call before the delivery')
+    // The warning speaks at the counter, not on orders: it is not on this page.
+    expect(text(el)).not.toContain('Needs a PO on every order')
+    // The order page reads the alerts: it does not end them.
+    expect(el.querySelector('[data-testid="order-alert"] button')).toBeNull()
+  })
+
   it('renders the document number and the lowercase status', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     expect(text(el)).toContain('SO-000042')
