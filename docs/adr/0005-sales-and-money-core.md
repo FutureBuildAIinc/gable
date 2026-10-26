@@ -1293,7 +1293,10 @@ The order is by kind, whatever document the path names:
 
 1a. the customer's credit serialization, taken by the acts that read a
    customer's credit exposure (the confirm, the hold release and the
-   fulfilment) right after the order row: a transaction scoped advisory lock
+   fulfilment) right after the order row, and by the AR core's credit hold
+   acts (place, override and release), which take it before the customer
+   row at step 7 so a hold cannot commit inside the window a counter
+   charge sale's completion leaves between its fact read and its commit: a transaction scoped advisory lock
    keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
    id>`). Without it two concurrent confirms of one customer's orders each read
    an exposure that does not yet count the other (a draft is not counted) and

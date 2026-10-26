@@ -294,6 +294,9 @@ func (s *Service) PlaceHold(ctx context.Context, in PlaceHoldIn) (*CreditHold, b
 	var out *CreditHold
 	placed := false
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.lockCreditOrder(ctx, in.CustomerID); err != nil {
+			return err
+		}
 		if _, err := s.lockCustomer(ctx, in.CustomerID); err != nil {
 			return err
 		}
@@ -394,6 +397,9 @@ func (s *Service) ReleaseHold(ctx context.Context, id uuid.UUID, in HoldActIn) (
 		if err := s.CustomerInWall(ctx, hold.CustomerID); err != nil {
 			return err
 		}
+		if err := s.lockCreditOrder(ctx, hold.CustomerID); err != nil {
+			return err
+		}
 		if hold.Status == "released" {
 			return httpx.InvalidStateTransition("the credit hold is already released")
 		}
@@ -453,6 +459,9 @@ func (s *Service) OverrideHold(ctx context.Context, id uuid.UUID, in HoldActIn) 
 			return err
 		}
 		if err := s.CustomerInWall(ctx, hold.CustomerID); err != nil {
+			return err
+		}
+		if err := s.lockCreditOrder(ctx, hold.CustomerID); err != nil {
 			return err
 		}
 		if hold.Status == "released" {
