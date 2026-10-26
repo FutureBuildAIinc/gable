@@ -99,6 +99,34 @@ export interface TenderIn {
     /** The cashier looked at the payer's ID (a check or a charge); the number is never taken. */
     id_checked?: boolean;
     id_type?: IdType;
+    /** The kind of check the tender is (CP-17a): personal_check, cashiers_check, bank_draft, travelers_check or money_order. */
+    instrument?: string;
+}
+
+/** The payer identity a large cash crossing captures at the counter (CP-17a); the sensitive values are sealed at rest. */
+export interface PayerCaptureIn {
+    name: string;
+    address: string;
+    occupation: string;
+    date_of_birth: string;
+    id_type: string;
+    id_number: string;
+    taxpayer_id: string;
+    third_party_payer: boolean;
+}
+
+/** What the large cash preview answered (CP-17a). */
+export interface LargeCashPreview {
+    country: string;
+    rule_family: string;
+    counted_cents: number;
+    aggregate_cents: number;
+    threshold_cents: number;
+    comparator: string;
+    asks_details: boolean;
+    fields: string[];
+    note?: string;
+    dealer_threshold: boolean;
 }
 
 /** One returned line of a return or an exchange. */
@@ -207,15 +235,45 @@ export const posService = {
         return response.json();
     },
 
-    /** The money moment: the tenders in cents on the sale's revision. */
-    async completeSale(saleId: string, revision: number, tenders: TenderIn[]): Promise<Sale> {
+    /** The money moment: the tenders in cents on the sale's revision, with the payer capture and the manager's avoidance mark when the counter holds them (CP-17a). */
+    async completeSale(
+        saleId: string,
+        revision: number,
+        tenders: TenderIn[],
+        extras?: { payer?: PayerCaptureIn; suspected_avoidance?: boolean },
+    ): Promise<Sale> {
+        const body: Record<string, unknown> = { tenders };
+        if (extras?.payer) body.payer = extras.payer;
+        if (extras?.suspected_avoidance !== undefined) body.suspected_avoidance = extras.suspected_avoidance;
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/complete`, {
                 method: 'POST',
                 headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
-                body: JSON.stringify({ tenders }),
+                body: JSON.stringify(body),
             }),
             'Failed to complete the sale',
+        );
+        return response.json();
+    },
+
+    /**
+     * What the branch country's large cash rule asks of this payment before Pay
+     * (CP-17a): the server classifies the tenders against the sale it holds,
+     * so the screen never decides a rule on its own. Writes nothing.
+     */
+    async largeCashPreview(saleId: string, tenders: TenderIn[], suspectedAvoidance = false): Promise<LargeCashPreview> {
+        const wireTenders = tenders.map((t) => {
+            const out: Record<string, unknown> = { method: t.method, amount_cents: t.amount_cents };
+            if (t.instrument) out.instrument = t.instrument;
+            return out;
+        });
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/large-cash/preview`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ transaction_id: saleId, suspected_avoidance: suspectedAvoidance, tenders: wireTenders }),
+            }),
+            'Failed to check the large cash rule',
         );
         return response.json();
     },

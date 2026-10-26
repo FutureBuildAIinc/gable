@@ -15,6 +15,7 @@ import { branchContext } from '../../../services/BranchContext.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import type { Location } from '../../../types/location.ts';
 import { router } from '../../../lib/router.ts';
+import { LargeCashService, type LargeCashSettings } from '../../../services/LargeCashService.ts';
 
 interface BranchForm {
   id?: string;
@@ -29,6 +30,8 @@ interface BranchForm {
   zip?: string;
   phone?: string;
   timezone?: string;
+  /** The branch's country, two letters; empty means the dealer's default country. */
+  country?: string;
   active: boolean;
 }
 
@@ -42,6 +45,7 @@ const EMPTY_FORM: BranchForm = {
   zip: '',
   phone: '',
   timezone: 'America/New_York',
+  country: '',
   active: true,
 };
 
@@ -56,6 +60,9 @@ export class GableAdminBranches extends LitElement {
   @state() private _editorOpen = false;
   @state() private _saving = false;
   @state() private _form: BranchForm = { ...EMPTY_FORM };
+  // The dealer's large cash settings (CP-17a): the default country and the Canadian dealer threshold.
+  @state() private _largeCash: LargeCashSettings | null = null;
+  @state() private _largeCashSaving = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -72,6 +79,29 @@ export class GableAdminBranches extends LitElement {
       this._error = apiErrorMessage(err, 'Failed to load branches');
     } finally {
       this._loading = false;
+    }
+    try {
+      this._largeCash = await LargeCashService.read();
+    } catch {
+      this._largeCash = null;
+    }
+  }
+
+  private _updateLargeCash(patchSettings: Partial<LargeCashSettings>) {
+    if (!this._largeCash) return;
+    this._largeCash = { ...this._largeCash, ...patchSettings };
+  }
+
+  private async _saveLargeCash() {
+    if (!this._largeCash) return;
+    this._largeCashSaving = true;
+    try {
+      this._largeCash = await LargeCashService.save(this._largeCash);
+      ToastService.show('Large cash settings saved', 'success');
+    } catch (err) {
+      ToastService.show(apiErrorMessage(err, 'Failed to save the large cash settings'), 'error');
+    } finally {
+      this._largeCashSaving = false;
     }
   }
 
@@ -93,6 +123,7 @@ export class GableAdminBranches extends LitElement {
       zip: b.zip ?? '',
       phone: b.phone ?? '',
       timezone: b.timezone ?? 'America/New_York',
+      country: b.country_code ?? '',
       active: b.active,
     };
     this._editorOpen = true;
@@ -134,6 +165,7 @@ export class GableAdminBranches extends LitElement {
             zip: text(f.zip),
             phone: text(f.phone),
             timezone: text(f.timezone),
+            country_code: f.country || null,
             active: f.active,
           },
           f.revision,
@@ -152,6 +184,7 @@ export class GableAdminBranches extends LitElement {
           zip: f.zip?.trim() || undefined,
           phone: f.phone?.trim() || undefined,
           timezone: f.timezone?.trim() || undefined,
+          country_code: f.country || undefined,
           active: f.active,
         });
         ToastService.show('Branch created', 'success');
@@ -229,6 +262,8 @@ export class GableAdminBranches extends LitElement {
           </div>
         </div>
 
+        ${this._renderLargeCashCard()}
+
         ${this._error ? html`
           <div class="bg-safety-red/10 border border-safety-red/30 text-safety-red text-sm px-4 py-3 rounded-lg">
             ${this._error}
@@ -299,6 +334,67 @@ export class GableAdminBranches extends LitElement {
     `;
   }
 
+  /** The dealer's large cash settings: the default country and the Canadian dealer threshold (CP-17a). */
+  private _renderLargeCashCard() {
+    const lc = this._largeCash;
+    return html`
+      <div class="bg-slate-steel border border-white/5 rounded-xl p-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Large cash</h2>
+            <p class="text-xs text-zinc-500 mt-1">The country picks the branch's large cash rule. A branch with no country of its own uses the dealer default.</p>
+          </div>
+          <label class="text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+            Dealer default country
+            <select
+              .value=${lc?.country_default ?? ''}
+              ?disabled=${!lc}
+              @change=${(e: Event) => this._updateLargeCash({ country_default: (e.target as HTMLSelectElement).value })}
+              class="mt-1 block bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
+            >
+              <option value="">Not set</option>
+              <option value="US">United States (Form 8300 rule)</option>
+              <option value="CA">Canada (dealer policy)</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              .checked=${lc?.ca_enabled ?? false}
+              ?disabled=${!lc}
+              @change=${(e: Event) => this._updateLargeCash({ ca_enabled: (e.target as HTMLInputElement).checked })}
+              class="rounded bg-slate-steel border-white/10 text-gable-green focus:ring-gable-green/30"
+            />
+            Canadian dealer threshold on
+          </label>
+          <label class="text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+            Canadian threshold
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              .value=${lc ? (lc.ca_threshold_cents / 100).toFixed(2) : ''}
+              ?disabled=${!lc}
+              @input=${(e: Event) => {
+                const dollars = Number((e.target as HTMLInputElement).value);
+                if (!Number.isNaN(dollars)) this._updateLargeCash({ ca_threshold_cents: Math.round(dollars * 100) });
+              }}
+              class="mt-1 block w-32 bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
+            />
+          </label>
+          <button
+            @click=${() => { void this._saveLargeCash(); }}
+            ?disabled=${!lc || this._largeCashSaving}
+            class="px-4 py-2 text-sm font-semibold bg-gable-green text-deep-space rounded-lg hover:bg-gable-green/90 transition-colors disabled:opacity-50"
+          >${this._largeCashSaving ? 'Saving...' : 'Save settings'}</button>
+        </div>
+        <p class="text-xs text-zinc-500 mt-3">
+          The Canadian threshold is a dealer policy for the dealer's own records. It is not a FINTRAC report.
+        </p>
+      </div>
+    `;
+  }
+
   private _renderEditor() {
     const isEdit = !!this._form.id;
     return html`
@@ -329,6 +425,21 @@ export class GableAdminBranches extends LitElement {
             ${this._textField('State', 'state', 'CT')}
             ${this._textField('ZIP', 'zip', '')}
             ${this._textField('Phone', 'phone', '')}
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+              Country
+              <select
+                .value=${this._form.country ?? ''}
+                @change=${(e: Event) => this._updateField('country', (e.target as HTMLSelectElement).value)}
+                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
+              >
+                <option value="">Dealer default</option>
+                <option value="US">United States (Form 8300 rule)</option>
+                <option value="CA">Canada (dealer policy)</option>
+              </select>
+              <span class="mt-1 block text-xs normal-case tracking-normal font-normal text-zinc-500">
+                The country picks the branch's large cash rule. A branch saved with no country of its own needs the dealer's default country.
+              </span>
+            </label>
             <div class="md:col-span-2">${this._textField('Timezone', 'timezone', 'America/New_York')}</div>
             <label class="flex items-center gap-2 text-sm text-zinc-300 md:col-span-2">
               <input

@@ -9,6 +9,8 @@ import type { ProductDetail, PIMMedia } from '../../../types/pim.ts';
 import type { Product } from '../../../types/product.ts';
 import { formatPrice4 } from '../../../lib/utils.ts';
 import { formatQuantity, isPositiveQuantity } from '../../../lib/money.ts';
+import { ProductService } from '../../../services/product.service.ts';
+import { ToastService } from '../../../lib/toast-service.ts';
 import { isDrawablePath } from '../../../components/ProductThumb.ts';
 
 @customElement('gable-product-overview-tab')
@@ -70,6 +72,25 @@ export class GableProductOverviewTab extends LitElement {
         `;
     }
 
+    /**
+     * Sets or clears the Form 8300 consumer durable flag (the large cash
+     * designated reporting transaction test) and reloads the product so the
+     * toggle and the revision move together.
+     */
+    private async _toggleConsumerDurable() {
+        try {
+            await ProductService.updateConsumerDurable(
+                this.product.id,
+                !this.product.consumer_durable,
+                this.product.revision,
+            );
+            ToastService.show(this.product.consumer_durable ? 'Consumer durable flag cleared' : 'Consumer durable flag set', 'success');
+            this.dispatchEvent(new CustomEvent('dimensions-update', { bubbles: true, composed: true }));
+        } catch {
+            ToastService.show('Failed to update the consumer durable flag', 'error');
+        }
+    }
+
     private _openMarginModal() {
         this.dispatchEvent(new CustomEvent('open-margin-modal', { bubbles: true, composed: true }));
     }
@@ -128,6 +149,26 @@ export class GableProductOverviewTab extends LitElement {
                         </div>
 
                         ${this.product.upc ? this._renderInfoCard(Tag, 'UPC', this.product.upc) : nothing}
+
+                        <!-- Consumer durable (the Form 8300 large cash rule) -->
+                        <div class="bg-zinc-900 border border-white/10 rounded-lg p-3 col-span-2 sm:col-span-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <div class="flex items-center gap-1.5 text-zinc-500 text-xs">
+                                    Consumer durable
+                                </div>
+                                <button
+                                    @click=${() => { void this._toggleConsumerDurable(); }}
+                                    class="p-1 rounded hover:bg-white/10 text-zinc-500 hover:text-gable-green transition-colors"
+                                    title="Toggle the consumer durable flag"
+                                >
+                                    ${icon(Pencil, 14, 'w-3.5 h-3.5')}
+                                </button>
+                            </div>
+                            <div class="font-mono text-sm font-medium ${this.product.consumer_durable ? 'text-gable-green' : 'text-zinc-500'}">
+                                ${this.product.consumer_durable ? 'Yes' : 'No'}
+                            </div>
+                            <div class="text-xs text-zinc-600 mt-1">Form 8300 large cash rule; a lumber yard's default is off</div>
+                        </div>
                     </div>
 
                     <!-- Stock Summary -->

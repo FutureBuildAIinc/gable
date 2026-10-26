@@ -5,6 +5,8 @@ import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select';
 import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
+import type { PayerCaptureIn } from '../../services/POSService.ts';
+import '../../pages/pos/PayerDialog.ts';
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
   Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister,
@@ -75,6 +77,14 @@ export class POSTerminal extends LitElement {
   // largest check a manager approved for this sale (null: none).
   @state() private _checkRef = '';
   @state() private _idChecked = false;
+  // The large cash capture (CP-17a): the instrument kind of the check being
+  // entered, the manager's suspected avoidance mark, the payer the counter
+  // captured and the ask the preview made.
+  @state() private _checkInstrument = 'personal_check';
+  @state() private _suspectAvoidance = false;
+  @state() private _payer: PayerCaptureIn | null = null;
+  @state() private _payerAsk: { fields: string[]; dealerThreshold: boolean } | null = null;
+  @state() private _payerRefused = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
   // The words a check over the limit was refused in (the server's, or the
@@ -517,6 +527,7 @@ export class POSTerminal extends LitElement {
       this._standing = null;
       this._buyerId = '';
       this._resetTender();
+      this._resetLargeCashCapture();
       this._custQuery = '';
       this._custResults = [];
       this._poText = '';
@@ -562,6 +573,7 @@ export class POSTerminal extends LitElement {
       this._standing = null;
       this._buyerId = '';
       this._resetTender();
+      this._resetLargeCashCapture();
       this._poText = '';
       this._jobId = '';
       this._step = 'customer';
@@ -1167,6 +1179,7 @@ export class POSTerminal extends LitElement {
     const entry: TenderIn = { method: this._tenderMethod, amount_cents: cents };
     // the check number rides as the reference; the ID checked and its kind (never a number) on a check or a charge
     if (this._tenderMethod === 'check' && this._checkRef.trim() !== '') entry.reference = this._checkRef.trim();
+    if (this._tenderMethod === 'check') entry.instrument = this._checkInstrument;
     if ((this._tenderMethod === 'check' || this._tenderMethod === 'account') && this._idChecked && this._idType !== '') {
       entry.id_checked = true;
       entry.id_type = this._idType;
@@ -1205,6 +1218,7 @@ export class POSTerminal extends LitElement {
     this._checkRef = '';
     this._idChecked = false;
     this._idType = '';
+    this._checkInstrument = 'personal_check';
     this._checkOverWords = null;
   }
 
@@ -1247,6 +1261,7 @@ export class POSTerminal extends LitElement {
     this._checkRef = '';
     this._idChecked = false;
     this._idType = '';
+    this._checkInstrument = 'personal_check';
     // The next tender is chosen again, never assumed.
     this._tenderMethod = null;
   }
@@ -1281,6 +1296,19 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    // The branch country's large cash rule (CP-17a): the server classifies
+    // the plan's tenders against the sale it holds. A crossing asks for the
+    // payer's details before Pay; a captured payer rides the completion.
+    try {
+      const preview = await posService.largeCashPreview(this._sale.id, plan.tenders, this._suspectAvoidance);
+      if (preview.asks_details && this._payer === null) {
+        this._payerAsk = { fields: preview.fields, dealerThreshold: preview.dealer_threshold };
+        this._payerRefused = false;
+        return;
+      }
+    } catch {
+      // the preview is advisory: the completion's own capture is the authority
+    }
     await this._completeSale(plan.tenders);
   }
 
@@ -1295,9 +1323,15 @@ export class POSTerminal extends LitElement {
       this._error = null;
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
-      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
+      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders,
+        this._payer || this._suspectAvoidance
+            ? { payer: this._payer ?? undefined, suspected_avoidance: this._suspectAvoidance }
+            : undefined);
       // the sale completed on the card: the waiting card has nothing left to say
       this._dismissCardWait();
+      // the payer capture and the avoidance mark went with the sale that needed them
+      this._resetLargeCashCapture();
+      this._suspectAvoidance = false;
       this._sale = completed;
       this._completed = completed;
       // The Sale complete card says it (number, total, tenders, change): no band over the page.
@@ -1314,6 +1348,17 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       // a check over the limit the screen could not know of (a walk-in's, or the database wide limit) says so beside Ask a manager
       if (err instanceof ApiError && err.hasBlocker('check_over_limit')) this._checkOverWords = err.message;
+      // A large cash crossing without the payer's details (CP-17a): the
+      // capture is asked again in the dialog, in words, and the sale stays
+      // open with its tenders still added.
+      if (err instanceof ApiError && err.hasBlocker('payer_details_required')) {
+        this._error = null;
+        this._payerRefused = true;
+        if (this._payerAsk === null) {
+          this._payerAsk = { fields: ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'], dealerThreshold: false };
+        }
+        return;
+      }
       const words = err instanceof Error ? err.message : 'Failed to complete sale';
       // The terminal's own outcomes are said by the waiting card, in words,
       // not by the error band: a card the device still holds waits here, and
@@ -2444,6 +2489,20 @@ export class POSTerminal extends LitElement {
             ${this._renderOrderSummary(sale, productLines, hasLines)}
           </div>
         </div>`}
+        ${this._payerAsk !== null ? html`
+          <gable-payer-dialog
+            .ask=${this._payerAsk}
+            ?refused=${this._payerRefused}
+            .prior=${this._payer}
+            @payer-save=${(e: CustomEvent) => {
+              this._payer = e.detail;
+              this._payerAsk = null;
+              this._payerRefused = false;
+              void this._pay();
+            }}
+            @payer-cancel=${() => { this._payerAsk = null; this._payerRefused = false; }}
+          ></gable-payer-dialog>
+        ` : nothing}
       </div>
     `;
   }
