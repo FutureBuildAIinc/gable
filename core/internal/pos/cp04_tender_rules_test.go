@@ -104,10 +104,10 @@ func TestCP04_CashUnaffectedByIDRule(t *testing.T) {
 	}
 }
 
-// RULE: the ID rule holds each check tender on its own. A check the rule
-// covers is refused without its own ID even when a second check in the same
-// sale carried one, and splitting the money into checks under the figure
-// leaves each check uncovered (the rule is per check, as the limit rule is).
+// RULE: the ID rule reads the sale's checks in total. Every check tender of
+// a sale whose checks together pass the figure must carry the ID, so
+// splitting the money into checks under the figure cannot avoid it; a small
+// checked check frees nothing.
 func TestCP04_SplitCheckEachNeedsID(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -120,10 +120,18 @@ func TestCP04_SplitCheckEachNeedsID(t *testing.T) {
 	if r := f.completeSale(sale, idTender(100, "state_id"), idTender(1098, "drivers_license")); r.status != http.StatusOK {
 		t.Errorf("two checks each with the ID = %d: %s", r.status, r.raw)
 	}
-	// two checks under the figure ask for no ID: the rule reads one check at a time
-	sale2, _ := f.cartOf("2", nil)
-	if r := f.completeSale(sale2, tender("check", 599), tender("check", 599)); r.status != http.StatusOK {
-		t.Errorf("two checks under the figure = %d: %s", r.status, r.raw)
+	// two checks under the figure, together over it, are refused without the
+	// ID: splitting a check cannot avoid the rule
+	sale2, _ := f.cartOf("2", nil) // 1198
+	blockerOf(t, f.completeSale(sale2, tender("check", 599), tender("check", 599)), "id_required")
+	// the same split, each check with the ID, completes
+	if r := f.completeSale(sale2, idTender(599, "state_id"), idTender(599, "drivers_license")); r.status != http.StatusOK {
+		t.Errorf("two checks under the figure, each with the ID = %d: %s", r.status, r.raw)
+	}
+	// a single check under the figure asks for no ID
+	sale3, total := f.cartOf("1", nil) // 599
+	if r := f.completeSale(sale3, tender("check", total)); r.status != http.StatusOK {
+		t.Errorf("one check under the figure = %d: %s", r.status, r.raw)
 	}
 }
 

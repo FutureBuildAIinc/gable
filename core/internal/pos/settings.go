@@ -155,23 +155,25 @@ func errSettingWrite(err error) error {
 		Message: "failed to write the counter settings: " + err.Error()}
 }
 
-// checkTenderIDRule holds each check tender to the dealer's ID rule
+// checkTenderIDRule holds the sale's check tenders to the dealer's ID rule
 // (pos.check_id_required_over_cents): absent or empty is never, 0 is every
-// check, a figure is checks over it. The rule reads one check at a time, as
-// the check limit does: a check it covers is refused 409 id_required unless
-// that same tender carries id_checked, so a second checked check in the sale
-// frees nothing, and splitting the money into checks under the figure leaves
-// each check uncovered. The rule never asks for the ID's number, which no
-// body carries. Cash is never held.
+// check, a figure is checks over it read on the sale's checks in total, so
+// splitting the money into checks under the figure cannot avoid it. When the
+// rule bites, every check tender of the sale must carry id_checked (one
+// unchecked check is refused 409 id_required; a checked one frees nothing
+// but itself). The rule never asks for the ID's number, which no body
+// carries. Cash is never held.
 func (s *Service) checkTenderIDRule(ctx context.Context, customerID uuid.UUID, tenders []TenderIn) error {
-	anyCheck := false
+	var checks int
+	var sum int64
 	for i := range tenders {
-		if tenders[i].Method == TenderCheck {
-			anyCheck = true
-			break
+		if tenders[i].Method != TenderCheck {
+			continue
 		}
+		checks++
+		sum += int64(tenders[i].AmountCents)
 	}
-	if !anyCheck {
+	if checks == 0 {
 		return nil
 	}
 	over, err := s.repo.CheckIDRequiredOverCents(ctx)
@@ -181,12 +183,15 @@ func (s *Service) checkTenderIDRule(ctx context.Context, customerID uuid.UUID, t
 	if over == nil {
 		return nil
 	}
+	// every check asks on each tender alone; a figure asks once the sale's
+	// checks together pass it
+	bites := *over == 0 || sum > *over
+	if !bites {
+		return nil
+	}
 	var facts *CustomerFacts
 	for i := range tenders {
 		if tenders[i].Method != TenderCheck || tenders[i].IDChecked {
-			continue
-		}
-		if *over != 0 && int64(tenders[i].AmountCents) <= *over {
 			continue
 		}
 		if facts == nil {
