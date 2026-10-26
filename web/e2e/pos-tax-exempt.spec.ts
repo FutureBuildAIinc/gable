@@ -109,7 +109,7 @@ async function addCertificate(
   await dialog.locator('#tax-exempt-effective').fill(effective);
   if (expiry) await dialog.locator('#tax-exempt-expiry').fill(expiry);
   await page.getByTestId('tax-exemption-save').click();
-  await expect(page.getByTestId('tax-exemption-row')).toContainText(number, { timeout: 10000 });
+  await expect(page.getByTestId('tax-exemption-row').filter({ hasText: number })).toBeVisible({ timeout: 10000 });
 }
 
 test('the counter honours a tax exemption end to end', async ({ page, request }) => {
@@ -170,7 +170,8 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   await page.getByRole('button', { name: 'Tax Exemption' }).click();
   await page.getByTestId('tax-exemption-end').click();
   await answerAppDialog(page, 'End certificate');
-  await expect(page.getByTestId('tax-exemption-status')).toHaveText('Ended', { timeout: 10000 });
+  await expect(page.getByTestId('tax-exemption-row').filter({ hasText: cert }).getByTestId('tax-exemption-status'))
+    .toHaveText('Ended', { timeout: 10000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tax-exempt-ended.png'), fullPage: true });
 
   await backToCounter(page);
@@ -184,8 +185,10 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   // An expired certificate exempts nothing: the tax stays on.
   const yesterday = new Date(Date.now() - 24 * 3600 * 1000 * 2).toISOString().slice(0, 10);
   const old = new Date(Date.now() - 24 * 3600 * 1000 * 30).toISOString().slice(0, 10);
-  await addCertificate(page, account.id, `CERT-OLD-${Date.now().toString(36).toUpperCase()}`, old, yesterday);
-  await expect(page.getByTestId('tax-exemption-status')).toHaveText('Expired');
+  const oldCert = `CERT-OLD-${Date.now().toString(36).toUpperCase()}`;
+  await addCertificate(page, account.id, oldCert, old, yesterday);
+  await expect(page.getByTestId('tax-exemption-row').filter({ hasText: oldCert }).getByTestId('tax-exemption-status'))
+    .toHaveText('Expired');
   await backToCounter(page);
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
