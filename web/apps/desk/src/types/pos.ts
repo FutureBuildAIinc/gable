@@ -23,6 +23,34 @@ export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type PriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
 
 /** One line of a counter sale: the shared salesdoc shape (ADR 0005 2.2). */
+
+/** A colorant amount as the manufacturer guides print it: whole ounces, a count of the coarse 1/32 step and a count of the fine 1/denominator step. */
+export interface TintAmount {
+    whole_oz: number;
+    increments_coarse: number;
+    increments_fine: number;
+    unit_denominator: number;
+}
+
+/** One colorant of a tint. */
+export interface TintComponent {
+    colorant_code: string;
+    colorant_name: string;
+    amount: TintAmount;
+}
+
+/** A paint line's tint record (row CP-16): the base, the colour and the formula frozen on the sale. */
+export interface LineTint {
+    formula_id: string | null;
+    color_code: string;
+    color_name: string;
+    base_code: string;
+    container_size_code: string;
+    rescaled: boolean;
+    tint_charge_cents: number | null;
+    components: TintComponent[];
+}
+
 export interface SaleLine {
     id: string;
     position: number;
@@ -52,6 +80,8 @@ export interface SaleLine {
     is_special_order: boolean;
     vendor_id: string | null;
     special_order_unit_cost_ten_thousandths: number | null;
+    /** The paint line's tint record, null on every other line (row CP-16). */
+    tint: LineTint | null;
     created_at: string;
 }
 

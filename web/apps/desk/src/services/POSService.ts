@@ -186,6 +186,19 @@ export const posService = {
         return response.json();
     },
 
+    /** Adds one unit of the product with a tint attached (row CP-16): the base, the colour and the formula as mixed. */
+    async addItemTint(saleId: string, productID: string, tint: Record<string, unknown>): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ line: { product_id: productID, quantity: '1', tint } }),
+            }),
+            'Failed to add the tinted item',
+        );
+        return response.json();
+    },
+
     /** Sets a line's quantity on the sale's revision; the answer is the whole sale, the line repriced. */
     async changeQuantity(saleId: string, itemId: string, quantity: string, revision: number): Promise<Sale> {
         const response = await expectOk(

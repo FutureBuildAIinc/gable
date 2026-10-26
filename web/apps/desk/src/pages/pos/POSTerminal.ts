@@ -30,6 +30,8 @@ import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
+import './TintLineDialog.ts';
+import { tintSummary } from './tint.ts';
 import { kindLabel } from './movements.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
@@ -140,6 +142,8 @@ export class POSTerminal extends LitElement {
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
+  // The tint line's dialog (row CP-16): the open sale line it was opened for.
+  @state() private _tintLine: SaleLine | null = null;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -1635,6 +1639,19 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  /** The tint line, in the counter's dialog frame (row CP-16). */
+  private _renderTintModal() {
+    const line = this._tintLine;
+    if (!line || !this._sale) return nothing;
+    return this._overlay(html`
+      <gable-tint-line-dialog sale-id=${this._sale.id} product-id=${line.product_id ?? ''}
+        .basePrice=${line.unit_price_ten_thousandths ?? 0}
+        .customerId=${this._customer?.id ?? ''}
+        @tint-cancel=${() => { this._tintLine = null; }}
+        @tint-added=${(e: CustomEvent<Sale>) => { this._tintLine = null; this._sale = e.detail; }}></gable-tint-line-dialog>
+    `);
+  }
+
   /** The drawer's cash movements, in the till dialog frame (CP-08). */
   private _renderMovementModal() {
     if (!this._showMovement || !this._till) return nothing;
@@ -2187,7 +2204,16 @@ export class POSTerminal extends LitElement {
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
+                  ${item.tint ? html`
+                    <div class="font-mono text-xs text-slate-400" data-testid="pos-line-tint">
+                      ${item.tint.color_name}${item.tint.color_code ? ` (${item.tint.color_code})` : ''} on ${item.tint.base_code} ${item.tint.container_size_code}
+                      ${tintSummary(item.tint.components)}
+                    </div>` : nothing}
                 </div>
+                ${open && item.tint === null && hasQuantityControl(item) && item.product_id ? html`
+                  <button type="button" data-testid="pos-line-tint-button" title="Tint" aria-label="Tint ${item.description}"
+                    @click=${() => { this._tintLine = item; }}
+                    class="inline-flex h-11 shrink-0 items-center justify-center rounded border border-white/20 px-3 text-xs font-semibold text-slate-200 hover:bg-white/5">Tint</button>` : nothing}
                 ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
                 ${open ? html`
@@ -2402,6 +2428,7 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderTintModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`
