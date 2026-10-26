@@ -211,6 +211,51 @@ func (r *Repository) InvoiceVisible(ctx context.Context, id uuid.UUID) (bool, er
 	return n > 0, err
 }
 
+// DepositFacts is the order's money standing, read on the deposit path.
+type DepositFacts struct {
+	Status         string
+	TotalCents     int64
+	DepositedCents int64
+	BilledCents    int64
+}
+
+// Cancelled reports whether the order is off the books (the wire's voided).
+func (f DepositFacts) Cancelled() bool { return f.Status == "CANCELLED" }
+
+// FullyInvoiced reports whether the order's invoices have billed its whole
+// total, so nothing a deposit could hold against is left to bill.
+func (f DepositFacts) FullyInvoiced() bool { return f.BilledCents >= f.TotalCents }
+
+// OrderDepositFacts locks the order row and reads what a deposit's rules
+// need: the order's status and total, the money already taken on it and what
+// its invoices have billed. The lock is the caller's own transaction's (the
+// executor is the transaction's when the caller is inside one), and the sums
+// run as their own statement after the lock is held: under READ COMMITTED a
+// locked row's own columns are re-read on release but a subquery over other
+// tables keeps the statement's first snapshot, so one statement would let
+// two racing deposits both pass the balance rule. With the sums read after
+// the lock, the second transaction's fresh statement sees the first's
+// committed deposit.
+func (r *Repository) OrderDepositFacts(ctx context.Context, orderID uuid.UUID) (DepositFacts, error) {
+	var f DepositFacts
+	e := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT o.status, ROUND(o.total_amount * 100)::bigint
+		FROM orders o WHERE o.id = $1 FOR UPDATE`, orderID).Scan(&f.Status, &f.TotalCents)
+	if e != nil {
+		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
+	}
+	e = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT COALESCE((SELECT SUM(ROUND(p.amount * 100)::bigint) FROM payments p
+		                 WHERE p.order_id = $1 AND p.status = 'POSTED'), 0),
+		       COALESCE((SELECT SUM(ROUND(i.total_amount * 100)::bigint) FROM invoices i
+		                 WHERE i.order_id = $1 AND i.status <> 'VOID'), 0)`, orderID).
+		Scan(&f.DepositedCents, &f.BilledCents)
+	if e != nil {
+		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
+	}
+	return f, nil
+}
+
 // OrderBelongsTo reports whether the order exists for the customer.
 func (r *Repository) OrderBelongsTo(ctx context.Context, orderID, customerID uuid.UUID) (exists, matches bool, err error) {
 	var owner uuid.UUID

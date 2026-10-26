@@ -324,6 +324,11 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 	var out *Payment
 	var effects *account.Effects
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if in.OrderID != nil && len(in.Applications) == 0 {
+			if err := s.checkDeposit(ctx, *in.OrderID, in.AmountCents); err != nil {
+				return err
+			}
+		}
 		on := time.Time{}
 		if in.ReceivedOn != nil {
 			on = *in.ReceivedOn
@@ -365,6 +370,26 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 		return nil, nil, err
 	}
 	return out, effects, nil
+}
+
+// checkDeposit holds the deposit rules (CP-07), inside the caller's
+// transaction on a locked order: a deposit only on an order that can still
+// be billed, and never past its balance due after the deposits already
+// taken.
+func (s *Service) checkDeposit(ctx context.Context, orderID uuid.UUID, amountCents int64) error {
+	facts, err := s.repo.OrderDepositFacts(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case facts.Cancelled():
+		return httpx.Conflict("this order is cancelled: no deposit can be taken on it")
+	case facts.FullyInvoiced():
+		return httpx.Conflict("this order is fully invoiced: no deposit can be taken on it")
+	case facts.DepositedCents+amountCents > facts.TotalCents:
+		return httpx.Conflict("the deposit is larger than the order's balance due after deposits")
+	}
+	return nil
 }
 
 // lockForWrite takes the payment row (section 11, step 2) held to the branch
