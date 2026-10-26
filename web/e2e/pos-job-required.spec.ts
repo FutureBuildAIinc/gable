@@ -93,7 +93,10 @@ async function openCounter(page: Page) {
 
 test('the counter: an account that requires a job is charged only with a job picked', async ({ page, request }) => {
   const account = await customerWithAJob(request);
-  test.skip(!account, 'the seed holds no single branch customer with a job and credit room to charge');
+  if (!account) {
+    test.skip(true, 'the seed holds no single branch customer with a job and credit room to charge');
+    return;
+  }
   await signIn(page, 'POS Account E2E');
   const product = await stockedProduct(request);
 
@@ -155,22 +158,17 @@ test('the counter: an account that requires a job is charged only with a job pic
   expect(full.job_id).toBe(account.job_id);
   expect(full.customer_po).toBe('PO-E2E-JOB-91');
 
-  // Put the account back the way the seed held it.
   // Put the account back the way the seed held it. The charge sale may have
   // added the counter's branch to the customer (the first document at another
   // yard adds it), and a shared customer's restricted fields are refused to
   // this role: a 403 leaves the flag on, which no other spec reads.
-  const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as {
-    account_number: string; name: string; payment_terms_id: string; revision: number;
-  };
+  const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as Record<string, unknown>;
   const revert = await request.put(`/api/v1/customers/${account.id}`, {
     data: {
-      account_number: fresh.account_number,
-      name: fresh.name,
-      job_required: false,
-      po_required: false,
-      payment_terms_id: fresh.payment_terms_id,
-      revision: fresh.revision,
+      account_number: fresh.account_number, name: fresh.name, email: fresh.email, phone: fresh.phone,
+      address: fresh.address, price_profile_id: fresh.price_profile_id, is_active: fresh.is_active,
+      credit_limit_cents: fresh.credit_limit_cents, currency: fresh.currency, payment_terms_id: fresh.payment_terms_id,
+      po_required: fresh.po_required, job_required: false, revision: fresh.revision,
     },
   });
   expect([200, 403]).toContain(revert.status());
