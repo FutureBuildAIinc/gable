@@ -784,6 +784,23 @@ func Run() {
 		logger.Warn("the simulated card terminal is wired: a demo stack only, never a production configuration",
 			"script", cfg.POSTerminalSimulator)
 	}
+	// The Run card terminal driver (CP-05): selected by configuration like
+	// the simulator, never by default. Its credentials are the Run Payments
+	// set (resolved at call time, DB-first); the Reporting API set is
+	// optional and only the lost answer lookup and the settlement batch
+	// need it. A demo stack's simulator wins: both are never wired.
+	if cfg.POSTerminal == "run" && cfg.POSTerminalSimulator == "" {
+		runTerm := payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
+			OnKeyRotated(func(apiKey, refreshToken string) {
+				if err := paymentKeys.PersistRotatedKey(apiKey, refreshToken); err != nil {
+					logger.Error("failed to persist rotated Run Payments api_key", "error", err)
+				}
+			}).
+			WithReporting(cfg.RunReportingBaseURL, cfg.RunReportingClientID, cfg.RunReportingClientSecret)
+		posSvc.WithTerminal(runTerm, terminalLedger)
+		logger.Info("the Run card terminal driver is wired",
+			"transaction_lookup", cfg.RunReportingBaseURL != "")
+	}
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
 	// and the payment refund route holds the same credit to the counter's
