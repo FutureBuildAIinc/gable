@@ -16914,7 +16914,7 @@ export interface components {
                     mode: "never" | "every_check" | "over_amount";
                     /**
                      * Format: int64
-                     * @description Required when mode is over_amount; refused otherwise.
+                     * @description Read only when mode is over_amount; dropped otherwise.
                      */
                     over_cents?: number | null;
                 };

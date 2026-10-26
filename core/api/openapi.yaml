@@ -32888,7 +32888,7 @@ components:
               required: [mode]
               properties:
                 mode: {type: string, enum: [never, every_check, over_amount]}
-                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Required when mode is over_amount; refused otherwise."}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Read only when mode is over_amount; dropped otherwise."}
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
