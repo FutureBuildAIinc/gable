@@ -77,6 +77,9 @@ func (s *Service) GetFormula(ctx context.Context, id uuid.UUID) (*Formula, error
 // pins: a component's denominator must be the one its tint system declares,
 // so two systems in one catalogue do not collide.
 func (s *Service) CreateFormula(ctx context.Context, d *FormulaDraft) (*Formula, error) {
+	if d.Source == "" {
+		d.Source = "manual"
+	}
 	den, err := s.repo.SystemDenominatorOfColor(ctx, d.ColorID)
 	if err != nil {
 		return nil, httpErr(err)

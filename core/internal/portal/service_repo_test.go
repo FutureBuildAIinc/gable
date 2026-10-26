@@ -77,14 +77,14 @@ type fakePortalRepo struct {
 	newOrderID    uuid.UUID
 
 	// the pro portal's core (M35): /me, /today, the timeline, the feeds
-	meUser        *CustomerUser
-	meRole        string
-	todayQuotes   []TodayQuoteRow
+	meUser          *CustomerUser
+	meRole          string
+	todayQuotes     []TodayQuoteRow
 	todayDeliveries []TodayDeliveryRow
-	todayInvoices []TodayInvoiceRow
-	todayOrders   []TodayOrderRow
-	deliveryState *orderDeliveryState
-	quotes        []PortalQuoteDTO
+	todayInvoices   []TodayInvoiceRow
+	todayOrders     []TodayOrderRow
+	deliveryState   *orderDeliveryState
+	quotes          []PortalQuoteDTO
 
 	// failures
 	getCartErr    error

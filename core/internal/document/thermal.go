@@ -104,13 +104,13 @@ type ThermalLine struct {
 // container size, the tint charge when one was made, and each colorant with
 // its amount in the manufacturer's own layout.
 type ThermalTint struct {
-	ColorCode          string
-	ColorName          string
-	BaseCode           string
-	ContainerSizeCode  string
-	Rescaled           bool
-	TintChargeCents    httpx.Cents
-	Components         []ThermalTintComponent
+	ColorCode         string
+	ColorName         string
+	BaseCode          string
+	ContainerSizeCode string
+	Rescaled          bool
+	TintChargeCents   httpx.Cents
+	Components        []ThermalTintComponent
 }
 
 // ThermalTintComponent is one colorant of the block.
@@ -127,7 +127,7 @@ type ThermalTintComponent struct {
 type ThermalTender struct {
 	Method      string
 	AmountCents httpx.Cents
-	LastFour    string // empty when not a card
+	LastFour    string      // empty when not a card
 	ChangeCents httpx.Cents // 0 when no change due
 }
 

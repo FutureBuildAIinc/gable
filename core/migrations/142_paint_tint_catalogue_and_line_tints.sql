@@ -181,6 +181,15 @@ ALTER TABLE pos_return_lines
     ADD COLUMN IF NOT EXISTS mis_tint BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS tinted_return BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- The mis tint joins the closed list of return reasons.
+DO $$ BEGIN
+    ALTER TABLE pos_return_lines DROP CONSTRAINT IF EXISTS pos_return_lines_reason_code_check;
+    ALTER TABLE pos_return_lines ADD CONSTRAINT pos_return_lines_reason_code_check
+        CHECK (reason_code IN ('defective', 'damaged', 'wrong_item', 'ordered_wrong', 'changed_mind',
+            'overbought', 'mis_tint', 'other'));
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
+
 -- The paint volume units (a quart is 4 to the gallon, a pint 8; the gallon's
 -- own standard pair is 576 to 77, so these keep the same ratio exactly).
 INSERT INTO units (code, name, dimension, std_unit_qty, std_ref_qty, is_system) VALUES

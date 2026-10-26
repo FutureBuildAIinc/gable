@@ -33,9 +33,9 @@ type ExchangeIn struct {
 	// omitted one on a sale that kept no cash leaves the surplus on the
 	// account, while a named cash one is refused as any cash refund is.
 	RefundMethodGiven bool
-	Reason       string
-	Returned     []ReturnLineIn
-	Items        []salesdoc.ParsedLine
+	Reason            string
+	Returned          []ReturnLineIn
+	Items             []salesdoc.ParsedLine
 	// Tenders pay the difference when the replacement is worth more.
 	Tenders    []TenderIn
 	PickedUpBy string

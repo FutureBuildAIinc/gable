@@ -318,4 +318,3 @@ func TestPostEntryAndCreateJournalEntryEnforcePerBranchBalance(t *testing.T) {
 		t.Errorf("CreateJournalEntry with per-branch imbalance = %v, want ErrUnbalanced", err)
 	}
 }
-

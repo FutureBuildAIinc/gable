@@ -10,8 +10,8 @@ package salesdoc
 import (
 	"strings"
 
-	tint "github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	tint "github.com/gablelbm/gable/internal/tint"
 	"github.com/google/uuid"
 )
 
@@ -192,22 +192,22 @@ type Line struct {
 // returnable by dealer policy, with a mis tint (the store's own error) as
 // the accepted exception everywhere.
 type LineTint struct {
-	FormulaID           *uuid.UUID `json:"formula_id"`
-	ColorCode           string     `json:"color_code"`
-	ColorName           string     `json:"color_name"`
-	BaseCode            string     `json:"base_code"`
-	ContainerSizeCode   string     `json:"container_size_code"`
-	Rescaled            bool       `json:"rescaled"`
-	TintChargeCents     *httpx.Cents `json:"tint_charge_cents"`
-	Components          []TintComponent `json:"components"`
+	FormulaID         *uuid.UUID      `json:"formula_id"`
+	ColorCode         string          `json:"color_code"`
+	ColorName         string          `json:"color_name"`
+	BaseCode          string          `json:"base_code"`
+	ContainerSizeCode string          `json:"container_size_code"`
+	Rescaled          bool            `json:"rescaled"`
+	TintChargeCents   *httpx.Cents    `json:"tint_charge_cents"`
+	Components        []TintComponent `json:"components"`
 }
 
 // TintComponent is one colorant of a sold tint: its code and name and its
 // amount, the amount an integer count of a named dispense unit and never a
 // decimal quantity.
 type TintComponent struct {
-	ColorantCode string `json:"colorant_code"`
-	ColorantName string `json:"colorant_name"`
+	ColorantCode string      `json:"colorant_code"`
+	ColorantName string      `json:"colorant_name"`
 	Amount       tint.Amount `json:"amount"`
 }
 

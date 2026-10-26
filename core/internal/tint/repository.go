@@ -271,15 +271,12 @@ func (r *PostgresRepository) CreateColor(ctx context.Context, d *ColorDraft) (*C
 	return c, nil
 }
 
-// attachComponents reads the components of the formulas into them, in guide
-// order.
-func (r *PostgresRepository) attachComponents(ctx context.Context, out []Formula) error {
-	ids := make([]uuid.UUID, 0, len(out))
-	for i := range out {
-		ids = append(ids, out[i].ID)
-	}
+// componentsOf reads the components of the formulas, keyed by formula id, in
+// guide order.
+func (r *PostgresRepository) componentsOf(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]Component, error) {
+	out := map[uuid.UUID][]Component{}
 	if len(ids) == 0 {
-		return nil
+		return out, nil
 	}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT fc.formula_id, c.id, c.code, c.name, fc.whole_oz, fc.increments_coarse, fc.increments_fine, fc.unit_denominator
@@ -288,29 +285,19 @@ func (r *PostgresRepository) attachComponents(ctx context.Context, out []Formula
 		WHERE fc.formula_id = ANY($1)
 		ORDER BY fc.formula_id, fc.position`, ids)
 	if err != nil {
-		return fmt.Errorf("failed to read formula components: %w", err)
+		return nil, fmt.Errorf("failed to read formula components: %w", err)
 	}
 	defer rows.Close()
-	byID := map[uuid.UUID][]Component{}
 	for rows.Next() {
 		var fid uuid.UUID
 		var comp Component
 		if err := rows.Scan(&fid, &comp.ColorantID, &comp.Code, &comp.Name, &comp.Amount.WholeOZ,
 			&comp.Amount.Coarse, &comp.Amount.Fine, &comp.Amount.Denominator); err != nil {
-			return err
+			return nil, err
 		}
-		byID[fid] = append(byID[fid], comp)
+		out[fid] = append(out[fid], comp)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for i := range out {
-		out[i].Components = byID[out[i].ID]
-		if out[i].Components == nil {
-			out[i].Components = []Component{}
-		}
-	}
-	return nil
+	return out, rows.Err()
 }
 
 const formulaCols = `id, color_id, base_id, product_id, container_size_code, container_volume_oz,
@@ -339,7 +326,21 @@ func (r *PostgresRepository) ListFormulas(ctx context.Context, colorID, baseID *
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return out, r.attachComponents(ctx, out)
+	ids := make([]uuid.UUID, 0, len(out))
+	for i := range out {
+		ids = append(ids, out[i].ID)
+	}
+	comps, err := r.componentsOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Components = comps[out[i].ID]
+		if out[i].Components == nil {
+			out[i].Components = []Component{}
+		}
+	}
+	return out, nil
 }
 
 func (r *PostgresRepository) GetFormula(ctx context.Context, id uuid.UUID) (*Formula, error) {
@@ -351,8 +352,13 @@ func (r *PostgresRepository) GetFormula(ctx context.Context, id uuid.UUID) (*For
 	if err != nil {
 		return nil, notFound(err)
 	}
-	if err := r.attachComponents(ctx, []Formula{out}); err != nil {
+	comps, err := r.componentsOf(ctx, []uuid.UUID{out.ID})
+	if err != nil {
 		return nil, err
+	}
+	out.Components = comps[out.ID]
+	if out.Components == nil {
+		out.Components = []Component{}
 	}
 	return &out, nil
 }

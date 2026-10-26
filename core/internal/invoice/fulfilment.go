@@ -21,24 +21,24 @@ import (
 // line shape of ADR 0005 section 2.2 (money in cents and scale 4 integers),
 // plus the order line it bills and its cost (section 8.4).
 type FulfilmentLine struct {
-	ID                 uuid.UUID
-	Position           int
-	LineType           string // PRODUCT, KIT, COMPONENT, CHARGE, TEXT
-	ParentLineID       *uuid.UUID
-	ProductID          *uuid.UUID
-	ChargeCodeID       *uuid.UUID
-	SKU                *string
-	Description        string
-	Quantity           *int64 // scale 4
-	UOM                *string
-	PriceUOM           *string
-	UOMQty             *int64
-	PriceUOMQty        *int64
-	StockUOM           *string
-	StockQuantity      *int64 // scale 4, the bill in the stocking unit
-	BoardThicknessIn   *int64 // scale 4, a tallied line's cross section
-	BoardWidthIn       *int64
-	TallyRows          []TallyRowInput
+	ID               uuid.UUID
+	Position         int
+	LineType         string // PRODUCT, KIT, COMPONENT, CHARGE, TEXT
+	ParentLineID     *uuid.UUID
+	ProductID        *uuid.UUID
+	ChargeCodeID     *uuid.UUID
+	SKU              *string
+	Description      string
+	Quantity         *int64 // scale 4
+	UOM              *string
+	PriceUOM         *string
+	UOMQty           *int64
+	PriceUOMQty      *int64
+	StockUOM         *string
+	StockQuantity    *int64 // scale 4, the bill in the stocking unit
+	BoardThicknessIn *int64 // scale 4, a tallied line's cross section
+	BoardWidthIn     *int64
+	TallyRows        []TallyRowInput
 	// Tint is a paint line's tint record (row CP-16), frozen on the invoice
 	// line exactly as the counter sold it.
 	Tint               *salesdoc.LineTint

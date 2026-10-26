@@ -2,8 +2,21 @@
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 -- Down 142: the tint tables go whole (every row they hold is this
--- migration's own), the return line's two flags go, and the two seeded
--- volume units go only while nothing names them.
+-- migration's own), the return line's two flags go, the reason list gives up
+-- the mis tint (refusing while any return line carries one), and the two
+-- seeded volume units go only while nothing names them.
+
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pos_return_lines WHERE reason_code = 'mis_tint') THEN
+        RAISE EXCEPTION 'a return line carries the mis tint reason: the down cannot remove it from the list';
+    END IF;
+END $$;
+ALTER TABLE pos_return_lines DROP CONSTRAINT IF EXISTS pos_return_lines_reason_code_check;
+DO $$ BEGIN
+    ALTER TABLE pos_return_lines ADD CONSTRAINT pos_return_lines_reason_code_check
+        CHECK (reason_code IN ('defective', 'damaged', 'wrong_item', 'ordered_wrong', 'changed_mind', 'overbought', 'other'));
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
 
 ALTER TABLE pos_return_lines
     DROP COLUMN IF EXISTS mis_tint,

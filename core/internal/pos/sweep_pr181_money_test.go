@@ -61,9 +61,9 @@ func TestSweepPR181_P1_1_WalkInExchangeRefusesAccountTender(t *testing.T) {
 	sale, line, _ := f.cashSaleLine(t, "1") // 599 in the drawer
 	r := f.exchange("", map[string]any{
 		"original_sale_id": sale, "reason": "upgrade",
-		"returned_lines":  []map[string]any{lineOf(line, "1", "wrong_item")},
-		"sale_lines":      f.replaceWith("3"), // 1796
-		"tenders":         []map[string]any{tender("account", 1197)},
+		"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("3"), // 1796
+		"tenders":        []map[string]any{tender("account", 1197)},
 	})
 	blockerOf(t, r, "walk_in_account")
 	if got := f.walkInOpenCents(t); got != 0 {
@@ -267,7 +267,7 @@ func TestSweepPR181R2_RefundMethodOverrideNeedsASecondHand(t *testing.T) {
 	// for 1 leaves a 599 surplus the cash method would pay
 	r = f.do("POST", "/api/v1/pos/exchanges", map[string]any{
 		"register_id": f.register, "original_sale_id": sale, "reason": "same hand",
-		"refund_method": "cash",
+		"refund_method":  "cash",
 		"returned_lines": []map[string]any{lineOf(line, "2", "defective")},
 		"sale_lines":     f.replaceWith("1"),
 	}, "X-Test-Role", "cashier", "X-Test-Sub", managerM1)

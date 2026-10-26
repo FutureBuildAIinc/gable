@@ -69,8 +69,8 @@ type returnLinePriced struct {
 	// accepted where a customer choice return of a tinted line is refused.
 	// tinted marks a returned line whose sale carried a tint, so the can
 	// goes to the mistint rack and never back into saleable stock.
-	misTint bool
-	tinted  bool
+	misTint  bool
+	tinted   bool
 	uom      string
 	stockUOM *string
 	stockQty *httpx.Quantity

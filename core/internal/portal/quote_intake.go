@@ -254,4 +254,3 @@ func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uu
 
 	return resp, nil
 }
-

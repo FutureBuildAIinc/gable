@@ -630,7 +630,7 @@ func (r *PostgresRepository) insertLineTint(ctx context.Context, lineID uuid.UUI
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric / 100)
 		RETURNING id`,
 		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
-		t.Rescaled, centsArg(t.TintChargeCents)).Scan(&id); err != nil {
+		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
 		return fmt.Errorf("failed to add the line's tint: %w", mapWriteError(err))
 	}
 	for i, c := range t.Components {
@@ -2366,4 +2366,11 @@ func (r *PostgresRepository) ListRegisters(ctx context.Context) ([]CounterRegist
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+func tintCentsOrZero(c *httpx.Cents) int64 {
+	if c == nil {
+		return 0
+	}
+	return int64(*c)
 }

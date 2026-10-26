@@ -49,21 +49,21 @@ type LineRequest struct {
 // amounts as actually mixed (a rescaled amount the counter overrode lands
 // here as its own value, never the derived one).
 type TintRequest struct {
-	FormulaID          *string              `json:"formula_id"`
-	ColorCode          *string              `json:"color_code"`
-	ColorName          *string              `json:"color_name"`
-	BaseCode           *string              `json:"base_code"`
-	ContainerSizeCode  *string              `json:"container_size_code"`
-	Rescaled           *bool                `json:"rescaled"`
-	TintChargeCents    json.RawMessage      `json:"tint_charge_cents"`
-	Components         []TintComponentRequest `json:"components"`
+	FormulaID         *string                `json:"formula_id"`
+	ColorCode         *string                `json:"color_code"`
+	ColorName         *string                `json:"color_name"`
+	BaseCode          *string                `json:"base_code"`
+	ContainerSizeCode *string                `json:"container_size_code"`
+	Rescaled          *bool                  `json:"rescaled"`
+	TintChargeCents   json.RawMessage        `json:"tint_charge_cents"`
+	Components        []TintComponentRequest `json:"components"`
 }
 
 // TintComponentRequest is one colorant of a requested tint.
 type TintComponentRequest struct {
-	ColorantCode *string              `json:"colorant_code"`
-	ColorantName *string              `json:"colorant_name"`
-	Amount       tintAmountRequest    `json:"amount"`
+	ColorantCode *string           `json:"colorant_code"`
+	ColorantName *string           `json:"colorant_name"`
+	Amount       tintAmountRequest `json:"amount"`
 }
 
 type tintAmountRequest struct {
