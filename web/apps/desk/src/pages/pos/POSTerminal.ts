@@ -140,6 +140,8 @@ export class POSTerminal extends LitElement {
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
+  /** The Till menu on a handheld: the till's money controls live behind it below 900. */
+  @state() private _tillMenu = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -1052,7 +1054,7 @@ export class POSTerminal extends LitElement {
   private _renderHotkeyLegend() {
     return html`
       <div role="group" aria-label="Keyboard shortcuts" data-testid="pos-hotkey-legend"
-        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/10 bg-slate-steel px-4 py-1.5 text-xs text-slate-300">
+        class="hidden min-[900px]:flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/10 bg-slate-steel px-4 py-1.5 text-xs text-slate-300">
         ${legendKeys((a) => this._hotkeyLive(a)).map((k) => html`
           <span data-action=${k.action} class="inline-flex items-center gap-1 whitespace-nowrap ${k.live ? '' : 'opacity-40'}">
             <kbd class="rounded border border-white/20 px-1.5 font-mono text-slate-200">${k.keycap}</kbd>${k.label}
@@ -1880,31 +1882,60 @@ export class POSTerminal extends LitElement {
                   ></gable-select>` : nothing}
               </p>` : nothing}
           </div>
-          <nav class="flex flex-wrap items-center gap-2" aria-label="Sale progress">
+          <nav class="hidden flex-wrap items-center gap-2 min-[900px]:flex" aria-label="Sale progress">
             ${this._progressChip('Customer', 1, progress.customer)}
             ${this._progressChip('Payment', 2, progress.payment)}
             ${this._progressChip('Summary', 3, progress.summary)}
           </nav>
         </div>
-        <div class="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:flex-nowrap">
+        <div class="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:flex-nowrap">
           ${this._till ? html`
             <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
             <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
-          <span class="max-w-[8rem] truncate text-xs text-slate-200" title="Cashier" data-testid="pos-cashier">${cashier}</span>
+          <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
-            <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
-              title="Safe drop, pickup, cash paid in or paid out"
-              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
-            <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
-              title="Count the drawer and close the till with its Z report"
-              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
+            ${this._renderTillMenu()}
+            <button @click=${() => this._beginFresh()}
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">New Sale</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
-              class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>`}
-          ${this._register && this._till ? html`
-          <button @click=${() => this._beginFresh()}
-            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
+              class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>`}
         </div>
       </header>`;
+  }
+
+  /**
+   * The till's money controls: a Till menu button below 900 (a drawer and a
+   * till close are money movements, kept off the thumb's first row on a
+   * handheld), the same controls inline at 900 and wider.
+   */
+  private _renderTillMenu() {
+    const item = 'flex min-h-11 w-full items-center whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
+    return html`
+      <div class="relative min-[900px]:contents" data-testid="pos-till-menu">
+        <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
+          aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
+          class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
+          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="3" y="6" width="18" height="13" rx="2"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path>
+          </svg>
+        </button>
+        ${this._tillMenu ? html`
+          <div role="menu" aria-label="Till" data-testid="pos-till-menu-items"
+            class="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col gap-1 rounded border border-white/10 bg-slate-steel p-2 shadow-raised">
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._showMovement = true; }} ?disabled=${this._tillBusy}
+              data-testid="pos-drawer-cash" title="Safe drop, pickup, cash paid in or paid out" class=${item}>Drawer Cash</button>
+            <button role="menuitem" @click=${() => { this._tillMenu = false; this._beginCloseTill(); }} ?disabled=${this._tillBusy}
+              data-testid="pos-close-till" title="Count the drawer and close the till with its Z report" class=${item}>Close Till</button>
+          </div>` : nothing}
+        <div class="hidden items-center gap-2 min-[900px]:flex">
+          <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
+            title="Safe drop, pickup, cash paid in or paid out"
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
+          <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
+            title="Count the drawer and close the till with its Z report"
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>
+        </div>
+      </div>`;
   }
 
   /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
