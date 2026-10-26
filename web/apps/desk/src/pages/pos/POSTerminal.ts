@@ -20,6 +20,8 @@ import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exch
 import { signatureRefusal, sealedWords } from './signatureLogic';
 import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
+import './ScalePanel';
+import { weightBadgeText } from './scale';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
@@ -140,6 +142,8 @@ export class POSTerminal extends LitElement {
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
+  // The scale panel overlay (CP-19).
+  @state() private _showScale = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -1645,6 +1649,19 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  private _renderScaleModal() {
+    if (!this._showScale) return nothing;
+    return this._overlay(html`
+      <gable-pos-scale-panel
+        register-id=${this._registerId}
+        .sale=${this._sale}
+        @scale-sale=${(e: CustomEvent<Sale>) => { this._sale = e.detail; this._error = null; }}
+        @scale-error=${(e: CustomEvent<string>) => { this._error = e.detail; }}
+        @scale-close=${() => { this._showScale = false; }}>
+      </gable-pos-scale-panel>
+    `);
+  }
+
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
     this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
@@ -1900,6 +1917,10 @@ export class POSTerminal extends LitElement {
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>`}
+          ${this._register ? html`
+            <button @click=${() => { this._showScale = true; }}
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200"
+              data-testid="pos-scale-button">Scale</button>` : nothing}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
@@ -2186,6 +2207,7 @@ export class POSTerminal extends LitElement {
                 ${this._renderThumb(item)}
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
+                  ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
                 ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
@@ -2403,6 +2425,7 @@ export class POSTerminal extends LitElement {
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
         ${this._renderReturnModal()}
+        ${this._renderScaleModal()}
 
         ${this._error ? html`
           <div class="flex items-center justify-between border-b border-safety-red/40 bg-safety-red/10 px-4 py-2 text-sm text-safety-red" role="alert">
