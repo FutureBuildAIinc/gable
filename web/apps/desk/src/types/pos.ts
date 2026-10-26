@@ -98,6 +98,8 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** For a completed sale that has returns: sale line id -> quantity already returned. */
+    returned_quantities?: Record<string, string>;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -175,10 +177,12 @@ export interface SaleSummary {
     register_id: string;
     cashier_id: string;
     customer_id: string | null;
+    customer_name: string | null;
     currency: string;
     total_cents: number;
     status: SaleStatus;
     invoice_id: string | null;
+    invoice_number: string | null;
     completed_at: string | null;
     created_at: string;
     item_count: number;
@@ -489,4 +493,45 @@ export interface TerminalLostItem {
 export interface TerminalSweepResult {
     claimed_closed: number;
     dispatched_lost: number;
+}
+
+// --- Refund intents (CP-06) ---
+
+export type RefundIntentAct = 'void' | 'return' | 'payback';
+export type RefundIntentState = 'PENDING' | 'FAILED';
+export type RefundIntentOutcome = 'refund' | 'no_refund';
+
+/** One open refund claim waiting on a manager (GET /api/v1/pos/refund-intents). */
+export interface RefundIntent {
+    id: string;
+    sale_id: string;
+    sale_number: string;
+    tender_id: string;
+    tender_method: TenderMethod;
+    amount_cents: number;
+    act: RefundIntentAct;
+    state: RefundIntentState;
+    held_credit_cents: number;
+    created_at: string;
+}
+
+export interface RefundIntentResolved {
+    id: string;
+    sale_id: string;
+    tender_id: string;
+    act: RefundIntentAct;
+    state: 'DONE' | 'FAILED';
+    outcome: RefundIntentOutcome;
+    refund_tx_id: string | null;
+    reconciliation_reference: string | null;
+}
+
+export interface RefundIntentPaidBack {
+    id: string;
+    payback_id: string;
+    sale_id: string;
+    tender_id: string;
+    amount_cents: number;
+    refund_tx_id: string;
+    state: 'DONE';
 }
