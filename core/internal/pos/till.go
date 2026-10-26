@@ -459,7 +459,8 @@ func (s *Service) GetZReport(ctx context.Context, sessionID uuid.UUID) (*ZReport
 	return s.repo.GetZReportBySession(ctx, sessionID)
 }
 
-// ListZReports lists Z snapshots for a register on a date.
-func (s *Service) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
+// ListZReports lists Z snapshots for a register on a business date
+// (YYYY-MM-DD, "" is the branch's today), the day cut in the branch's own zone.
+func (s *Service) ListZReports(ctx context.Context, registerID string, date string) ([]ZReport, error) {
 	return s.repo.ListZReports(ctx, registerID, date)
 }
