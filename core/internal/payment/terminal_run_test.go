@@ -186,11 +186,11 @@ func newRunFake(t *testing.T) *runFakeServer {
 // newRunDriver wires the driver on the fake, with the real ledger as its sink.
 func newRunDriver(t *testing.T, fs *runFakeServer, ledger *payment.TerminalLedger) *payment.RunTerminal {
 	t.Helper()
-	return payment.NewRunTerminal(func() payment.GatewayConfig{
+	return payment.NewRunTerminal(func() payment.GatewayConfig {
 		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: fs.server.URL}
 	}, ledger, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithPollInterval(5 * time.Millisecond).
-		WithInteractionWindow(2 * time.Second).
+		WithPollInterval(5*time.Millisecond).
+		WithInteractionWindow(2*time.Second).
 		WithReporting(fs.server.URL, "clientid-teststub", "clientsecret-teststub")
 }
 
@@ -252,10 +252,10 @@ func newRunTerminalFixtureOn(t *testing.T, ledger *payment.TerminalLedger) (*run
 func TestRunTerminalSaleDispatchPostsTheDocumentedChargeCard(t *testing.T) {
 	fs := newRunFake(t)
 	var sink recordingSink
-	term := payment.NewRunTerminal(func() payment.GatewayConfig{
+	term := payment.NewRunTerminal(func() payment.GatewayConfig {
 		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: fs.server.URL}
 	}, &sink, slog.New(slog.NewTextHandler(io.Discard, nil))).
-		WithPollInterval(5 * time.Millisecond).WithInteractionWindow(50 * time.Millisecond).
+		WithPollInterval(5*time.Millisecond).WithInteractionWindow(50*time.Millisecond).
 		WithReporting(fs.server.URL, "clientid-teststub", "clientsecret-teststub")
 	receipt, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 		IntentID: uuid.New(), Kind: payment.TerminalKindSale, AmountCents: 2500,
@@ -445,7 +445,7 @@ func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
 		amount int64
 	}{
 		{payment.TerminalKindRefund, 1200},
-		{payment.TerminalKindVoid, 0},
+		{payment.TerminalKindVoid, 2500},
 	} {
 		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: tc.kind + "-0",
 			RegisterID: "REG-" + sale.String()[:12], BranchID: m29BranchOf(t, ledger), AmountCents: tc.amount,
@@ -475,6 +475,9 @@ func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
 		}
 		if tc.kind == payment.TerminalKindRefund && body["amount"].(float64) != 1200 {
 			t.Fatalf("refund amount %v, want 1200 cents", body["amount"])
+		}
+		if tc.kind == payment.TerminalKindVoid && body["amount"] != nil {
+			t.Fatalf("the void body carries an amount (%v): a void is the full transaction", body["amount"])
 		}
 	}
 }
