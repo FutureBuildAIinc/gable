@@ -66,6 +66,14 @@ async function saleTotal(page: Page): Promise<number> {
   return Number(text.replace(/[$,\s]/g, ''));
 }
 
+/** Rings one unit at a time until the sale's total passes the cents named. */
+async function ringPast(page: Page, sku: string, cents: number) {
+  for (let i = 0; i < 40 && (await saleTotal(page)) <= cents; i++) await addOne(page, sku);
+  const total = await saleTotal(page);
+  expect(total).toBeGreaterThan(cents);
+  return total;
+}
+
 /** Opens the counter and names the account the sale goes to. */
 async function nameAccount(page: Page, accountNumber: string) {
   const search = page.locator('#pos-customer-search');
@@ -103,10 +111,7 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
 
   // At the counter: a $60 check is held until the ID is checked.
   await openCounter(page);
-  await addOne(page, product.sku);
-  await addOne(page, product.sku);
-  const total = await saleTotal(page);
-  expect(total).toBeGreaterThan(60);
+  const total = await ringPast(page, product.sku, 6000);
   await payByCheck(page, 60, false);
   await expect(page.getByTestId('pos-check-id-needed')).toContainText(
     `A check over $50.00 needs the customer's ID`,
@@ -128,7 +133,6 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   // and the sale is not completed.
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
-  await addOne(page, product.sku);
   await addOne(page, product.sku);
   await payByCheck(page, 150, true);
   await page.getByRole('button', { name: 'Add as split tender' }).click();
@@ -155,9 +159,7 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
   // customer's own limit beats the database wide one.
   await openCounter(page);
   await nameAccount(page, account.account_number);
-  for (let i = 0; i < 30; i++) await addOne(page, product.sku);
-  const againTotal = await saleTotal(page);
-  expect(againTotal).toBeGreaterThan(150);
+  await ringPast(page, product.sku, 15000);
   await payByCheck(page, 150, true);
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
