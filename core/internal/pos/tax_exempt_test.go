@@ -11,13 +11,18 @@ package pos_test
 // detaching it restores the tax.
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // exemptCartWithLines is a walk-in sale of 4 (subtotal 2200) whose lines are
@@ -271,6 +276,66 @@ func TestCP10_ExemptionWindowIsTheBranchDay(t *testing.T) {
 	}
 	if got := num(t, f.getSale(t, saleID), "tax_cents"); got != 195 {
 		t.Errorf("tax_cents = %d, want 195 (the branch's day is past the window)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// levelEngine prices the fixture customer at its own level (4.00) and
+// everyone else at the base (the walk-in's retail tier), the way the
+// production engine's customer level rung does.
+type levelEngine struct{ customer uuid.UUID }
+
+func (e levelEngine) PriceFor(_ context.Context, customerID, _ uuid.UUID, _ httpx.Quantity, _ string, _ *uuid.UUID) (salesdoc.EngineAnswer, error) {
+	if customerID == e.customer {
+		return salesdoc.EngineAnswer{Price: 40000, PriceUOM: "PCS", UOMQty: salesdoc.One, PriceUOMQty: salesdoc.One, Basis: "level"}, nil
+	}
+	return salesdoc.EngineAnswer{Price: 55000, PriceUOM: "PCS", UOMQty: salesdoc.One, PriceUOMQty: salesdoc.One, Basis: "base"}, nil
+}
+
+// RULE (CP-10 fix round): the lines price for the customer, so when the
+// customer moves on a sale that already has lines the lines are priced again
+// for the customer now standing on the sale: the account is charged its own
+// level, and the walk-in price comes back on a detach.
+func TestCP10_AttachRepricesTheLinesForTheAccount(t *testing.T) {
+	testutil.LockBranchDay(t)
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithPriceEngine(levelEngine{customer: f.customerID})
+	})
+
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("2")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, f.getSale(t, saleID), "subtotal_cents"); got != 1100 {
+		t.Fatalf("walk-in subtotal = %d, want 1100 (2 at the base 5.50)", got)
+	}
+	if r := f.attach(saleID, map[string]any{"customer_id": f.customerID.String()}); r.status != http.StatusOK {
+		t.Fatalf("attach the account = %d: %s", r.status, r.raw)
+	}
+	body := f.getSale(t, saleID)
+	lines, _ := body["lines"].([]any)
+	first, _ := lines[0].(map[string]any)
+	if price, _ := first["unit_price_ten_thousandths"].(json.Number); price.String() != "40000" {
+		t.Errorf("unit price after the attach = %v, want 40000 (the account's level)", first["unit_price_ten_thousandths"])
+	}
+	if src, _ := first["price_basis"].(string); src != "level" {
+		t.Errorf("price basis after the attach = %q, want level (the engine's own word for the rung it priced)", first["price_basis"])
+	}
+	if got := num(t, body, "subtotal_cents"); got != 800 {
+		t.Errorf("subtotal after the attach = %d, want 800 (2 at the level 4.00)", got)
+	}
+	if got := num(t, body, "total_cents"); got != 871 {
+		t.Errorf("total after the attach = %d, want 871 (the branch tax on 800)", got)
+	}
+
+	// A detach puts the walk-in's own price back on the lines.
+	if r := f.attach(saleID, map[string]any{"customer_id": nil}); r.status != http.StatusOK {
+		t.Fatalf("detach = %d: %s", r.status, r.raw)
+	}
+	body = f.getSale(t, saleID)
+	if got := num(t, body, "subtotal_cents"); got != 1100 {
+		t.Errorf("subtotal after the detach = %d, want 1100 (the base price back)", got)
 	}
 	f.assertARInvariants(t)
 }
