@@ -1653,6 +1653,13 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if !strings.Contains(string(buf), `"code":"unavailable"`) {
 		t.Errorf("bound key terminal lost items read answered another refusal: %s", buf)
 	}
+	// The manager's open refund claims list (CP-06): its sale join carries the
+	// branch wall, so the pinned key never reads another branch's claims.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/refund-intents", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/refund-intents")
+	if strings.Contains(string(buf), f.txnB.String()) {
+		t.Errorf("bound key refund intents list named the foreign sale: %s", buf)
+	}
 
 	// The open till of the foreign register: no session answers, while the
 	// pin's own register answers its own.

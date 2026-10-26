@@ -511,7 +511,7 @@ claims waiting on a manager have a screen), at the counter of `KEL-MAIN` (`REG-0
    customer, total and date. The same sale is found by its invoice number (`IN-...`) and by the customer's name,
    and the date field narrows a search to one day. A voided sale in the list reads "Voided - cannot be returned"
    and cannot be picked. The same search through the API is
-   `curl -s 'http://127.0.0.1:8080/api/v1/pos/transactions?q=Snowfern'` (the sale number goes in `q` the same
+   `curl -s "http://127.0.0.1:8080/api/v1/pos/transactions?q=Snowfern"` (the sale number goes in `q` the same
    way), and a walk-in sale's row carries `customer_name: null`.
 3. **Return one line damaged and one to stock.** Pick the sale: the return dialog opens on it. On the first line
    choose "Damaged, not restocked"; on the second leave "Back to stock" on; take one of each back and Take the
