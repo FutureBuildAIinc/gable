@@ -1050,6 +1050,17 @@ components:
       - is_special_order
       - vendor_id
       - special_order_unit_cost_ten_thousandths
+      - weight_source
+      - weight_gross_lb
+      - weight_tare_lb
+      - weight_net_lb
+      - weight_net_basis
+      - scale_device_id
+      - scale_ticket_id
+      - scale_ticket_number
+      - manual_weight_reason
+      - weight_captured_by
+      - weight_captured_at
       - created_at
       - order_line_id
       - unit_cost_ten_thousandths
@@ -1208,6 +1219,63 @@ components:
           - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+          - type: string
+            enum: [scale, manual]
+          - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+          - string
+          - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+          - string
+          - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+          - string
+          - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+          - type: string
+            enum: [single_draft, double_draft]
+          - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+          - string
+          - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+          - string
+          - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+          - string
+          - 'null'
+        weight_captured_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -1592,6 +1660,17 @@ components:
       - is_special_order
       - vendor_id
       - special_order_unit_cost_ten_thousandths
+      - weight_source
+      - weight_gross_lb
+      - weight_tare_lb
+      - weight_net_lb
+      - weight_net_basis
+      - scale_device_id
+      - scale_ticket_id
+      - scale_ticket_number
+      - manual_weight_reason
+      - weight_captured_by
+      - weight_captured_at
       - created_at
       - invoice_line_id
       - restock
@@ -1751,6 +1830,63 @@ components:
           - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+          - type: string
+            enum: [scale, manual]
+          - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+          - string
+          - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+          - string
+          - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+          - string
+          - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+          - type: string
+            enum: [single_draft, double_draft]
+          - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+          - string
+          - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+          - string
+          - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+          - string
+          - 'null'
+        weight_captured_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
