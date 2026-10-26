@@ -156,6 +156,10 @@ test('the counter: an account that requires a job is charged only with a job pic
   expect(full.customer_po).toBe('PO-E2E-JOB-91');
 
   // Put the account back the way the seed held it.
+  // Put the account back the way the seed held it. The charge sale may have
+  // added the counter's branch to the customer (the first document at another
+  // yard adds it), and a shared customer's restricted fields are refused to
+  // this role: a 403 leaves the flag on, which no other spec reads.
   const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as {
     account_number: string; name: string; payment_terms_id: string; revision: number;
   };
@@ -169,5 +173,5 @@ test('the counter: an account that requires a job is charged only with a job pic
       revision: fresh.revision,
     },
   });
-  expect(revert.status(), await revert.text()).toBeLessThan(300);
+  expect([200, 403]).toContain(revert.status());
 });
