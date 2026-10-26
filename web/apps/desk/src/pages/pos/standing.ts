@@ -147,16 +147,21 @@ export interface CheckIDRule {
     over_cents: number | null;
 }
 
-/** Does the rule ask for the customer's ID on a check of amountCents? */
-export function idRequired(rule: CheckIDRule | null, amountCents: number): boolean {
+/**
+ * Does the rule ask for the customer's ID when the sale's checks come to
+ * checksTotalCents? An over an amount rule reads the total, so splitting one
+ * check into pieces under the figure cannot avoid it; the server holds the
+ * same rule at the completion.
+ */
+export function idRequired(rule: CheckIDRule | null, checksTotalCents: number): boolean {
     if (rule === null || rule.mode === 'never') return false;
     if (rule.mode === 'every_check') return true;
-    return rule.over_cents !== null && amountCents > rule.over_cents;
+    return rule.over_cents !== null && checksTotalCents > rule.over_cents;
 }
 
-/** Why the rule asks for the ID on a check of amountCents, in words, or null when it does not. */
-export function idRequiredWords(rule: CheckIDRule | null, amountCents: number): string | null {
-    if (!idRequired(rule, amountCents)) return null;
+/** Why the rule asks for the ID on the sale's checks in total, in words, or null when it does not. */
+export function idRequiredWords(rule: CheckIDRule | null, checksTotalCents: number): string | null {
+    if (!idRequired(rule, checksTotalCents)) return null;
     if (rule !== null && rule.mode === 'over_amount' && rule.over_cents !== null) {
         return `A check over ${money(rule.over_cents)} needs the customer's ID: check it and pick the ID type`;
     }

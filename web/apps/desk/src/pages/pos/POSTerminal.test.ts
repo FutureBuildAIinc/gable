@@ -2791,6 +2791,26 @@ describe('the dealer check ID rule at the counter', () => {
     el.remove();
   });
 
+  it('holds the ID when two checks together pass the figure, each under it', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // a first check under the figure, with the ID, joins the split
+    (el as unknown as { _pendingTenders: { method: string; amount_cents: number; id_checked: boolean; id_type: string }[] })
+      ._pendingTenders = [{ method: 'check', amount_cents: 4325, id_checked: true, id_type: 'state_id' }];
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`A check over $50.00 needs the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
   it('warns a walk-in at entry when the check is over the dealer wide limit the same read carries', async () => {
     svc.settings.mockResolvedValue(
       { revision: 2, rules: { check_limit_cents: 10000, check_id_required: { mode: 'never', over_cents: null } } });
@@ -2829,6 +2849,8 @@ describe('the dealer check ID rule at the counter', () => {
     expect((q(el2, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
     el2.remove();
   });
+});
+
 describe('the summary when the attached customer is tax exempt', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 

@@ -977,15 +977,22 @@ export class POSTerminal extends LitElement {
     return plan.ok && this._idHoldWords(plan.tenders) === null;
   }
 
+  /** The sale's checks in total: the added check tenders plus the entry. */
+  private _checksTotalCents(tenders: TenderIn[]): number {
+    return tenders.filter((t) => t.method === 'check').reduce((n, t) => n + t.amount_cents, 0);
+  }
+
   /**
    * Why the dealer's ID rule holds the plan's checks (why, or null when it
-   * does not): every check the rule covers must record the ID was checked.
-   * A manager's approval covers the limit, never the ID.
+   * does not): the rule reads the sale's checks in total, and when it bites,
+   * every check tender must record the ID was checked, so a split cannot
+   * avoid it. A manager's approval covers the limit, never the ID.
    */
   private _idHoldWords(tenders: TenderIn[]): string | null {
+    const total = this._checksTotalCents(tenders);
     for (const t of tenders) {
       if (t.method === 'check' && !t.id_checked) {
-        const why = idRequiredWords(this._idRule, t.amount_cents);
+        const why = idRequiredWords(this._idRule, total);
         if (why) return why;
       }
     }
@@ -1244,10 +1251,12 @@ export class POSTerminal extends LitElement {
         this._checkOverWords = overLimit;
         return overLimit;
       }
-      // the dealer's ID rule holds the check until the ID is checked; a
-      // manager's check approval covers the limit, never the ID
+      // the dealer's ID rule holds the check until the ID is checked; it
+      // reads the sale's checks in total (the added ones plus this entry), so
+      // a split cannot slip under the figure; a manager's check approval
+      // covers the limit, never the ID
       if (!entry.id_checked) {
-        const why = idRequiredWords(this._idRule, entry.amount_cents);
+        const why = idRequiredWords(this._idRule, this._checksTotalCents([...this._pendingTenders, entry]));
         if (why) return why;
       }
     }
@@ -2188,7 +2197,9 @@ export class POSTerminal extends LitElement {
     const isCheck = this._tenderMethod === 'check';
     const limit = this._standing?.check_limit_cents ?? this._dealerCheckLimitCents;
     const amount = this._entry?.amount_cents ?? this._owedCents;
-    const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, amount) : null;
+    // the rule reads the sale's checks in total: the added ones plus what is typed
+    const checksTotal = isCheck ? this._checksTotalCents([...this._pendingTenders, { method: 'check', amount_cents: amount }]) : 0;
+    const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, checksTotal) : null;
     return html`
       <div class="mt-3 rounded-lg border border-white/10 p-3" data-testid="pos-tender-extras">
         ${isCheck ? html`
