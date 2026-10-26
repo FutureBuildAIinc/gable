@@ -685,15 +685,6 @@ export class POSTerminal extends LitElement {
       </div>`;
   }
 
-  /**
-   * The warning the clerk has not read yet, if any: the one that asks to be
-   * acknowledged and is not on the sale's list of acknowledgements.
-   */
-  private _pendingAcknowledgement() {
-    const alerts = this._standing?.alerts ?? [];
-    return alerts.find((a) => a.acknowledge_required && !this._acknowledgedAlerts.includes(a.id)) ?? null;
-  }
-
   private _renderCustomerPanel() {
     const sale = this._sale;
     // A completed sale's lines are no bar: naming a customer starts the next sale.
@@ -1328,9 +1319,10 @@ export class POSTerminal extends LitElement {
       }
     }
     // A warning that asks to be acknowledged is read at the counter first: the
-    // clerk says so, and the acknowledgement goes on the sale with it.
-    const pending = this._pendingAcknowledgement();
-    if (pending) {
+    // clerk says so, and the acknowledgement goes on the sale with it. Every
+    // such warning is read before the sale is taken.
+    for (const pending of this._standing?.alerts ?? []) {
+      if (!pending.acknowledge_required || this._acknowledgedAlerts.includes(pending.id)) continue;
       const read = await confirmDialog({
         title: 'This customer has a warning',
         body: pending.text,
