@@ -25,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/app/orderwire"
+	"github.com/gablelbm/gable/internal/appwrite"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
@@ -227,6 +228,30 @@ func Run() {
 	} else {
 		logger.Error("JWKS_URL not set and AUTH_MODE != dev; set JWKS_URL for production or AUTH_MODE=dev for development")
 		os.Exit(1)
+	}
+
+	// ADR 0012: when APPWRITE_ENDPOINT is set, Appwrite is the identity
+	// provider and its server must clear the 2.0.0 floor. A server below the
+	// floor stops the boot; an unreachable one only warns, since no sign in
+	// path is wired to it yet.
+	if cfg.AppwriteEndpoint != "" {
+		awClient := &appwrite.Client{
+			Endpoint:  cfg.AppwriteEndpoint,
+			ProjectID: cfg.AppwriteProjectID,
+			APIKey:    cfg.AppwriteAPIKey,
+		}
+		vctx, vcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		version, err := awClient.Version(vctx)
+		vcancel()
+		switch {
+		case err != nil:
+			logger.Warn("Appwrite unreachable at start; continuing without it", "endpoint", cfg.AppwriteEndpoint, "error", err)
+		case appwrite.CheckFloor(version) != nil:
+			logger.Error("Appwrite server below the 2.0.0 floor", "endpoint", cfg.AppwriteEndpoint, "version", version)
+			os.Exit(1)
+		default:
+			logger.Info("Appwrite identity provider", "endpoint", cfg.AppwriteEndpoint, "version", version)
+		}
 	}
 
 	// 4b. Branch Context Middleware — enforces multi-branch scoping per

@@ -85,7 +85,7 @@ func TestProof(t *testing.T) {
 	downCtx, downCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	downCmd := exec.CommandContext(downCtx, "docker", "compose", "-p", "s9proof", "-f", compose, "down", "-v")
 	downCmd.Dir = root
-	_ = downCmd.CombinedOutput() // best effort: the stack may not exist yet
+	_, _ = downCmd.CombinedOutput() // best effort: the stack may not exist yet
 	downCancel()
 
 	t.Cleanup(func() {
