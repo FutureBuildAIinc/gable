@@ -468,6 +468,17 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
 		}
 
+		// Section 11 step 1a: the customer's credit and alert serialization lock,
+		// taken right after the sale row for every sale naming a customer (whether
+		// paid on account or by cash, check, card or store credit), before the
+		// account exposure read, the counter alerts read, the open credit memos
+		// (step 3) and the inventory rows (step 6).
+		if sale.CustomerID != nil {
+			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
+				return err
+			}
+		}
+
 		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
 		// customer's credit advisory lock (section 11, step 1a, taken right
 		// after the sale row): without it two concurrent ACCOUNT sales each
@@ -480,9 +491,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if sale.CustomerID == nil {
 				return conflict("walk_in_account",
 					"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
-			}
-			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
-				return err
 			}
 			facts, err := s.repo.CustomerFacts(ctx, customerID)
 			if err != nil {

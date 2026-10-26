@@ -15714,7 +15714,7 @@ paths:
       tags: [pos]
       summary: Exchange goods in one act
       description: >-
-        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -32628,6 +32628,11 @@ components:
           description: "Tender for the difference only. Not store_credit (the returned credit is applied itself)."
           items: {$ref: "#/components/schemas/PosTenderRequest"}
         picked_up_by: {type: [string, "null"], maxLength: 200}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
+          items: {type: string, format: uuid}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]

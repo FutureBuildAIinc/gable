@@ -120,6 +120,7 @@ export interface ExchangeIn {
     returned_lines: ReturnLineIn[];
     sale_lines: Array<{ product_id: string; quantity: string }>;
     tenders?: TenderIn[];
+    acknowledged_alert_ids?: string[];
 }
 
 export const posService = {

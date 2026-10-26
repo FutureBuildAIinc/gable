@@ -104,7 +104,6 @@ type Repository interface {
 	// not deleted, so the row stays for the audit trail.
 	InsertAlert(ctx context.Context, a *Alert) error
 	GetAlert(ctx context.Context, id uuid.UUID) (*Alert, error)
-	LockAlert(ctx context.Context, id uuid.UUID) error
 	EndAlert(ctx context.Context, a *Alert) error
 	ListAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) ([]Alert, error)
 	CountAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) (int64, error)
@@ -315,8 +314,15 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 }
 
 func (r *PostgresRepository) LockCustomer(ctx context.Context, id uuid.UUID) error {
+	exec := r.db.GetExecutor(ctx)
+	// Section 11 step 1a before step 7: serialize with counter sale completions
+	// that read the customer's controls and counter alerts before step 6.
+	if _, err := exec.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, id.String()); err != nil {
+		return fmt.Errorf("failed to take customer credit lock: %w", err)
+	}
 	var locked uuid.UUID
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+	err := exec.QueryRow(ctx,
 		`SELECT c.id FROM customers c WHERE c.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF c`,
 		id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {

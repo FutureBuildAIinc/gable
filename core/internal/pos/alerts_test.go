@@ -12,12 +12,36 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeractor"
+	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
+
+// withCustomers mounts the customer routes on the fixture's mux, wired the
+// way serve wires them, so a test can drive the real alert routes alongside
+// the counter routes.
+func withCustomers() func(*fixture) {
+	return func(f *fixture) {
+		f.mounts = append(f.mounts, func(f *fixture, mux *http.ServeMux) {
+			svc := customer.NewService(customer.NewRepository(f.db)).
+				WithOutbox(f.events).
+				WithTxRunner(f.db).
+				WithAudit(customeraudit.New(audit.NewLogger(f.db))).
+				WithActorResolver(customeractor.New())
+			customer.NewHandler(svc).RegisterRoutes(mux)
+		})
+	}
+}
 
 // leaveAlert leaves an alert on the customer's account: the office's note or
 // warning, the way the customer module leaves it.
@@ -142,5 +166,198 @@ func TestCP11_TheRefusalNamesTheWarning(t *testing.T) {
 	r := f.completeSale(sale, tender("account", total))
 	if !strings.Contains(string(r.raw), "Needs a PO on every order") {
 		t.Errorf("the refusal %s does not name the warning", r.raw)
+	}
+}
+
+// RULE (CP-11, P2-1): an exchange for a customer with an acknowledge-required
+// counter warning is refused without the acknowledgement and succeeds when the
+// exchange request names the acknowledged alert, recording the acknowledgement
+// audit row on the replacement sale.
+func TestCP11_ExchangeCarriesAlertAcknowledgement(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	sale, total := f.accountCart("2", nil)
+	if r := f.completeSale(sale, tender("account", total)); r.status != http.StatusOK {
+		t.Fatalf("complete original sale = %d: %s", r.status, r.raw)
+	}
+	cur := f.getSale(t, sale)
+	line := str(t, cur["lines"].([]any)[0].(map[string]any), "id")
+
+	alertID := f.leaveAlert("warning", "Needs a PO on every order", true, false, true)
+	stockBefore := f.stock()
+	invBefore := f.counterInvoices(t)
+
+	// Without the acknowledgement, the exchange is refused 409 alert_unacknowledged
+	// and nothing is written.
+	refused := f.exchange("", map[string]any{
+		"original_sale_id": sale, "reason": "wrong size",
+		"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("2"),
+		"tenders":        []map[string]any{tender("cash", 599)},
+	})
+	code, blockers, _ := errorOf(t, refused)
+	if refused.status != http.StatusConflict || code != "conflict" || len(blockers) != 1 || blockers[0] != "alert_unacknowledged" {
+		t.Fatalf("an exchange without the acknowledgement = %d: %s, want 409 alert_unacknowledged", refused.status, refused.raw)
+	}
+	if f.stock() != stockBefore || f.counterInvoices(t) != invBefore {
+		t.Errorf("a refused exchange moved stock or wrote an invoice")
+	}
+
+	// With the acknowledgement named on the exchange, the exchange completes and
+	// records the acknowledgement on the replacement sale.
+	ok := f.exchange("", map[string]any{
+		"original_sale_id":       sale,
+		"reason":                 "wrong size",
+		"returned_lines":         []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":             f.replaceWith("2"),
+		"tenders":                []map[string]any{tender("cash", 599)},
+		"acknowledged_alert_ids": []string{alertID},
+	})
+	if ok.status != http.StatusCreated {
+		t.Fatalf("the acknowledged exchange = %d: %s, want 201", ok.status, ok.raw)
+	}
+	newSale, _ := ok.body["sale"].(map[string]any)
+	newSaleID := str(t, newSale, "id")
+	var changes map[string]any
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT changes FROM audit_log WHERE action = 'pos.alert.acknowledged' AND entity_id = $1`, newSaleID).
+		Scan(&changes); err != nil {
+		t.Fatalf("the acknowledged exchange left no audit row on the replacement sale: %v", err)
+	}
+	if fmt.Sprint(changes["alert_id"]) != alertID {
+		t.Errorf("the exchange acknowledgement audit row = %v, want alert_id %s", changes, alertID)
+	}
+}
+
+// RULE (CP-11, P2-2): a warning added through the real customer alert route
+// while sales complete at the counter (pool size 4, three contenders) shares
+// the customer's step 1a serialization lock with the completion's alert check,
+// even on cash sales, so an acknowledge-required warning cannot commit inside
+// a completion's window between its alert check and its commit.
+func TestCP11_AlertAddedWhileSalesComplete(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), withCustomers())
+	f.openTill(0)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM audit_log WHERE entity_id = $1`, f.customerID)
+	})
+
+	sales := make([]string, 3)
+	for i := range sales {
+		sales[i] = f.startSale(&f.customerID)
+		if r := f.addLine(sales[i], f.productLine("1")); r.status != http.StatusOK {
+			t.Fatalf("add line = %d: %s", r.status, r.raw)
+		}
+	}
+
+	// A separate test connection holds the product's inventory row (step 6),
+	// so the first completion stops at stock out: after it has checked the
+	// customer's counter alerts, before it commits.
+	stall, err := database.Connect(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stall.Close() })
+	stallTx, err := stall.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stallTx.Rollback(context.Background())
+	var stallXID string
+	if err := stallTx.QueryRow(context.Background(), `
+		SELECT pg_current_xact_id()::text FROM inventory WHERE product_id = $1 AND location_id = $2
+		FOR UPDATE OF inventory`, f.productID, f.yardID).Scan(&stallXID); err != nil {
+		t.Fatalf("hold the inventory row: %v", err)
+	}
+
+	ctx := context.Background()
+	statuses := make([]int, 3)
+	var wg sync.WaitGroup
+	for i := range sales {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			statuses[i] = f.completeSale(sales[i], tender("cash", 599)).status
+		}(i)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := f.db.Pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := f.scalar(`SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).(int64); n == 0 {
+		t.Fatal("no completion ever reached its stock out: the stall proved nothing")
+	}
+
+	// The office posts an acknowledge-required counter warning through the
+	// real customer alert route. It must wait on the customer's step 1a lock
+	// and never commit while a sale completion's transaction is open.
+	added := make(chan resp, 1)
+	go func() {
+		added <- f.do("POST", "/api/v1/customers/"+f.customerID.String()+"/alerts",
+			map[string]any{
+				"kind":                 "warning",
+				"text":                 "Verify job PO at counter",
+				"show_at_counter":      true,
+				"show_at_orders":       false,
+				"acknowledge_required": true,
+			},
+			"X-Test-Role", "admin", "X-Test-Sub", mustUUID(f.t))
+	}()
+	select {
+	case r := <-added:
+		t.Fatalf("the alert route answered %d while a sale completion was open in its window: %s", r.status, r.raw)
+	case <-time.After(1500 * time.Millisecond):
+		// still waiting on the customer's step 1a lock held by the completion
+	}
+
+	if err := stallTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	alertResp := <-added
+	if alertResp.status != http.StatusCreated {
+		t.Fatalf("add alert = %d: %s, want 201", alertResp.status, alertResp.raw)
+	}
+	alertID := str(t, alertResp.body, "id")
+	var alertCreatedAt time.Time
+	if err := f.db.Pool.QueryRow(ctx, `SELECT created_at FROM customer_alerts WHERE id = $1`, alertID).Scan(&alertCreatedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every contender either completed before the alert committed (200) or ran
+	// after the alert committed and was refused 409 alert_unacknowledged.
+	for i, st := range statuses {
+		if st != http.StatusOK && st != http.StatusConflict {
+			t.Errorf("sale %d = %d, want 200 or 409", i, st)
+			continue
+		}
+		if st == http.StatusOK {
+			var completedAt time.Time
+			if err := f.db.Pool.QueryRow(ctx, `SELECT completed_at FROM pos_transactions WHERE id = $1`, sales[i]).Scan(&completedAt); err != nil {
+				t.Fatal(err)
+			}
+			if !completedAt.Before(alertCreatedAt) {
+				t.Errorf("sale %s completed at %s, not before the alert at %s", sales[i], completedAt, alertCreatedAt)
+			}
+		}
+	}
+
+	// A sale after the warning is refused without acknowledgement.
+	next := f.startSale(&f.customerID)
+	if r := f.addLine(next, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(next, tender("cash", 599)); r.status != http.StatusConflict {
+		t.Errorf("a sale after the warning = %d, want 409: %s", r.status, r.raw)
 	}
 }

@@ -218,8 +218,16 @@ func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, []uuid.UUID, 
 			revision = &n
 		}
 	}
-	acknowledged := make([]uuid.UUID, 0, len(r.AcknowledgedAlertIDs))
-	for i, raw := range r.AcknowledgedAlertIDs {
+	acknowledged := parseAcknowledgedAlertIDs(v, r.AcknowledgedAlertIDs)
+	if err := v.Err(); err != nil {
+		return nil, "", nil, nil, err
+	}
+	return tenders, pickedUpBy, revision, acknowledged, nil
+}
+
+func parseAcknowledgedAlertIDs(v *httpx.Validator, rawIDs []string) []uuid.UUID {
+	acknowledged := make([]uuid.UUID, 0, len(rawIDs))
+	for i, raw := range rawIDs {
 		field := fmt.Sprintf("acknowledged_alert_ids[%d]", i)
 		id, err := uuid.Parse(strings.TrimSpace(raw))
 		if err != nil {
@@ -228,10 +236,7 @@ func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, []uuid.UUID, 
 		}
 		acknowledged = append(acknowledged, id)
 	}
-	if err := v.Err(); err != nil {
-		return nil, "", nil, nil, err
-	}
-	return tenders, pickedUpBy, revision, acknowledged, nil
+	return acknowledged
 }
 
 // voidSaleRequest is POST /pos/transactions/{id}/void.

@@ -96,22 +96,6 @@ func (r *PostgresRepository) GetAlert(ctx context.Context, id uuid.UUID) (*Alert
 	return a, nil
 }
 
-// LockAlert takes the alert's row lock for the rest of the transaction, so a
-// revision check and the end after it are one act.
-func (r *PostgresRepository) LockAlert(ctx context.Context, id uuid.UUID) error {
-	var locked uuid.UUID
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT ca.id`+alertJoin+`
-		WHERE ca.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF ca`,
-		id, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrAlertNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("failed to lock alert: %w", err)
-	}
-	return nil
-}
-
 // EndAlert ends the alert: the row stays for the audit trail, its revision
 // moves and the end says who called it off.
 func (r *PostgresRepository) EndAlert(ctx context.Context, a *Alert) error {

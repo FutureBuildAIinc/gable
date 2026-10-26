@@ -2162,7 +2162,8 @@ paths:
         exchange_card_refund (a card refund of the surplus is a card return
         through POST /pos/returns, today's refund path), exchange_card_token,
         tax_quote_stale, tax_rate_not_configured, exceeds_sold,
-        insufficient_stock, no_open_session, walk_in_account, no_tender_due.
+        insufficient_stock, no_open_session, walk_in_account, no_tender_due,
+        alert_unacknowledged.
         Nothing is written when any refusal answers. The cashier is the JWT's
         subject; a machine key is refused 403.
       parameters:
@@ -2520,6 +2521,14 @@ components:
           description: "Tender for the difference only. Not store_credit (the returned credit is applied itself)."
           items: {$ref: "#/components/schemas/PosTenderRequest"}
         picked_up_by: {type: [string, "null"], maxLength: 200}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before
+            taking the exchange's replacement sale. A warning that asks to be
+            acknowledged must be named here, or the exchange is refused with 409
+            alert_unacknowledged and nothing is written.
+          items: {type: string, format: uuid}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]

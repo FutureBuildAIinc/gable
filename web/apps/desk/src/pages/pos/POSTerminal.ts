@@ -1338,9 +1338,23 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
-    // A warning that asks to be acknowledged is read at the counter first: the
-    // clerk says so, and the acknowledgement goes on the sale with it. Every
-    // such warning is read before the sale is taken.
+    if (!(await this._acknowledgeCounterWarnings(this._sale?.customer_id))) return;
+    await this._completeSale(plan.tenders);
+  }
+
+  /**
+   * A warning that asks to be acknowledged is read at the counter first: the
+   * clerk says so, and the acknowledgement goes on the sale with it. Every
+   * such warning is read before the sale or the exchange is taken.
+   */
+  private async _acknowledgeCounterWarnings(customerId?: string | null): Promise<boolean> {
+    if (customerId && (!this._standing || this._standing.customer_id !== customerId)) {
+      try {
+        this._standing = await posService.standing(customerId, 0);
+      } catch {
+        // if the standing read fails here, the server's own completion check still guards the sale
+      }
+    }
     for (const pending of this._standing?.alerts ?? []) {
       if (!pending.acknowledge_required || this._acknowledgedAlerts.includes(pending.id)) continue;
       const read = await confirmDialog({
@@ -1349,10 +1363,10 @@ export class POSTerminal extends LitElement {
         confirmLabel: 'I have read this',
         cancelLabel: 'Not now',
       });
-      if (!read) return;
+      if (!read) return false;
       this._acknowledgedAlerts = [...this._acknowledgedAlerts, pending.id];
     }
-    await this._completeSale(plan.tenders);
+    return true;
   }
 
   /**
@@ -1574,6 +1588,8 @@ export class POSTerminal extends LitElement {
     const f = this._exchangeFigures;
     const tenders = withTender && f !== null && f.difference_cents > 0
       ? [{ method: this._exchangeTender, amount_cents: f.difference_cents }] : undefined;
+    const acknowledged = withTender && this._acknowledgedAlerts.length > 0
+      ? this._acknowledgedAlerts : undefined;
     return {
       register_id: this._registerId,
       original_sale_id: sale.id,
@@ -1583,6 +1599,7 @@ export class POSTerminal extends LitElement {
       returned_lines: returned,
       sale_lines: this._exchangeLines.map((l) => ({ product_id: l.product.product_id, quantity: l.qty })),
       ...(tenders ? { tenders } : {}),
+      ...(acknowledged ? { acknowledged_alert_ids: acknowledged } : {}),
     };
   }
 
@@ -1652,6 +1669,7 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    if (!(await this._acknowledgeCounterWarnings(sale.customer_id))) return;
     const body = this._exchangeBody(true);
     if (body === null) {
       this._error = 'Name the goods coming back and the goods that replace them';

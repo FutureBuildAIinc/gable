@@ -1291,14 +1291,17 @@ The order is by kind, whatever document the path names:
    row, so the allocation subscriber's request insert (5.4) never waits
    behind a confirm;
 
-1a. the customer's credit serialization, taken by the acts that read a
-   customer's credit exposure (the confirm, the hold release and the
-   fulfilment) right after the order row: a transaction scoped advisory lock
-   keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
-   id>`). Without it two concurrent confirms of one customer's orders each read
-   an exposure that does not yet count the other (a draft is not counted) and
-   both pass the check. It is not a row lock, so it adds no edge to the order
-   below: the acts that take it hold their own order row and take inventory
+1a. the customer's credit and counter-alert serialization, taken by the acts
+   that read a customer's credit exposure or counter warnings (the confirm, the
+   hold release, the fulfilment, the counter sale completion for a named
+   customer, and the customer alert writes) right after the order or sale row:
+   a transaction scoped advisory lock keyed on the customer
+   (`pg_advisory_xact_lock` over `order-credit:<customer id>`). Without it two
+   concurrent confirms of one customer's orders each read an exposure that does
+   not yet count the other (a draft is not counted) and both pass the check, or
+   an alert added while a counter sale completes misses the completion's
+   warning check. It is not a row lock, so it adds no edge to the order below:
+   the acts that take it hold their own order or sale row and take inventory
    (step 6) after it, and the back order worker, which does not read credit,
    never takes it; the customer row (step 7) is left to the AR core as before,
    because locking it here would put a step 7 lock before step 6;

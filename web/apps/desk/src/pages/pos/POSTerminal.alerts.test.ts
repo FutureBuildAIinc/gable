@@ -28,6 +28,9 @@ const svc = vi.hoisted(() => ({
   printReceipt: vi.fn(),
   emailReceipt: vi.fn(),
   standing: vi.fn(),
+  returnReasons: vi.fn(),
+  previewExchange: vi.fn(),
+  createExchange: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -186,6 +189,53 @@ describe('the counter and the customer alerts', () => {
     q(el, 'pos-pay').click();
     await flush();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 1198 }], []);
+    el.remove();
+  });
+
+  it('asks the clerk to read the warning before taking an exchange, and sends the acknowledgement on the exchange', async () => {
+    svc.returnReasons.mockResolvedValue([]);
+    svc.createExchange.mockResolvedValue({
+      return: { id: 'r1', number: 'R-1', restocking_fee_cents: 0 },
+      sale: sale({ id: 's2', number: 'S-2', customer_id: 'cu1', status: 'completed' }),
+      returned_cents: 1198, restocking_fee_cents: 0, replacement_cents: 1198, difference_cents: 0, refunded_cents: 0,
+    });
+    const el = await withAlerts([ACK_WARNING]);
+    const internal = el as unknown as {
+      _completed: Sale | null;
+      _beginReturn: () => void;
+      _returnQty: Record<string, string>;
+      _returnReason: string;
+      _exchangeOn: boolean;
+      _exchangeLines: Array<{ product: { product_id: string; sku: string; description: string; unit_price_cents: number; uom: string; in_stock: string }; qty: string }>;
+      _exchangeFigures: { returned_cents: number; restocking_fee_cents: number; replacement_cents: number; difference_cents: number } | null;
+    };
+    internal._completed = sale({ customer_id: 'cu1', status: 'completed' });
+    internal._beginReturn();
+    internal._returnQty = { a: '1' };
+    internal._returnReason = 'Wrong size';
+    internal._exchangeOn = true;
+    internal._exchangeLines = [{
+      product: { product_id: 'p-b', sku: 'SKU-b', description: 'Item b', unit_price_cents: 1100, uom: 'EA', in_stock: '10' },
+      qty: '1',
+    }];
+    internal._exchangeFigures = { returned_cents: 1198, restocking_fee_cents: 0, replacement_cents: 1198, difference_cents: 0 };
+    await el.updateComplete;
+
+    q(el, 'exchange-take').click();
+    await flush();
+
+    const dialog = document.querySelector('gable-app-dialog') as HTMLElement | null;
+    expect(dialog).toBeTruthy();
+    expect(dialog!.textContent).toContain('Check the site before the delivery');
+    expect(svc.createExchange).not.toHaveBeenCalled();
+
+    await answerAppDialog(true);
+    await flush();
+    expect(svc.createExchange).toHaveBeenCalledWith(expect.objectContaining({
+      original_sale_id: 's1',
+      customer_id: 'cu1',
+      acknowledged_alert_ids: ['a3'],
+    }));
     el.remove();
   });
 });
