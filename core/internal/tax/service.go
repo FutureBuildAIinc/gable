@@ -5,11 +5,14 @@ package tax
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"math"
+	"net/http"
+	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -27,6 +30,8 @@ type TaxCalculator interface {
 	SaveExemption(ctx context.Context, req *CreateExemptionRequest) (*TaxExemption, error)
 	// DeleteExemption removes an exemption by ID.
 	DeleteExemption(ctx context.Context, id uuid.UUID) error
+	// EndExemption marks an exemption inactive: it stays on file.
+	EndExemption(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // Service implements TaxCalculator with Avalara or flat-rate fallback.
@@ -112,25 +117,91 @@ func (s *Service) VoidTax(ctx context.Context, documentCode string) error {
 }
 
 func (s *Service) GetExemptions(ctx context.Context, customerID uuid.UUID) ([]TaxExemption, error) {
-	return s.exemptionRepo.GetByCustomer(ctx, customerID)
+	exemptions, err := s.exemptionRepo.GetByCustomer(ctx, customerID)
+	if err != nil {
+		return nil, err
+	}
+	// each row carries its standing on the customer's branch's business day,
+	// the day the window reads, so the screen never states a day of its own
+	day, err := s.exemptionRepo.CustomerBranchDay(ctx, customerID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range exemptions {
+		exemptions[i].Status = StatusOf(&exemptions[i], day)
+	}
+	return exemptions, nil
+}
+
+// invalidField is the create's own field refusal: a 400 naming the field,
+// the shape of ADR 0001, so the dialog's rules and the server's are one.
+func invalidField(field, message string) error {
+	return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed,
+		Message: "one or more fields failed validation", Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
+
+// validateExemption holds the create's rules on the server, not only in the
+// dialog: the certificate's number, its dates' shape and order, the issuing
+// state's two letters, and that the customer exists. Nothing is written
+// until every rule passes.
+func validateExemption(req *CreateExemptionRequest, effective, expiry *time.Time) error {
+	if strings.TrimSpace(req.CertificateNumber) == "" {
+		return invalidField("certificate_number", "the certificate number is required")
+	}
+	if state := strings.TrimSpace(req.IssuingState); state != "" && !stateCode.MatchString(state) {
+		return invalidField("issuing_state", "the issuing state or province is two letters")
+	}
+	if effective != nil && expiry != nil && sameDay(*expiry, *effective) == before {
+		return invalidField("expiry_date", "the expiry day is on or after the effective day")
+	}
+	return nil
 }
 
 func (s *Service) SaveExemption(ctx context.Context, req *CreateExemptionRequest) (*TaxExemption, error) {
+	var effective, expiry *time.Time
+	if req.EffectiveDate != nil {
+		t, err := time.Parse("2006-01-02", *req.EffectiveDate)
+		if err != nil {
+			return nil, invalidField("effective_date", "the effective day is a date, YYYY-MM-DD")
+		}
+		effective = &t
+	}
+	if req.ExpiryDate != nil {
+		t, err := time.Parse("2006-01-02", *req.ExpiryDate)
+		if err != nil {
+			return nil, invalidField("expiry_date", "the expiry day is a date, YYYY-MM-DD")
+		}
+		expiry = &t
+	}
+	if err := validateExemption(req, effective, expiry); err != nil {
+		return nil, err
+	}
+	exists, err := s.exemptionRepo.CustomerExists(ctx, req.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, invalidField("customer_id", "no such customer")
+	}
+	if effective == nil {
+		day, err := s.exemptionRepo.CustomerBranchDay(ctx, req.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		effective = &day
+		if expiry != nil && sameDay(*expiry, day) == before {
+			return nil, invalidField("expiry_date", "the expiry day is on or after the effective day")
+		}
+	}
 	ex := &TaxExemption{
 		ID:                uuid.New(),
 		CustomerID:        req.CustomerID,
 		ExemptReason:      req.ExemptReason,
 		CertificateNumber: req.CertificateNumber,
 		IssuingState:      req.IssuingState,
+		EffectiveDate:     *effective,
+		ExpiryDate:        expiry,
 		IsActive:          true,
-	}
-
-	if req.ExpiryDate != nil {
-		t, err := time.Parse("2006-01-02", *req.ExpiryDate)
-		if err != nil {
-			return nil, fmt.Errorf("invalid expiry_date format (expected YYYY-MM-DD): %w", err)
-		}
-		ex.ExpiryDate = &t
 	}
 
 	if err := s.exemptionRepo.Create(ctx, ex); err != nil {
@@ -150,14 +221,27 @@ func (s *Service) DeleteExemption(ctx context.Context, id uuid.UUID) error {
 	return s.exemptionRepo.Delete(ctx, id)
 }
 
+// EndExemption ends a certificate: it stays on file, inactive, no longer
+// exempting a sale (CP-10). False when no such id exists; a certificate
+// that was already ended answers its own refusal.
+func (s *Service) EndExemption(ctx context.Context, id uuid.UUID) (bool, error) {
+	ended, err := s.exemptionRepo.MarkInactive(ctx, id)
+	if errors.Is(err, errAlreadyEnded) {
+		return false, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+			Message: "the certificate was already ended",
+			Details: []httpx.FieldError{httpx.Blocker("already_ended", "the certificate was already ended: it stays on file, inactive")}}
+	}
+	return ended, err
+}
+
 // --- Internal helpers ---
 
 func (s *Service) isExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	exemptions, err := s.exemptionRepo.GetActiveByCustomer(ctx, customerID)
+	standing, err := s.exemptionRepo.CoveringNow(ctx, customerID)
 	if err != nil {
 		return false, err
 	}
-	return len(exemptions) > 0, nil
+	return standing != nil, nil
 }
 
 func (s *Service) zeroTaxResult(req *TaxPreviewRequest) *TaxResult {

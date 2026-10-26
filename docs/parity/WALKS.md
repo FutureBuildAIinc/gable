@@ -555,4 +555,31 @@ figures in full.
    one: the Z REPORT sheet reads the frozen close, the count against the expected, read only, and prints the same
    way. At Lake Country Outpost the list holds only that register's reports.
 
+### CP-10: the exempt sale, the certificate on file and the branch's own rate
+
+Proves: CP-10 without the ship to (decision D4 stays out): the exemption certificate recorded, shown and ended on the
+account, the counter's running totals honouring it (the untaxed total at Pay), the expiry honoured at the counter and
+on orders, and the branch's tax jurisdiction and rate set on the admin screen. Across two yards: `KEL-MAIN`
+(`REG-01`) and `LK` (`REG-LK`).
+
+1. **A certificate on file (Robin Diaz).** On an account's page open the Tax Exemption tab: Add certificate, with the
+   number, the reason (RESALE), the issuing state, the effective day and (when it has one) the expiry day. The list
+   shows it Active. `GET /api/v1/tax/exemptions/<customer id>` carries the same row.
+2. **The untaxed total at Pay (Jordan Pike).** At `REG-01` ring lines for the account: the Order summary says
+   `Tax exempt` with the certificate number and its expiry in place of the tax figure, and the total is the subtotal
+   alone. Charge to account for exactly that total: the sale completes with `tax_cents` 0 (the money moment and the
+   screen agree, so the old "only a cash tender can give change" refusal is gone). `GET /api/v1/pos/transactions/<id>`
+   carries `tax_exemption` with the certificate number.
+3. **Ending it (Robin Diaz).** On the account's Tax Exemption tab press End and confirm: the row reads Ended, and a new
+   sale for the account carries the branch's tax again.
+4. **An expired window exempts nothing.** Add a certificate whose expiry day is past: the panel reads Expired. A new
+   counter sale for the account carries the tax, and an order for the account prices at the branch rate
+   (`tax_source` `branch_rate`, `tax_exempt` false): the counter and the order path read one window rule.
+5. **A future window exempts nothing yet.** Add a certificate whose effective day is ahead: the panel reads Not in
+   effect yet, and the sale and the order both carry the tax.
+6. **The branch's own rate (Robin Diaz).** On Admin, Branches edit `KEL-MAIN`: the Tax jurisdiction code and the
+   Default tax rate (typed as a percent, 8.875, stored as the fraction the column holds) save with the rest. Ring a
+   sale at `REG-01`: the summary's tax is the new rate on the subtotal. `LK` keeps its own rate, and its register
+   `REG-LK` prices at it, not at `KEL-MAIN`'s.
+
 None of the other walks of the plan are written yet; they land with their items.

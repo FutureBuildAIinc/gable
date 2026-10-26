@@ -20,6 +20,7 @@ ADR-011, which lives in the FutureBuild infra repository, not here.
 | [0008](0008-inventory-identity-and-vendor-intake.md) | Inventory identity and vendor intake | C4-0 |
 | [0009](0009-finer-admin-scopes.md) | Finer admin and users scopes | C5-1a |
 | [0010](0010-multi-company.md) | Multi company within one database | C5-3 |
+| [0011](0011-offline-counter.md) | The offline counter | CP-13 |
 
 ## Writing one
 
