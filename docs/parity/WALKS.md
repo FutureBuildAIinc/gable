@@ -504,15 +504,15 @@ claims waiting on a manager have a screen), at the counter of `KEL-MAIN` (`REG-0
 (`REG-LK`) beside it. Sign in and open Point of Sale.
 
 1. **Ring the sale to return later (Jordan Pike).** Open Till at `REG-01`, then ring two lines (a 2x4x8 SPF
-   Premium and a second product) for a named account and take the exact cash. The receipt's number
+   Premium and a second product) for the account Snowfern Cabin Co and take the exact cash. The receipt's number
    (`POS-000...`) is the sale's own number and its barcode text. Start a new sale so nothing of the first stays
    on screen.
 2. **Find the past sale.** Press "Return a past sale". Type the first sale's number: the list answers it with its
    customer, total and date. The same sale is found by its invoice number (`IN-...`) and by the customer's name,
    and the date field narrows a search to one day. A voided sale in the list reads "Voided - cannot be returned"
    and cannot be picked. The same search through the API is
-   `curl -s 'http://127.0.0.1:8080/api/v1/pos/transactions?q=POS-000001'`, and a walk-in sale's row carries
-   `customer_name: null`.
+   `curl -s 'http://127.0.0.1:8080/api/v1/pos/transactions?q=Snowfern'` (the sale number goes in `q` the same
+   way), and a walk-in sale's row carries `customer_name: null`.
 3. **Return one line damaged and one to stock.** Pick the sale: the return dialog opens on it. On the first line
    choose "Damaged, not restocked"; on the second leave "Back to stock" on; take one of each back and Take the
    Return. The credit memo and the cash refund post (`select number, status from credit_memos order by created_at
