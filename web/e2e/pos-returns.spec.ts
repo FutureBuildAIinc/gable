@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { pickOptionByValue } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -108,7 +109,10 @@ test('CP-06: return a past sale with mixed restock choices and open refund inten
   await qtyInputs.nth(1).fill('1');
   const restockOptions = page.locator('[data-testid="return-restock-damaged"]');
   await restockOptions.nth(0).click();
-  // Second line stays back to stock by default.
+  // Second line stays back to stock by default. Each returned line names a
+  // reason from the closed list (the damaged line is the damaged one).
+  await pickOptionByValue(page.getByTestId('return-reason').nth(0), 'damaged');
+  await pickOptionByValue(page.getByTestId('return-reason').nth(1), 'changed_mind');
   await page.getByTestId('return-take').click();
   await expect(page.getByText(/Return RTN-\d+ complete/)).toBeVisible({ timeout: 15000 });
   await expect(page.getByText(/\$[\d,.]+ refunded/)).toBeVisible();

@@ -497,4 +497,38 @@ it posts. Run `curl` against <http://127.0.0.1:8080>; each yard's id is in `GET 
    bank line, who matched it and the difference in cents between the bank and the slip (nothing when they agree). The
    line is now matched in bank reconciliation to the day's deposit entry, so no other day can take it.
 
-None of the other walks of the plan are written yet; they land with their items.
+### CP-06: return any past sale, the restock choice per line, and the refund claims queue
+
+Proves: CP-06 items 3 to 5 (a past sale is found and returned, the restock choice is per line, and the refund
+claims waiting on a manager have a screen), at the counter of `KEL-MAIN` (`REG-01`) with the second yard `LK`
+(`REG-LK`) beside it. Sign in and open Point of Sale.
+
+1. **Ring the sale to return later (Jordan Pike).** Open Till at `REG-01`, then ring two lines (a 2x4x8 SPF
+   Premium and a second product) for a named account and take the exact cash. The receipt's number
+   (`POS-000...`) is the sale's own number and its barcode text. Start a new sale so nothing of the first stays
+   on screen.
+2. **Find the past sale.** Press "Return a past sale". Type the first sale's number: the list answers it with its
+   customer, total and date. The same sale is found by its invoice number (`IN-...`) and by the customer's name,
+   and the date field narrows a search to one day. A voided sale in the list reads "Voided - cannot be returned"
+   and cannot be picked. The same search through the API is
+   `curl -s 'http://127.0.0.1:8080/api/v1/pos/transactions?q=POS-000001'`, and a walk-in sale's row carries
+   `customer_name: null`.
+3. **Return one line damaged and one to stock.** Pick the sale: the return dialog opens on it. On the first line
+   choose "Damaged, not restocked"; on the second leave "Back to stock" on; take one of each back and Take the
+   Return. The credit memo and the cash refund post (`select number, status from credit_memos order by created_at
+   desc limit 1;` in `make pg-shell`), and the stock adds back only the second line's goods (`select quantity from
+   inventory where product_id = '<the first product>'` is unchanged by the damaged line). The sale now reads its
+   `returned_quantities` (`GET /api/v1/pos/transactions/<id>`), and picking it again shows each line's remainder;
+   a sale whose lines all came back reads "Everything on this sale has already been returned".
+4. **The second yard never sees the first yard's sales.** At `REG-LK` (or with the `X-Branch-Id` of `LK` on the
+   curl), the same number search answers an empty list: the branch wall holds the search to the caller's yard.
+5. **The refund claims queue (Robin Diaz).** Open Daily Till's menu and press "Refund intents" beside "Lost card
+   answers" (or go straight to `/pos/refund-intents`). Every claim still waiting on a person lists with its sale
+   number, amount, tender, state in words and how long it has been waiting: a claim "Waiting on the terminal's
+   answer" is settled with Resolve (record "The terminal refunded it" with the terminal's refund id, or "No refund
+   went out" with the reconciliation reference, each with a reason); a claim "Refund declined - the credit is
+   held" is paid back to its card with Pay back and a reason. A settled claim and a paid back credit leave the
+   list. On a stack with no card terminal the list is empty and the routes say so plainly. The API is
+   `GET /api/v1/pos/refund-intents`, guarded as the resolve routes are: a cashier's call answers 403.
+
+The remaining walks of the plan land with their items.
