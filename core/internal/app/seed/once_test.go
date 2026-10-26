@@ -48,7 +48,8 @@ func TestSeedRunsOnceAndForceReseeds(t *testing.T) {
 	if marker == "" {
 		t.Fatalf("the %s marker is empty", seedMarkerKey)
 	}
-	if got := countRows(t, db, "pos_sync_log"); got == 0 {
+	baseline := countRows(t, db, "pos_sync_log")
+	if baseline == 0 {
 		t.Fatal("the first run wrote no demo rows")
 	}
 
@@ -61,8 +62,8 @@ func TestSeedRunsOnceAndForceReseeds(t *testing.T) {
 	if !strings.Contains(second, seedSkipMessage) {
 		t.Fatalf("the second run did not say it skipped:\n%s", second)
 	}
-	if got := countRows(t, db, "pos_sync_log"); got != 3 {
-		t.Fatalf("pos_sync_log holds %d rows after the skipped run, want the seed's 2 plus the probe row", got)
+	if got := countRows(t, db, "pos_sync_log"); got != baseline+1 {
+		t.Fatalf("pos_sync_log holds %d rows after the skipped run, want %d (baseline %d plus the probe row)", got, baseline+1, baseline)
 	}
 	if again, _ := readMarker(t, db); again != marker {
 		t.Fatalf("the marker changed on the skipped run: %q became %q", marker, again)
@@ -73,8 +74,8 @@ func TestSeedRunsOnceAndForceReseeds(t *testing.T) {
 	if !strings.Contains(forced, "DATABASE SEEDING COMPLETE") {
 		t.Fatalf("the forced run did not seed:\n%s", forced)
 	}
-	if got := countRows(t, db, "pos_sync_log"); got != 2 {
-		t.Fatalf("pos_sync_log holds %d rows after the forced run, want the seed's 2 and no probe row", got)
+	if got := countRows(t, db, "pos_sync_log"); got != baseline {
+		t.Fatalf("pos_sync_log holds %d rows after the forced run, want baseline %d with the probe row gone", got, baseline)
 	}
 }
 
