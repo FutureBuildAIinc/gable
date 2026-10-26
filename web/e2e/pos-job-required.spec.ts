@@ -145,11 +145,15 @@ test('the counter: an account that requires a job is charged only with a job pic
 
   // The books: the completed sale and its invoice carry the job.
   const sales = (await (await request.get(`/api/v1/pos/transactions?register_id=REG-01&limit=200`)).json()) as {
-    items: { id: string; customer_id: string | null; status: string; job_id: string | null }[];
+    items: { id: string; customer_id: string | null; status: string }[];
   };
   const sale = sales.items.find((s) => s.customer_id === account.id && s.status === 'completed');
   expect(sale, 'the charge sale is listed for the account').toBeTruthy();
-  expect(sale!.job_id).toBe(account.job_id);
+  const full = (await (await request.get(`/api/v1/pos/transactions/${sale!.id}`)).json()) as {
+    job_id: string | null; customer_po: string | null;
+  };
+  expect(full.job_id).toBe(account.job_id);
+  expect(full.customer_po).toBe('PO-E2E-JOB-91');
 
   // Put the account back the way the seed held it.
   const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as {
