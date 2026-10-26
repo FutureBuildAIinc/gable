@@ -15,6 +15,10 @@ import (
 )
 
 // fakeProductRepo is an in-memory product.Repository for unit tests.
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type fakeProductRepo struct {
 	created []*Product
 }

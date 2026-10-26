@@ -603,6 +603,41 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/large-cash/preview:
+    post:
+      operationId: posLargeCashPreview
+      tags: [pos]
+      summary: What the large cash rule asks of this payment
+      description: >-
+        The counter's look before Pay (CP-17a): the server classifies the
+        named tenders against the sale it holds under the branch's country
+        rule (the United States Form 8300 family, or the Canadian dealer
+        threshold when the dealer has it on) and answers whether the
+        payer's details will be required and which fields the rule needs.
+        Writes nothing; the completion's own capture is the authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosLargeCashPreviewRequest"
+      responses:
+        "200":
+          description: The rule family's view of this payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosLargeCashPreview"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
@@ -2281,6 +2316,24 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+    PosPayerCapture:
+      type: object
+      description: >-
+        The payer identity a large cash crossing captures at the counter
+        (CP-17a). The taxpayer identification number and the ID number are
+        sensitive: sealed at rest, never logged, never printed on a receipt
+        and never in an audit row's body.
+      properties:
+        name: {type: string, description: "The payer's name."}
+        address: {type: string, description: "The payer's address."}
+        occupation: {type: string, description: "The payer's occupation, or the nature of a sole proprietor's principal business."}
+        date_of_birth: {type: string, description: "The payer's date of birth, as YYYY-MM-DD."}
+        id_type: {type: string, enum: [drivers_license, state_id, passport, military_id, other], description: "The kind of identification looked at."}
+        id_number: {type: string, description: "The identification number; sealed at rest."}
+        taxpayer_id: {type: string, description: "The taxpayer identification number (the United States rule); sealed at rest."}
+        third_party_payer: {type: boolean, description: "Whether the person paying acts on behalf of someone else."}
     PosTenderRequest:
       type: object
       required: [method, amount_cents]
@@ -2291,6 +2344,43 @@ components:
         token_id: {type: [string, "null"], description: "The card token a card tender charges."}
         id_checked: {type: [boolean, "null"], description: "The cashier looked at the payer's ID; on a check or an account tender only. The ID's number is never taken."}
         id_type: {type: [string, "null"], enum: [drivers_license, state_id, passport, military_id, other, null], description: "The kind of ID looked at; needs id_checked true."}
+        instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null], description: "The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark."}
+    PosLargeCashPreviewRequest:
+      type: object
+      required: [transaction_id, tenders]
+      properties:
+        transaction_id: {type: string, format: uuid, description: "The sale the payment panel holds."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark."}
+        tenders:
+          type: array
+          items:
+            type: object
+            required: [method, amount_cents]
+            properties:
+              method: {type: string, description: "The tender method: cash, check, card, account or store_credit."}
+              instrument: {type: [string, "null"], enum: [personal_check, cashiers_check, bank_draft, travelers_check, money_order, null]}
+              amount_cents: {type: integer, format: int64, minimum: 1}
+    PosLargeCashPreview:
+      type: object
+      required: [country, rule_family, counted_cents, aggregate_cents, threshold_cents, comparator, asks_details, fields]
+      description: >-
+        What the counter asks before Pay (CP-17a): the branch's country and
+        rule family, this sale's counted cash, the aggregate it comes to,
+        the threshold with its comparator shape, whether the payer's
+        details are required and the fields the rule needs. A Canadian
+        branch carries the note that the capture is for the dealer's own
+        records and is not a FINTRAC report.
+      properties:
+        country: {type: string, description: "The branch's country, two letters."}
+        rule_family: {type: string, enum: ["", US_8300, CA_DEALER]}
+        counted_cents: {type: integer, format: int64}
+        aggregate_cents: {type: integer, format: int64}
+        threshold_cents: {type: integer, format: int64}
+        comparator: {type: string, enum: [greater, at_or_above]}
+        asks_details: {type: boolean}
+        fields: {type: array, items: {type: string}}
+        note: {type: string}
+        dealer_threshold: {type: boolean, description: "True for the Canadian dealer policy threshold (never a legal duty)."}
     PosVoidRequest:
       type: object
       required: [reason]

@@ -102,15 +102,15 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 		INSERT INTO locations (
 			parent_id, path, type, code, description,
 			name, address, city, state, zip, phone,
-			tax_jurisdiction_code, default_tax_rate, timezone, country_code, active
+			tax_jurisdiction_code, default_tax_rate, timezone, active, country_code
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,COALESCE($17,TRUE))
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,COALESCE($15,TRUE),$16)
 		RETURNING ` + locationColumns
 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, tzOrDefault(loc.Timezone), loc.CountryCode, loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, tzOrDefault(loc.Timezone), loc.Active, loc.CountryCode,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		return fmt.Errorf("create location: %w", err)
@@ -179,7 +179,7 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ID, revision, loc.Path, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
-		loc.TaxJurisdictionCode, loc.DefaultTaxRate, derefString(loc.Timezone), loc.CountryCode, loc.Active,
+		loc.TaxJurisdictionCode, loc.DefaultTaxRate, derefString(loc.Timezone), loc.Active, loc.CountryCode,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

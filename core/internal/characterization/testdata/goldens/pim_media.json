@@ -37,6 +37,7 @@
           "board_thickness_in": null,
           "board_width_in": null,
           "commission_rate": 0,
+          "consumer_durable": false,
           "created_at": "<ts+0d>",
           "description": "2x4x8 SPF Premium",
           "geometry_source": "parametric",

@@ -43,6 +43,13 @@ func errText(err error) string {
 
 // --- fakes ---------------------------------------------------------------
 
+func (f *fakeRepo) SettingValue(ctx context.Context, key string) (string, bool, error) {
+	if key == "country.default" {
+		return "US", true, nil
+	}
+	return "", false, nil
+}
+
 type fakeRepo struct {
 	locations map[uuid.UUID]*Location
 	branches  []Location
