@@ -48,15 +48,16 @@ that commit, so a deploy is a commit: nothing is built here and uploaded.
 
 The compose file path is `deploy/compose.yml`.
 
-The paths inside that file (the build context and the mounted API snippet)
-are relative to the compose file's own directory, so the repository root is
-one level up from it. If the platform resolves paths against the repository
-root instead, set `GABLE_REPO_ROOT` to `.` and the paths land in the same
-places.
+Docker Compose resolves relative paths (the build context and the mounted API
+snippet) against the project directory, which is `deploy/` unless the platform
+passes `--project-directory` at the repository root. The default
+`GABLE_REPO_ROOT` (`..`) is what `docker compose -f deploy/compose.yml` needs;
+set `GABLE_REPO_ROOT` to `.` only when the platform passes
+`--project-directory` at the repository root.
 
 ### 3. Set the environment values
 
-Five values have no default. The recipe refuses to start without them, and
+Six values have no default. The recipe refuses to start without them, and
 says which one is missing.
 
 | Value | What it is | How to make it | A secret |
@@ -66,6 +67,7 @@ says which one is missing.
 | `PORTAL_JWT_SECRET` | Signs the portal's session tokens. | `openssl rand -hex 32` | yes |
 | `GABLE_PUBLIC_URL` | The deployment's public address. The core writes it into the links it hands out. | `https://demo.gablelbm.com` | no |
 | `CORS_ORIGINS` | The origins allowed to call the API. The same address on a single domain deployment. | `https://demo.gablelbm.com` | no |
+| `TRUSTED_PROXIES` | The platform's proxy network (and the compose network where `web` fronts `core`), as CIDRs or addresses separated by commas, so each visitor gets their own rate limit budget instead of sharing one budget on the proxy's address. | For example `10.0.0.0/8,172.16.0.0/12` (confirm from the `core` boot log on the first deploy) | no |
 
 The demo adds four more:
 
@@ -82,6 +84,10 @@ the general ledger, the accounts and the payments. The demo is safe only
 because the access gate in front of it keeps the public out and because it
 holds sample data and nothing else. **Never run a customer this way.**
 
+The customer variant leaves those four unset and sets `JWKS_URL` as a
+required variable of the customer variant (with `AUTH_ISSUER` optional); see
+[Sign in](#sign-in) below.
+
 `VITE_AUTH_DEV_MODE` is a build argument, so changing it needs a rebuild.
 A platform that passes the application's environment values to the build
 picks it up as it is; one that does not needs the value added to the build
@@ -91,14 +97,14 @@ Optional values, all with a default:
 
 | Value | Default | What it is |
 |---|---|---|
-| `GABLE_REPO_ROOT` | `..` | Where the repository root is, relative to the compose file. |
+| `GABLE_REPO_ROOT` | `..` | Where the repository root is, relative to the compose project directory. |
 | `GABLE_PG_VOLUME` | `gable_postgres_data` | The name of the data volume. Give a second deployment on the same host its own name. |
-| `TRUSTED_PROXIES` | empty | The platform's proxy network, as CIDRs or addresses, separated by commas. Set it so every visitor gets their own rate limit budget instead of sharing one with every other visitor. |
 | `RATE_LIMIT_PER_MINUTE` | `120` | The API's request limit per caller address. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TLS` | empty | Mail. Left empty, the report runs and its result is logged instead of being delivered, and the report's screen says that the delivery was logged and not sent. |
 | `DEMO_SEED_ONCE` | `1` | The seed's memory. With it on, the seed runs on the first start only. |
 | `DEMO_SEED_FORCE` | empty | `1` asks for a reseed on purpose. |
 | `POSTGRES_USER`, `POSTGRES_DB` | `gable_user`, `gable_db` | The database's user and name. |
+| `AUTH_ISSUER` | empty | Optional in the customer variant: the expected token issuer (`iss` claim) when `JWKS_URL` is used. |
 
 No payment processor key and no AI key are in the recipe. Without a payment
 key the portal's online payment is off. Without an AI key every AI feature
@@ -121,8 +127,11 @@ the internet and a deployment running with `AUTH_MODE=dev`.
 
 The platform builds the images, runs `migrate` once, and then starts
 `core`, `worker` and `web`. The `migrate` service's log says that the
-migrations were applied and that the demo data was seeded. The domain
-answers with the front door, and the desk signs in with a persona.
+migrations were applied and that the demo data was seeded. Check the `core`
+service's boot log to confirm `TRUSTED_PROXIES` covers the proxy peer: the
+core logs the setting's state at startup and warns if `X-Forwarded-For`
+arrives from an address outside `TRUSTED_PROXIES`. The domain answers with
+the front door, and the desk signs in with a persona.
 
 ### 7. A redeploy that keeps the data
 
@@ -157,10 +166,17 @@ nothing. A customer's database never holds sample data.
 
 ### Sign in
 
-Leave `AUTH_MODE` unset. The core is then fail-closed: it needs `JWKS_URL`
-and refuses to start without it. Today that is what the staff sign in uses;
-once the staff sign in lands it is the same setting with the sign in behind
-it.
+Leave `AUTH_MODE` unset and set `JWKS_URL`. With `AUTH_MODE` unset the core
+is fail-closed: `JWKS_URL` is a required variable of the customer variant and
+the core refuses to start without it.
+
+| Value | Required in customer variant | What it is |
+|---|---|---|
+| `JWKS_URL` | yes | The identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
+| `AUTH_ISSUER` | no | When set, the core also checks that each token's `iss` claim matches this issuer string. |
+
+Note: staff sign in moves to Appwrite in ADR 0012. Until ADR 0012 lands, a
+customer deployment authenticates staff tokens against `JWKS_URL`.
 
 Build the web image without `VITE_AUTH_DEV_MODE`, so the persona sign in is
 not offered. The demo's sign in is a display name and no credential, and it
@@ -196,8 +212,9 @@ the `migrate` service has to finish before the others start.
 
 ### What is not in the package yet
 
-- The staff sign in. Until it lands, a customer's deployment needs
-  `JWKS_URL` from its own identity provider.
+- The staff sign in (staff sign in moves to Appwrite in ADR 0012). Until it
+  lands, a customer's deployment requires `JWKS_URL` from its own identity
+  provider.
 - An automated backup. Back the volume up yourself, on a schedule, and
   restore one to be sure.
 - Mail. Without the SMTP values the sender logs instead of delivering, and
@@ -223,6 +240,7 @@ bash deploy/check.sh
 ```
 
 It proves that the compose file parses, that it refuses to start when one of
-the five required values is missing, that no service publishes a host port,
-that every long running service has a health check, and that the images are
-built from this repository's own Dockerfiles.
+the six required values is missing, that no service publishes a host port,
+that every long running service has a health check, that the images are
+built from this repository's own Dockerfiles, and that the customer variant
+passes `JWKS_URL` and `AUTH_ISSUER` to `core`.

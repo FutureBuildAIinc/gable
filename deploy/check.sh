@@ -9,12 +9,14 @@
 # What it proves:
 #   1. the compose file parses: `docker compose config` succeeds with
 #      placeholder values;
-#   2. it refuses to start when a required value is missing: each of the five
+#   2. it refuses to start when a required value is missing: each of the six
 #      values that have no default makes `docker compose config` fail, and
 #      the failure names the value;
 #   3. no service publishes a host port;
 #   4. every long running service has a health check;
-#   5. the recipe builds this repository's own Dockerfiles.
+#   5. the recipe builds this repository's own Dockerfiles;
+#   6. the customer variant (AUTH_MODE unset) passes JWKS_URL and AUTH_ISSUER
+#      to the core service.
 #
 # Run it from anywhere inside the repository:
 #
@@ -44,9 +46,12 @@ ok() {
 # The values the recipe requires, and the placeholder each one gets while the
 # check runs. The placeholders are obviously not secrets: they are the same
 # word, so nothing here can be mistaken for a credential.
-REQUIRED=(POSTGRES_PASSWORD PAYMENT_VAULT_KEY PORTAL_JWT_SECRET GABLE_PUBLIC_URL CORS_ORIGINS)
+REQUIRED=(POSTGRES_PASSWORD PAYMENT_VAULT_KEY PORTAL_JWT_SECRET GABLE_PUBLIC_URL CORS_ORIGINS TRUSTED_PROXIES)
 PH_SECRET="placeholder-not-a-real-secret"
 PH_URL="https://demo.example.invalid"
+PH_PROXY="10.0.0.0/8,172.16.0.0/12"
+PH_JWKS="https://idp.example.invalid/.well-known/jwks.json"
+PH_ISSUER="https://idp.example.invalid"
 
 # The services that stay up. The one shot service (migrate) is not one of
 # them: it runs, it exits, and the platform does not start it again.
@@ -66,7 +71,8 @@ write_env_file() {
 	local pair
 	: >"$out"
 	for pair in "POSTGRES_PASSWORD=$PH_SECRET" "PAYMENT_VAULT_KEY=$PH_SECRET" \
-		"PORTAL_JWT_SECRET=$PH_SECRET" "GABLE_PUBLIC_URL=$PH_URL" "CORS_ORIGINS=$PH_URL"; do
+		"PORTAL_JWT_SECRET=$PH_SECRET" "GABLE_PUBLIC_URL=$PH_URL" \
+		"CORS_ORIGINS=$PH_URL" "TRUSTED_PROXIES=$PH_PROXY"; do
 		[ "${pair%%=*}" = "$omit" ] && continue
 		printf '%s\n' "$pair" >>"$out"
 	done
@@ -95,18 +101,25 @@ for name in "${REQUIRED[@]}"; do
 	ok "the recipe refuses to start without $name"
 done
 
-# 3 and 4 and 5. The rendered config is the authority: no service publishes a
-# port, every long running service has a health check, and the images are
-# built from this repository's Dockerfiles.
+# 3, 4, 5 and 6. The rendered config is the authority: no service publishes a
+# port, every long running service has a health check, the images are built
+# from this repository's Dockerfiles, and the customer variant passes JWKS_URL
+# and AUTH_ISSUER to core.
 docker compose --env-file "$TMPDIR_CHECK/all.env" -f "$COMPOSE" config --format json >"$TMPDIR_CHECK/config.json"
-python3 - "$TMPDIR_CHECK/config.json" "$COMPOSE" <<'PY'
+cp "$TMPDIR_CHECK/all.env" "$TMPDIR_CHECK/customer.env"
+printf 'JWKS_URL=%s\nAUTH_ISSUER=%s\n' "$PH_JWKS" "$PH_ISSUER" >>"$TMPDIR_CHECK/customer.env"
+(unset AUTH_MODE; docker compose --env-file "$TMPDIR_CHECK/customer.env" -f "$COMPOSE" config --format json >"$TMPDIR_CHECK/customer.json")
+
+python3 - "$TMPDIR_CHECK/config.json" "$TMPDIR_CHECK/customer.json" "$PH_JWKS" "$PH_ISSUER" <<'PY'
 import json
 import os
 import sys
 
-config_path, compose_path = sys.argv[1], sys.argv[2]
+config_path, customer_path, expected_jwks, expected_issuer = sys.argv[1:5]
 with open(config_path, encoding="utf-8") as handle:
     config = json.load(handle)
+with open(customer_path, encoding="utf-8") as handle:
+    customer = json.load(handle)
 
 services = config.get("services", {})
 problems = []
@@ -150,6 +163,16 @@ volumes = config.get("volumes", {})
 if not volumes:
     problems.append("the recipe has no named volume")
 
+# The customer variant (AUTH_MODE unset) must pass JWKS_URL and AUTH_ISSUER to
+# core so the fail-closed server can verify tokens from the identity provider.
+customer_core_env = customer.get("services", {}).get("core", {}).get("environment", {})
+if customer_core_env.get("AUTH_MODE", "") != "":
+    problems.append("the customer variant left AUTH_MODE set on core: %r" % customer_core_env.get("AUTH_MODE"))
+if customer_core_env.get("JWKS_URL") != expected_jwks:
+    problems.append("service core does not receive JWKS_URL in the customer variant")
+if customer_core_env.get("AUTH_ISSUER") != expected_issuer:
+    problems.append("service core does not receive AUTH_ISSUER in the customer variant")
+
 if problems:
     for problem in problems:
         print("check-deploy: FAIL: %s" % problem, file=sys.stderr)
@@ -157,6 +180,7 @@ if problems:
 print("check-deploy: ok: no service publishes a port")
 print("check-deploy: ok: every long running service has a health check")
 print("check-deploy: ok: the images are built from this repository's Dockerfiles")
+print("check-deploy: ok: the customer variant passes JWKS_URL and AUTH_ISSUER to core")
 PY
 
 ok "the recipe is safe to hand to a platform"

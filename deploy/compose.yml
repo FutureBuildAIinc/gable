@@ -29,20 +29,20 @@
 #
 # THE VALUES THE OPERATOR SETS
 #
-# Five values have no default and the file refuses to start without them:
+# Six values have no default and the file refuses to start without them:
 #
 #   POSTGRES_PASSWORD   the database password
 #   PAYMENT_VAULT_KEY   64 hex characters, `openssl rand -hex 32`
 #   PORTAL_JWT_SECRET   the portal's session secret
 #   GABLE_PUBLIC_URL    the deployment's public address
 #   CORS_ORIGINS        the same address
+#   TRUSTED_PROXIES     the platform's proxy network (CIDRs or addresses)
 #
 # deploy/README.md says how to make each one and which are secrets.
 #
 # THE DEMO VARIANT AND THE CUSTOMER VARIANT
 #
-# The demo sets four more values, and they are the only difference between the
-# two variants:
+# The demo sets four more values:
 #
 #   AUTH_MODE=dev        the core stops checking who the caller is
 #   DEMO_SEED=1          the migrate service loads the demo data
@@ -56,9 +56,15 @@
 # the public out, and because the demo holds sample data and nothing else.
 # Never run a customer this way.
 #
-# The customer variant leaves AUTH_MODE unset (the core then needs JWKS_URL
-# today, and the staff sign in once it lands), leaves DEMO_SEED unset (no seed
-# ever runs), and builds the web image without VITE_AUTH_DEV_MODE.
+# The customer variant leaves AUTH_MODE, DEMO_SEED, DEMO_SEED_IMPORT and
+# VITE_AUTH_DEV_MODE unset, and sets JWKS_URL as a required variable of the
+# customer variant (with AUTH_ISSUER optional):
+#
+#   JWKS_URL             the identity provider's JWKS endpoint (required in
+#                        the customer variant; with AUTH_MODE unset the core
+#                        refuses to start without JWKS_URL. Note: staff sign
+#                        in moves to Appwrite in ADR 0012)
+#   AUTH_ISSUER          optional: the expected token issuer (`iss` claim)
 #
 # The seed runs once. The seed truncates the transactional tables on every run
 # it makes, so on a demo tenant that would wipe the demo on every redeploy.
@@ -68,11 +74,11 @@
 #
 # PATHS
 #
-# The build context and the mounted file are relative to this file's own
-# directory, so the repository root is one level up. GABLE_REPO_ROOT changes
-# that for a platform that resolves paths against the repository root instead
-# (set it to "."). The default is what `docker compose -f deploy/compose.yml`
-# needs when it runs from the repository root.
+# Docker Compose resolves relative paths against the project directory, which
+# is this file's own directory (`deploy/`) unless the platform passes
+# `--project-directory` at the repository root. The default `..` is what
+# `docker compose -f deploy/compose.yml` needs; set GABLE_REPO_ROOT to `.`
+# only when the platform passes `--project-directory` at the repository root.
 
 # The core image, built once per service from the same Dockerfile. The
 # migrate, core and worker services all run the one binary; each subcommand
@@ -131,9 +137,13 @@ services:
     <<: *core-build
     command: ["./core", "serve"]
     environment:
-      # AUTH_MODE=dev for the demo, unset for a customer (then the core needs
-      # JWKS_URL). See the note at the top of this file.
+      # AUTH_MODE=dev for the demo, unset for a customer. With AUTH_MODE unset
+      # the core is fail-closed and requires JWKS_URL (AUTH_ISSUER is optional
+      # and checks the token's iss claim when set). Note: staff sign in moves
+      # to Appwrite in ADR 0012. See the note at the top of this file.
       AUTH_MODE: ${AUTH_MODE-}
+      JWKS_URL: ${JWKS_URL-}
+      AUTH_ISSUER: ${AUTH_ISSUER-}
       PORT: "8080"
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       # Seals the keys an administrator enters in Tech Admin. The README says
@@ -146,9 +156,8 @@ services:
       GABLE_PUBLIC_URL: ${GABLE_PUBLIC_URL:?set GABLE_PUBLIC_URL to the deployment's public address}
       CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to the deployment's public address}
       # The platform's proxy network, so each visitor has their own rate limit
-      # budget instead of sharing one with every other visitor. Unset, every
-      # caller shares the proxy's budget.
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES-}
+      # budget instead of sharing one with every other visitor.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:?set TRUSTED_PROXIES to the platform's proxy network}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
       EDI_OUTPUT_DIR: /app/edi_out
       # Mail. Empty keeps the log sender: the report runs and its result is
