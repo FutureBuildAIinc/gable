@@ -30,6 +30,8 @@ import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
+import './TillReportView.ts';
+import './TillZReports.ts';
 import { kindLabel } from './movements.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
@@ -140,6 +142,10 @@ export class POSTerminal extends LitElement {
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
+  // The X report of the open drawer, and the register's stored Z reports (CP-08).
+  @state() private _showXReport = false;
+  @state() private _xReport: TillReport | null = null;
+  @state() private _showZReports = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -335,6 +341,20 @@ export class POSTerminal extends LitElement {
       void this._beginFresh();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to open till';
+    } finally {
+      this._tillBusy = false;
+    }
+  }
+
+  /** The X report of the open drawer: a mid-shift read, never a close. */
+  private async _beginXReport() {
+    if (!this._till) return;
+    try {
+      this._tillBusy = true;
+      this._xReport = await posService.tillReport(this._till.id);
+      this._showXReport = true;
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to load the X report';
     } finally {
       this._tillBusy = false;
     }
@@ -552,7 +572,7 @@ export class POSTerminal extends LitElement {
     this._step = key;
   }
 
-  /** Back to a walk-in sale (only before the first line). */
+  /** Back to a walk-in sale (the tax follows the account now standing on it). */
   private async _clearCustomer() {
     if (!this._sale || this._sale.status !== 'open') return;
     try {
@@ -669,8 +689,8 @@ export class POSTerminal extends LitElement {
             </div>
             <button
               @click=${() => this._clearCustomer()}
-              ?disabled=${hasLines || finished || this._loading}
-              title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              ?disabled=${finished || this._loading}
+              title=${finished ? 'Start a new sale to change the customer' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Walk-in sale</button>
           </div>
@@ -722,7 +742,7 @@ export class POSTerminal extends LitElement {
           placeholder="Find by name or account number"
           aria-label="Find a customer by name or account number"
           .value=${this._custQuery}
-          ?disabled=${hasLines || this._till === null}
+          ?disabled=${this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
         ${this._till === null ? nothing : html`<div class="mt-1 text-xs text-slate-400">Name the customer, then add products</div>`}
@@ -948,8 +968,8 @@ export class POSTerminal extends LitElement {
       case 'add':
         return till && open;
       case 'customer':
-        // the lookup is off once the sale has a line: the customer is named first
-        return till && open && this._customer === null && !hasLines;
+        // the account is named before or after the lines (CP-10: the tax follows it)
+        return till && open && this._customer === null;
       case 'quantity':
         return open && hasLines;
       case 'next':
@@ -1652,6 +1672,25 @@ export class POSTerminal extends LitElement {
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }
 
+  /** The X report panel on the open drawer (CP-08). */
+  private _renderXReportModal() {
+    if (!this._showXReport) return nothing;
+    return this._overlay(html`
+      ${this._xReport ? html`
+        <gable-till-report-view kind="x" .report=${this._xReport} branch-name=${this._register?.branch_name ?? ''}
+          @report-close=${() => { this._showXReport = false; this._xReport = null; }}></gable-till-report-view>` : nothing}
+    `);
+  }
+
+  /** The register's stored Z reports (CP-08). */
+  private _renderZReportsModal() {
+    if (!this._showZReports || !this._register) return nothing;
+    return this._overlay(html`
+      <gable-till-z-reports register-id=${this._registerId}
+        @z-close=${() => { this._showZReports = false; }}></gable-till-z-reports>
+    `);
+  }
+
   private _renderTillCloseModal() {
     if (!this._showTillClose) return nothing;
     const close = () => { this._showTillClose = false; this._tillReport = null; this._closeResult = null; };
@@ -1705,7 +1744,7 @@ export class POSTerminal extends LitElement {
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
           <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
-          <input type="number" step="0.01" .value=${this._counts[m]}
+          <input type="number" step="0.01" .value=${this._counts[m]} data-testid="till-count-${m}"
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
             class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
             style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="Enter the count" />
@@ -1895,11 +1934,21 @@ export class POSTerminal extends LitElement {
             <button @click=${() => { this._showMovement = true; }} ?disabled=${this._tillBusy} data-testid="pos-drawer-cash"
               title="Safe drop, pickup, cash paid in or paid out"
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Drawer Cash</button>
+            <button @click=${() => this._beginXReport()} ?disabled=${this._tillBusy} data-testid="pos-x-report"
+              title="A mid-shift read of the drawer, printable; not a close"
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">X Report</button>
+            <button @click=${() => { this._showZReports = true; }} ?disabled=${this._tillBusy} data-testid="pos-z-reports"
+              title="The frozen Z report of each past drawer of this register"
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
-              class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>`}
+              class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>
+            ${this._register ? html`
+            <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
+              title="The frozen Z report of each past drawer of this register"
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>` : nothing}`}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
@@ -2201,8 +2250,11 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
           <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
+          ${sale?.tax_exemption ? html`
+          <div class="flex items-baseline justify-between gap-2 py-1 text-slate-400"><dt>Tax</dt>
+            <dd class="text-right text-xs" data-testid="summary-tax-exempt">Tax exempt${sale.tax_exemption.certificate_number ? html` &middot; ${sale.tax_exemption.certificate_number}` : nothing}${sale.tax_exemption.expiry_day ? html` &middot; expires ${sale.tax_exemption.expiry_day}` : nothing}</dd></div>` : html`
           <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
-            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
+            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>`}
           <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-white" data-testid="summary-total">${fmt(total)}</dd></div>
           ${completed ? html`
@@ -2402,6 +2454,8 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderXReportModal()}
+        ${this._renderZReportsModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`
