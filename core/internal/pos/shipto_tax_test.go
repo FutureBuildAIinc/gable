@@ -20,8 +20,12 @@ import (
 )
 
 // zoneFor seeds one postal zone through the zone tables and answers its id.
-func zoneFor(t *testing.T, repo *taxzone.Repository, code string, parts ...taxzone.RatePart) uuid.UUID {
+func zoneFor(t *testing.T, f *fixture, code string, parts ...taxzone.RatePart) uuid.UUID {
 	t.Helper()
+	// The zone tables start empty: a zone an earlier run left behind could
+	// answer the lookup with a lower rate and win the lowest combined rule.
+	mustExec(t, f.db, `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`)
+	repo := taxzone.NewRepository(f.db)
 	z, err := repo.Create(context.Background(), &taxzone.Draft{
 		Country: "US", JurisdictionCode: "Z-" + code, JurisdictionType: "CTY", JurisdictionName: "The county",
 		ZoneKind: taxzone.KindPostal, Sourcing: taxzone.SourcingDestination,
@@ -46,7 +50,7 @@ func zonePart(name, rate string) taxzone.RatePart {
 func TestDeliveredCounterSaleTakesTheShipToZoneRate(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	zoneID := zoneFor(t, taxzone.NewRepository(f.db), "98150",
+	zoneID := zoneFor(t, f, "98150",
 		zonePart(taxzone.PartState, "0.035000"), zonePart(taxzone.PartCity, "0.015000"))
 
 	shipTo := uuid.New()
@@ -181,7 +185,7 @@ func TestShipToOnACounterSaleIsRefusedWithoutCustomerOrDelivery(t *testing.T) {
 func TestShipToNamedOnTheCustomerAttach(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	zoneFor(t, taxzone.NewRepository(f.db), "98150", zonePart(taxzone.PartState, "0.050000"))
+	zoneFor(t, f, "98150", zonePart(taxzone.PartState, "0.050000"))
 
 	shipTo := uuid.New()
 	mustExec(t, f.db, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, city, region, postal_code, country, is_default, is_active)

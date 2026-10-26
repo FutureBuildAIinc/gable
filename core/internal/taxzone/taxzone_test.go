@@ -19,8 +19,19 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/taxzone"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/internal/testutil"
 )
+
+
+// clearZones empties the zone tables: the suite's database is shared, and a
+// zone an earlier run left behind would answer lookups with the wrong rate.
+func clearZones(t *testing.T, db *database.DB) {
+	t.Helper()
+	if _, err := db.Pool.Exec(context.Background(), `TRUNCATE tax_zone_boundaries, tax_zone_rates, tax_zones`); err != nil {
+		t.Fatalf("clear the zone tables: %v", err)
+	}
+}
 
 func mustCreate(t *testing.T, repo *taxzone.Repository, d *taxzone.Draft) *taxzone.Zone {
 	t.Helper()
@@ -48,6 +59,7 @@ func part(name, rate string) taxzone.RatePart {
 
 func TestLookupResolvesTheZoneThatCoversThePlaceOfReceipt(t *testing.T) {
 	db := testutil.RequireDB(t)
+	clearZones(t, db)
 	repo := taxzone.NewRepository(db)
 	ctx := context.Background()
 	on := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
@@ -97,6 +109,7 @@ func TestLookupResolvesTheZoneThatCoversThePlaceOfReceipt(t *testing.T) {
 
 func TestLookupHonoursTheEffectiveWindow(t *testing.T) {
 	db := testutil.RequireDB(t)
+	clearZones(t, db)
 	repo := taxzone.NewRepository(db)
 	ctx := context.Background()
 	on := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
@@ -117,6 +130,7 @@ func TestLookupHonoursTheEffectiveWindow(t *testing.T) {
 
 func TestLookupMatchesAProvinceZoneByRegion(t *testing.T) {
 	db := testutil.RequireDB(t)
+	clearZones(t, db)
 	repo := taxzone.NewRepository(db)
 	ctx := context.Background()
 	on := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
@@ -144,6 +158,7 @@ func TestLookupMatchesAProvinceZoneByRegion(t *testing.T) {
 
 func TestZoneAdminCreateReadListCloseDelete(t *testing.T) {
 	db := testutil.RequireDB(t)
+	clearZones(t, db)
 	repo := taxzone.NewRepository(db)
 	ctx := context.Background()
 
