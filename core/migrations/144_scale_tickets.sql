@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS scale_tickets (
     captured_by TEXT NOT NULL,
     captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     void_reason TEXT NULL,
+    revision BIGINT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (source <> 'MANUAL' OR manual_reason IS NOT NULL)
 );

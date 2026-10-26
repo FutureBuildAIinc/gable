@@ -177,6 +177,24 @@ type Line struct {
 	VendorID         *uuid.UUID   `json:"vendor_id"`
 	SpecialOrderCost *httpx.Price `json:"special_order_unit_cost_ten_thousandths"`
 
+	// The weight block of a weighed line (CP-19, ruling D8): all null on a
+	// line that was not weighed. The weights are pounds at the wire's scale;
+	// weight_source is scale or manual, and a manual weight carries its
+	// reason and the Handbook 44 marking the documents print. The net basis
+	// records that Gable computed the net as the difference of two gross
+	// readings (double draft), never as a scale tare operation.
+	WeightSource       *string          `json:"weight_source"`
+	WeightGrossLb      *httpx.Quantity  `json:"weight_gross_lb"`
+	WeightTareLb       *httpx.Quantity  `json:"weight_tare_lb"`
+	WeightNetLb        *httpx.Quantity  `json:"weight_net_lb"`
+	WeightNetBasis     *string          `json:"weight_net_basis"`
+	ScaleDeviceID      *uuid.UUID       `json:"scale_device_id"`
+	ScaleTicketID      *uuid.UUID       `json:"scale_ticket_id"`
+	ScaleTicketNumber  *string          `json:"scale_ticket_number"`
+	ManualWeightReason *string          `json:"manual_weight_reason"`
+	WeightCapturedBy   *string          `json:"weight_captured_by"`
+	WeightCapturedAt   *httpx.Timestamp `json:"weight_captured_at"`
+
 	CreatedAt httpx.Timestamp `json:"created_at"`
 }
 

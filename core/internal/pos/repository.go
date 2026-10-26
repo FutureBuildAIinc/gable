@@ -348,8 +348,13 @@ func dayBounds(day string) (time.Time, time.Time) {
 	return start, start.Add(24 * time.Hour)
 }
 
-// posLineCols is the shared line projection over pos_line_items.
-var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`)
+// posLineCols is the shared line projection over pos_line_items, with the
+// counter's own weight block (CP-19) the other document tables pass NULLs
+// for.
+var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`,
+	`l.weight_source, ROUND(l.weight_gross_lb * 10000)::bigint, ROUND(l.weight_tare_lb * 10000)::bigint,
+	ROUND(l.weight_net_lb * 10000)::bigint, l.weight_net_basis, l.scale_device_id, l.scale_ticket_id,
+	l.scale_ticket_number, l.manual_weight_reason, l.weight_captured_by, l.weight_captured_at`)
 
 func mapWriteError(err error) error {
 	var pgErr *pgconn.PgError
