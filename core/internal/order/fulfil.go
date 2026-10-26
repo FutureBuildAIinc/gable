@@ -462,7 +462,7 @@ func (s *Service) prepareFulfilTax(ctx context.Context, id uuid.UUID, req Fulfil
 	if err != nil {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, cur.CustomerID)
+	exempt, err := s.exemptOn(ctx, cur.BranchID, cur.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -622,7 +622,7 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 			inv.TaxCents = int64(priced.taxCents)
 			inv.TaxSource = string(salesdoc.TaxSourceProvider)
 		} else {
-			exempt, err := s.repo.CustomerExempt(ctx, cur.CustomerID)
+			exempt, err := s.exemptOn(ctx, cur.BranchID, cur.CustomerID)
 			if err != nil {
 				return err
 			}

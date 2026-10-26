@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -90,7 +91,10 @@ type Repository interface {
 	OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, contactID, jobID *uuid.UUID) (shipToOK, contactOK, jobOK bool, err error)
 	ShipTo(ctx context.Context, shipToID uuid.UUID) (snapshot *ShipToSnapshot, rate *string, err error)
 	BranchTaxRate(ctx context.Context, branchID uuid.UUID) (*string, error)
-	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// CustomerExemption reads the certificate that exempts a sale on day
+	// through tax.ExemptionCovering: the one window rule the order path and
+	// the counter share (CP-10). Nil when no certificate covers the day.
+	CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error)
 
 	// The credit check reads documents, never customers.balance_due
 	// (ADR 0005 5.3).
@@ -1297,14 +1301,12 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID uuid.UU
 	return rate, nil
 }
 
-func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	var exempt bool
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND is_active)`, customerID).Scan(&exempt)
+func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	standing, err := tax.ExemptionCovering(ctx, r.db.GetExecutor(ctx), customerID, day)
 	if err != nil {
-		return false, fmt.Errorf("failed to read tax exemptions: %w", err)
+		return nil, fmt.Errorf("failed to read tax exemptions: %w", err)
 	}
-	return exempt, nil
+	return standing, nil
 }
 
 // OpenReceivableCents is the customer's open receivable (documents, less unapplied cash) plus the unbilled

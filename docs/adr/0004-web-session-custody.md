@@ -9,6 +9,12 @@ Accepted for the Gable v1 refactor (item R1-8). The interim design below is the
 v1 design. The target design is built at the cutover (cycle 7), and this record
 is replaced by one that supersedes it then.
 
+ADR 0012 (staff sign in) supersedes this record for staff on the web: its
+session slice builds this record's target, and when it lands the interim
+`sessionStorage` handoff below ends for staff. The target's cookie is issued
+by the API after an Appwrite sign in made by the core, with no bridge
+(ADR 0012 sections 2 and 3).
+
 ## Context
 
 The web workspace is two separate bundles on one origin: the front door at `/`
@@ -56,7 +62,8 @@ removes it.
 ### Target (cutover, cycle 7): an HttpOnly cookie issued by the API
 
 At the cutover the API issues the session as an `HttpOnly`, `Secure`,
-`SameSite=Strict` cookie at sign in, through the FutureBuild bridge. Both
+`SameSite=Strict` cookie at sign in, after an Appwrite sign in made by the
+core (ADR 0012), with no bridge. Both
 bundles then send it with `credentials: 'same-origin'`, and no script can read
 it. Custody in JavaScript shrinks to the display data the bundles need (name,
 roles), which is not a credential.

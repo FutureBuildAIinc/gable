@@ -9026,7 +9026,7 @@ export interface paths {
         put?: never;
         /**
          * Create a tax exemption
-         * @description Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+         * @description Roles admin, owner, finance. customer_id, exempt_reason and certificate_number are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to the customer's primary branch's business day, expiry_date is a YYYY-MM-DD string on or after effective_date, and issuing_state is a two letter code when sent (any invalid field answers 400 naming the field). A customer outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxExemptionCreate"];
         delete?: never;
@@ -9049,6 +9049,26 @@ export interface paths {
         get: operations["taxExemptionList"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/exemptions/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a tax exemption
+         * @description Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, ended) but exempts no sale. An unknown id answers 404; a certificate that was already ended answers 409 already_ended. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+         */
+        post: operations["taxExemptionEnd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16538,6 +16558,13 @@ export interface components {
              * @description The return an exchange's replacement sale stands against.
              */
             exchange_return_id: string | null;
+            /** @description Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day. */
+            tax_exemption?: {
+                /** @description The certificate's number as the counter shows it. */
+                certificate_number?: string;
+                /** @description The certificate's last day, YYYY-MM-DD; absent when it does not expire. */
+                expiry_day?: string;
+            } | null;
             lines: components["schemas"]["PosLineItem"][];
             tenders: components["schemas"]["PosTender"][];
         };
@@ -17069,6 +17096,10 @@ export interface components {
                 [key: string]: number;
             };
             expected_by_method: {
+                [key: string]: number;
+            };
+            /** @description The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. Always present on a live read; a Z report frozen before the figure existed carries none in its stored payload. */
+            refunds_by_method: {
                 [key: string]: number;
             };
             /** @description The signed variance cents per lowercase method; present once the drawer is counted. */
@@ -19292,13 +19323,23 @@ export interface components {
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description The certificate's standing on the customer's branch's business day, said by the server (the same window rule the counter and the orders read), so no screen computes a day of its own.
+             * @enum {string}
+             */
+            status?: "active" | "expired" | "future" | "ended";
         };
         TaxExemptionCreateRequest: {
             /** Format: uuid */
             customer_id: string;
             exempt_reason: string;
-            certificate_number?: string;
+            certificate_number: string;
             issuing_state?: string;
+            /**
+             * Format: date
+             * @description The certificate's first day, YYYY-MM-DD; defaults to today.
+             */
+            effective_date?: string;
             /**
              * Format: date
              * @description YYYY-MM-DD.
@@ -38538,6 +38579,31 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    taxExemptionEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The certificate is ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     taxExemptionDelete: {
         parameters: {
             query?: never;
@@ -38560,6 +38626,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
