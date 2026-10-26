@@ -146,12 +146,16 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tax-exempt-charged.png'), fullPage: true });
 
   const sales = (await (await request.get('/api/v1/pos/transactions?register_id=REG-01')).json()) as {
-    items: { id: string; customer_id: string | null; tax_cents: number; total_cents: number; status: string }[];
+    items: { id: string; customer_id: string | null; status: string }[];
   };
   const sale = sales.items.find((s) => s.customer_id === account.id && s.status === 'completed');
   expect(sale, 'the exempt charge sale completed').toBeTruthy();
-  expect(sale!.tax_cents).toBe(0);
-  expect(sale!.total_cents).toBe(Math.round(subtotal * 100));
+  const full = (await (await request.get(`/api/v1/pos/transactions/${sale!.id}`)).json()) as {
+    tax_cents: number; total_cents: number; tax_exemption: { certificate_number: string } | null;
+  };
+  expect(full.tax_cents).toBe(0);
+  expect(full.total_cents).toBe(Math.round(subtotal * 100));
+  expect(full.tax_exemption?.certificate_number).toBe(cert);
 
   // The certificate ends in the UI, and the tax returns on a new sale.
   await page.goto(`/accounts/${account.id}`);
