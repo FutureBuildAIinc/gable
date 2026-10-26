@@ -127,7 +127,7 @@ export interface CounterCustomer {
 
 // --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
 
-export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'account_hold' | 'manager_override';
 
 export interface WayForward {
     kind: 'pay_down' | 'manager_override' | 'switch_tender';

@@ -393,6 +393,33 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    twice: the second says Reprint with its count (the 80mm layout needs the receipt renderer; without it the screen
    says the layout is not available).
 
+### A credit hold from accounts receivable stops the charge (CP-11)
+
+Needs the demo seed with at least two yards and the counter open (the walk above). `$TARNWICK` is the customer id as
+before; the hold calls are accounts receivable's own routes, the ones the AR screen drives.
+
+1. **AR places the hold.** `curl -X POST .../api/v1/ar/credit-holds -H 'Content-Type: application/json'
+   -d '{"customer_id":"'$TARNWICK'","reason":"past due 60 days"}'` answers 201 with the hold. The account's flag is
+   set in the same transaction: `GET .../api/v1/ar/credit-holds?customer_id=$TARNWICK` lists it as active.
+2. **The counter states it.** At Point of Sale find Tarnwick and attach the account: the standing line says
+   "On credit hold" in the red the zero limit uses, and the line under it carries the hold's own words ("past due
+   60 days") and that nothing can be put on the account. Ring a line: Charge to account is off, and the ways
+   forward are Ask a manager to approve and Pay another way; there is no Take the amount on the account, because
+   paying the balance does not lift a hold.
+3. **The server refuses the charge.** `GET .../api/v1/pos/customers/$TARNWICK/standing?amount_cents=599` answers
+   the verdict blocked with the reason `account_hold`; a completion with an account tender
+   (`POST .../api/v1/pos/transactions/<sale>/complete`) answers 409 with the same blocker and writes nothing: no
+   invoice, no balance, no ledger row.
+4. **The account still buys.** Pay the same sale in cash: "Sale complete", and the account's balance does not move.
+5. **A manager may approve the one sale.** Start a sale, press Ask a manager to approve, type a reason: the charge
+   goes through for that sale only; the next sale is blocked again.
+6. **An override window on the hold.** `POST .../api/v1/ar/credit-holds/<hold id>/override` with
+   `"override_reason": "agreed on the phone", "override_until": "<an hour ahead>", "max_order_cents": 599`: a sale
+   of at most $5.99 on the account completes, one over the cap is refused with the cap in the words, and after the
+   window the hold stands as before.
+7. **AR releases the hold.** `POST .../api/v1/ar/credit-holds/<hold id>/release -d '{"reason":"paid up"}'`: the
+   counter attaches the account again and the charge completes.
+
 ### The card terminal at the counter, from the claim to the manager's queue
 
 Needs the demo seed, two yards, a register each, and the simulated terminal selected by configuration
