@@ -70,6 +70,7 @@ func TestCP11_StandingCarriesCounterAlerts(t *testing.T) {
 	// A customer with no alert carries an empty list, not a missing field.
 	other := uuid.New()
 	mustExec(f.t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Quiet Co', $2, `+defaultBranch+`)`, other, "WPOS-"+uuid.NewString()[:8])
+	t.Cleanup(func() { mustExec(f.t, f.db, `DELETE FROM customers WHERE id = $1`, other) })
 	quiet := f.standing(other, "")
 	if quiet.status != http.StatusOK {
 		t.Fatalf("standing of a customer with no alert = %d: %s", quiet.status, quiet.raw)
