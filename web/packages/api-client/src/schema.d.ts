@@ -17032,8 +17032,8 @@ export interface components {
             expected_by_method: {
                 [key: string]: number;
             };
-            /** @description The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. */
-            refunds_by_method: {
+            /** @description The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. A Z report frozen before the figure existed carries none. */
+            refunds_by_method?: {
                 [key: string]: number;
             };
             /** @description The signed variance cents per lowercase method; present once the drawer is counted. */

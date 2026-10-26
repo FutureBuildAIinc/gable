@@ -3053,7 +3053,7 @@ components:
         limit: {type: integer}
     PosTillReport:
       type: object
-      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, refunds_by_method, movements, movement_totals_by_kind]
+      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, movements, movement_totals_by_kind]
       properties:
         session:
           $ref: "#/components/schemas/PosTillSession"
@@ -3077,7 +3077,7 @@ components:
         refunds_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
-          description: "The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it."
+          description: "The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. A Z report frozen before the figure existed carries none."
         over_short_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
