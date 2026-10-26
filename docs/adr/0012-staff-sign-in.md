@@ -77,11 +77,9 @@ self hosting dealer cannot obtain.
   `claims.Email`, and `getPerformedBy`
   (`core/internal/pricing/category_service.go`, around line 610) prefers it to
   the subject.
-- **The guards' roles.** The guards in `core/internal/app/serve` (`serve.go`,
-  `wire_branch_wall.go`, `wire_customer_branch.go`, `wire_customer_quotes.go`
-  and `wire_exposure.go`) use `owner`, `admin`, `sales`, `finance`,
-  `purchasing`, `warehouse`, `cashier`, `driver`, and `user` once (the
-  `/uploads/` route, `serve.go`
+- **The guards' roles.** The guards in `core/internal/app/serve` use `owner`,
+  `admin`, `sales`, `finance`, `purchasing`, `warehouse`, `cashier`, `driver`,
+  and `user` once (the `/uploads/` route, `serve.go`
   line 1183).
 - **Branches come from Gable's own table.** `core/pkg/middleware/branch.go`
   checks `X-Branch-Id` against `user_locations` rows keyed by the token's
@@ -266,7 +264,9 @@ only (section 4); the one time secret it brings back is spent by the core.
   every refusal gives, a person whose membership is unconfirmed or absent,
   whose user is blocked or deleted, whose Appwrite email is not verified
   (section 6 says how an invitee proves it), or who holds no mapped role
-  (Appwrite's `owner` alone, or only unknown roles). Multi factor
+  (only unknown roles), and a person whose membership holds Appwrite's
+  `owner` at all (section 5 says why that one cannot be carried by a check
+  for a mapped role). Multi factor
   authentication in Appwrite is out of scope for this record, deferred like
   passkeys: the core refuses a person whose account answers `mfa: true`,
   at sign in and at refresh, with a reason an admin can act on (turn the
@@ -293,7 +293,11 @@ only (section 4); the one time secret it brings back is spent by the core.
   the expiry and a used flag. For a shell the same row also holds what the
   shell's leg needs across the provider redirect: the PKCE challenge (S256),
   the validated return target, and the hash of the one time code the shell
-  redeems, with that code's own expiry. The cookie carries the raw state and
+  redeems, with that code's own expiry and its own flag, `code_used`,
+  because the row is claimed twice: once for the state and once for the code.
+  The row also names the person: once the callback knows them it holds the
+  subject and the Appwrite user id, so the redemption knows whose
+  `staff_sessions` row it signs in. The cookie carries the raw state and
   the row holds only its hash, so a read of the table yields nothing a replay
   could use; the one time code is stored hashed too, so the row never holds a
   credential that can be spent. The callback claims the row with one
@@ -302,10 +306,11 @@ only (section 4); the one time secret it brings back is spent by the core.
   secret is an HTTP call and cannot join a database transaction, so the claim
   is what makes the state single use. A state that comes back twice finds the
   row used and is refused before anything is exchanged. The shell's one time
-  code is redeemed the same way: its row is claimed, and only a claim that
-  changes exactly one row yields the session, so a replayed code is refused by
-  the row and never by the shell. A row past its expiry is refused, and
-  expired rows are swept.
+  code is redeemed the same way, on its own flag: the row is claimed with a
+  conditional update that flips `code_used` and checks that exactly one row
+  changed, and only such a claim yields the session, so a replayed code is
+  refused by the row and never by the shell. A row past its expiry is
+  refused, and expired rows are swept.
 - **The request path, fail closed.** The auth layer dispatches in this order:
   a machine key by its `sk_live_` shape (ADR 0002 section 1, unchanged); a
   shell access token by its own fixed prefix (section 3); the session cookie;
@@ -313,10 +318,11 @@ only (section 4); the one time secret it brings back is spent by the core.
   shell token fills `middleware.UserClaims` with `sub` and `roles`, and with
   no email;
   `role` is always empty. A staff session's email is in neither the token nor
-  the session row, and that is the decision: the email readers of today
-  (`PartnerAuth`, `requesterSub`, `getPerformedBy`, all named in Context)
-  then fall back to the subject, and a staff token can never be taken for a
-  partner's, because `PartnerAuth` refuses a claim with no email. Outside the
+  the session row, and that is the decision: of the email readers of today
+  (`PartnerAuth`, `requesterSub`, `getPerformedBy`, all named in Context),
+  `requesterSub` and `getPerformedBy` fall back to the subject, and
+  `PartnerAuth` refuses a claim with no email, so a staff token can never be
+  taken for a partner's. Outside the
   public paths, a request with none of
   these, or with an unknown, revoked, idle expired or absolutely expired
   session, is answered 401 before any handler runs; it never reaches a guard
@@ -345,9 +351,12 @@ only (section 4); the one time secret it brings back is spent by the core.
   `middleware.ClaimsPrimaryRole(claims)`, which returns the first of the
   mapped roles in the fixed order owner, admin, sales, finance, purchasing,
   warehouse, cashier, driver, so that row does not depend on the order of
-  `roles` either. The two call sites that keep a role string, `caller` for
-  the audit subject and the override path's event actor, use that helper;
-  every decision uses `ClaimsHaveAnyRole`. Every `claims.Role` reader is
+  `roles` either. Every call site that records a role string uses that
+  helper: the AP caller for the audit subject, the order override's event
+  actor, and the exposure acknowledge, request and override events, whose
+  `actor_role` column (`core/internal/pricing/exposure_model.go`) the
+  exposure handler fills today with `userRole(r)`; every decision uses
+  `ClaimsHaveAnyRole`. Every `claims.Role` reader is
   found by a grep in that slice and covered by a test.
 - **The subject is a UUID.** `sub` is the name based UUID (version 5) over a
   fixed Gable namespace and `<projectId>:<userId>`. Every reader that parses
@@ -474,18 +483,19 @@ Gable's own session (section 2).
   the user carries the Microsoft identity and no password, and that the
   identity is the person's own, because a user that signed up for itself
   under that address would otherwise take the member's seat.
-- **Google has no such step on the floor or on the release the local proof
-  runs.** Its adapter honours the provider's `email_verified` claim, so
+- **Google needs no administrator step, on the floor or on the release the
+  local proof runs; the invitee proves the address himself.** Its adapter
+  honours the provider's `email_verified` claim, so
   Appwrite adopts the invited user, but on the 2.0.0 and 2.1.0 releases the
   adoption leaves the address as it was, so an invitee who has not proved the
   email yet is refused as unverified, with Google or with any other method,
   and has to prove it first. Appwrite marks the address verified on that
-  adoption only from the 2.6.2 release on, and there only when the provider's
-  address is on the same domain as the member's; that release also revokes
-  that user's other credentials, so on it an invitee who signs in with Google
-  halfway through the recovery proof loses the recovery link. On the floor and
-  on the pin the invitee keeps that link: it is bound to the account it was
-  issued for and expires as Appwrite sets it. A generic
+  adoption from the 2.5.0 release on, and there only when the provider's
+  address is on the same domain as the member's; from the 2.6.2 release on it
+  also revokes that user's other credentials, so from there an invitee who
+  signs in with Google halfway through the recovery proof loses the recovery
+  link. On the floor and on the pin the invitee keeps that link: it is bound
+  to the account it was issued for and expires as Appwrite sets it. A generic
   `oidc` provider behaves like Google when its issuer claims the address
   verified and like Microsoft when it does not, so the dealer must point it
   at an issuer that claims verified only for addresses it verified.
@@ -549,8 +559,9 @@ Gable's own session (section 2).
   is ended first. What Appwrite records for a provider sign in is known at
   source (Context): a Google sign in is recorded against the invited user, a
   Microsoft sign in that meets no known user makes one of its own, and a
-  provider sign in that would adopt an existing user is refused outright on
-  every release Gable supports. A user Appwrite records that is no member is
+  provider sign in whose address the provider does not report as verified,
+  and that would adopt an existing user, is refused. A user Appwrite records
+  that is no member is
   refused, so the invite (section 6) still decides who may sign in.
 - **The first page after a callback.** The callback answers with
   `Referrer-Policy: no-referrer` and redirects at once, so the user id and
@@ -582,10 +593,13 @@ Gable's own session (section 2).
   Team `owner` can mint a `gable-owner` member outside Gable, with no Gable
   audit row. **A Team `owner` is therefore as strong as every Gable role
   together**, and the operator rule of section 8 says no member holds it,
-  because Gable's own key administers the Team. The core also refuses sign in
-  for a member whose membership holds Appwrite's `owner` without
-  `gable-owner`, and the staff screen flags that member, so a Team `owner`
-  who is added outside Gable cannot act as one. The role
+  because Gable's own key administers the Team. The core cannot make that
+  rule hold on its own: Appwrite lets a Team `owner` write the roles of its
+  own membership, so an owner added outside Gable could add `gable-owner` to
+  itself and pass a check that looks for a mapped role. **The core therefore
+  refuses sign in for any membership that holds Appwrite's `owner` at all**,
+  whatever else it holds, and the staff screen flags every Team owner the
+  core sees in a membership list. The role
   list is a code constant tested against the guards, so a role a guard names
   and the mapping misses fails a test. The one guard naming `user` (the
   `/uploads/` route) is widened in slice 2 to every mapped staff role, and
@@ -739,7 +753,7 @@ narrowest set that covers the record:
 | Scope | Calls |
 |---|---|
 | `sessions.write` | the email and password session, the OAuth2 token URL the core asks Appwrite for (the browser then navigates to that URL), the magic URL token, the secret exchange, recovery |
-| `users.read` | the user's status and email verification at sign in and refresh; the email lookup at invite and at the magic link start |
+| `users.read` | the user's status, email verification and multi factor flag at sign in and refresh; the email lookup at invite and at the magic link start |
 | `users.write` | one call only, caused by a Gable admin's invite: `users.create` |
 | `teams.read` | the membership read |
 | `teams.write` | add, change and remove a membership |
@@ -848,13 +862,15 @@ trustworthy origin, so the local walk works.
   (the header check is on the cookie path).
 - **Sign in refusals,** each with the one fixed answer: an unconfirmed
   membership, a blocked user, a deleted user, an unverified email, a member
-  with only Appwrite's `owner` or only unknown roles, a non member, and an
+  with only unknown roles, a member whose membership holds Appwrite's
+  `owner`, a non member, and an
   account that answers `mfa: true` (with its admin facing reason).
 - **The session cookie's own attributes:** `HttpOnly`, `Secure`,
   `SameSite=Strict`, `Path=/api` and no `Domain`.
-- **A Team `owner`:** a member whose membership holds Appwrite's `owner`
-  without `gable-owner` is refused at sign in, and the staff screen flags
-  that member.
+- **A Team `owner`:** a member whose membership holds Appwrite's `owner` is
+  refused at sign in whatever else it holds, including `gable-owner` that the
+  member wrote for itself, and the staff screen flags every Team owner the
+  core sees in a membership list.
 - **The provider's address never takes an account over:** on the local
   Appwrite a provider sign in whose address is not verified and is the
   address of an existing member (Appwrite's own `mock-unverified` provider)
@@ -936,13 +952,13 @@ trustworthy origin, so the local walk works.
 | Slice | What it proves or builds | Dev hours |
 |---|---|---|
 | 1 | The local Appwrite proof: the compose file and setup script, with Appwrite on PostgreSQL and the image pinned at 2.1.0, the release the hosted deployment runs, and a Go integration test that signs a seeded user in by email and password server side, reads the account and the membership, maps the roles, ends the session as the user, and is refused for a non member; it also checks that Appwrite accepts Gable's callback as a `success` URL once the hostname is a Web platform, that the core reads the deployment's version and refuses to start below the floor of section 8, and that the email and password sign in still works through the key with the project's email and password switch off (section 8). Nothing else starts until it is green. | 6 to 10 |
-| 2 | The core: the Appwrite client, `staff_sessions` with its migration, the sign in, refresh and sign out routes (the new ones joined to `publicAPIPaths`, so they are not refused by the auth middleware before they can answer), the fail closed session middleware, the UUID `sub`, the `role` readers changed, the `user` guard widened with the contract text that names it changed, listed in `docs/refactor/CONTRACT-CHANGES.md` and regenerated into the client schema, the roster link set from the staff screen, the limits, the audit rows, the configuration checks, and their tests. | 14 to 20 |
+| 2 | The core: the Appwrite client, `staff_sessions` with its migration, the sign in, refresh and sign out routes (the new ones joined to `publicAPIPaths`, so they are not refused by the auth middleware before they can answer), the fail closed session middleware, the UUID `sub`, the `role` readers changed (the exposure event's `actor_role` column among them), the `user` guard widened with the contract text that names it changed, listed in `docs/refactor/CONTRACT-CHANGES.md` and regenerated into the client schema, the roster link set from the staff screen, the limits, the audit rows, the configuration checks, and their tests. | 14 to 20 |
 | 3 | The web: the door's form and config against the core, cookie custody, the handoff deleted, the CSRF header, the session expired panel, and the Playwright sign in, sign out and expiry specs. | 6 to 10 |
-| 4 | The redirect methods through Appwrite: the start route, Gable's callback with its `state` check and the secret exchange, the `pending_sign_ins` table with its migration (the hash of the state, the method, the client kind, the expiry and the used flag) and the callback that claims it with one conditional update before it calls Appwrite, `google` and `microsoft` (a provider configured in the local Appwrite against a test provider), the unverified provider address that would take an account over refused, `magic_link` (members only, no user creation) and `oidc`, and the `oidc` row's issuer fields retired. The new routes join `publicAPIPaths`. | 6 to 9 |
-| 5 | The shells: the system browser, the deep link or loopback return, PKCE redemption, refresh rotation, keychain custody, each shell's own callback handler (only the desk registers the `gable` scheme, so the work, field and pro shells use the loopback return), and the shell's fields in the `pending_sign_ins` row (the PKCE challenge, the validated return target and the hash of the one time code). The redeem and refresh routes join `publicAPIPaths` so the shell's own token path is not refused by the auth middleware. | 6 to 10 |
+| 4 | The redirect methods through Appwrite: the start route, Gable's callback with its `state` check and the secret exchange, the `pending_sign_ins` table with its migration (the hash of the state, the method, the client kind, the expiry, the used flag, the subject and the Appwrite user id) and the callback that claims it with one conditional update before it calls Appwrite, `google` and `microsoft` (a provider configured in the local Appwrite against a test provider), the unverified provider address that would take an account over refused, `magic_link` (members only, no user creation) and `oidc`, and the `oidc` row's issuer fields retired. The new routes join `publicAPIPaths`. | 6 to 9 |
+| 5 | The shells: the system browser, the deep link or loopback return, PKCE redemption, refresh rotation, keychain custody, each shell's own callback handler (only the desk registers the `gable` scheme, so the work, field and pro shells use the loopback return), and the shell's fields in the `pending_sign_ins` row (the PKCE challenge, the validated return target, the hash of the one time code and its own `code_used` flag). The redeem and refresh routes join `publicAPIPaths` so the shell's own token path is not refused by the auth middleware. | 6 to 10 |
 | 6 | Invite with its three cases, the email proof (recovery page, or the magic URL proof on its own route with no `state`) and the verified mark, resend, role change and remove from Gable's admin, with branch grants in the same act. | 8 to 12 |
 | 7 | The demo people as seeded Appwrite users, the `devauth` build tag, and the documentation that carries it (`README.md`, `AGENTS.md` and the `AUTH_MODE=dev go run` lines in `docs/modules/`), each of which becomes `go run -tags devauth`. | 4 to 6 |
-| 8 | The JWKS path retired (`JWKS_URL`, `AUTH_ISSUER`, its middleware branch and tests), once the counter's close walk has run on Appwrite sign in (section 7), and the `JWKS_URL` lines in `.do/app-demo.yaml`, `.do/app-staging.yaml` and `.do/README.md` changed with it. | 2 to 4 |
+| 8 | The JWKS path retired (`JWKS_URL`, `AUTH_ISSUER`, its middleware branch and tests), once the counter's close walk has run on Appwrite sign in (section 7), and the `JWKS_URL` lines in `.do/app-demo.yaml`, `.do/app-staging.yaml` and `.do/README.md` changed with it. The partner routes are moved under the portal's own auth or retired with that slice, whichever the partner integration picks (an open question below); a slice that retired the JWKS path and left three live routes answering 401 for every caller is not done. | 2 to 4 |
 | | **Total** | **52 to 81** |
 
 Order: slices 1, 2, 3 and 7 first (staff sign in on the web, the demo
@@ -1010,6 +1026,12 @@ deferred and not counted.
   magic link; a dealer that wants both paths for one Team would need an
   Appwrite side for the Microsoft members, which is a decision on record for
   the maintainers.
+- **Where the partner routes go when the JWKS path retires.** The three
+  partner routes answer from the JWT path's claims alone, so slice 8 leaves
+  them without any. They move under the portal's own auth, which already
+  holds a customer context, or they retire with that slice; which one is the
+  partner integration's pick, and slice 8 carries whichever is picked (a
+  decision on record for the maintainers).
 
 Passkeys are deferred to a later record; the hosted deployment's Appwrite
 project and key are an operator's setup, not a design choice.
