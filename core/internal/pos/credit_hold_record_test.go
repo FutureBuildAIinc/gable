@@ -300,13 +300,13 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 	// credit lock and stops at the stock out, the other two queue on the
 	// lock.
 	ctx := context.Background()
-	statuses := make([]int, 3)
+	resps := make([]resp, 3)
 	var wg sync.WaitGroup
 	for i := range sales {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			statuses[i] = f.completeSale(sales[i], tender("account", 599)).status
+			resps[i] = f.completeSale(sales[i], tender("account", 599))
 		}(i)
 	}
 	// wait until a completion is blocked on the stalled row: a lock waiting
@@ -359,13 +359,13 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 	// landed (409 account_hold) is the rule working, and a sale that
 	// completed decided before the hold could land.
 	wins := 0
-	for i, st := range statuses {
-		if st == http.StatusOK {
+	for i, r := range resps {
+		if r.status == http.StatusOK {
 			wins++
 			continue
 		}
-		if st != http.StatusConflict {
-			t.Errorf("sale %d = %d, want 200 or 409", i, st)
+		if _, blockers, _ := errorOf(t, r); r.status != http.StatusConflict || len(blockers) != 1 || blockers[0] != "account_hold" {
+			t.Errorf("sale %d = %d: %s, want 200 or 409 account_hold", i, r.status, r.raw)
 		}
 	}
 	if got := f.balance(); got != int64(wins)*599 {
@@ -377,8 +377,142 @@ func TestCP11_HoldPlacedWhileSalesComplete(t *testing.T) {
 	if r := f.addLine(next, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	if r := f.completeSale(next, tender("account", 599)); r.status != http.StatusConflict {
-		t.Errorf("a sale after the hold = %d, want 409: %s", r.status, r.raw)
+	r := f.completeSale(next, tender("account", 599))
+	if _, blockers, _ := errorOf(t, r); r.status != http.StatusConflict || len(blockers) != 1 || blockers[0] != "account_hold" {
+		t.Errorf("a sale after the hold = %d: %s, want 409 account_hold", r.status, r.raw)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE: a hold the AR sweep places while sales complete (pool size 4, three
+// contenders, the sweep's real EvaluateHolds and the counter's real
+// completions): the sweep takes the customer's credit lock before writing the
+// hold, so it cannot commit inside a completion's window and let a charge
+// complete after the hold commits.
+func TestCP11_SweepHoldWhileSalesComplete(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	arSvc := account.NewService(f.db, gl.NewService(gl.NewRepository(f.db), nil, slog.Default()), slog.Default())
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM credit_holds WHERE customer_id = $1`, f.customerID)
+		mustExec(t, f.db, `UPDATE customers SET credit_hold = FALSE WHERE id = $1`, f.customerID)
+	})
+
+	// One earlier charge, backdated past due so the sweep plans a past_due
+	// hold on this account.
+	first, firstTotal := f.accountCart("1", nil)
+	if r := f.completeSale(first, tender("account", firstTotal)); r.status != http.StatusOK {
+		t.Fatalf("first charge = %d: %s", r.status, r.raw)
+	}
+	mustExec(t, f.db, `UPDATE invoices SET invoice_date = CURRENT_DATE - 60, due_date = CURRENT_DATE - 30 WHERE customer_id = $1`, f.customerID)
+	if ev, err := arSvc.EvaluateHolds(context.Background(), true, []uuid.UUID{f.customerID}, "ar-test", ""); err != nil || len(ev.WouldPlace) != 1 {
+		t.Fatalf("dry run = %+v, %v: want one placement", ev, err)
+	}
+
+	sales := make([]string, 3)
+	for i := range sales {
+		sales[i] = f.startSale(&f.customerID)
+		if r := f.addLine(sales[i], f.productLine("1")); r.status != http.StatusOK {
+			t.Fatalf("add line = %d: %s", r.status, r.raw)
+		}
+	}
+
+	// A connection of the test's own (never one of the pool's four) holds
+	// the product's inventory row, so every completion stops at its stock
+	// out: after it has read the account facts and passed the verdict,
+	// before it posts. That is the window the sweep's hold must not land in.
+	stall, err := database.Connect(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stall.Close() })
+	stallTx, err := stall.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stallTx.Rollback(context.Background())
+	var stallXID string
+	if err := stallTx.QueryRow(context.Background(), `
+		SELECT pg_current_xact_id()::text FROM inventory WHERE product_id = $1 AND location_id = $2
+		FOR UPDATE OF inventory`, f.productID, f.yardID).Scan(&stallXID); err != nil {
+		t.Fatalf("hold the inventory row: %v", err)
+	}
+
+	// Three completions race (pool size 4): the first holds the customer's
+	// credit lock and stops at the stock out, the other two queue on the
+	// lock.
+	ctx := context.Background()
+	resps := make([]resp, 3)
+	var wg sync.WaitGroup
+	for i := range sales {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			resps[i] = f.completeSale(sales[i], tender("account", 599))
+		}(i)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := f.db.Pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := f.scalar(`SELECT count(*) FROM pg_locks WHERE NOT granted AND transactionid = $1`, stallXID).(int64); n == 0 {
+		t.Fatal("no completion ever reached its stock out: the stall proved nothing")
+	}
+
+	// The AR sweep places the hold. It must not commit while a completion's
+	// transaction is open on this customer.
+	swept := make(chan error, 1)
+	go func() {
+		_, err := arSvc.EvaluateHolds(ctx, false, []uuid.UUID{f.customerID}, "ar-test", "")
+		swept <- err
+	}()
+	select {
+	case err := <-swept:
+		if err == nil {
+			t.Fatal("the sweep committed a hold while a charge sale's transaction was open: money can go on an account the hold already holds")
+		}
+		t.Fatalf("the sweep failed: %v", err)
+	case <-time.After(2 * time.Second):
+		// still running: the sweep is waiting for the credit lock the
+		// completions hold, which is the rule this test proves
+	}
+
+	if err := stallTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if err := <-swept; err != nil {
+		t.Fatalf("the sweep failed: %v", err)
+	}
+	wins := 0
+	for i, r := range resps {
+		if r.status == http.StatusOK {
+			wins++
+			continue
+		}
+		if _, blockers, _ := errorOf(t, r); r.status != http.StatusConflict || len(blockers) != 1 || blockers[0] != "account_hold" {
+			t.Errorf("sale %d = %d: %s, want 200 or 409 account_hold", i, r.status, r.raw)
+		}
+	}
+	if got := f.balance(); got != firstTotal+int64(wins)*599 {
+		t.Errorf("balance_due = %d with %d completions, want %d", got, wins, firstTotal+int64(wins)*599)
+	}
+
+	next := f.startSale(&f.customerID)
+	if r := f.addLine(next, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(next, tender("account", 599))
+	if _, blockers, _ := errorOf(t, r); r.status != http.StatusConflict || len(blockers) != 1 || blockers[0] != "account_hold" {
+		t.Errorf("a sale after the sweep's hold = %d: %s, want 409 account_hold", r.status, r.raw)
 	}
 	f.assertARInvariants(t)
 }
