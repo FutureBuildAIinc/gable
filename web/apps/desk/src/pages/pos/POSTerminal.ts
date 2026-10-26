@@ -13,7 +13,7 @@ import type {
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
-  chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
+  chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
   storeCreditOffer, tenderMethods, idRefusal,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
@@ -2002,6 +2002,10 @@ export class POSTerminal extends LitElement {
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
     const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
     const needsPO = accountWhy === PO_REFUSAL;
+    // the job rule is the PO's mirror: the way back to the Customer panel
+    // (where the Job select lives) belongs in the box for both; an account
+    // with no job on file has none to pick, so its words carry no way back
+    const needsJob = accountWhy === JOB_REFUSAL;
     return html`
       <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
         aria-disabled=${this._till === null ? 'true' : 'false'}>
@@ -2039,9 +2043,9 @@ export class POSTerminal extends LitElement {
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>
-              ${needsPO ? html`
+              ${needsPO || needsJob ? html`
                 <button data-testid="pos-refusal-customer" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
-                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Enter the purchase order in Customer</button>` : nothing}
+                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">${needsPO ? 'Enter the purchase order in Customer' : 'Pick the job in Customer'}</button>` : nothing}
               ${waysForward(this._standing).length > 0 ? html`
                 <div class="mt-2 flex flex-wrap gap-2" data-testid="pos-refusal-ways">
                   ${waysForward(this._standing).map((w) => html`

@@ -896,6 +896,29 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('offers the way back to Customer for a missing job, worded for the job', async () => {
+      const needsJobOnly = { ...account, job_required: true, jobs: [{ id: 'j1', name: 'Ridge Build' }] } as unknown as CounterCustomer;
+      const el = await withCustomer(needsJobOnly);
+      expect(q(el, 'pos-account-refusal').textContent).toContain('requires a job on every charge sale');
+      toggle(el, 'payment').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('false');
+      const way = q(el, 'pos-refusal-customer');
+      expect(way.textContent).toContain('Pick the job in Customer');
+      way.click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('true');
+      el.remove();
+    });
+
+    it('offers no way back for a job when the account has none on file to pick', async () => {
+      const noJobs = { ...account, job_required: true, jobs: [] } as unknown as CounterCustomer;
+      const el = await withCustomer(noJobs);
+      expect(q(el, 'pos-account-refusal').textContent).toContain('none on file');
+      expect(q(el, 'pos-refusal-customer')).toBeNull();
+      el.remove();
+    });
+
     it('offers the purchase order way on only when the purchase order is the reason', async () => {
       // over the available credit AND a PO required and empty: the words are the credit's
       const both = { ...needsPO, available_credit_cents: 5000 } as unknown as CounterCustomer;
