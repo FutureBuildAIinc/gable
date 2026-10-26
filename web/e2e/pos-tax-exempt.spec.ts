@@ -65,6 +65,14 @@ async function openCounter(page: Page) {
   await expect(tillState).toContainText('Till open');
 }
 
+/** Back at the counter (the account page work is done). */
+async function backToCounter(page: Page) {
+  await page.goto('/pos');
+  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
+  const tillState = page.getByTestId('pos-till-state');
+  await expect(tillState).toContainText('Till open');
+}
+
 async function addOne(page: Page, sku: string) {
   const lines = page.locator('[data-testid="pos-lines"] li');
   const before = await lines.count();
@@ -165,6 +173,7 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   await expect(page.getByTestId('tax-exemption-status')).toHaveText('Ended', { timeout: 10000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tax-exempt-ended.png'), fullPage: true });
 
+  await backToCounter(page);
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await addOne(page, product.sku);
@@ -177,6 +186,7 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   const old = new Date(Date.now() - 24 * 3600 * 1000 * 30).toISOString().slice(0, 10);
   await addCertificate(page, account.id, `CERT-OLD-${Date.now().toString(36).toUpperCase()}`, old, yesterday);
   await expect(page.getByTestId('tax-exemption-status')).toHaveText('Expired');
+  await backToCounter(page);
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await addOne(page, product.sku);
