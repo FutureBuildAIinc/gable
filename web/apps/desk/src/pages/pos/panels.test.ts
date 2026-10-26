@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { payPlan, panelProgress } from './panels';
+import { CASH_ROUNDING_NEAREST_5, CASH_ROUNDING_OFF } from '../../lib/cashRounding';
 
 describe('payPlan', () => {
   it('sends the tenders already added, unchanged, when they cover the total', () => {
@@ -115,5 +116,54 @@ describe('payPlan, the one rule for splits', () => {
     const split = payPlan(8650, [t('card', 4000)], t('check', 5000));
     expect(split.ok).toBe(false);
     if (!split.ok) expect(split.limitCents).toBe(4650);
+  });
+});
+
+describe('payPlan, the branch cash rounding rule (CP-18)', () => {
+  const t = (method: 'cash' | 'card' | 'check' | 'account', amount_cents: number) => ({ method, amount_cents });
+
+  it('takes the money exactly when the rule is off', () => {
+    const plan = payPlan(103, [], t('cash', 105), CASH_ROUNDING_OFF);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.changeCents).toBe(2);
+  });
+
+  it('asks for the rounded cash and gives no change on a round up', () => {
+    // $1.03 rounds up to $1.05: the drawer keeps $1.05, so the $1.05 tendered
+    // leaves no change at all.
+    const plan = payPlan(103, [], t('cash', 105), CASH_ROUNDING_NEAREST_5);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.changeCents).toBe(0);
+  });
+
+  it('rounds the cash leg of a split, not the whole sale', () => {
+    // The card takes $0.50 exactly; the cash leg of $0.53 rounds up to $0.55,
+    // so the $0.60 tendered leaves $0.05 of change.
+    const plan = payPlan(103, [t('card', 50)], t('cash', 60), CASH_ROUNDING_NEAREST_5);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.tenders).toEqual([t('card', 50), t('cash', 60)]);
+      expect(plan.changeCents).toBe(5);
+    }
+  });
+
+  it('leaves a card sale exact', () => {
+    const plan = payPlan(107, [], t('card', 107), CASH_ROUNDING_NEAREST_5);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.changeCents).toBe(0);
+  });
+
+  it('asks for the rounded cash when the tenders fall short of it', () => {
+    // $1.03 needs $1.05 from the drawer: $1.03 in cash is not enough, and
+    // the counter says how much the drawer wants.
+    const plan = payPlan(103, [], t('cash', 103), CASH_ROUNDING_NEAREST_5);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.owedCents).toBe(2);
+  });
+
+  it('says what the sale still owes when the rule is off', () => {
+    const plan = payPlan(103, [], t('cash', 100), CASH_ROUNDING_OFF);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.owedCents).toBe(3);
   });
 });

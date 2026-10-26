@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -444,6 +445,52 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		tendered := totalTendered + credit
 		change := tendered - total
+		// Cash rounding without pennies (CP-18): the branch's own rule rounds
+		// the cash leg only, after the tax is computed and before the payment
+		// legs are written. The invoice keeps the exact total and the tax the
+		// engine computed; the drawer holds the rounded cash, the change falls
+		// out of the rounded figure, and the difference between the two is the
+		// branch's rounding income or its loss.
+		roundingMode, err := s.repo.BranchCashRoundingMode(ctx, sale.BranchID)
+		if err != nil {
+			return err
+		}
+		// The cash that settles the sale, to the cent: the cash tendered less
+		// the change. It is the leg the rule moves; the card, the cheque, the
+		// account and the store credit settle to the exact cent.
+		cashLegExact := cashTendered - change
+		cashLegRounded, roundingDiff := cashLegExact, int64(0)
+		roundingCarrier := -1
+		if roundingMode == RoundingNearest5Cents && cashLegExact > 0 {
+			cashLegRounded, roundingDiff = RoundCash(cashLegExact)
+			if roundingDiff != 0 {
+				// The change falls out of the rounded figure, so the cash leg
+				// pays what the drawer keeps. The payment that carries the
+				// difference is the leg's largest one: it can stand the
+				// difference on its own, and the other cash payments keep
+				// their whole amount.
+				roundedChange := cashTendered - cashLegRounded
+				legPayments := cashLegPayments(tenders, roundedChange)
+				for i := range legPayments {
+					if legPayments[i] > 0 && (roundingCarrier < 0 || legPayments[i] > legPayments[roundingCarrier]) {
+						roundingCarrier = i
+					}
+				}
+				if roundingCarrier < 0 || legPayments[roundingCarrier] < roundingDiff {
+					// No leg can stand the difference: the money is taken
+					// exactly rather than half rounded.
+					cashLegRounded, roundingDiff = cashLegExact, 0
+					roundingCarrier = -1
+				}
+			}
+		}
+		if roundingDiff != 0 {
+			change = cashTendered - cashLegRounded
+			if change < 0 {
+				return conflict("insufficient_tender",
+					fmt.Sprintf("the cash due is %d cents once the branch rounds it to the nearest five cents, and the tenders carry %d", cashLegRounded, cashTendered))
+			}
+		}
 		if change < 0 {
 			return conflict("insufficient_tender",
 				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total-credit, totalTendered))
@@ -453,8 +500,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
 		// The legs the sale keeps, change taken out of the cash, sum exactly to
-		// the total; the two checks above make it so and this holds it.
-		if tendered-change != total {
+		// the total; the two checks above make it so and this holds it. A
+		// rounded sale keeps the rounded cash, so the legs sum to the total
+		// plus the rounding difference.
+		if tendered-change != total+roundingDiff {
 			return conflict("legs_do_not_sum",
 				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
 		}
@@ -701,10 +750,15 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				continue
 			}
 			amount := int64(t.AmountCents)
-			if t.Method == TenderCash && cashChangeLeft > 0 {
-				give := min64(amount, cashChangeLeft)
-				amount -= give
-				cashChangeLeft -= give
+			if t.Method == TenderCash {
+				// The change comes out of the cash, in the order the tenders
+				// were taken: what the drawer keeps is what the tender
+				// carries less the change given from it.
+				if cashChangeLeft > 0 {
+					give := min64(amount, cashChangeLeft)
+					amount -= give
+					cashChangeLeft -= give
+				}
 			}
 			if amount <= 0 {
 				// the whole tender walked out as change: no payment, but
@@ -725,11 +779,37 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				card = &account.CardFacts{GatewayTxID: charges[i].GatewayTxID, GatewayStatus: "SETTLED",
 					Last4: charges[i].Last4, Brand: charges[i].Brand, AuthCode: charges[i].AuthCode}
 			}
+			// The cash leg settles the exact cash the sale needs: the rounded
+			// cash less the difference the drawer keeps as the branch's
+			// rounding income. Every other cash payment keeps its whole
+			// amount, and the carrier gives up the difference.
+			applied := amount
+			roundingOnPayment := int64(0)
+			if t.Method == TenderCash && i == roundingCarrier {
+				if roundingDiff > 0 {
+					// The branch took the rounding as its income: the payment
+					// carries the rounded cash, the invoice takes the exact
+					// share, and the difference rides on the payment entry as
+					// the rounding income.
+					roundingOnPayment = roundingDiff
+					applied = amount - roundingDiff
+				}
+				// A round-down leaves the invoice a cent or two short: the
+				// whole payment applies and the write off below closes the
+				// rest, booking the loss the branch ate.
+			}
+			if applied < 0 {
+				applied = 0
+			}
+			applications := []account.ApplyLine{}
+			if applied > 0 {
+				applications = append(applications, account.ApplyLine{InvoiceID: inv.ID, AmountCents: applied})
+			}
 			payID, fx, err := s.ar.RecordPayment(ctx, account.RecordPaymentIn{
 				CustomerID: customerID, BranchID: sale.BranchID, Currency: sale.Currency,
 				Method: string(t.Method), AmountCents: amount, Reference: t.Reference, ReceivedOn: date,
-				Actor: actor, Card: card,
-				Applications: []account.ApplyLine{{InvoiceID: inv.ID, AmountCents: amount}},
+				Actor: actor, Card: card, RoundingCents: roundingOnPayment,
+				Applications: applications,
 			})
 			if err != nil {
 				return err
@@ -769,6 +849,20 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				})}); err != nil {
 				return err
 			}
+		}
+		// A cash sale the branch rounded down leaves the invoice a cent or two
+		// short: the branch ate the difference it did not collect. The write
+		// off closes the invoice and books that loss in one entry, against the
+		// cash rounding loss account.
+		if roundingDiff < 0 {
+			fx, err := s.ar.WriteOff(ctx, account.WriteOffIn{
+				InvoiceID: inv.ID, AmountCents: -roundingDiff, AccountCode: gl.AccountCodeRoundingLoss,
+				Reason: "Cash rounding down", Actor: actor, On: date,
+			})
+			if err != nil {
+				return err
+			}
+			mergeEffects(&fxAll, fx)
 		}
 		if err := s.repo.CompleteSale(ctx, saleID, inv.ID, int64(totals.SubtotalCents), taxCents, total, change); err != nil {
 			return err
@@ -950,6 +1044,27 @@ func (s tenderSums) legsRefusal() error {
 		return conflict("one_store_credit_leg", "a sale takes at most one store credit tender: put the whole amount on one")
 	}
 	return nil
+}
+
+// cashLegPayments splits the cash tenders into the payments they become: the
+// change comes out of the cash, in the order the tenders were taken, and what
+// is left is what the drawer keeps.
+func cashLegPayments(tenders []TenderIn, change int64) []int64 {
+	payments := make([]int64, len(tenders))
+	left := change
+	for i := range tenders {
+		if tenders[i].Method != TenderCash {
+			continue
+		}
+		amount := int64(tenders[i].AmountCents)
+		if left > 0 {
+			give := min64(amount, left)
+			amount -= give
+			left -= give
+		}
+		payments[i] = amount
+	}
+	return payments
 }
 
 // withID copies the "ID checked" facts of a tender request onto the stored

@@ -255,6 +255,27 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 	}
 	changeLeft := sale.ChangeCents
 	var accountCents int64
+	// The cash rounding the branch's rule made (CP-18): the tender legs keep
+	// the sale's total plus the rounding, so the difference between the legs
+	// and the total is the rounding the drawer and the books carry. An
+	// exchange's credit is a leg of the sale as well: it covers the total as
+	// far as it goes. A sale the rule did not touch shows no rounding.
+	var kept int64
+	for i := range tenders {
+		kept += int64(tenders[i].AmountCents)
+	}
+	if sale.ExchangeReturnID != nil {
+		ret, err := s.repo.GetReturn(ctx, *sale.ExchangeReturnID)
+		if err != nil {
+			return uuid.Nil, document.ThermalReceipt{}, err
+		}
+		credit := -int64(ret.TotalCents)
+		if credit > int64(sale.TotalCents) {
+			credit = int64(sale.TotalCents)
+		}
+		kept += credit
+	}
+	r.RoundingCents = httpx.Cents(kept - int64(sale.TotalCents))
 	for i := range tenders {
 		t := &tenders[i]
 		tt := document.ThermalTender{

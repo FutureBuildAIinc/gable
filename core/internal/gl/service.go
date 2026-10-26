@@ -48,6 +48,13 @@ const (
 	AccountCodeRevenue         = "4010"
 	AccountCodeOverShort       = "5030" // Cash Over/Short (till drawer variance)
 	AccountCodeCustomerDeposit = "2200" // Customer Deposits (prepayment liability)
+	// Cash rounding without pennies (CP-18): a cash total rounded up is
+	// income to the branch and one rounded down is its loss. Two accounts,
+	// because a round-up and a round-down are different in kind and one
+	// account whose balance is sometimes a debit and sometimes a credit
+	// would make the trial balance read wrongly.
+	AccountCodeRoundingIncome = "4095" // Cash Rounding Income (revenue, credit)
+	AccountCodeRoundingLoss   = "5045" // Cash Rounding Loss (expense, debit)
 
 	// SourceReversal marks a net-zero reversing entry.
 	SourceReversal = "REVERSAL"

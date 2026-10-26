@@ -43,6 +43,18 @@ type RecordPaymentIn struct {
 	Card               *CardFacts
 	Actor              string
 	Applications       []ApplyLine
+
+	// RoundingCents is the cash rounding this payment carries (CP-18): the
+	// amount the drawer received over the sale's exact total, when the
+	// branch rounds cash up. It rides on the payment entry as a credit to
+	// the branch's cash rounding income account, so the drawer, the books
+	// and the receipt all carry the same rounded figure, and it leaves the
+	// payment's unapplied cash: the rounding is the branch's income, not
+	// cash the customer can still apply. A round-down does not come here:
+	// the branch eats the cent it did not collect, and the write off
+	// against the cash rounding loss account closes the invoice and books
+	// that loss in one entry.
+	RoundingCents int64
 }
 
 // RecordPayment writes the payment (POSTED, the whole amount unapplied), posts
@@ -54,6 +66,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	}
 	if in.AmountCents <= 0 {
 		return uuid.Nil, nil, invalidField("amount_cents", "must be greater than zero")
+	}
+	if in.RoundingCents < 0 || in.RoundingCents >= in.AmountCents {
+		return uuid.Nil, nil, invalidField("rounding_cents", "must be less than the amount and not negative")
 	}
 	if err := s.refuseDayToCome(ctx, in.BranchID, in.ReceivedOn, "received_on"); err != nil {
 		return uuid.Nil, nil, err
@@ -91,14 +106,19 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		card = &CardFacts{}
 	}
 	var number string
+	// The cash rounding is not cash the customer can still apply (CP-18): the
+	// branch has taken it as its rounding income the moment the payment is
+	// written, so the payment's unapplied cash is the amount less the
+	// rounding. The deposit account carries the same figure, and the two tie.
 	err := s.ex(ctx).QueryRow(ctx, `
 		INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, reference, notes, received_on,
 			order_id, project_id, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
-		VALUES ($1, $2, $3, $4, $5, $6::bigint::numeric / 100, $6::bigint::numeric / 100, NULLIF($7, ''), NULLIF($8, ''), $9::date,
+		VALUES ($1, $2, $3, $4, $5, $6::bigint::numeric / 100, ($6::bigint - $18::bigint)::numeric / 100, NULLIF($7, ''), NULLIF($8, ''), $9::date,
 			$10, $11, NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''))
 		RETURNING number`,
 		id, in.CustomerID, in.BranchID, in.Currency, in.Method, in.AmountCents, in.Reference, in.Notes, date(in.ReceivedOn),
-		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
+		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode,
+		in.RoundingCents).Scan(&number)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("failed to record the payment: %w", err)
 	}
@@ -107,11 +127,20 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	}
 	fx := &Effects{}
 	payID := id
+	// The cash rounding income (CP-18) rides on the payment entry: the
+	// drawer holds the rounded cash, so the entry debits cash for the
+	// rounded figure and credits the rounding income with the difference
+	// between it and the exact amount the customer's deposit stands for.
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
+		{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents},
+	}
+	if in.RoundingCents > 0 {
+		legs[1].Credit -= in.RoundingCents
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Credit: in.RoundingCents})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.ReceivedOn, Memo: "Payment " + number, Source: gl.SourcePayment,
-		SourceRefID: &payID, BranchID: in.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
-			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents},
-		}})
+		SourceRefID: &payID, BranchID: in.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return uuid.Nil, nil, err
 	}
@@ -461,6 +490,11 @@ type WriteOffIn struct {
 	Reason      string
 	Actor       string
 	On          time.Time
+
+	// AccountCode is the expense account the write off debits. Empty takes
+	// the bad debt account. The cash rounding loss account takes the cent
+	// a branch did not collect when it rounded a cash sale down (CP-18).
+	AccountCode string
 }
 
 // WriteOff posts DR 5040 / CR 1020 and the WRITE_OFF subledger row, closes the
@@ -496,9 +530,16 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 		return nil, err
 	}
 	appID := uuid.New()
+	lossAccount := in.AccountCode
+	lossName := "Bad Debt Expense"
+	if lossAccount == "" {
+		lossAccount = gl.AccountCodeBadDebt
+	} else if lossAccount == gl.AccountCodeRoundingLoss {
+		lossName = "Cash Rounding Loss"
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Write off " + inv.Number, Source: gl.SourceWriteOff,
 		SourceRefID: &appID, BranchID: inv.BranchID, Currency: inv.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeBadDebt, Description: "Bad Debt Expense", Debit: in.AmountCents},
+			{AccountCode: lossAccount, Description: lossName, Debit: in.AmountCents},
 			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Credit: in.AmountCents},
 		}})
 	if err != nil {
@@ -919,6 +960,14 @@ type RefundCreditMemoIn struct {
 	GatewayRefundID string
 	Actor           string
 	On              time.Time
+
+	// RoundingCents is the cash rounding this refund carries (CP-18): the
+	// difference between the cash that leaves the drawer and the exact
+	// amount refunded against the customer's account. The branch's rule
+	// rounds the cash that leaves the drawer, and the difference rides on
+	// the refund entry in the direction opposite the sale that created it,
+	// so a sale and its return net to zero in the rounding account.
+	RoundingCents int64
 }
 
 // RefundCreditMemo pays credit out: DR 1020 / CR 1010, a REFUND subledger row
@@ -949,11 +998,26 @@ func (s *Service) RefundCreditMemo(ctx context.Context, in RefundCreditMemoIn) (
 		return uuid.Nil, nil, err
 	}
 	refundID := uuid.New()
+	// The cash rounding (CP-18) rides on the refund entry: the drawer pays
+	// the rounded figure and the difference goes back to the branch's
+	// rounding account, in the direction opposite the sale that created it.
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.AmountCents},
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
+	}
+	if in.RoundingCents > 0 {
+		// The drawer paid more than the credit: the rounding income the
+		// sale credited takes it back.
+		legs[1].Credit += in.RoundingCents
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Debit: in.RoundingCents})
+	} else if in.RoundingCents < 0 {
+		// The drawer paid less than the credit: the rounding loss the sale
+		// debited gives it back.
+		legs[1].Credit += in.RoundingCents
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingLoss, Description: "Cash Rounding Loss", Credit: -in.RoundingCents})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Refund of credit memo " + m.Number, Source: gl.SourceCreditMemo,
-		SourceRefID: &refundID, BranchID: m.BranchID, Currency: m.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.AmountCents},
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
-		}})
+		SourceRefID: &refundID, BranchID: m.BranchID, Currency: m.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return uuid.Nil, nil, err
 	}

@@ -869,8 +869,18 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				if err != nil {
 					return err
 				}
-				if bound && -st.total > refundableCash {
-					spent, err := s.consumeOverride(ctx, sale.ID, OverrideRefundMethod, -st.total, st.actor)
+				// The drawer pays the rounded figure (CP-18), so the bound is
+				// against the cash that actually leaves the drawer: the sale
+				// kept the rounded cash, and the refund pays the rounded cash
+				// back.
+				payout := -st.total
+				mode, err := s.repo.BranchCashRoundingMode(ctx, sale.BranchID)
+				if err != nil {
+					return err
+				}
+				payout, _ = RoundCashFor(mode, payout)
+				if bound && payout > refundableCash {
+					spent, err := s.consumeOverride(ctx, sale.ID, OverrideRefundMethod, payout, st.actor)
 					if err != nil {
 						return err
 					}
@@ -1293,10 +1303,25 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		mergeEffects(&fxAll, fxPost)
 		// The refund: cash or card pays the credit out (DR 1020 / CR 1010),
 		// account leaves the credit open.
+		//
+		// Cash rounding without pennies (CP-18): the refund against the
+		// customer and the tax stays exact, because the rounding is a rule on
+		// how cash is handed over and not a change to the price of the goods.
+		// The cash that leaves the drawer is the rounded figure, and the
+		// difference goes to the rounding account in the direction opposite
+		// the sale that created it, so the two net to zero.
 		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
+			var rounding int64
+			if in.RefundMethod == RefundCash {
+				mode, err := s.repo.BranchCashRoundingMode(ctx, *branchID)
+				if err != nil {
+					return err
+				}
+				_, rounding = RoundCashFor(mode, -st.total)
+			}
 			_, rfx, err := s.ar.RefundCreditMemo(ctx, account.RefundCreditMemoIn{
 				MemoID: memoID, AmountCents: -st.total, Reason: in.Reason, Method: string(in.RefundMethod),
-				GatewayRefundID: in.GatewayTxID, Actor: st.actor, On: date})
+				GatewayRefundID: in.GatewayTxID, Actor: st.actor, On: date, RoundingCents: rounding})
 			if err != nil {
 				return err
 			}

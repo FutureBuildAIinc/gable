@@ -112,6 +112,10 @@ type Service struct {
 // ARCore is the slice of the AR core the counter drives (account.Service).
 type ARCore interface {
 	RecordPayment(ctx context.Context, in account.RecordPaymentIn) (uuid.UUID, *account.Effects, error)
+	// WriteOff closes an invoice's open amount against a loss account. The
+	// counter writes off the cent it did not collect when the branch rounds a
+	// cash sale down (CP-18).
+	WriteOff(ctx context.Context, in account.WriteOffIn) (*account.Effects, error)
 	VoidPayment(ctx context.Context, in account.VoidPaymentIn) (*account.Effects, error)
 	Reverse(ctx context.Context, in account.ReverseIn) (*account.Effects, error)
 	RefundPayment(ctx context.Context, in account.RefundPaymentIn) (uuid.UUID, *account.Effects, error)

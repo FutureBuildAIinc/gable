@@ -67,6 +67,7 @@ const BRANCH: Location = {
   phone: null,
   tax_jurisdiction_code: 'CT-01',
   default_tax_rate: 0.0635,
+  cash_rounding_mode: 'OFF',
   timezone: 'America/New_York',
   active: true,
   branch_id: 'b-1',

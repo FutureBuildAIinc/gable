@@ -7,19 +7,31 @@
 // sent before; only the number of clicks changes. Integer cents throughout.
 
 import type { TenderIn } from '../../services/POSService';
+import { CASH_ROUNDING_NEAREST_5, roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
     | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method']; limitCents?: number };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
+const cashSum = (tenders: TenderIn[]) =>
+    tenders.filter((t) => t.method === 'cash').reduce((s, t) => s + t.amount_cents, 0);
 
 /**
  * What Pay sends: the tenders already added, plus the tender being entered
  * when the added ones do not yet cover the total. Refuses (with what is still
  * owed) when the tenders do not cover the total.
+ *
+ * The branch's cash rounding rule (CP-18) moves the cash leg only: the
+ * drawer keeps the rounded cash and the change falls out of the rounded
+ * figure, exactly as the server does it. The rule off changes nothing.
  */
-export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
+export function payPlan(
+    totalCents: number,
+    added: TenderIn[],
+    entry: TenderIn | null,
+    rounding: CashRoundingMode | null | undefined = null,
+): PayPlan {
     // One rule: card, check and account tenders together never exceed the
     // total, so the change never exceeds the cash tendered (the server's own
     // change_from_cash). Everything else pays, with change from the cash.
@@ -38,10 +50,22 @@ export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn |
         tenders = [...added, entry];
     }
     const tendered = sum(tenders);
-    if (totalCents <= 0 || tenders.length === 0 || tendered < totalCents) {
-        return { ok: false, owedCents: Math.max(totalCents - tendered, 0) };
+    // The cash leg is what the total is less the legs that settle to the
+    // cent, and the branch's rule rounds it: the drawer keeps the rounded
+    // cash, and the change is what the cash tendered holds over it.
+    const cashDue = roundCashFor(rounding, totalCents - nonCash(tenders)).rounded;
+    const cashTendered = cashSum(tenders);
+    const change = cashTendered - cashDue;
+    if (totalCents <= 0 || tenders.length === 0 || tendered < totalCents || change < 0) {
+        const owed = Math.max(totalCents - tendered, 0);
+        // With the rule on, the cash the drawer wants is the rounded figure,
+        // so that is what the counter asks for; with the rule off the sale's
+        // own total is what is still owed.
+        const cashShort = Math.max(cashDue - cashTendered, 0);
+        const rounded = rounding === CASH_ROUNDING_NEAREST_5;
+        return { ok: false, owedCents: rounded ? cashShort : owed };
     }
-    return { ok: true, tenders, changeCents: tendered - totalCents };
+    return { ok: true, tenders, changeCents: change };
 }
 
 export type PanelState = 'done' | 'current' | 'upcoming';
