@@ -104,9 +104,11 @@ func TestTheCounterLookupStatesTheAccountsStanding(t *testing.T) {
 	mustExec(t, f.db, `UPDATE customers SET credit_limit = NULL WHERE id = $1`, f.customerID)
 }
 
-// RULE: the customer is named before the first line, the purchase order and
-// the job may follow; a job is the customer's own; a sale answers the
-// customer it was named for.
+// RULE: the purchase order and the job may follow the customer; a job is
+// the customer's own; a sale answers the customer it was named for. The
+// customer may be named or changed with lines rung (CP-10: an exempt account
+// is named at Pay), and the totals follow the customer now standing on the
+// sale.
 func TestTheSaleTakesItsCustomerBeforeTheFirstLine(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -141,12 +143,13 @@ func TestTheSaleTakesItsCustomerBeforeTheFirstLine(t *testing.T) {
 	if r := f.attach(saleID, map[string]any{"customer_id": uuid.NewString()}); r.status != http.StatusNotFound {
 		t.Errorf("a missing customer = %d, want 404: %s", r.status, r.raw)
 	}
-	// the first line, then the customer is fixed; the PO may still change
+	// the first line, then the customer may still change (CP-10: the account
+	// is often named at Pay, and the tax follows the customer)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	if r := f.attach(saleID, map[string]any{"customer_id": other.String()}); r.status != http.StatusConflict {
-		t.Errorf("another customer after a line = %d, want 409: %s", r.status, r.raw)
+	if r := f.attach(saleID, map[string]any{"customer_id": other.String()}); r.status != http.StatusOK || str(t, r.body, "customer_id") != other.String() {
+		t.Errorf("another customer after a line = %d: %s", r.status, r.raw)
 	}
 	r = f.attach(saleID, map[string]any{"customer_id": f.customerID.String(), "customer_po": "PO-8000", "job_id": job.String()})
 	if r.status != http.StatusOK || str(t, r.body, "customer_po") != "PO-8000" {
