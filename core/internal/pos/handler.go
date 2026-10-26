@@ -758,6 +758,7 @@ func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
 		report.TenderedByMethod = map[string]int64{}
 		report.SalesTotalCents = 0
 		report.ChangeCents = 0
+		report.RefundsByMethod = map[string]int64{}
 		report.MovementTotalsByKind = map[string]int64{}
 		report.Movements = []TillMovement{}
 	}

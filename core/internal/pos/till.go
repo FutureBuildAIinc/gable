@@ -231,9 +231,24 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TenderedByMethod:     agg.TenderedByMethod,
 		ExpectedByMethod:     expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents, movementNetCash(agg.MovementTotals)),
 		OverShortByMethod:    session.OverShortByMethod,
+		RefundsByMethod:      refundsByMethod(agg),
 		Movements:            movements,
 		MovementTotalsByKind: agg.MovementTotals,
 	}, nil
+}
+
+// refundsByMethod names the session's refunds per method, a method present
+// only where the session refunded on it (a cash only session carries no CARD
+// figure, as its expected map carries none).
+func refundsByMethod(agg *TillAggregate) map[string]int64 {
+	out := map[string]int64{}
+	if agg.CashRefundsCents > 0 {
+		out["CASH"] = agg.CashRefundsCents
+	}
+	if agg.CardRefundsCents > 0 {
+		out["CARD"] = agg.CardRefundsCents
+	}
+	return out
 }
 
 // CloseTill closes the session: computes the expected per method from the
