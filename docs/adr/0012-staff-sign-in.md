@@ -139,6 +139,11 @@ self hosting dealer cannot obtain.
   route is public and needs no key (`app/controllers/api/health.php` in the
   1.x releases; Appwrite's own compose file healthchecks that path from the
   2.0.0 release on).
+- **The line Gable targets.** The Appwrite 2.x line on PostgreSQL, and no
+  other line: a 1.x Appwrite is refused at start, and the floor of section 8
+  sits on the 2.x line. Every slice is proven on a local Appwrite pinned in
+  the local compose to 2.1.0, the release the hosted deployment runs
+  (section 9).
 - **JWTs.** `account.createJWT` returns a short lived token that a server
   passes back to Appwrite with `setJWT` to act as the user:
   https://appwrite.io/docs/products/auth/jwt . Appwrite publishes no JWKS for
@@ -583,19 +588,20 @@ Ending the Appwrite session the core opened is not in that table: the core
 ends it on that session's own secret, and Appwrite's own scope for that call
 is the session's, so no key scope covers it.
 
-**The minimum Appwrite release is 2.0.0.** Gable supports Appwrite 2.0.0 and
-later, and refuses to start against an older one. That release is the first
-whose provider address cannot take over an existing account: the gate that
-refuses an unverified provider email before Appwrite adopts the user with
-that address arrives in 1.9.0, but on 1.9.0 the Microsoft adapter still
-reports every address it returns as verified, so the gate never refuses a
-Microsoft sign in there; from 2.0.0 the adapter reports no address as
-verified and the gate refuses. The core reads Appwrite's version at start
-(`GET /v1/health/version`) and refuses to start when the version it reads is
-below 2.0.0. When Appwrite cannot be reached at start, the core starts and
-keeps every provider redirect method closed at the door until it has read a
-version at or above the floor; email and password sign in, the invite proof
-and the PIN step up do not depend on the floor.
+**The minimum Appwrite release is 2.0.0.** Gable targets the Appwrite 2.x
+line on PostgreSQL, and refuses to start against any 1.x Appwrite. Within
+that line the floor is 2.0.0, the first release whose provider address
+cannot take over an existing account: the gate that refuses an unverified
+provider email before Appwrite adopts the user with that address arrives in
+1.9.0, but on 1.9.0 the Microsoft adapter still reports every address it
+returns as verified, so the gate never refuses a Microsoft sign in there;
+from 2.0.0 the adapter reports no address as verified and the gate refuses.
+The core reads Appwrite's version at start (`GET /v1/health/version`) and
+refuses to start when the version it reads is below 2.0.0. When Appwrite
+cannot be reached at start, the core starts and keeps every provider redirect
+method closed at the door until it has read a version at or above the floor;
+email and password sign in, the invite proof and the PIN step up do not
+depend on the floor.
 
 The key lives only in the core's environment, injected by the operator,
 never committed, logged, sent to a client or written to a table, and every
@@ -615,7 +621,8 @@ In the Appwrite project the operator:
   list). Appwrite accepts the `success` and `failure` URLs of
   `createOAuth2Token`, and the URLs of the magic link and recovery, only on
   a hostname in that list, so Gable's callback must be on it;
-- runs Appwrite 2.0.0 or later, the floor of this section;
+- runs the Appwrite 2.x line on PostgreSQL, 2.0.0 or later, the floor of this
+  section;
 - enables, under Auth, each method the dealer allows, and for each OAuth2
   provider enters the provider's client id and secret in its OAuth2
   settings, registering at the provider the redirect URI Appwrite shows
@@ -638,7 +645,9 @@ In the Appwrite project the operator:
   for the lead's walks, with a setup script that creates the project, the
   Team, the platform and one seeded user per role through the API. CI runs
   it in its own job on the paths it guards, because the stack is heavy. The
-  image is pinned at 2.0.0 or later, the floor of section 8.
+  compose runs Appwrite on PostgreSQL, like the deployment it stands in for,
+  and pins the image at 2.1.0, the release the hosted deployment runs, so
+  every slice is proven against the release it ships with.
 - **The floor:** the core reads the local Appwrite's version and starts; a
   version below 2.0.0 refuses the core's start; a version it cannot read
   keeps every provider redirect method closed at the door while email and
@@ -714,7 +723,7 @@ In the Appwrite project the operator:
 
 | Slice | What it proves or builds | Dev hours |
 |---|---|---|
-| 1 | The local Appwrite proof: the compose file and setup script, and a Go integration test that signs a seeded user in by email and password server side, reads the account and the membership, maps the roles, ends the session as the user, and is refused for a non member; it also checks that Appwrite accepts Gable's callback as a `success` URL once the hostname is a Web platform, and that the core reads the deployment's version and refuses to start below the floor of section 8. Nothing else starts until it is green. | 6 to 10 |
+| 1 | The local Appwrite proof: the compose file and setup script, with Appwrite on PostgreSQL and the image pinned at 2.1.0, the release the hosted deployment runs, and a Go integration test that signs a seeded user in by email and password server side, reads the account and the membership, maps the roles, ends the session as the user, and is refused for a non member; it also checks that Appwrite accepts Gable's callback as a `success` URL once the hostname is a Web platform, and that the core reads the deployment's version and refuses to start below the floor of section 8. Nothing else starts until it is green. | 6 to 10 |
 | 2 | The core: the Appwrite client, `staff_sessions` with its migration, the sign in, refresh and sign out routes, the fail closed session middleware, the UUID `sub`, the `role` readers changed, the `user` guard widened with the contract text that names it changed, listed in `docs/refactor/CONTRACT-CHANGES.md` and regenerated into the client schema, the roster link set from the staff screen, the limits, the audit rows, the configuration checks, and their tests. | 14 to 20 |
 | 3 | The web: the door's form and config against the core, cookie custody, the handoff deleted, the CSRF header, the session expired panel, and the Playwright sign in, sign out and expiry specs. | 6 to 10 |
 | 4 | The redirect methods through Appwrite: the start route, Gable's callback with its `state` check and the secret exchange, `google` and `microsoft` (a provider configured in the local Appwrite against a test provider), the unverified provider address that would take an account over refused, `magic_link` (members only, no user creation) and `oidc`, and the `oidc` row's issuer fields retired. | 6 to 9 |
@@ -728,7 +737,8 @@ Order: slices 1, 2, 3 and 7 first (staff sign in on the web, the demo
 people), then 8, 4, 5 and 6. Slice 8 is gated on the counter's close walk
 having run on Appwrite sign in (section 7). Slice 4 builds `google` and
 `microsoft` before `magic_link` and `oidc`. Slice 1 pins the Appwrite image
-at the floor of section 8. Passkeys are deferred and not counted.
+at the release the hosted deployment runs, on PostgreSQL. Passkeys are
+deferred and not counted.
 
 ## Consequences
 
@@ -736,11 +746,11 @@ at the floor of section 8. Passkeys are deferred and not counted.
   allows an OAuth2 method, Appwrite's endpoint faces staff browsers for the
   provider redirect. FutureBuild points the same settings at its own Appwrite
   deployment.
-- The dealer runs Appwrite 2.0.0 or later. An older deployment is refused at
-  the core's start when its version is readable, and a deployment whose
-  version cannot be read keeps the provider redirect methods closed at the
-  door. On an older release a provider address could take over a member's
-  account, which is what the floor exists for.
+- The dealer runs the Appwrite 2.x line on PostgreSQL, 2.0.0 or later. A 1.x
+  deployment is refused at the core's start when its version is readable, and
+  a deployment whose version cannot be read keeps the provider redirect
+  methods closed at the door. On an older release a provider address could
+  take over a member's account, which is what the floor exists for.
 - Microsoft needs an administrator's act in the Appwrite console before it
   admits anyone (section 4), and a dealer's own Entra tenant must be pinned
   in Appwrite's Microsoft provider settings.
