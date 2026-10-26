@@ -5,9 +5,10 @@
 
 ## Status
 
-Proposed for parity row CP-13 ("Offline counter (keeps selling when the
-connection drops)"). It becomes accepted when the lead merges it after
-review. No code is written for CP-13 before it is accepted.
+Accepted for parity row CP-13 ("Offline counter (keeps selling when the
+connection drops)"), merged after its independent reviews. The change that
+accepts it also amends ADR 0005: its Status names the supersession below,
+and its section 11 names the lock kinds and locks of section 3.2.
 
 It stands on ADR 0001 (the wire contract), ADR 0003 (the outbox), ADR 0005
 (the sales and money core) and ADR 0006 (units and pricing).
