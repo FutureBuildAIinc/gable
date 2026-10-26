@@ -125,16 +125,16 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 		                 WHERE r.zone_id = z.id AND r.effective_from <= $3::date
 		                   AND (r.effective_to IS NULL OR r.effective_to >= $3::date)), 0)::text AS combined
 		FROM tax_zones z
-		JOIN tax_zone_boundaries b ON b.zone_id = z.id
 		WHERE z.effective_from <= $3::date
 		  AND (z.effective_to IS NULL OR z.effective_to >= $3::date)
 		  AND (
 		        (z.zone_kind = 'POSTAL'
-		         AND b.country = $1
-		         AND b.postal_code_low <= $2
-		         AND (b.postal_code_high = '' OR b.postal_code_high >= $2)
-		         AND (b.extension_low = '' OR b.extension_high = '' OR $4 = ''
-		              OR (b.extension_low <= $4 AND b.extension_high >= $4)))
+		         AND EXISTS (SELECT 1 FROM tax_zone_boundaries b
+		                     WHERE b.zone_id = z.id AND b.country = $1
+		                       AND b.postal_code_low <= $2
+		                       AND (b.postal_code_high = '' OR b.postal_code_high >= $2)
+		                       AND (b.extension_low = '' OR b.extension_high = '' OR $4 = ''
+		                            OR (b.extension_low <= $4 AND b.extension_high >= $4))))
 		     OR (z.zone_kind = 'PROVINCE' AND z.country = $1 AND z.province_code = $5)
 		  )
 		ORDER BY combined ASC, z.jurisdiction_code ASC, z.id ASC`,
@@ -145,7 +145,9 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 	defer rows.Close()
 
 	// The first row is the lowest combined rate in the area: the state rule
-	// for a postal code that straddles districts.
+	// for a postal code that straddles districts. The result set is drained
+	// and closed before the parts are read: inside a transaction the two
+	// queries share one connection.
 	var (
 		id  uuid.UUID
 		src string
@@ -153,13 +155,23 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 	)
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("failed to read the tax zone: %w", err)
 		}
+		rows.Close()
 		return nil, ErrZoneNotFound
 	}
 	if err := rows.Scan(&id, &src, &ver, new(string)); err != nil {
+		rows.Close()
 		return nil, fmt.Errorf("failed to read the tax zone: %w", err)
 	}
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("failed to read the tax zone: %w", err)
+	}
+	rows.Close()
 
 	// The parts the snapshot freezes: the live parts of the winning zone.
 	partRows, err := exec.Query(ctx, `

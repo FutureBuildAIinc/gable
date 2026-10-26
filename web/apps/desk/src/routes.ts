@@ -82,6 +82,7 @@ export const routes: RouteConfig[] = [
   { path: '/admin/apps', load: () => import('./pages/admin/AppsPage.ts'), layout: 'erp' },
   { path: '/admin/branches/:id/users', load: () => import('./pages/admin/branches/BranchUsers.ts'), layout: 'erp' },
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
+  { path: '/admin/tax-zones', load: () => import('./pages/admin/taxzones/TaxZones.ts'), layout: 'erp' },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp' },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp' },
   { path: '/pricing/market-check', load: () => import('./pages/admin/pricing/MarketCheck.ts'), layout: 'erp' },

@@ -195,9 +195,9 @@ func (s *Service) CreateCounterInvoice(ctx context.Context, in *CounterInvoice) 
 	if in.Number, err = store.NextInvoiceNumber(ctx); err != nil {
 		return err
 	}
-	deliveryType := in.DeliveryType
-	if deliveryType != "DELIVERY" {
-		deliveryType = "PICKUP"
+	deliveryType := "PICKUP"
+	if in.DeliveryType == "DELIVERY" || in.DeliveryType == "delivery" {
+		deliveryType = "DELIVERY"
 	}
 	inv := &FulfilmentInvoice{
 		ID: in.ID, Number: in.Number, BranchID: in.BranchID, CustomerID: in.CustomerID, Currency: in.Currency,

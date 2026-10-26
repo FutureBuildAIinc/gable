@@ -22,9 +22,11 @@ func isAbsentRaw(raw json.RawMessage) bool {
 
 // startSaleRequest is POST /pos/transactions.
 type startSaleRequest struct {
-	RegisterID *string `json:"register_id"`
-	CashierID  *string `json:"cashier_id"`
-	CustomerID *string `json:"customer_id"`
+	RegisterID   *string `json:"register_id"`
+	CashierID    *string `json:"cashier_id"`
+	CustomerID   *string `json:"customer_id"`
+	ShipToID     *string `json:"ship_to_id"`
+	DeliveryType *string `json:"delivery_type"`
 }
 
 func (r *startSaleRequest) parse() (*StartSale, error) {
@@ -42,6 +44,27 @@ func (r *startSaleRequest) parse() (*StartSale, error) {
 	if id, ok := v.UUID("customer_id", r.CustomerID, false); ok {
 		out.CustomerID = &id
 	}
+	// A delivered counter sale names the ship to the goods are taken to
+	// (CP-10); a pickup, the default, takes the branch rate.
+	if id, ok := v.UUID("ship_to_id", r.ShipToID, false); ok {
+		out.ShipToID = &id
+	}
+	if r.DeliveryType != nil && *r.DeliveryType != "" {
+		switch *r.DeliveryType {
+		case "pickup":
+			out.DeliveryType = "pickup"
+		case "delivery":
+			out.DeliveryType = "delivery"
+		default:
+			v.Check(false, "delivery_type", "must be pickup or delivery")
+		}
+	}
+	if out.ShipToID != nil {
+		v.Check(out.CustomerID != nil, "ship_to_id",
+			"a ship to needs the customer named: the walk-in customer carries none")
+		v.Check(out.DeliveryType == "delivery", "ship_to_id",
+			"a ship to is named on a delivery: send delivery_type delivery")
+	}
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
@@ -50,9 +73,11 @@ func (r *startSaleRequest) parse() (*StartSale, error) {
 
 // StartSale is a parsed counter sale create.
 type StartSale struct {
-	RegisterID string
-	CashierID  uuid.UUID
-	CustomerID *uuid.UUID
+	RegisterID   string
+	CashierID    uuid.UUID
+	CustomerID   *uuid.UUID
+	ShipToID     *uuid.UUID
+	DeliveryType string // pickup or delivery, empty is pickup
 }
 
 // addLineRequest is POST /pos/transactions/{id}/items: one line in the shared
@@ -102,6 +127,10 @@ type attachCustomerRequest struct {
 	JobID      *string `json:"job_id"`
 	// BuyerContactID names the roster buyer an on account sale is for.
 	BuyerContactID *string `json:"buyer_contact_id"`
+	// ShipToID and DeliveryType name a delivered counter sale's ship to
+	// (CP-10), so its tax is sourced to the ship to's zone.
+	ShipToID     *string `json:"ship_to_id"`
+	DeliveryType *string `json:"delivery_type"`
 }
 
 func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
@@ -118,6 +147,23 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 	}
 	if r.CustomerPO != nil {
 		out.CustomerPO = strings.TrimSpace(*r.CustomerPO)
+	}
+	if id, ok := v.UUID("ship_to_id", r.ShipToID, false); ok {
+		out.ShipToID = &id
+	}
+	if r.DeliveryType != nil && *r.DeliveryType != "" {
+		switch *r.DeliveryType {
+		case "pickup":
+			out.DeliveryType = "pickup"
+		case "delivery":
+			out.DeliveryType = "delivery"
+		default:
+			v.Check(false, "delivery_type", "must be pickup or delivery")
+		}
+	}
+	if out.ShipToID != nil {
+		v.Check(out.DeliveryType == "delivery", "ship_to_id",
+			"a ship to is named on a delivery: send delivery_type delivery")
 	}
 	if err := v.Err(); err != nil {
 		return nil, err

@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -42,6 +43,19 @@ type Repository interface {
 	VoidSale(ctx context.Context, id uuid.UUID) error
 	NextSaleNumber(ctx context.Context) (string, error)
 	NextReturnNumber(ctx context.Context) (string, error)
+	// ShipToBelongsTo checks the ship to a delivered sale names is its
+	// customer's own (CP-10).
+	ShipToBelongsTo(ctx context.Context, shipToID, customerID uuid.UUID) (bool, error)
+	// ShipTo reads the ship to's snapshot and its typed rate (CP-10).
+	ShipTo(ctx context.Context, shipToID uuid.UUID) (*salesdoc.ShipToSnapshot, *string, error)
+	// TaxZone resolves a place of receipt through the zone tables (CP-10),
+	// nil when no zone covers it.
+	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
+	// SaveSaleShipTo freezes the ship to onto the sale row at completion.
+	SaveSaleShipTo(ctx context.Context, saleID uuid.UUID, snapshot []byte) error
+	// SetSaleDelivery names a delivered sale's ship to and delivery type
+	// (CP-10); an empty delivery type leaves the sale a pickup.
+	SetSaleDelivery(ctx context.Context, saleID uuid.UUID, shipToID *uuid.UUID, deliveryType string) error
 	ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error)
 
 	// Lines
@@ -394,10 +408,11 @@ func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
 		var created time.Time
 		err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_transactions (id, number, register_id, cashier_id, customer_id, currency, subtotal, tax_amount,
-			total, change_due, status, till_session_id, branch_id, created_at, updated_at, revision)
-		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8, $9, NOW(), NOW(), 1)
+			total, change_due, status, till_session_id, branch_id, ship_to_id, delivery_type, created_at, updated_at, revision)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8, $9, $10, $11, NOW(), NOW(), 1)
 		RETURNING created_at, revision`,
 			s.ID, s.Number, s.RegisterID, s.CashierID, s.CustomerID, s.Currency, StatusOpen, s.TillSessionID, s.BranchID,
+			s.ShipToID, deliveryTypeArg(s.DeliveryType),
 		).Scan(&created, &s.Revision)
 		if err != nil {
 			return fmt.Errorf("failed to create the sale: %w", mapWriteError(err))
@@ -443,20 +458,109 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
 	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
 
-// saleCols is the full sale's columns: the list item's head and the purchase
-// order and job a charge sale names.
-const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
+// saleCols is the full sale's columns: the list item's head, the purchase
+// order and job a charge sale names, and the delivery answer a delivered
+// sale carries (CP-10).
+const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id,
+	t.delivery_type, t.ship_to_id`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
 	var created time.Time
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
-		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID); err != nil {
+		&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
+		&s.DeliveryType, &s.ShipToID); err != nil {
 		return err
+	}
+	// the wire's spelling is lowercase, like every enum on the wire
+	s.DeliveryType = strings.ToLower(s.DeliveryType)
+	if s.DeliveryType == "" {
+		s.DeliveryType = "pickup"
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
 	s.CreatedAt = httpx.TimestampOf(created)
+	return nil
+}
+
+// deliveryTypeArg carries the sale's delivery type, PICKUP when unset: the
+// wire's lowercase is accepted beside the column's own case.
+func deliveryTypeArg(t string) any {
+	if t == "delivery" || t == "DELIVERY" {
+		return "DELIVERY"
+	}
+	return "PICKUP"
+}
+
+// ShipToBelongsTo checks the ship to a delivered sale names is its
+// customer's own (CP-10).
+func (r *PostgresRepository) ShipToBelongsTo(ctx context.Context, shipToID, customerID uuid.UUID) (bool, error) {
+	var one int
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT 1 FROM customer_ship_tos WHERE id = $1 AND customer_id = $2 AND is_active`, shipToID, customerID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check the ship to: %w", err)
+	}
+	return true, nil
+}
+
+// ShipTo reads the ship to's snapshot and its typed rate (CP-10).
+func (r *PostgresRepository) ShipTo(ctx context.Context, shipToID uuid.UUID) (*salesdoc.ShipToSnapshot, *string, error) {
+	var (
+		snap salesdoc.ShipToSnapshot
+		rate *string
+	)
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT id, code, COALESCE(name, ''), COALESCE(line1, ''), line2, COALESCE(city, ''),
+		       COALESCE(region, ''), COALESCE(postal_code, ''), country, phone, delivery_instructions,
+		       tax_rate::text
+		FROM customer_ship_tos WHERE id = $1`, shipToID).
+		Scan(&snap.ID, &snap.Code, &snap.Name, &snap.Line1, &snap.Line2, &snap.City,
+			&snap.Region, &snap.PostalCode, &snap.Country, &snap.Phone, &snap.DeliveryInstructions, &rate)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, httpx.BadRequest("a referenced record does not exist",
+			httpx.FieldError{Field: "ship_to_id", Message: "no such ship-to"})
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read ship-to: %w", err)
+	}
+	return &snap, rate, nil
+}
+
+// TaxZone resolves a place of receipt through the zone tables (CP-10); no
+// zone is not an error, it answers nil.
+func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error) {
+	zone, err := taxzone.Lookup(ctx, r.db, taxzone.LookupInput{Country: country, Postal: postal, Region: region, On: on})
+	if errors.Is(err, taxzone.ErrZoneNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return zone, nil
+}
+
+// SetSaleDelivery names a delivered sale's ship to and delivery type
+// (CP-10), moving the revision as the other attach writes do.
+func (r *PostgresRepository) SetSaleDelivery(ctx context.Context, saleID uuid.UUID, shipToID *uuid.UUID, deliveryType string) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_transactions SET ship_to_id = $2, delivery_type = $3, updated_at = NOW(), revision = revision + 1
+		WHERE id = $1`, saleID, shipToID, deliveryTypeArg(deliveryType))
+	if err != nil {
+		return fmt.Errorf("failed to name the sale's delivery: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// SaveSaleShipTo freezes the ship to onto the sale row at completion.
+func (r *PostgresRepository) SaveSaleShipTo(ctx context.Context, saleID uuid.UUID, snapshot []byte) error {
+	if _, err := r.ex(ctx).Exec(ctx,
+		`UPDATE pos_transactions SET ship_to_snapshot = $2, updated_at = NOW() WHERE id = $1`, saleID, snapshot); err != nil {
+		return fmt.Errorf("failed to save the sale's ship to: %w", err)
+	}
 	return nil
 }
 

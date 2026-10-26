@@ -77,6 +77,11 @@ type AttachCustomerIn struct {
 	// BuyerContactID is the roster buyer the sale is for; the account may
 	// ask for one on every sale on account.
 	BuyerContactID *uuid.UUID
+	// ShipToID and DeliveryType are the delivered sale's answer (CP-10):
+	// a ship to names where the goods go, so the tax is sourced to its
+	// zone instead of the branch.
+	ShipToID     *uuid.UUID
+	DeliveryType string // pickup or delivery; empty leaves the sale as it is
 }
 
 // namedCustomer is the counter's one rule for which customers a caller may
@@ -113,6 +118,19 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 	}
 	if in.CustomerID == nil && (in.CustomerPO != "" || in.JobID != nil || in.BuyerContactID != nil) {
 		return nil, invalid("customer_id", "name the customer before a purchase order, a job or a buyer")
+	}
+	// A ship to is the named customer's own and rides a delivery (CP-10).
+	if in.ShipToID != nil {
+		if in.CustomerID == nil {
+			return nil, invalid("customer_id", "a ship to needs the customer named: the walk-in customer carries none")
+		}
+		ok, err := s.repo.ShipToBelongsTo(ctx, *in.ShipToID, *in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, invalid("ship_to_id", "no such ship to for this customer")
+		}
 	}
 	currency := ""
 	if in.CustomerID != nil {
@@ -181,6 +199,11 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		}
 		if err := s.repo.SetSaleBuyer(ctx, saleID, in.BuyerContactID); err != nil {
 			return err
+		}
+		if in.DeliveryType != "" || in.ShipToID != nil {
+			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, in.DeliveryType); err != nil {
+				return err
+			}
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{

@@ -123,8 +123,12 @@ func (r *createRequest) parse() (*Draft, error) {
 		if high == "" {
 			high = low
 		}
+		country := strings.ToUpper(strings.TrimSpace(in.Country))
+		if country == "" {
+			country = d.Country
+		}
 		d.Boundaries = append(d.Boundaries, Boundary{
-			Country: strings.ToUpper(strings.TrimSpace(in.Country)), PostalLow: low, PostalHigh: high,
+			Country: country, PostalLow: low, PostalHigh: high,
 			ExtensionLow: strings.TrimSpace(in.ExtensionLow), ExtensionHigh: strings.TrimSpace(in.ExtensionHigh),
 		})
 	}
