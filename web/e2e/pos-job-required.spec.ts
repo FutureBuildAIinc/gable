@@ -70,6 +70,13 @@ async function stockedProduct(request: APIRequestContext): Promise<{ sku: string
   throw new Error('no stocked product for the counter run');
 }
 
+/** Opens the Payment panel (one panel is open at a time; its tenders are in it). */
+async function openPayment(page: Page) {
+  const head = page.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+}
+
 /** The counter with the drawer open (see pos.spec.ts's openCounter). */
 async function openCounter(page: Page) {
   await page.goto('/pos');
@@ -122,7 +129,11 @@ test('the counter: an account that requires a job is charged only with a job pic
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-refused.png'), fullPage: true });
 
   // A job picked: the charge is offered and the sale completes on the job.
+  // The Job select lives in the Customer panel, which the move to Payment
+  // collapsed; the refusal's own shortcut reopens it.
+  await page.getByTestId('pos-refusal-customer').click();
   await pickOptionByValue(page.locator('#pos-job'), account.job_id);
+  await openPayment(page);
   await expect(charge).toBeEnabled();
   await charge.click();
   await page.getByRole('button', { name: 'Add as split tender' }).click();
