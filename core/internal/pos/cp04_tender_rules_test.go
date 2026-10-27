@@ -52,14 +52,22 @@ func TestCP04_CheckOverIDThresholdNeedsID(t *testing.T) {
 	}
 
 	over, overTotal := f.cartOf("2", nil) // 1198
+	stock := f.stock()
+	invoices := f.counterInvoices(t)
 	r := f.completeSale(over, tender("check", overTotal))
 	blockerOf(t, r, "id_required")
 	if want := "A check over 10.00 USD"; !strings.Contains(string(r.raw), want) {
 		t.Errorf("the refusal %s does not say what the rule asks", r.raw)
 	}
-	stock := f.stock()
 	if f.stock() != stock {
 		t.Errorf("a refused check moved stock")
+	}
+	// nothing was written: the sale stays open with no invoice behind it
+	if got := str(t, f.getSale(t, over), "status"); got != "open" {
+		t.Errorf("the refused sale status = %q, want open", got)
+	}
+	if got := f.counterInvoices(t); got != invoices {
+		t.Errorf("%d invoices after the refusal, want %d", got, invoices)
 	}
 	// with the ID checked and its type the same check completes
 	if r := f.completeSale(over, idTender(overTotal, "drivers_license")); r.status != http.StatusOK {
