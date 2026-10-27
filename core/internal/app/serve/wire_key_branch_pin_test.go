@@ -286,8 +286,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		}
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, f.taxExempt, f.custB); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
@@ -1398,8 +1398,8 @@ func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UU
 func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, id, customer); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, id, customer); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 }

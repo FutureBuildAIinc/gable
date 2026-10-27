@@ -128,8 +128,8 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 	// The order create needs a tax answer that needs no branch rate: an
 	// exemption on the customer (the resolver's first arm).
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		 VALUES ($1, $2, 'pin noheader', 'PIN-NH-1', 'WA')`, uuid.New(), f.custID); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		 VALUES ($1, $2, 'pin noheader', 'PIN-NH-1', 'WA', CURRENT_DATE - 1)`, uuid.New(), f.custID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
