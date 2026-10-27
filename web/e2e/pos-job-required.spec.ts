@@ -36,52 +36,128 @@ async function registerBranch(request: APIRequestContext): Promise<string> {
 }
 
 /**
- * A seeded customer with at least one active job and credit room, discovered
- * through its quotes (the seed draws fresh job ids every run). The counter's
- * job roster is the customer's active projects, which only the seed carries.
+ * A product with stock at the counter's branch, for the item search, together
+ * with its base price so the credit room check is measured against the sale.
  */
-async function customerWithAJob(
+async function stockedProduct(
   request: APIRequestContext,
   branchId: string,
-): Promise<{ id: string; name: string; account_number: string; job_id: string } | null> {
-  const quotes = (await (await request.get('/api/v1/quotes?limit=200')).json()) as {
-    items: { customer_id: string; job_id: string | null }[];
+): Promise<{ sku: string; base_price_ten_thousandths: number }> {
+  const products = (
+    await (
+      await request.get('/api/v1/products?limit=200', {
+        headers: { 'X-Branch-Id': branchId },
+      })
+    ).json()
+  ) as {
+    items: { id: string; sku: string; base_price_ten_thousandths: number; available: string }[];
   };
-  const jobsByCustomer = new Map<string, Set<string>>();
-  for (const q of quotes.items) {
-    if (!q.job_id) continue;
-    if (!jobsByCustomer.has(q.customer_id)) jobsByCustomer.set(q.customer_id, new Set<string>());
-    jobsByCustomer.get(q.customer_id)!.add(q.job_id);
-  }
-  for (const [customer, jobs] of jobsByCustomer) {
-    const c = (await (await request.get(`/api/v1/customers/${customer}`)).json()) as {
-      id: string; name: string; account_number: string; credit_limit_cents: number | null; balance_cents: number;
-      branch_ids: string[]; is_active: boolean;
-    };
-    // one branch only, and the register's own: a shared customer's restricted
-    // fields (the Job required control among them) are refused to the role the
-    // run signs in, and a write through another yard's header is a 404
-    if (c.branch_ids.length !== 1 || c.branch_ids[0] !== branchId || !c.is_active) continue;
-    if (c.credit_limit_cents === null || c.credit_limit_cents - c.balance_cents >= 2_000_000) {
-      return { id: c.id, name: c.name, account_number: c.account_number, job_id: [...jobs][0] };
-    }
-  }
-  return null;
-}
-
-/** A product with stock at the counter's branch, for the item search. */
-async function stockedProduct(request: APIRequestContext): Promise<{ sku: string }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string }[] };
   for (const p of products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse()) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= 50) return p;
+    if ((Number(p.available) || 0) >= 50) return p;
   }
   throw new Error('no stocked product for the counter run');
+}
+
+interface CustomerHeader {
+  id: string;
+  name: string;
+  account_number: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  price_profile_id: string | null;
+  salesperson_id: string | null;
+  is_active: boolean;
+  credit_limit_cents: number | null;
+  balance_cents: number;
+  currency: string | null;
+  payment_terms_id: string;
+  po_required: boolean;
+  job_required: boolean;
+  branch_ids: string[];
+  revision: number;
+}
+
+interface PreparedAccount {
+  id: string;
+  name: string;
+  account_number: string;
+  job_id: string;
+  original_credit_limit_cents: number | null;
+  original_job_required: boolean;
+}
+
+/**
+ * Prepares a single-branch customer at the register's branch with an active
+ * job and credit room for the sale. In AUTH_MODE=dev the portal project route
+ * (POST /api/portal/v1/projects) is pinned by serve.go to TARNWICK-001 (which
+ * the multi-yard seed shares across KEL-MAIN and WK), while the seed's four
+ * single-branch KEL-MAIN customers always hold active projects and vary only
+ * in their random receivable balance. We query the register's branch directly
+ * (X-Branch-Id), read the counter's own customer lookup for the active job and
+ * open receivable, and set credit_limit_cents through the customer PUT so the
+ * account always has room for the sale on every seed draw.
+ */
+async function prepareAccountWithJob(
+  request: APIRequestContext,
+  branchId: string,
+  saleRoomCents: number,
+): Promise<PreparedAccount> {
+  const listRes = await request.get('/api/v1/customers?limit=50', {
+    headers: { 'X-Branch-Id': branchId },
+  });
+  expect(listRes.status(), await listRes.text()).toBe(200);
+  const customers = (await listRes.json()) as { items: CustomerHeader[] };
+  for (const c of customers.items) {
+    if (c.branch_ids.length !== 1 || c.branch_ids[0] !== branchId || !c.is_active) continue;
+    const lookupRes = await request.get(
+      `/api/v1/pos/customers?q=${encodeURIComponent(c.account_number)}`,
+      { headers: { 'X-Branch-Id': branchId } },
+    );
+    expect(lookupRes.status(), await lookupRes.text()).toBe(200);
+    const lookup = (await lookupRes.json()) as {
+      items: {
+        id: string;
+        open_receivable_cents: number;
+        jobs: { id: string; name: string }[];
+      }[];
+    };
+    const counter = lookup.items.find((item) => item.id === c.id);
+    if (!counter || counter.jobs.length === 0) continue;
+
+    const neededLimit = Math.max(c.balance_cents, counter.open_receivable_cents, 0) + saleRoomCents;
+    const targetLimit =
+      c.credit_limit_cents === null ? neededLimit : Math.max(c.credit_limit_cents, neededLimit);
+    const putRes = await request.put(`/api/v1/customers/${c.id}`, {
+      headers: { 'X-Branch-Id': branchId },
+      data: {
+        account_number: c.account_number,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        address: c.address,
+        price_profile_id: c.price_profile_id,
+        salesperson_id: c.salesperson_id,
+        is_active: c.is_active,
+        credit_limit_cents: targetLimit,
+        currency: c.currency,
+        payment_terms_id: c.payment_terms_id,
+        po_required: c.po_required,
+        job_required: false,
+        revision: c.revision,
+      },
+    });
+    expect(putRes.status(), await putRes.text()).toBe(200);
+    return {
+      id: c.id,
+      name: c.name,
+      account_number: c.account_number,
+      job_id: counter.jobs[0].id,
+      original_credit_limit_cents: c.credit_limit_cents,
+      original_job_required: c.job_required,
+    };
+  }
+  throw new Error('expected a single-branch customer at the register branch with an active job');
 }
 
 /** Opens the Payment panel (one panel is open at a time; its tenders are in it). */
@@ -107,93 +183,131 @@ async function openCounter(page: Page) {
 
 test('the counter: an account that requires a job is charged only with a job picked', async ({ page, request }) => {
   const branchId = await registerBranch(request);
-  const account = await customerWithAJob(request, branchId);
-  if (!account) {
-    test.skip(true, 'the seed holds no single branch customer at the register branch with a job and credit room to charge');
-    return;
-  }
   // The run works in the register's yard: the account page PUT and the
   // counter both write through the branch the header carries, and a write on
   // another yard's customer is a 404 (or shares the customer out).
   await page.addInitScript((id) => localStorage.setItem('gable_current_branch_id', id), branchId);
   await signIn(page, 'POS Account E2E');
-  const product = await stockedProduct(request);
+  const product = await stockedProduct(request, branchId);
+  const unitCents = Math.max(100, Math.ceil(product.base_price_ten_thousandths / 100));
+  const saleRoomCents = unitCents * 4;
+  const account = await prepareAccountWithJob(request, branchId, saleRoomCents);
 
-  // The account page: Job required is set beside PO required.
-  await page.goto(`/accounts/${account.id}`);
-  await expect(page.getByRole('heading', { name: account.name })).toBeVisible();
-  await expect(page.locator('[data-fact="job"]')).toHaveText('No');
-  await page.getByRole('button', { name: 'Edit Profile' }).click();
-  await page.getByLabel('Job required').check();
-  const saved = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/v1/customers/${account.id}` && r.request().method() === 'PUT');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  expect((await saved).status(), await (await saved).text()).toBe(200);
-  await expect(page.locator('[data-fact="job"]')).toHaveText('Yes');
-  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-account.png'), fullPage: true });
+  try {
+    // The account page: Job required is set beside PO required.
+    await page.goto(`/accounts/${account.id}`);
+    await expect(page.getByRole('heading', { name: account.name })).toBeVisible();
+    await expect(page.locator('[data-fact="job"]')).toHaveText('No');
+    await page.getByRole('button', { name: 'Edit Profile' }).click();
+    await page.getByLabel('Job required').check();
+    const saved = page.waitForResponse((r) => new URL(r.url()).pathname === `/api/v1/customers/${account.id}` && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    expect((await saved).status(), await (await saved).text()).toBe(200);
+    await expect(page.locator('[data-fact="job"]')).toHaveText('Yes');
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-account.png'), fullPage: true });
 
-  // The counter: the account attached, the Job select marked and the charge off.
-  await openCounter(page);
-  await page.locator('#pos-customer-search').fill(account.account_number);
-  await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(account.account_number) }).click();
-  await expect(page.getByTestId('pos-customer-name')).toHaveText(account.name);
-  await expect(page.locator('label[for="pos-job"]')).toContainText('required for a charge');
-  const lines = page.locator('[data-testid="pos-lines"] li');
-  const before = await lines.count();
-  await page.getByTestId('catalog-search').fill(product.sku);
-  await page.getByTestId('catalog-search').press('Enter');
-  await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
-  await page.getByLabel(/Purchase order/).fill('PO-E2E-JOB-91');
-  await page.getByLabel(/Purchase order/).blur();
-  await page.getByTestId('pos-next-payment').click();
-  const charge = page.getByRole('button', { name: 'Charge to account' });
-  await expect(charge).toBeDisabled();
-  await expect(page.getByTestId('pos-account-refusal')).toContainText(/requires a job on every charge sale/);
-  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-refused.png'), fullPage: true });
+    // The counter: the account attached, the Job select marked and the charge off.
+    await openCounter(page);
+    await page.locator('#pos-customer-search').fill(account.account_number);
+    await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(account.account_number) }).click();
+    await expect(page.getByTestId('pos-customer-name')).toHaveText(account.name);
+    await expect(page.locator('label[for="pos-job"]')).toContainText('required for a charge');
+    const lines = page.locator('[data-testid="pos-lines"] li');
+    const before = await lines.count();
+    await page.getByTestId('catalog-search').fill(product.sku);
+    await page.getByTestId('catalog-search').press('Enter');
+    await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
+    await page.getByLabel(/Purchase order/).fill('PO-E2E-JOB-91');
+    await page.getByLabel(/Purchase order/).blur();
+    await page.getByTestId('pos-next-payment').click();
+    const charge = page.getByRole('button', { name: 'Charge to account' });
+    await expect(charge).toBeDisabled();
+    await expect(page.getByTestId('pos-account-refusal')).toContainText(/requires a job on every charge sale/);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-refused.png'), fullPage: true });
 
-  // A job picked: the charge is offered and the sale completes on the job.
-  // The Job select lives in the Customer panel, which the move to Payment
-  // collapsed, so the panel's own head reopens it.
-  await page.getByTestId('panel-customer-toggle').click();
-  await expect(page.locator('#pos-job')).toBeVisible();
-  await pickOptionByValue(page.locator('#pos-job'), account.job_id);
-  await openPayment(page);
-  await expect(charge).toBeEnabled();
-  await charge.click();
-  await page.getByRole('button', { name: 'Add as split tender' }).click();
-  await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
-  await page.getByTestId('pos-pay').click();
-  await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
-  // The completed sale shows what it was charged against, on the screen.
-  await expect(page.getByTestId('pos-complete-refs')).toContainText('PO PO-E2E-JOB-91');
-  await expect(page.getByTestId('pos-complete-refs')).toContainText(/Job \S/);
-  await expect(page.getByTestId('pos-order-refs')).toContainText('PO PO-E2E-JOB-91');
-  await expect(page.getByTestId('pos-order-refs')).toContainText(/Job \S/);
-  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-charged.png'), fullPage: true });
+    // A job picked: the charge is offered and the sale completes on the job.
+    // The Job select lives in the Customer panel, which the move to Payment
+    // collapsed, so the panel's own head reopens it.
+    await page.getByTestId('panel-customer-toggle').click();
+    await expect(page.locator('#pos-job')).toBeVisible();
+    await pickOptionByValue(page.locator('#pos-job'), account.job_id);
+    await openPayment(page);
+    await expect(charge).toBeEnabled();
+    await charge.click();
+    await page.getByRole('button', { name: 'Add as split tender' }).click();
+    await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
+    await page.getByTestId('pos-pay').click();
+    await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+    // The completed sale shows what it was charged against, on the screen.
+    await expect(page.getByTestId('pos-complete-refs')).toContainText('PO PO-E2E-JOB-91');
+    await expect(page.getByTestId('pos-complete-refs')).toContainText(/Job \S/);
+    await expect(page.getByTestId('pos-order-refs')).toContainText('PO PO-E2E-JOB-91');
+    await expect(page.getByTestId('pos-order-refs')).toContainText(/Job \S/);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-job-required-charged.png'), fullPage: true });
 
-  // The books: the completed sale and its invoice carry the job.
-  const sales = (await (await request.get(`/api/v1/pos/transactions?register_id=REG-01&limit=200`)).json()) as {
-    items: { id: string; customer_id: string | null; status: string }[];
-  };
-  const sale = sales.items.find((s) => s.customer_id === account.id && s.status === 'completed');
-  expect(sale, 'the charge sale is listed for the account').toBeTruthy();
-  const full = (await (await request.get(`/api/v1/pos/transactions/${sale!.id}`)).json()) as {
-    job_id: string | null; customer_po: string | null;
-  };
-  expect(full.job_id).toBe(account.job_id);
-  expect(full.customer_po).toBe('PO-E2E-JOB-91');
+    // The books: the completed sale and its invoice carry the job.
+    const sales = (
+      await (
+        await request.get(`/api/v1/pos/transactions?register_id=REG-01&limit=200`, {
+          headers: { 'X-Branch-Id': branchId },
+        })
+      ).json()
+    ) as {
+      items: { id: string; customer_id: string | null; status: string }[];
+    };
+    const sale = sales.items.find((s) => s.customer_id === account.id && s.status === 'completed');
+    expect(sale, 'the charge sale is listed for the account').toBeTruthy();
+    const full = (
+      await (
+        await request.get(`/api/v1/pos/transactions/${sale!.id}`, {
+          headers: { 'X-Branch-Id': branchId },
+        })
+      ).json()
+    ) as {
+      job_id: string | null;
+      customer_po: string | null;
+      revision: number;
+    };
+    expect(full.job_id).toBe(account.job_id);
+    expect(full.customer_po).toBe('PO-E2E-JOB-91');
 
-  // Put the account back the way the seed held it. The customer stayed on its
-  // one branch (the register's own), so the header the run pins carries the
-  // write and the revert is a plain success.
-  const fresh = (await (await request.get(`/api/v1/customers/${account.id}`)).json()) as Record<string, unknown>;
-  const revert = await request.put(`/api/v1/customers/${account.id}`, {
-    headers: { 'X-Branch-Id': branchId },
-    data: {
-      account_number: fresh.account_number, name: fresh.name, email: fresh.email, phone: fresh.phone,
-      address: fresh.address, price_profile_id: fresh.price_profile_id, is_active: fresh.is_active,
-      credit_limit_cents: fresh.credit_limit_cents, currency: fresh.currency, payment_terms_id: fresh.payment_terms_id,
-      po_required: fresh.po_required, job_required: false, revision: fresh.revision,
-    },
-  });
-  expect(revert.status(), await revert.text()).toBe(200);
+    // Void the run's charge sale so the account's balance and invoices return
+    // to what the seed held.
+    const voided = await request.post(`/api/v1/pos/transactions/${sale!.id}/void`, {
+      headers: { 'X-Branch-Id': branchId },
+      data: { reason: 'e2e cleanup', revision: full.revision },
+    });
+    expect(voided.status(), await voided.text()).toBe(200);
+  } finally {
+    // Put the account header back the way the seed held it. The customer
+    // stayed on its one branch (the register's own), so the header the run
+    // pins carries the write and the revert is a plain success.
+    const fresh = (
+      await (
+        await request.get(`/api/v1/customers/${account.id}`, {
+          headers: { 'X-Branch-Id': branchId },
+        })
+      ).json()
+    ) as CustomerHeader;
+    const revert = await request.put(`/api/v1/customers/${account.id}`, {
+      headers: { 'X-Branch-Id': branchId },
+      data: {
+        account_number: fresh.account_number,
+        name: fresh.name,
+        email: fresh.email,
+        phone: fresh.phone,
+        address: fresh.address,
+        price_profile_id: fresh.price_profile_id,
+        salesperson_id: fresh.salesperson_id,
+        is_active: fresh.is_active,
+        credit_limit_cents: account.original_credit_limit_cents,
+        currency: fresh.currency,
+        payment_terms_id: fresh.payment_terms_id,
+        po_required: fresh.po_required,
+        job_required: account.original_job_required,
+        revision: fresh.revision,
+      },
+    });
+    expect(revert.status(), await revert.text()).toBe(200);
+  }
 });
