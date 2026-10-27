@@ -47,6 +47,8 @@ export interface PromptDialogOptions {
     initialValue?: string;
     placeholder?: string;
     tone?: DialogTone;
+    /** Masks the field (a PIN, a secret): what is typed shows as dots. */
+    masked?: boolean;
 }
 
 export interface DialogDoneDetail {
@@ -71,6 +73,8 @@ export class GableAppDialog extends LitElement {
     @property({ type: Boolean }) required = false;
     @property({ type: String, attribute: 'initial-value' }) initialValue = '';
     @property({ type: String }) placeholder = '';
+    /** Masks the field (a PIN, a secret): what is typed shows as dots. */
+    @property({ type: Boolean }) masked = false;
 
     @state() private _value = '';
     /** The panel-sized scrim over a modal open behind this dialog, if any. */
@@ -245,7 +249,7 @@ export class GableAppDialog extends LitElement {
                                     <input
                                         id="${this._ids}-field"
                                         data-dialog-input
-                                        type="text"
+                                        type=${this.masked ? 'password' : 'text'}
                                         .value=${this._value}
                                         placeholder=${this.placeholder}
                                         @input=${(e: Event) => { this._value = (e.target as HTMLInputElement).value; }}
@@ -333,5 +337,6 @@ export function promptDialog(options: PromptDialogOptions): Promise<string | nul
         el.initialValue = options.initialValue ?? '';
         el.placeholder = options.placeholder ?? '';
         el.tone = options.tone ?? 'default';
+        el.masked = options.masked ?? false;
     }).then((detail) => (detail.confirmed ? detail.value : null));
 }

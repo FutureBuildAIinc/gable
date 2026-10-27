@@ -27,6 +27,7 @@ import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORD
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
+import './StepUpDialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
@@ -79,6 +80,10 @@ export class POSTerminal extends LitElement {
   @state() private _idChecked = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
+
+  // The manager step up waiting on the PIN dialog: the reason and cap are kept
+  // here, the token completes them (CP-04).
+  @state() private _stepUp: { kind: 'account' | 'check'; reason: string; capCents: number } | null = null;
   // The words a check over the limit was refused in (the server's, or the
   // screen's from the customer's own limit), with Ask a manager beside them.
   @state() private _checkOverWords: string | null = null;
@@ -437,6 +442,10 @@ export class POSTerminal extends LitElement {
 
   private _scheduleStanding() {
     if (this._standingTimer) clearTimeout(this._standingTimer);
+    if (this._standing === null) {
+      void this._syncStanding();
+      return;
+    }
     this._standingTimer = setTimeout(() => { void this._syncStanding(); }, 150);
   }
 
@@ -481,9 +490,11 @@ export class POSTerminal extends LitElement {
 
   /**
    * A manager approves this one sale (an account sale the verdict blocks, or a
-   * check over the limit), with a reason and a cap. The server wants a person
-   * with the manager role other than this sale's own cashier, so the manager
-   * signs in at this terminal; a refusal is said in the server's words.
+   * check over the limit), with a reason and a cap. A manager signed in here
+   * with the role approves as themselves (the claims path); anyone else asks
+   * the manager to step up with their own counter PIN (CP-04), and the
+   * approval the PIN mints is spent by this one sale's override, bound to the
+   * kind and the cap the manager saw.
    */
   private async _askManager(kind: 'account' | 'check', capCents: number) {
     const sale = this._sale;
@@ -493,20 +504,59 @@ export class POSTerminal extends LitElement {
       label: 'Reason', required: true, confirmLabel: 'Approve',
     });
     if (!reason) return;
+    this._error = null;
+    const roles = authCustody.roles ?? [];
+    const sub = authCustody.subject;
+    if (kind === 'account' || kind === 'check') {
+      if ((roles.includes('admin') || roles.includes('owner')) && (!sub || sale.cashier_id !== sub)) {
+        await this._recordOverride(sale, kind, reason, capCents);
+        return;
+      }
+    }
+    this._stepUp = { kind, reason, capCents };
+  }
+
+  /** Records the override, with a manager's approval token when the PIN minted one. */
+  private async _recordOverride(sale: Sale, kind: 'account' | 'check', reason: string, capCents: number, approvalToken?: string, managerName?: string) {
     try {
       this._error = null;
-      const approval = await posService.approveOverride(sale.id, kind, reason, capCents);
+      const approval = await posService.approveOverride(sale.id, kind, reason, capCents, approvalToken);
       if (kind === 'check') {
         this._checkApprovedCents = approval.cap_cents;
         this._checkOverWords = null;
       }
       await this._syncStanding();
-      this._success = 'Approved for this sale';
+      this._success = managerName ? `Approved by ${managerName}` : 'Approved for this sale';
       if (this._errorTimer) clearTimeout(this._errorTimer);
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
     } catch (err: unknown) {
       this._error = apiErrorMessage(err, 'Failed to record the approval');
     }
+  }
+
+  /** The PIN dialog's approval completes the override the cashier asked for. */
+  private async _onStepUpApproved(detail: { token: string; managerName: string }) {
+    const ask = this._stepUp;
+    const sale = this._sale;
+    this._stepUp = null;
+    if (!ask || !sale) return;
+    await this._recordOverride(sale, ask.kind, ask.reason, ask.capCents, detail.token, detail.managerName);
+  }
+
+  /** The step up dialog, over everything, whatever panel is open. The
+   * manager sees the kind and the cap they are approving. */
+  private _renderStepUp() {
+    if (!this._stepUp || !this._sale) return nothing;
+    return html`
+      <gable-step-up-dialog act="override" .kind=${this._stepUp.kind} .amountCents=${this._stepUp.capCents}
+        target-id=${this._sale.id}
+        heading=${this._stepUp.kind === 'account' ? 'A manager approves this sale on account' : 'A manager approves this check'}
+        .detail=${this._stepUp.kind === 'account'
+          ? `Approve ${fmt(this._stepUp.capCents)} on account for this sale`
+          : `Approve a check of ${fmt(this._stepUp.capCents)} for this sale`}
+        @step-up-cancel=${() => { this._stepUp = null; }}
+        @step-up-approved=${(e: CustomEvent<{ token: string; managerName: string }>) => void this._onStepUpApproved(e.detail)}></gable-step-up-dialog>
+    `;
   }
 
   /* ---- The sale's customer ---- */
@@ -545,6 +595,7 @@ export class POSTerminal extends LitElement {
       // the job; Next: Payment moves on once there is a line.
       this._step = 'customer';
       this._open = 'customer';
+      await this._syncStanding();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
@@ -1260,6 +1311,12 @@ export class POSTerminal extends LitElement {
       this._error = 'Invalid tender amount';
       return;
     }
+    if (this._customer !== null && this._standing === null && (entry.method === 'check' || entry.method === 'store_credit')) {
+      void this._syncStanding().then(() => {
+        if (this._standing !== null) this._addPendingTender();
+      });
+      return;
+    }
     const refusal = this._entryRefusal(entry);
     if (refusal) {
       this._error = refusal;
@@ -1670,7 +1727,8 @@ export class POSTerminal extends LitElement {
 
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
-    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
+    const by = m.kind === 'pickup' && m.taken_by ? ` by ${m.taken_by}` : '';
+    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded${by}`;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }
@@ -2457,6 +2515,7 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderStepUp()}
         ${this._renderXReportModal()}
         ${this._renderZReportsModal()}
         ${this._renderReturnModal()}

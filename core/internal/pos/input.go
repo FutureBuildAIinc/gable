@@ -566,16 +566,19 @@ func (r *paybackIntentRequest) parse() (*PaybackIntentIn, error) {
 	return &out, nil
 }
 
-// movementRequest is POST /pos/till/{id}/movements.
+// movementRequest is POST /pos/till/{id}/movements. An approval_token, when
+// sent on a pickup, is a manager's step up approval whose manager is the
+// taker: taken_by is not typed by the caller on that path.
 type movementRequest struct {
-	Kind        *string         `json:"kind"`
-	AmountCents json.RawMessage `json:"amount_cents"`
-	ReasonCode  *string         `json:"reason_code"`
-	Note        *string         `json:"note"`
-	TakenBy     *string         `json:"taken_by"`
+	Kind          *string         `json:"kind"`
+	AmountCents   json.RawMessage `json:"amount_cents"`
+	ReasonCode    *string         `json:"reason_code"`
+	Note          *string         `json:"note"`
+	TakenBy       *string         `json:"taken_by"`
+	ApprovalToken *string         `json:"approval_token"`
 }
 
-func (r *movementRequest) parse() (MovementIn, error) {
+func (r *movementRequest) parse() (MovementIn, string, error) {
 	v := &httpx.Validator{}
 	var in MovementIn
 	kind := ""
@@ -613,20 +616,31 @@ func (r *movementRequest) parse() (MovementIn, error) {
 		v.Check(in.ReasonCode == "", "reason_code", "a drop or pickup carries no reason code")
 	}
 	v.Check(in.ReasonCode != "other" || in.Note != "", "note", "is required when the reason code is other")
+	token := ""
+	if r.ApprovalToken != nil {
+		token = strings.TrimSpace(*r.ApprovalToken)
+	}
 	if in.Kind == MovementPickup {
-		v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+		if token == "" {
+			v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+		} else {
+			v.Check(in.TakenBy == "", "taken_by", "the manager is named by their approval, not typed")
+		}
 	} else if kind != "" {
 		v.Check(in.TakenBy == "", "taken_by", "only a pickup names the person taking the cash")
+		v.Check(token == "", "approval_token", "only a pickup is approved by a step up")
 	}
 	if err := v.Err(); err != nil {
-		return MovementIn{}, err
+		return MovementIn{}, "", err
 	}
-	return in, nil
+	return in, token, nil
 }
 
-// signOffRequest is POST /pos/till/{id}/signoff.
+// signOffRequest is POST /pos/till/{id}/signoff. An approval_token, when
+// sent, is a manager's step up approval whose manager signs off.
 type signOffRequest struct {
-	Reason *string `json:"reason"`
+	Reason        *string `json:"reason"`
+	ApprovalToken *string `json:"approval_token"`
 }
 
 // variancePolicyRequest is PUT /pos/till/policy: the branch and its own
