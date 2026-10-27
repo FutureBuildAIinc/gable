@@ -128,6 +128,7 @@ test('the manager step up: PIN set on the staff screen, an over limit check appr
 
   // A check over the one dollar limit: the words say it, with the way on.
   await page.getByTestId('tender-check').click();
+  await expect(page.getByTestId('pos-check-limit')).toBeVisible();
   const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
   await page.getByLabel('Tender amount').fill(total.toFixed(2));
   // the refused tender is not added: the words say it and the way is on

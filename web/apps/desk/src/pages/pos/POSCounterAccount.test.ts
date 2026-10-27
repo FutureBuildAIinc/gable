@@ -371,6 +371,22 @@ describe('a check, its ID and its limit', () => {
     el.remove();
   });
 
+  it('refuses a split check over the customer’s limit even before the debounce timer fires', async () => {
+    svc.standing.mockResolvedValue(standing({ check_limit_cents: 1000 }));
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    inner(el)._customer = account;
+    await el.updateComplete;
+    await flush();
+    await el.updateComplete;
+    await checkEntry(el);
+    await typeAmount(el, '11.98');
+    q(el, 'pos-add-tender').click();
+    await flush();
+    await el.updateComplete;
+    expect(q(el, 'pos-check-over')?.textContent).toContain('over the check limit of $10.00');
+    el.remove();
+  });
+
   it('lets the check go once a manager approved a check that size for this sale', async () => {
     svc.approveOverride.mockResolvedValue({ id: 'o', sale_id: 's1', kind: 'check', approved_by: 'm', reason: 'r', cap_cents: 1198, created_at: '', consumed_at: null });
     svc.completeSale.mockResolvedValue(completed());

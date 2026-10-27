@@ -442,6 +442,10 @@ export class POSTerminal extends LitElement {
 
   private _scheduleStanding() {
     if (this._standingTimer) clearTimeout(this._standingTimer);
+    if (this._standing === null) {
+      void this._syncStanding();
+      return;
+    }
     this._standingTimer = setTimeout(() => { void this._syncStanding(); }, 150);
   }
 
@@ -591,6 +595,7 @@ export class POSTerminal extends LitElement {
       // the job; Next: Payment moves on once there is a line.
       this._step = 'customer';
       this._open = 'customer';
+      await this._syncStanding();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
@@ -1304,6 +1309,12 @@ export class POSTerminal extends LitElement {
     const entry = this._entry;
     if (!entry) {
       this._error = 'Invalid tender amount';
+      return;
+    }
+    if (this._customer !== null && this._standing === null && (entry.method === 'check' || entry.method === 'store_credit')) {
+      void this._syncStanding().then(() => {
+        if (this._standing !== null) this._addPendingTender();
+      });
       return;
     }
     const refusal = this._entryRefusal(entry);
