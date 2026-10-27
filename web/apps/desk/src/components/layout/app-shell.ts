@@ -287,14 +287,6 @@ export class GableAppShell extends LitElement {
   }
 
   /** Menu band for the active tab: app identity + its own menu items. */
-  // After each render the band's active item is scrolled into view, so a
-  // narrow screen opens with the active menu item visible, not clipped off
-  // the right edge of the row.
-  protected override updated(): void {
-    this.querySelector<HTMLElement>('[data-active-menu="yes"]')
-      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }
-
   private _appMenu() {
     const key = workspace.activeKey;
     if (key === 'home') return nothing;
@@ -313,7 +305,6 @@ export class GableAppShell extends LitElement {
           (item) => html`
             <a
               href="${item.path}"
-              data-active-menu=${active === item.path ? 'yes' : nothing}
               class="${cn(
                 'shrink-0 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
                 active === item.path
