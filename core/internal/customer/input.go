@@ -94,6 +94,7 @@ type Request struct {
 	Currency         *string         `json:"currency"`
 	PaymentTermsID   *string         `json:"payment_terms_id"`
 	POrequired       *bool           `json:"po_required"`
+	JobRequired      *bool           `json:"job_required"`
 	// NamedBuyerRequired and CheckLimitCents are the counter's account
 	// controls; left out on a PUT they keep their value (an explicit null
 	// check limit defers to the database wide default).
@@ -117,6 +118,7 @@ type Draft struct {
 	Currency         *string
 	PaymentTermsID   *uuid.UUID // nil: the default terms on create
 	POrequired       bool
+	JobRequired      bool
 	Revision         *int64
 	// NamedBuyerRequired nil: unchanged on a PUT, false on create.
 	NamedBuyerRequired *bool
@@ -145,6 +147,9 @@ func (req *Request) parse(update bool) (*Draft, error) {
 	if req.POrequired != nil {
 		d.POrequired = *req.POrequired
 	}
+	if req.JobRequired != nil {
+		d.JobRequired = *req.JobRequired
+	}
 	d.NamedBuyerRequired = req.NamedBuyerRequired
 	if len(bytes.TrimSpace(req.CheckLimitCents)) > 0 {
 		d.CheckLimitSet = true
@@ -159,6 +164,7 @@ func (req *Request) parse(update bool) (*Draft, error) {
 		// A replace may not reset a control by leaving it out.
 		v.Check(req.PaymentTermsID != nil, "payment_terms_id", "is required on a PUT: a left out field would reset the customer's terms")
 		v.Check(req.POrequired != nil, "po_required", "is required on a PUT: a left out field would clear the purchase order requirement")
+		v.Check(req.JobRequired != nil, "job_required", "is required on a PUT: a left out field would clear the job requirement")
 		v.Check(req.PrimaryBranchID == nil, "primary_branch_id", "cannot be changed by an edit: it is fixed when the customer is created")
 		d.Revision = optRevision(v, req.Revision)
 	} else {

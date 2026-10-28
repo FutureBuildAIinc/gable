@@ -291,6 +291,10 @@ type CustomerFacts struct {
 	Name             string
 	Currency         string
 	PORequired       bool
+	JobRequired      bool
+	// JobsOnFile says the customer holds at least one open job, so the
+	// requirement can be met at the counter.
+	JobsOnFile bool
 	// TermsKind is the terms master's kind of the customer's payment terms
 	// (NET_DAYS, DAY_OF_MONTH, DUE_ON_RECEIPT), read from the master and never
 	// from a text.
@@ -2041,16 +2045,17 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
 			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
+			COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
 			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
+			EXISTS(SELECT 1 FROM projects p WHERE p.customer_id = c.id AND lower(p.status) = 'active'),
 			h.status, h.reason, h.override_until, h.max_order_cents
 		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
 		LEFT JOIN LATERAL (
 			SELECT status, reason, override_until, max_order_cents FROM credit_holds
 			WHERE customer_id = c.id AND status IN ('ACTIVE', 'OVERRIDDEN')
 			ORDER BY placed_at DESC LIMIT 1) h ON TRUE
-		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
-		&f.NamedBuyerRequired, &f.CheckLimitCents, &holdStatus, &holdReason, &holdUntil, &holdMax)
+		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.JobRequired, &f.TermsKind,
+		&f.NamedBuyerRequired, &f.CheckLimitCents, &f.JobsOnFile, &holdStatus, &holdReason, &holdUntil, &holdMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -2142,6 +2147,7 @@ type CounterCustomer struct {
 	AccountNumber        string       `json:"account_number"`
 	Name                 string       `json:"name"`
 	POrequired           bool         `json:"po_required"`
+	JobRequired          bool         `json:"job_required"`
 	CreditLimitCents     *httpx.Cents `json:"credit_limit_cents"`
 	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
 	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
@@ -2158,7 +2164,7 @@ type CounterJob struct {
 	Name string    `json:"name"`
 }
 
-const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE),
+const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE),
 	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END`
 
 // counterCustomerReach is the customer wall's two parameters at the counter
@@ -2190,7 +2196,7 @@ func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string,
 	out := []CounterCustomer{}
 	for rows.Next() {
 		var c CounterCustomer
-		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -2213,7 +2219,7 @@ func (r *PostgresRepository) CounterCustomerByID(ctx context.Context, id uuid.UU
 	err := r.ex(ctx).QueryRow(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE c.id = $1 AND COALESCE(c.is_active, TRUE) AND `+customer.Wall("c", 2, 3),
 		id, branch, grants).
-		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents)
+		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}

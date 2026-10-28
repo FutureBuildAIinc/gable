@@ -117,6 +117,7 @@ export interface CounterCustomer {
     account_number: string;
     name: string;
     po_required: boolean;
+    job_required: boolean;
     credit_limit_cents: number | null;
     open_receivable_cents: number;
     available_credit_cents: number | null;
