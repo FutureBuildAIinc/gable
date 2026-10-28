@@ -231,11 +231,11 @@
       "content_type": "application/json",
       "body": [
         {
-          "id": 19,
+          "id": 18,
           "status": "DRAFT"
         },
         {
-          "id": 22,
+          "id": 23,
           "status": "CONFIRMED"
         },
         {

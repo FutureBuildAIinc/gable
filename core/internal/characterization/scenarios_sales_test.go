@@ -727,6 +727,7 @@ func depositGroups() []groupDef {
 				path:   "/api/v1/orders",
 				body: map[string]any{
 					"customer_id":   "{myCustomer}",
+					"customer_po":   "GOLD-DEP-PO",
 					"delivery_type": "pickup",
 					"lines": []map[string]any{
 						{"product_id": "{product}", "quantity": "100"},

@@ -163,7 +163,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "active_orders": 21,
+        "active_orders": 22,
         "outstanding_ar": 10860798,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
@@ -269,7 +269,7 @@
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-3>",
-            "status": "DRAFT",
+            "status": "CONFIRMED",
             "total_amount": 55440
           },
           {
@@ -331,8 +331,8 @@
         ],
         "status_breakdown": {
           "CANCELLED": 3,
-          "CONFIRMED": 15,
-          "DRAFT": 6,
+          "CONFIRMED": 16,
+          "DRAFT": 5,
           "FULFILLED": 10
         }
       }
