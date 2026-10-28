@@ -80,15 +80,28 @@ export function buildChildQuery(params: ListChildParams = {}): string {
  * 13 whole digits are refused.
  */
 export function parseCreditLimitCents(text: string): { ok: true; cents: number | null } | { ok: false; message: string } {
+    return parseDollarsCents(text, 'credit limit');
+}
+
+/**
+ * Parses a check limit typed in dollars into integer cents, the same shape as
+ * the credit limit parse: empty means no limit of the customer's own (the
+ * counter's rule governs), zero means no checks at all.
+ */
+export function parseCheckLimitCents(text: string): { ok: true; cents: number | null } | { ok: false; message: string } {
+    return parseDollarsCents(text, 'check limit');
+}
+
+function parseDollarsCents(text: string, label: string): { ok: true; cents: number | null } | { ok: false; message: string } {
     const t = text.trim().replace(/^\$/, '').replace(/,/g, '').trim();
     if (t === '') return { ok: true, cents: null };
-    if (t.startsWith('-')) return { ok: false, message: 'A credit limit cannot be negative' };
+    if (t.startsWith('-')) return { ok: false, message: `A ${label} cannot be negative` };
     const m = /^(\d*)(?:\.(\d{0,2}))?$/.exec(t);
     if (!m || (m[1] === '' && !m[2])) {
         return { ok: false, message: /^\d*\.\d{3,}$/.test(t) ? 'Use at most two decimal places' : 'Enter an amount in dollars, for example 5000 or 5000.50' };
     }
     const whole = m[1] === '' ? '0' : m[1].replace(/^0+(?=\d)/, '');
-    if (whole.length > 13) return { ok: false, message: 'That credit limit is too large' };
+    if (whole.length > 13) return { ok: false, message: `That ${label} is too large` };
     const frac = (m[2] ?? '').padEnd(2, '0');
     return { ok: true, cents: Number(whole) * 100 + Number(frac) };
 }
@@ -113,6 +126,8 @@ export function customerRequestFromCustomer(c: Customer): CustomerUpdateRequest 
         price_profile_id: c.price_profile_id,
         salesperson_id: c.salesperson_id,
         credit_limit_cents: c.credit_limit_cents,
+        // the customer's own check limit: null defers to the counter's rule
+        check_limit_cents: c.check_limit_cents,
         currency: c.currency,
         payment_terms_id: c.payment_terms_id,
         po_required: c.po_required,

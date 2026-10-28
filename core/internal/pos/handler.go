@@ -182,6 +182,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
 	mux.HandleFunc("GET /api/v1/pos/return-reasons", guard(h.ListReturnReasons))
+	// The counter's dealer settings (CP-04): the read is the counter's own
+	// (the terminal asks for the ID before Pay), the write the admin and
+	// owner roles', held in the handler as the override's roles are.
+	mux.HandleFunc("GET /api/v1/pos/settings", guard(h.GetPosSettingsHandler))
+	mux.HandleFunc("PUT /api/v1/pos/settings", guard(h.PutPosSettingsHandler))
 	mux.HandleFunc("POST /api/v1/pos/exchanges", guard(h.CreateExchange))
 	mux.HandleFunc("POST /api/v1/pos/exchanges/preview", guard(h.PreviewExchange))
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))

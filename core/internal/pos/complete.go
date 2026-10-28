@@ -244,6 +244,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if err := s.checkTenderLimits(ctx, saleID, realCustomerID, tenders, false, actor); err != nil {
 		return nil, err
 	}
+	// The ID rule reads the same settings the limit does, before any card is
+	// charged: a check that needs the ID is refused before money moves.
+	if err := s.checkTenderIDRule(ctx, realCustomerID, tenders); err != nil {
+		return nil, err
+	}
 	// Card charges: outside the transaction, with the sale's own currency
 	// (the hard coded USD of the base commit is the bug this fixes). Every
 	// charge the transaction then refuses is reversed (gateway.go), and a
@@ -503,6 +508,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// open credit memos locked in id order (section 11, step 3) when the
 		// sale pays with store credit: both before the stock moves.
 		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+			return err
+		}
+		if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
 			return err
 		}
 		var storeMemos []openMemo

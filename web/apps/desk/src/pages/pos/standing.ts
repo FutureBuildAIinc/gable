@@ -165,3 +165,30 @@ export function tenderMethods(s: CounterStanding | null): TenderMethod[] {
 /** The ID kinds a check or charge may record, as the select lists them. */
 export const idRefusal = (checked: boolean, type: string): string | null =>
     checked && type === '' ? 'Pick the kind of ID that was checked' : null;
+
+/** The dealer's check ID rule as the counter reads it (GET /api/v1/pos/settings). */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/**
+ * Does the rule ask for the customer's ID when the sale's checks come to
+ * checksTotalCents? An over an amount rule reads the total, so splitting one
+ * check into pieces under the figure cannot avoid it; the server holds the
+ * same rule at the completion.
+ */
+export function idRequired(rule: CheckIDRule | null, checksTotalCents: number): boolean {
+    if (rule === null || rule.mode === 'never') return false;
+    if (rule.mode === 'every_check') return true;
+    return rule.over_cents !== null && checksTotalCents > rule.over_cents;
+}
+
+/** Why the rule asks for the ID on the sale's checks in total, in words, or null when it does not. */
+export function idRequiredWords(rule: CheckIDRule | null, checksTotalCents: number): string | null {
+    if (!idRequired(rule, checksTotalCents)) return null;
+    if (rule !== null && rule.mode === 'over_amount' && rule.over_cents !== null) {
+        return `Checks over ${money(rule.over_cents)} in total need the customer's ID: check it and pick the ID type`;
+    }
+    return `This check needs the customer's ID: check it and pick the ID type`;
+}
