@@ -206,7 +206,7 @@ func (s *Service) checkTenderIDRule(ctx context.Context, customerID uuid.UUID, t
 				"This check needs the customer's ID: check it and pick the ID type")
 		}
 		return conflict("id_required", fmt.Sprintf(
-			"A check over %s needs the customer's ID: check it and pick the ID type",
+			"Checks over %s in total need the customer's ID: check it and pick the ID type",
 			moneyWords(facts.Currency, *over)))
 	}
 	return nil

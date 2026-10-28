@@ -176,7 +176,7 @@ export function idRequired(rule: CheckIDRule | null, checksTotalCents: number): 
 export function idRequiredWords(rule: CheckIDRule | null, checksTotalCents: number): string | null {
     if (!idRequired(rule, checksTotalCents)) return null;
     if (rule !== null && rule.mode === 'over_amount' && rule.over_cents !== null) {
-        return `A check over ${money(rule.over_cents)} needs the customer's ID: check it and pick the ID type`;
+        return `Checks over ${money(rule.over_cents)} in total need the customer's ID: check it and pick the ID type`;
     }
     return `This check needs the customer's ID: check it and pick the ID type`;
 }

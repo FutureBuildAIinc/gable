@@ -56,7 +56,7 @@ func TestCP04_CheckOverIDThresholdNeedsID(t *testing.T) {
 	invoices := f.counterInvoices(t)
 	r := f.completeSale(over, tender("check", overTotal))
 	blockerOf(t, r, "id_required")
-	if want := "A check over 10.00 USD"; !strings.Contains(string(r.raw), want) {
+	if want := "Checks over 10.00 USD in total"; !strings.Contains(string(r.raw), want) {
 		t.Errorf("the refusal %s does not say what the rule asks", r.raw)
 	}
 	if f.stock() != stock {

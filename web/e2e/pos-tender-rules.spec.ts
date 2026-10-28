@@ -143,7 +143,7 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
     const total = await ringPast(page, product.sku, 60);
     await payByCheck(page, 60, false);
     await expect(page.getByTestId('pos-check-id-needed')).toContainText(
-      `A check over $50.00 needs the customer's ID`,
+      `Checks over $50.00 in total need the customer's ID`,
     );
     // Pay stays off with the ID still unchecked (the split leaves the rest
     // owed, so the button says that; the ID hold is the band above).

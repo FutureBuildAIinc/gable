@@ -197,7 +197,7 @@ describe('the dealer check ID rule, as the counter reads it', () => {
         expect(idRequired(over50, 5000)).toBe(false);
         expect(idRequired(over50, 5001)).toBe(true);
         expect(idRequiredWords(over50, 6000))
-            .toBe(`A check over $50.00 needs the customer's ID: check it and pick the ID type`);
+            .toBe(`Checks over $50.00 in total need the customer's ID: check it and pick the ID type`);
     });
 });
 

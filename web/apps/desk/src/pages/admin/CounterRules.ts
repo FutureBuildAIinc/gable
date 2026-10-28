@@ -121,7 +121,7 @@ export class GableCounterRules extends LitElement {
         const idChoices: { value: Draft['idMode']; label: string }[] = [
             { value: 'never', label: 'Never ask for an ID' },
             { value: 'every_check', label: 'Every check needs the customer\'s ID' },
-            { value: 'over_amount', label: 'Checks over an amount need the customer\'s ID' },
+            { value: 'over_amount', label: 'Checks over an amount in total need the customer\'s ID' },
         ];
         return html`
             <div class="space-y-6">

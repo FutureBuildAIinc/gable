@@ -2777,7 +2777,7 @@ describe('the dealer check ID rule at the counter', () => {
     await chooseCheck(el);
     await typeInto(el, '86.50');
     expect(q(el, 'pos-check-id-needed').textContent)
-      .toContain(`A check over $50.00 needs the customer's ID`);
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
     expect(q(el, 'pos-pay').textContent).toContain("Check the customer's ID");
     expect(svc.completeSale).not.toHaveBeenCalled();
@@ -2788,6 +2788,38 @@ describe('the dealer check ID rule at the counter', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
       [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+    el.remove();
+  });
+
+  it('carries the one ID check onto an added check once the split passes the figure', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // the first check, under the figure alone, is added with no ID asked
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    // the second check passes the figure together: the one ID stamps both
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID not checked yet');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID checked');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+    ]);
     el.remove();
   });
 
@@ -2803,7 +2835,7 @@ describe('the dealer check ID rule at the counter', () => {
     await chooseCheck(el);
     await typeInto(el, '43.25');
     expect(q(el, 'pos-check-id-needed').textContent)
-      .toContain(`A check over $50.00 needs the customer's ID`);
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
     await checkTheID(el);
     expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();

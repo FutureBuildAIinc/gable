@@ -14,7 +14,7 @@ import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequiredWords, holdStanding, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -1053,6 +1053,32 @@ export class POSTerminal extends LitElement {
     return null;
   }
 
+  /**
+   * One ID check covers the sale's checks: when the rule bites on the checks'
+   * total and the clerk ticks the ID with its kind on the entry, the checked
+   * ID stamps onto every added check that has none, so a split added before
+   * the total passed the figure is not trapped with no way to record the ID.
+   */
+  private _stampEntryIDOntoAddedChecks(entry: TenderIn) {
+    if (!entry.id_checked || entry.id_type === undefined) return;
+    const total = this._checksTotalCents([...this._pendingTenders, entry]);
+    if (!idRequired(this._idRule, total)) return;
+    this._pendingTenders = this._pendingTenders.map((t) =>
+      t.method === 'check' && !t.id_checked ? { ...t, id_checked: true, id_type: entry.id_type } : t);
+  }
+
+  /**
+   * An added check's ID state in words, when the rule reaches it: the ID
+   * checked once, with its kind, or not checked yet. Other tenders, and checks
+   * while the rule does not bite, say nothing.
+   */
+  private _addedCheckIDWords(t: TenderIn, entry: TenderIn | null, saleTotal: number): string {
+    if (t.method !== 'check') return '';
+    if (t.id_checked) return `ID checked: ${ID_TYPES.find((o) => o.value === t.id_type)?.label ?? ''}`;
+    const planTenders = [...this._pendingTenders, ...(entry !== null && this._tenderedSoFar < saleTotal ? [entry] : [])];
+    return this._idHoldWords(planTenders) !== null ? 'ID not checked yet' : '';
+  }
+
   /** The same facts the controls disable on, so a dimmed key means a disabled control. */
   private _hotkeyLive(action: HotkeyAction): boolean {
     const sale = this._sale;
@@ -1372,6 +1398,7 @@ export class POSTerminal extends LitElement {
       this._error = refusal;
       return;
     }
+    this._stampEntryIDOntoAddedChecks(entry);
     this._pendingTenders = [...this._pendingTenders, entry];
     this._tenderAmount = '';
     this._checkRef = '';
@@ -1396,6 +1423,7 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    if (entry !== null) this._stampEntryIDOntoAddedChecks(entry);
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
@@ -2177,10 +2205,13 @@ export class POSTerminal extends LitElement {
           <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
           ${this._pendingTenders.length > 0 ? html`
             <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
-              ${this._pendingTenders.map((t) => html`
+              ${this._pendingTenders.map((t) => {
+                const idWords = this._addedCheckIDWords(t, entry, total);
+                return html`
                 <div class="flex justify-between py-0.5 text-sm text-slate-200">
-                  <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
-                </div>`)}
+                  <span class="capitalize">${t.method}${idWords !== '' ? html` <span class="text-xs ${t.id_checked ? 'text-gable-green' : 'text-amber-400'}" data-testid="pos-added-check-id">${idWords}</span>` : nothing}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
+                </div>`;
+              })}
               <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
                 <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
               </div>
@@ -2275,14 +2306,14 @@ export class POSTerminal extends LitElement {
           </div>` : nothing}
         <label class="${isCheck ? 'mt-3 ' : ''}flex items-center gap-2 text-sm text-slate-200" for="pos-id-checked">
           <input id="pos-id-checked" data-testid="pos-id-checked" type="checkbox" .checked=${this._idChecked}
-            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; }} />
+            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }} />
           ID checked
         </label>
         ${this._idChecked ? html`
           <div class="mt-2">
             <gable-select id="pos-id-type" data-testid="pos-id-type" .value=${this._idType}
               .options=${[{ value: '', label: 'Kind of ID' }, ...ID_TYPES]}
-              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; }}
+              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }}
             ></gable-select>
             <p class="mt-1 text-xs text-slate-400">Only the kind of ID is kept, never its number</p>
           </div>` : nothing}
