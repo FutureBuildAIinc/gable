@@ -150,7 +150,13 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 	}
 
 	// The Z report list carries A's rows only.
-	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/zreports?date="+time.Now().UTC().Format("2006-01-02"), "")
+	var zDay string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT (NOW() AT TIME ZONE COALESCE((SELECT timezone FROM locations WHERE id = $1), 'UTC'))::date::text`,
+		f.branchA).Scan(&zDay); err != nil {
+		t.Fatalf("branch A business day: %v", err)
+	}
+	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/zreports?date="+zDay, "")
 	if status != http.StatusOK || !strings.Contains(string(buf), f.zrA.String()) {
 		t.Errorf("no header Z report list: %d %s, want A's row", status, buf)
 	}

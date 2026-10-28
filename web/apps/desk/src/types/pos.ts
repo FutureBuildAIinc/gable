@@ -383,6 +383,23 @@ export interface MovementRequest {
     reason_code?: MovementReason;
     note?: string;
     taken_by?: string;
+    /** A manager's step up approval: the manager it names is the taker. */
+    approval_token?: string;
+}
+
+/** A manager the step up picker offers: active, a PIN set, a role the act admits. */
+export interface StepUpManager {
+    id: string;
+    full_name: string;
+    staff_no: string;
+    role: string;
+}
+
+/** The single use approval a verified step up mints; one act spends it. */
+export interface StepUpApproval {
+    token: string;
+    manager_name: string;
+    expires_at: string;
 }
 
 export interface DayFigures {
