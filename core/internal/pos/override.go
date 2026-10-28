@@ -52,14 +52,17 @@ type OverrideIn struct {
 	CapCents int64
 }
 
-// overrideRequest is POST /pos/transactions/{id}/overrides.
+// overrideRequest is POST /pos/transactions/{id}/overrides. An
+// approval_token, when sent, is a manager's step up approval spent by this
+// one override.
 type overrideRequest struct {
-	Kind     *string         `json:"kind"`
-	Reason   *string         `json:"reason"`
-	CapCents json.RawMessage `json:"cap_cents"`
+	Kind          *string         `json:"kind"`
+	Reason        *string         `json:"reason"`
+	CapCents      json.RawMessage `json:"cap_cents"`
+	ApprovalToken *string         `json:"approval_token"`
 }
 
-func (r *overrideRequest) parse() (*OverrideIn, error) {
+func (r *overrideRequest) parse() (*OverrideIn, string, error) {
 	v := &httpx.Validator{}
 	out := &OverrideIn{}
 	if r.Kind != nil {
@@ -77,23 +80,41 @@ func (r *overrideRequest) parse() (*OverrideIn, error) {
 		out.CapCents = n
 	}
 	if err := v.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return out, nil
+	token := ""
+	if r.ApprovalToken != nil {
+		token = strings.TrimSpace(*r.ApprovalToken)
+	}
+	return out, token, nil
 }
 
 // ApproveOverride records a manager's approval of one sale. The approver is
 // a person other than the sale's cashier (the handler holds the role); the
 // sale must still be open, and an account override needs a named customer.
-func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *OverrideIn, approver string) (*AccountOverride, error) {
-	if approver == "" {
+// A step up approval token, when sent, is spent here inside this
+// transaction and its manager is the approver the row names.
+func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *OverrideIn, approver, approvalToken string) (*AccountOverride, error) {
+	if approver == "" && approvalToken == "" {
 		return nil, httpx.Forbidden("an override is approved by a signed in manager")
 	}
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
 	}
 	var out *AccountOverride
+	var stepUpManager StepUpManagerRef
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if approvalToken != "" {
+			// the manager's PIN already spoke: one use, this act, this sale,
+			// the kind and the cap the manager saw and approved
+			cap := in.CapCents
+			manager, err := s.consumeStepUpApproval(ctx, StepUpActOverride, in.Kind, saleID, &cap, approvalToken)
+			if err != nil {
+				return err
+			}
+			approver = manager.Name
+			stepUpManager = manager
+		}
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
 			return err
 		}
@@ -110,7 +131,8 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 		} else if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot approve an override on a %s sale", sale.Status.Status()))
 		}
-		if strings.EqualFold(sale.CashierID.String(), approver) {
+		if strings.EqualFold(sale.CashierID.String(), approver) ||
+			(stepUpManager.StaffID != "" && strings.EqualFold(sale.CashierID.String(), stepUpManager.StaffID)) {
 			return httpx.Forbidden("a manager other than the sale's own cashier approves an override")
 		}
 		if in.Kind == OverrideAccount && sale.CustomerID == nil {
@@ -121,10 +143,18 @@ func (s *Service) ApproveOverride(ctx context.Context, saleID uuid.UUID, in *Ove
 			return err
 		}
 		if s.auditLog != nil {
+			// a step up's audit row carries the manager's staff id as its
+			// user (the subject shaped column the users picker reads) and
+			// the name beside it
+			user, changes := approver, map[string]any{"override_id": o.ID, "kind": o.Kind, "cap_cents": o.CapCents,
+				"reason": o.Reason, "approved_by": o.ApprovedBy, "cashier_id": sale.CashierID, "customer_id": sale.CustomerID}
+			if stepUpManager.StaffID != "" {
+				user = stepUpManager.StaffID
+				changes["manager_name"] = stepUpManager.Name
+			}
 			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action: "pos.override.approved", EntityType: "pos_transaction", EntityID: saleID, UserID: approver,
-				Changes: map[string]any{"override_id": o.ID, "kind": o.Kind, "cap_cents": o.CapCents, "reason": o.Reason,
-					"cashier_id": sale.CashierID, "customer_id": sale.CustomerID}}); err != nil {
+				Action: "pos.override.approved", EntityType: "pos_transaction", EntityID: saleID, UserID: user,
+				Changes: changes}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
@@ -148,7 +178,7 @@ func (s *Service) consumeOverride(ctx context.Context, saleID uuid.UUID, kind st
 	// two persons spend a refund_method override: the manager who approved it
 	// cannot also be the one whose return or exchange consumes it. The error
 	// rolls the consumption back with the caller's transaction.
-	if kind == OverrideRefundMethod && actor != "" && actor != devApprover && strings.EqualFold(actor, o.ApprovedBy) {
+	if kind == OverrideRefundMethod && s.sameStaffAsApprover(ctx, actor, o.ApprovedBy) {
 		return false, httpx.Forbidden("a manager who approved a refund_method override cannot also make the cash return")
 	}
 	if s.auditLog != nil {
@@ -177,7 +207,7 @@ func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UU
 	}
 	open += storeCredit
 	v := onAccountVerdict(verdictIn{currency: facts.Currency, creditLimit: facts.CreditLimitCents, open: open,
-		termsKind: facts.TermsKind, amount: amount})
+		termsKind: facts.TermsKind, amount: amount, hold: facts.Hold, now: s.now()})
 	if v.Verdict == VerdictAllowed {
 		return nil
 	}
@@ -204,26 +234,11 @@ func (s *Service) checkOnAccount(ctx context.Context, saleID, customerID uuid.UU
 }
 
 // ApproveOverrideHandler is POST /pos/transactions/{id}/overrides: a
-// manager (admin or owner) other than the cashier approves one sale.
+// manager (admin or owner) other than the cashier approves one sale, or a
+// cashier spends a manager's step up approval token, whose PIN already
+// proved the role.
 func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request) {
 	if refuseMachineKey(w, r, "an override is approved by a person, never a machine key") {
-		return
-	}
-	// A configured deployment always carries claims (the auth layer sets them
-	// or answers 401); no claims and no machine key is the dev mode bypass,
-	// which every role guard of the module lets through, so it approves as
-	// "dev-mode": a person other than any cashier, never an empty name.
-	approver := devApprover
-	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
-		if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
-			httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
-			return
-		}
-		approver = claims.Subject
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
 		return
 	}
 	var req overrideRequest
@@ -231,17 +246,54 @@ func (h *Handler) ApproveOverrideHandler(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, r, err)
 		return
 	}
-	in, err := req.parse()
+	in, token, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	o, err := h.service.ApproveOverride(r.Context(), id, in, approver)
+	// A configured deployment always carries claims (the auth layer sets them
+	// or answers 401); no claims and no machine key is the dev mode bypass,
+	// which every role guard of the module lets through, so it approves as
+	// "dev-mode": a person other than any cashier, never an empty name. A
+	// step up token walks its own path under any auth mode.
+	approver := devApprover
+	if token == "" {
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+			if claims.Subject == "" || !middleware.ClaimsHaveAnyRole(claims, overrideRoles...) {
+				httpx.WriteError(w, r, httpx.Forbidden("an override is approved by a signed in manager"))
+				return
+			}
+			approver = h.actorFrom(r)
+		}
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	o, err := h.service.ApproveOverride(r.Context(), id, in, approver, token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, o)
+}
+
+// sameStaffAsApprover reports whether actor and approvedBy name the same
+// person, even when approvedBy holds the manager's display name from a step up
+// approval and actor holds the roster row's id or subject.
+func (s *Service) sameStaffAsApprover(ctx context.Context, actor, approvedBy string) bool {
+	if actor == "" || actor == devApprover || approvedBy == "" {
+		return false
+	}
+	if strings.EqualFold(actor, approvedBy) {
+		return true
+	}
+	m, ok, err := s.repo.FindStepUpManager(ctx, actor)
+	if err != nil || !ok {
+		return false
+	}
+	return strings.EqualFold(m.FullName, approvedBy) || m.isSubject(approvedBy)
 }
 
 // checkBuyer is the buyer roster rule: an account that asks for a named

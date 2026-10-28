@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -22,11 +23,14 @@ const (
 	// ReasonCreditHold is the hold the counter has today: a credit limit of
 	// zero, no credit given. ReasonCreditLimit is a sale that would put the
 	// account over a limit. ReasonCashOnlyTerms is an account whose terms
-	// are due on receipt. ReasonManagerOverride marks an allowed verdict a
-	// manager made.
+	// are due on receipt. ReasonAccountHold is the hold record the AR core
+	// places (an ACTIVE credit_holds row, or one whose override window has
+	// passed or whose cap the sale is over). ReasonManagerOverride marks an
+	// allowed verdict a manager made.
 	ReasonCreditHold      = "credit_hold"
 	ReasonCreditLimit     = "credit_limit"
 	ReasonCashOnlyTerms   = "cash_only_terms"
+	ReasonAccountHold     = "account_hold"
 	ReasonManagerOverride = "manager_override"
 
 	// The three ways forward from a blocked verdict.
@@ -59,6 +63,31 @@ type OnAccountVerdict struct {
 	WaysForward []WayForward `json:"ways_forward"`
 }
 
+// standingHold is the account's standing hold record (credit_holds, the
+// meaning the AR core gives it: a row whose status is ACTIVE or OVERRIDDEN).
+// A row is nil when the account holds none. An OVERRIDDEN row carries the
+// manager's window: override_until and, with it, the most one sale may put
+// on the account inside that window.
+type standingHold struct {
+	status        string
+	reason        string
+	overrideUntil *time.Time
+	maxOrderCents *int64
+}
+
+// standing reports whether the hold blocks the account at the moment in.now:
+// an ACTIVE hold always, an OVERRIDDEN one whose window has passed (the
+// override is what it buys, a way through until it elapses).
+func (h *standingHold) standing(now time.Time) bool {
+	if h == nil {
+		return false
+	}
+	if h.status == "ACTIVE" {
+		return true
+	}
+	return h.overrideUntil == nil || !h.overrideUntil.After(now)
+}
+
 // verdictIn is everything the verdict reads: the account as it stands and
 // the amount the sale would put on it. A later hold record (M25) adds its
 // own field here and its own reason in onAccountVerdict, nowhere else.
@@ -68,12 +97,14 @@ type verdictIn struct {
 	open        int64  // the open receivable the credit check reads
 	termsKind   string // the terms master's kind
 	amount      int64  // the account portion the sale asks for
+	hold        *standingHold
+	now         time.Time // the moment the hold's override window is read against
 }
 
 // overridable names the reasons a manager may waive for one sale: the terms
 // of an account are the dealer's, never one sale's.
 func overridable(reason string) bool {
-	return reason == ReasonCreditHold || reason == ReasonCreditLimit
+	return reason == ReasonCreditHold || reason == ReasonCreditLimit || reason == ReasonAccountHold
 }
 
 // onAccountVerdict decides whether in.amount may go on the account. It is a
@@ -89,6 +120,25 @@ func onAccountVerdict(in verdictIn) OnAccountVerdict {
 			WaysForward: []WayForward{
 				{Kind: WayPayDown, Available: false, Message: "Paying the balance does not change the account's terms."},
 				{Kind: WayManagerOverride, Available: false, Message: "A manager cannot waive the terms of an account for one sale."},
+				switchTender,
+			}}
+	case in.hold.standing(in.now):
+		msg := fmt.Sprintf("This account is on credit hold: %s. Nothing can be put on the account.", in.hold.reason)
+		return OnAccountVerdict{Verdict: VerdictBlocked, Reason: ReasonAccountHold, Message: msg,
+			WaysForward: []WayForward{
+				{Kind: WayPayDown, Available: false, Message: "Paying the balance does not lift a hold; accounts receivable releases it."},
+				{Kind: WayManagerOverride, Available: true, Message: "A manager can approve this sale on account."},
+				switchTender,
+			}}
+	case in.hold != nil && in.hold.maxOrderCents != nil && in.amount > *in.hold.maxOrderCents:
+		// a live override window on the hold, over the hold's own cap: the
+		// window buys a way through, never past the cap it names
+		msg := fmt.Sprintf("The hold on this account is overridden up to %s a sale: this sale asks %s.",
+			money(*in.hold.maxOrderCents), money(in.amount))
+		return OnAccountVerdict{Verdict: VerdictBlocked, Reason: ReasonAccountHold, Message: msg,
+			WaysForward: []WayForward{
+				{Kind: WayPayDown, Available: false, Message: "Paying the balance does not lift a hold; accounts receivable releases it."},
+				{Kind: WayManagerOverride, Available: true, Message: "A manager can approve this sale on account."},
 				switchTender,
 			}}
 	case in.creditLimit != nil && *in.creditLimit <= 0:
@@ -175,7 +225,7 @@ type AccountStanding struct {
 	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
 	OpenCreditMemoCents  httpx.Cents  `json:"open_credit_memo_cents"`
 	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
-	// OnHold is the hold the counter has today: a credit limit of zero.
+	// OnHold is a credit limit of zero or a standing credit hold record.
 	OnHold             bool         `json:"on_hold"`
 	TermsKind          string       `json:"terms_kind"`
 	NamedBuyerRequired bool         `json:"named_buyer_required"`
@@ -243,7 +293,7 @@ func (s *Service) Standing(ctx context.Context, customerID uuid.UUID, amount int
 		out.CheckLimitCents = &c
 	}
 	v := onAccountVerdict(verdictIn{currency: facts.Currency, creditLimit: facts.CreditLimitCents, open: open,
-		termsKind: facts.TermsKind, amount: amount})
+		termsKind: facts.TermsKind, amount: amount, hold: facts.Hold, now: s.now()})
 	if saleID != nil {
 		sale, err := s.repo.GetSale(ctx, *saleID)
 		if err != nil {
@@ -259,6 +309,10 @@ func (s *Service) Standing(ctx context.Context, customerID uuid.UUID, amount int
 		v = withOverride(v, amount, o, facts.Currency)
 	}
 	out.OnAccount = v
+	// a standing hold record holds the account as a limit of zero does
+	if facts.Hold != nil && facts.Hold.standing(s.now()) {
+		out.OnHold = true
+	}
 	// the shapes of payment the server takes: cash and card always, a check
 	// unless the customer's check limit is zero, the account when the verdict
 	// at no amount allows it (an override is the sale's, not the customer's),
@@ -269,7 +323,7 @@ func (s *Service) Standing(ctx context.Context, customerID uuid.UUID, amount int
 	}
 	out.PaymentOptions = append(out.PaymentOptions, "card")
 	if onAccountVerdict(verdictIn{currency: facts.Currency, creditLimit: facts.CreditLimitCents, open: open,
-		termsKind: facts.TermsKind}).Verdict == VerdictAllowed {
+		termsKind: facts.TermsKind, hold: facts.Hold, now: s.now()}).Verdict == VerdictAllowed {
 		out.PaymentOptions = append(out.PaymentOptions, "account")
 	}
 	if memoCents > 0 {
@@ -285,4 +339,20 @@ func (s *Service) checkLimitOf(ctx context.Context, facts CustomerFacts) (*int64
 		return facts.CheckLimitCents, nil
 	}
 	return s.repo.DefaultCheckLimitCents(ctx)
+}
+
+// jobRequiredRefusal is the account's job rule, the purchase order rule's
+// mirror: an account that requires a job is not charged to without one, and
+// an account that requires a job and has none on file is refused with its own
+// words. Cash and the other non account tenders never ask.
+func jobRequiredRefusal(facts CustomerFacts, jobID *uuid.UUID) error {
+	if !facts.JobRequired || jobID != nil {
+		return nil
+	}
+	if !facts.JobsOnFile {
+		return conflict("job_required",
+			"this account requires a job and has none on file: add one on the account page")
+	}
+	return conflict("job_required",
+		"this account requires a job on every charge sale: pick the job")
 }

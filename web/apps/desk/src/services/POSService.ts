@@ -35,6 +35,10 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    PosRules,
+    PosSettings,
+    StepUpManager,
+    StepUpApproval,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -309,15 +313,76 @@ export const posService = {
         return response.json();
     },
 
+    /**
+     * The dealer's counter rules (GET /api/v1/pos/settings): the database
+     * wide check limit and the check ID rule. The counter reads it to ask
+     * for the ID before Pay.
+     */
+    async settings(): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`),
+            'Failed to read the counter rules',
+        );
+        return response.json();
+    },
+
+    /** Writes the counter rules as one act on the revision (an owner or admin). */
+    async saveSettings(rules: PosRules, revision: number): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ rules, revision }),
+            }),
+            'Failed to save the counter rules',
+        );
+        return response.json();
+    },
+
     /** A manager approves one sale (kind account or check), with a reason and a cap in cents. */
-    async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number): Promise<CounterOverride> {
+    async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number,
+        approvalToken?: string): Promise<CounterOverride> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/overrides`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ kind, reason, cap_cents: capCents }),
+                body: JSON.stringify({ kind, reason, cap_cents: capCents, ...(approvalToken ? { approval_token: approvalToken } : {}) }),
             }),
             'Failed to record the approval',
+        );
+        return response.json();
+    },
+
+    // --- The manager step up (CP-04) ---
+
+    /** The managers the picker offers for one act: active, a PIN set, a role the act admits. */
+    async stepUpManagers(act: 'override' | 'pickup' | 'signoff'): Promise<StepUpManager[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/step-up/managers?act=${act}`),
+            'Failed to load the managers',
+        );
+        const page = (await response.json()) as { items?: StepUpManager[] };
+        return Array.isArray(page.items) ? page.items : [];
+    },
+
+    /**
+     * A manager approves at the counter with their own PIN; one act spends
+     * the answer. An override names the kind and the cap the manager
+     * approves, a pickup its amount.
+     */
+    async stepUp(act: 'override' | 'pickup' | 'signoff', manager: string, pin: string, targetId: string,
+        amountCents?: number, kind?: 'account' | 'check' | 'refund_method'): Promise<StepUpApproval> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/step-up`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    act, manager, pin, target_id: targetId,
+                    ...(amountCents !== undefined ? { amount_cents: amountCents } : {}),
+                    ...(kind !== undefined ? { kind } : {}),
+                }),
+            }),
+            'Failed to ask the manager',
         );
         return response.json();
     },
@@ -542,12 +607,12 @@ export const posService = {
         return Array.isArray(page.items) ? page.items : [];
     },
 
-    async signOffTill(sessionID: string, reason: string): Promise<TillReport> {
+    async signOffTill(sessionID: string, reason: string, approvalToken?: string): Promise<TillReport> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/signoff`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ reason }),
+                body: JSON.stringify({ reason, ...(approvalToken ? { approval_token: approvalToken } : {}) }),
             }),
             'Failed to sign off the till',
         );

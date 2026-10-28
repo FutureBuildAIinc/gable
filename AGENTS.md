@@ -19,6 +19,8 @@ Gable (Go module `github.com/gablelbm/gable`) is an open-source ERP platform pur
 
 **This repository does not deploy anything and points at no live environment.** `.do/app-demo.yaml` and `.do/app-staging.yaml` are *example* Digital Ocean App Platform specs for self-hosters: every hostname, repo and database name in them is a placeholder (`your-org/gable`, `*.example.com`, `your-db-cluster`), and both set `AUTH_MODE=production` with a placeholder `JWKS_URL`. Operational notes are in `.do/README.md`.
 
+`deploy/` is the same idea for a Coolify based platform such as FB Deploy: one compose file that runs Postgres on a named volume, a one shot migrate and seed, the API, the worker and the web image, with no published host port and the platform's proxy as the only way in. It carries a demo variant (the persona sign in behind the platform's access gate, the sample data loaded once) and a customer variant (the seed off, real sign in). `deploy/README.md` is the recipe and `deploy/check.sh` is its static check, which runs in the App Shape CI job.
+
 `AUTH_MODE=dev` is a **local-development-only** bypass. When set, the auth middleware is never constructed, so claims are nil and `RequireRole` passes through (`core/pkg/middleware/auth.go`) — every anonymous caller gets full admin/owner reach. No user is impersonated; there is no privileged demo login to remove. Never set it on a reachable host. See `SECURITY.md`.
 
 ## Repo Structure
@@ -36,6 +38,7 @@ docs/adr/         → architecture decision records (index in docs/adr/README.md
 docs/refactor/    → the v1 refactor's contract, goldens and census notes
 scripts/          → repository checks (check-shape.sh)
 .do/              → Example Digital Ocean App Platform deploy specs
+deploy/           → the deploy recipe for a Coolify based platform (compose.yml, check.sh, README.md)
 .claude/          → Contributor agent kit (skills + slash commands)
 .github/          → CI workflows, issue/PR templates, CODEOWNERS
 ```

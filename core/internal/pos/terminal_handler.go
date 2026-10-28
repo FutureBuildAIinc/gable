@@ -44,7 +44,7 @@ func (h *Handler) CancelTerminalIntentHandler(w http.ResponseWriter, r *http.Req
 		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
 		return
 	}
-	view, err := h.service.CancelTerminalIntent(r.Context(), id, actorFrom(r))
+	view, err := h.service.CancelTerminalIntent(r.Context(), id, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -58,7 +58,7 @@ func (h *Handler) SweepTerminalIntentsHandler(w http.ResponseWriter, r *http.Req
 	if refuseMachineKey(w, r, "the terminal sweep is run by a person, never a machine key") {
 		return
 	}
-	res, err := h.service.SweepTerminalIntents(r.Context(), actorFrom(r))
+	res, err := h.service.SweepTerminalIntents(r.Context(), h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -127,7 +127,7 @@ func (h *Handler) ResolveTerminalLostItemHandler(w http.ResponseWriter, r *http.
 		httpx.WriteError(w, r, err)
 		return
 	}
-	view, err := h.service.ResolveTerminalLostItem(r.Context(), id, *in, actorFrom(r))
+	view, err := h.service.ResolveTerminalLostItem(r.Context(), id, *in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
