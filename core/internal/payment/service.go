@@ -339,6 +339,22 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 	var out *Payment
 	var effects *account.Effects
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if in.OrderID != nil {
+			// The cash this payment would leave unapplied is held against
+			// the order as a deposit, whatever applications it also carries;
+			// even when held == 0, the order's deposit standing and the
+			// relation of any settled invoices to the order are checked.
+			// The order row (ADR 0005 section 11 step 1) is locked before
+			// the till session row (step 1b), the order the completion and
+			// the void take.
+			var applied int64
+			for _, a := range in.Applications {
+				applied += a.AmountCents
+			}
+			if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.TillSessionID != nil, in.AmountCents-applied, in.Applications); err != nil {
+				return err
+			}
+		}
 		if in.TillSessionID != nil {
 			status, err := s.repo.LockTillSession(ctx, *in.TillSessionID)
 			if err != nil {
@@ -346,19 +362,6 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 			}
 			if status != "OPEN" {
 				return httpx.Conflict("the till session is not open: open a till session before taking a counter deposit")
-			}
-		}
-		if in.OrderID != nil {
-			// The cash this payment would leave unapplied is held against
-			// the order as a deposit, whatever applications it also carries;
-			// even when held == 0, the order's deposit standing and the
-			// relation of any settled invoices to the order are checked.
-			var applied int64
-			for _, a := range in.Applications {
-				applied += a.AmountCents
-			}
-			if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.TillSessionID != nil, in.AmountCents-applied, in.Applications); err != nil {
-				return err
 			}
 		}
 		on := time.Time{}
