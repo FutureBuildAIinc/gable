@@ -40,6 +40,7 @@ type RecordPaymentIn struct {
 	Reference, Notes   string
 	ReceivedOn         time.Time
 	OrderID, ProjectID *uuid.UUID
+	TillSessionID      *uuid.UUID
 	Card               *CardFacts
 	Actor              string
 	Applications       []ApplyLine
@@ -93,12 +94,12 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	var number string
 	err := s.ex(ctx).QueryRow(ctx, `
 		INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, reference, notes, received_on,
-			order_id, project_id, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
+			order_id, project_id, till_session_id, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
 		VALUES ($1, $2, $3, $4, $5, $6::bigint::numeric / 100, $6::bigint::numeric / 100, NULLIF($7, ''), NULLIF($8, ''), $9::date,
-			$10, $11, NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''))
+			$10, $11, $12, NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''))
 		RETURNING number`,
 		id, in.CustomerID, in.BranchID, in.Currency, in.Method, in.AmountCents, in.Reference, in.Notes, date(in.ReceivedOn),
-		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
+		in.OrderID, in.ProjectID, in.TillSessionID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("failed to record the payment: %w", err)
 	}
@@ -126,7 +127,10 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		if err != nil {
 			return uuid.Nil, nil, err
 		}
-		if err := s.applyLocked(ctx, fx, pay, in.Applications, in.ReceivedOn, in.Actor, "applications"); err != nil {
+		// Applications sent at receipt share the payment's own id as their
+		// act_id, so order deposit reads can tell receipt-time invoice
+		// settlement apart from later applications of a deposit.
+		if err := s.applyLocked(ctx, fx, pay, in.Applications, in.ReceivedOn, in.Actor, "applications", id); err != nil {
 			return uuid.Nil, nil, err
 		}
 	}
@@ -154,7 +158,7 @@ func (s *Service) Apply(ctx context.Context, in ApplyIn) (*Effects, error) {
 		return nil, conflict("payment_voided", "the payment is voided: it applies nothing")
 	}
 	fx := &Effects{}
-	if err := s.applyLocked(ctx, fx, pay, in.Lines, in.On, in.Actor, "applications"); err != nil {
+	if err := s.applyLocked(ctx, fx, pay, in.Lines, in.On, in.Actor, "applications", uuid.New()); err != nil {
 		return nil, err
 	}
 	return fx, nil
@@ -170,7 +174,7 @@ func lineField(prefix string, i int, name string) string {
 	return fmt.Sprintf("%s[%d].%s", prefix, i, name)
 }
 
-func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow, lines []ApplyLine, on time.Time, actor, prefix string) error {
+func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow, lines []ApplyLine, on time.Time, actor, prefix string, act uuid.UUID) error {
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
 	}
@@ -265,7 +269,9 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	if _, err := s.lockCustomer(ctx, pay.CustomerID); err != nil {
 		return err
 	}
-	act := uuid.New()
+	if act == uuid.Nil {
+		act = uuid.New()
+	}
 	var applied []uuid.UUID
 	for _, p := range plans {
 		inv, l := p.inv, p.line

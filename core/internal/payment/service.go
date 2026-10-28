@@ -235,6 +235,21 @@ func (s *Service) resolve(ctx context.Context, in *Input) (*resolved, error) {
 	} else if ctxBranch := middleware.BranchIDForQuery(ctx); ctxBranch != nil {
 		branch = *ctxBranch
 	}
+	if in.TillSessionID != nil {
+		exists, tillBranch, err := s.repo.TillSessionBranch(ctx, *in.TillSessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fieldError("till_session_id", "no such till session")
+		}
+		if tillBranch != nil {
+			if in.BranchID != nil && *in.BranchID != *tillBranch {
+				return nil, fieldError("branch_id", "does not match the till session's branch")
+			}
+			branch = *tillBranch
+		}
+	}
 	if err := s.checkBranch(ctx, branch, "branch_id"); err != nil {
 		return nil, err
 	}
@@ -324,6 +339,31 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 	var out *Payment
 	var effects *account.Effects
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		if in.OrderID != nil {
+			// The cash this payment would leave unapplied is held against
+			// the order as a deposit, whatever applications it also carries;
+			// even when held == 0, the order's deposit standing and the
+			// relation of any settled invoices to the order are checked.
+			// The order row (ADR 0005 section 11 step 1) is locked before
+			// the till session row (step 1b), the order the completion and
+			// the void take.
+			var applied int64
+			for _, a := range in.Applications {
+				applied += a.AmountCents
+			}
+			if err := s.checkDeposit(ctx, *in.OrderID, res.branch, in.TillSessionID != nil, in.AmountCents-applied, in.Applications); err != nil {
+				return err
+			}
+		}
+		if in.TillSessionID != nil {
+			status, err := s.repo.LockTillSession(ctx, *in.TillSessionID)
+			if err != nil {
+				return err
+			}
+			if status != "OPEN" {
+				return httpx.Conflict("the till session is not open: open a till session before taking a counter deposit")
+			}
+		}
 		on := time.Time{}
 		if in.ReceivedOn != nil {
 			on = *in.ReceivedOn
@@ -336,7 +376,8 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 		}
 		id, fx, err := s.account.RecordPayment(ctx, account.RecordPaymentIn{
 			CustomerID: in.CustomerID, BranchID: res.branch, Currency: res.currency, Method: string(in.Method), AmountCents: in.AmountCents,
-			Reference: in.Reference, Notes: in.Notes, ReceivedOn: on, OrderID: in.OrderID, ProjectID: in.JobID, Card: card,
+			Reference: in.Reference, Notes: in.Notes, ReceivedOn: on, OrderID: in.OrderID, ProjectID: in.JobID,
+			TillSessionID: in.TillSessionID, Card: card,
 			Actor: who.Actor, Applications: in.Applications,
 		})
 		if err != nil {
@@ -365,6 +406,49 @@ func (s *Service) record1(ctx context.Context, res *resolved, card *account.Card
 		return nil, nil, err
 	}
 	return out, effects, nil
+}
+
+// checkDeposit holds the deposit rules (CP-07), inside the caller's
+// transaction on a locked order: cash held against an order only on an
+// order that can still be billed, and never past its balance due after the
+// deposits already taken. When a payment names an order and applies its
+// entire amount at receipt (heldCents == 0), the order must still not be
+// cancelled and every settled invoice must belong to the named order.
+func (s *Service) checkDeposit(ctx context.Context, orderID, branchID uuid.UUID, requireOrderBranch bool, heldCents int64, apps []account.ApplyLine) error {
+	facts, err := s.repo.OrderDepositFacts(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if requireOrderBranch && facts.BranchID != branchID {
+		return httpx.Conflict("this order belongs to another branch: take its deposit there")
+	}
+	if facts.Cancelled() {
+		return httpx.Conflict("this order is cancelled: no deposit can be taken on it")
+	}
+	if heldCents > 0 {
+		switch {
+		case facts.FullyInvoiced():
+			return httpx.Conflict("this order is fully invoiced: no deposit can be taken on it")
+		case facts.DepositedCents+heldCents > facts.TotalCents:
+			return httpx.Conflict("the deposit is larger than the order's balance due after deposits")
+		}
+		return nil
+	}
+	invIDs := make([]uuid.UUID, len(apps))
+	for i, a := range apps {
+		invIDs[i] = a.InvoiceID
+	}
+	ok, err := s.repo.InvoicesBelongToOrder(ctx, orderID, invIDs)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if facts.FullyInvoiced() {
+			return httpx.Conflict("this order is fully invoiced: no deposit can be taken on it")
+		}
+		return httpx.Conflict("this payment settles an invoice that does not belong to the named order")
+	}
+	return nil
 }
 
 // lockForWrite takes the payment row (section 11, step 2) held to the branch
@@ -444,6 +528,19 @@ func (s *Service) Void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 	}
 	var out *Payment
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		tillSessionID, err := s.repo.PaymentTillSessionID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if tillSessionID != nil {
+			status, err := s.repo.LockTillSession(ctx, *tillSessionID)
+			if err != nil {
+				return err
+			}
+			if status != "OPEN" {
+				return httpx.Conflict("the till session this payment was taken in is closed: refund it instead of voiding it")
+			}
+		}
 		head, err := s.lockForWrite(ctx, id, pre)
 		if err != nil {
 			return err
