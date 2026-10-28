@@ -9,12 +9,14 @@ package pos_test
 // a manager are listed with their pay back and resolve acts.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // listSales queries the counter's sale list with the given query string and
@@ -182,6 +184,121 @@ func TestCP06_DamagedLineNotRestocked(t *testing.T) {
 	// both lines refund in full, restock choice or not
 	if got, want := num(t, r.body, "total_cents"), -num(t, done.body, "total_cents"); got != want {
 		t.Errorf("return total_cents = %d, want %d (both lines refunded)", got, want)
+	}
+}
+
+// RULE (CP-06 item 3, money checklist line 11): a dated search is bounded by
+// the sale's branch business day in the branch's own zone, never the server's
+// zone and never UTC. The branch here sits 25 hours behind UTC, so a sale
+// made in the UTC evening is still yesterday's sale at the branch: the
+// branch's date finds it and the UTC date does not, and the list item names
+// the branch's business day rather than the UTC slice of the timestamp.
+func TestCP06_SearchDateBoundByBranchZone(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	// takes the branch day exclusively for the test: no other test reads the
+	// day while the zone is not the stored one
+	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
+	f := newFixture(t, db)
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	body := f.completeSale(saleID, f.cashFor("1"))
+	if body.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", body.status, body.raw)
+	}
+	number := str(t, body.body, "number")
+	// the sale is dated 20:00 UTC, which the branch's zone reads as 19:00
+	// the day before: the branch's business day is 2026-10-27
+	mustExec(t, db, `UPDATE pos_transactions SET created_at = '2026-10-28 20:00:00+00' WHERE id = $1`, saleID)
+
+	if items := f.listSales(t, "q="+number+"&date=2026-10-27"); len(items) != 1 {
+		t.Fatalf("search on the branch's day = %d items, want the sale", len(items))
+	}
+	if items := f.listSales(t, "q="+number+"&date=2026-10-28"); len(items) != 0 {
+		t.Fatalf("search on the UTC day = %d items, want none", len(items))
+	}
+	item := findSale(t, f.listSales(t, "q="+number), saleID)
+	if got := str(t, item, "business_day"); got != "2026-10-27" {
+		t.Errorf("business_day = %q, want 2026-10-27 (the branch's own day, not the UTC slice)", got)
+	}
+}
+
+// RULE (CP-06 item 5, money checklist line 15): the claims list carries the
+// branch wall on the claim's sale, so a finance caller scoped to one branch
+// never sees another branch's open claim, and the caller scoped to that
+// branch does. Red the moment the wall is dropped.
+func TestCP06_RefundIntentListHoldsTheBranchWall(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	setPosSetting(t, db, "multi_branch_enabled", "true")
+	setPosSetting(t, db, "default_branch_required", "false")
+	branchB := uuid.New()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Pool.Exec(context.Background(), q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', 'WL-CP06-Q', 'claims list wall B')`, branchB)
+	exec(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('cp06-list-b', $1, TRUE, 'test')`, branchB)
+	t.Cleanup(func() {
+		setPosSetting(t, db, "multi_branch_enabled", "false")
+		setPosSetting(t, db, "default_branch_required", "true")
+		exec(`DELETE FROM user_locations WHERE user_sub IN ('cp06-list-b', 'cp06-list-a')`)
+		exec(`DELETE FROM locations WHERE id = $1`, branchB)
+	})
+
+	// branch A's open claim and branch B's open claim, each a void's declined
+	// card credit, the second moved to branch B after its flow
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge(), approvedCharge(), approvedCharge()},
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusRefunded, payment.GatewayStatusDeclined,
+			payment.GatewayStatusRefunded, payment.GatewayStatusDeclined}}
+	f := newFixture(t, db, func(f *fixture) {
+		mustExec(t, db, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('cp06-list-a', $1, TRUE, 'test')`, f.branchID)
+		// every fixture request acts as the A granted person, as the resolve
+		// wall test wires it: with multi branch on, a no header random sub
+		// has no branch to act in
+		f.cashierSub = "cp06-list-a"
+		f.service = f.service.WithGateway(gw)
+	})
+	_, claimA, _ := declinedCreditVoid(t, f, gw, mustUUID(t))
+	saleB, claimB, _ := declinedCreditVoid(t, f, gw, mustUUID(t))
+	mustExec(t, db, `UPDATE pos_transactions SET branch_id = $2 WHERE id = $1`, saleB, branchB)
+
+	list := func(headers ...string) []map[string]any {
+		t.Helper()
+		r := f.do("GET", "/api/v1/pos/refund-intents", nil, headers...)
+		if r.status != http.StatusOK {
+			t.Fatalf("the list = %d: %s", r.status, r.raw)
+		}
+		items, ok := r.body["items"].([]any)
+		if !ok {
+			t.Fatalf("items is %T (%v), want an array", r.body["items"], r.body["items"])
+		}
+		out := make([]map[string]any, 0, len(items))
+		for _, it := range items {
+			out = append(out, it.(map[string]any))
+		}
+		return out
+	}
+	scopedA := []string{"X-Test-Role", "finance", "X-Test-Sub", "cp06-list-a", "X-Branch-Id", f.branchID.String()}
+	scopedB := []string{"X-Test-Role", "finance", "X-Test-Sub", "cp06-list-b", "X-Branch-Id", branchB.String()}
+
+	sees := func(items []map[string]any, id string) bool {
+		for _, it := range items {
+			if it["id"] == id {
+				return true
+			}
+		}
+		return false
+	}
+	if items := list(scopedA...); !sees(items, claimA["id"].(string)) || sees(items, claimB["id"].(string)) {
+		t.Errorf("branch A's list = %v, want A's claim only", items)
+	}
+	if items := list(scopedB...); !sees(items, claimB["id"].(string)) || sees(items, claimA["id"].(string)) {
+		t.Errorf("branch B's list = %v, want B's claim only", items)
 	}
 }
 
