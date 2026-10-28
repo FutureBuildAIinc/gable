@@ -15346,6 +15346,60 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/settings:
+    get:
+      operationId: posSettingsGet
+      tags: [pos]
+      summary: The counter's dealer rules
+      description: >-
+        The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The rules and their revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posSettingsPut
+      tags: [pos]
+      summary: Write the counter's dealer rules
+      description: >-
+        Writes both rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision). Admin and owner only, never a machine key; audited. rules is an object of named rules so later rules (the restocking fees) sit beside these.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosSettingsRequest"
+      responses:
+        "200":
+          description: The rules now in force, with the revision the write made.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/refund-intents/{id}/resolve:
     post:
       operationId: posRefundIntentResolve
@@ -23237,7 +23291,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, job_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -23297,6 +23351,9 @@ components:
         po_required:
           type: boolean
           description: "Whether an order of this customer must carry a purchase order number."
+        job_required:
+          type: boolean
+          description: "Whether every charge sale at the counter for this customer names a job."
         named_buyer_required:
           type: boolean
           description: "Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer."
@@ -23373,6 +23430,8 @@ components:
           description: Active payment terms; the default NET30 when left out on create.
         po_required:
           type: boolean
+        job_required:
+          type: boolean
         named_buyer_required:
           type: boolean
           description: Optional; left out keeps the value on a PUT (false on create).
@@ -23387,9 +23446,9 @@ components:
           description: PUT only, beside If-Match; a revision on create is a 400.
     CustomerUpdateRequest:
       type: object
-      required: [account_number, name, payment_terms_id, po_required]
+      required: [account_number, name, payment_terms_id, po_required, job_required]
       description: >-
-        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
+        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
       properties:
         account_number:
           type: string
@@ -23426,6 +23485,8 @@ components:
           format: uuid
           description: Active payment terms, or terms the customer already holds.
         po_required:
+          type: boolean
+        job_required:
           type: boolean
         named_buyer_required:
           type: boolean
@@ -32786,12 +32847,13 @@ components:
         name: {type: string}
     PosCounterCustomer:
       type: object
-      required: [id, account_number, name, po_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
+      required: [id, account_number, name, po_required, job_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
       properties:
         id: {type: string, format: uuid}
         account_number: {type: string}
         name: {type: string}
         po_required: {type: boolean, description: "The account asks for a purchase order on a charge sale (409 po_required at completion without one)."}
+        job_required: {type: boolean, description: "The account asks for a job on a charge sale (409 job_required at completion without one)."}
         credit_limit_cents: {type: [integer, "null"], format: int64, description: "Null: no limit. 0: no credit."}
         open_receivable_cents: {type: integer, format: int64, description: "What the credit check reads: open invoices less open credit memos and unapplied cash."}
         available_credit_cents: {type: [integer, "null"], format: int64, description: "The limit less the open receivable; negative when over; null with no limit."}
@@ -33094,6 +33156,38 @@ components:
       properties:
         branch_id: {type: string, format: uuid}
         variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosSettings:
+      type: object
+      required: [revision, rules]
+      properties:
+        revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
+            check_id_required:
+              type: object
+              required: [mode, over_cents]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount], description: "Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale."}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "The figure an over_amount rule names, read against the sale's checks in total; null on the other two."}
+    PosSettingsRequest:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the limit (no limit)."}
+            check_id_required:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount]}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Read only when mode is over_amount; dropped otherwise."}
+        revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
       required: [branch_id, date, deposit_slip_ref]

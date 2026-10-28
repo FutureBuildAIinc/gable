@@ -940,7 +940,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, job_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1002,6 +1002,9 @@ components:
         po_required:
           type: boolean
           description: "Whether an order of this customer must carry a purchase order number."
+        job_required:
+          type: boolean
+          description: "Whether every charge sale at the counter for this customer names a job."
         named_buyer_required:
           type: boolean
           description: "Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer."
@@ -1081,6 +1084,8 @@ components:
           description: Active payment terms; the default NET30 when left out on create.
         po_required:
           type: boolean
+        job_required:
+          type: boolean
         named_buyer_required:
           type: boolean
           description: Optional; left out keeps the value on a PUT (false on create).
@@ -1095,10 +1100,10 @@ components:
           description: PUT only, beside If-Match; a revision on create is a 400.
     CustomerUpdateRequest:
       type: object
-      required: [account_number, name, payment_terms_id, po_required]
+      required: [account_number, name, payment_terms_id, po_required, job_required]
       description: >-
         The body of PUT. A PUT replaces the header: a field left out takes its default (null for an
-        optional one, retail, true), except the two required controls (payment_terms_id and po_required)
+        optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required)
         and the two optional counter controls (named_buyer_required and check_limit_cents, which keep
         their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
       properties:
@@ -1137,6 +1142,8 @@ components:
           format: uuid
           description: Active payment terms, or terms the customer already holds.
         po_required:
+          type: boolean
+        job_required:
           type: boolean
         named_buyer_required:
           type: boolean

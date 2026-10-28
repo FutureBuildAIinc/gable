@@ -786,6 +786,7 @@ func TestNoHeader_CustomerFamily(t *testing.T) {
 		Terms         string `json:"payment_terms_id"`
 		AccountNumber string `json:"account_number"`
 		POrequired    *bool  `json:"po_required"`
+		JobRequired   *bool  `json:"job_required"`
 	}
 	if err := json.Unmarshal(body, &cur); err != nil {
 		t.Fatal(err)
@@ -794,8 +795,12 @@ func TestNoHeader_CustomerFamily(t *testing.T) {
 	if cur.POrequired != nil {
 		po = *cur.POrequired
 	}
-	replace := fmt.Sprintf(`{"name":"renamed by noheader","account_number":%q,"payment_terms_id":%q,"po_required":%v,"revision":%d}`,
-		cur.AccountNumber, cur.Terms, po, cur.Revision)
+	job := false
+	if cur.JobRequired != nil {
+		job = *cur.JobRequired
+	}
+	replace := fmt.Sprintf(`{"name":"renamed by noheader","account_number":%q,"payment_terms_id":%q,"po_required":%v,"job_required":%v,"revision":%d}`,
+		cur.AccountNumber, cur.Terms, po, job, cur.Revision)
 
 	// Ruling A: the customer, its contact and its ship to are dealer wide
 	// reads; only the activity (a CRM record) still follows the grants.

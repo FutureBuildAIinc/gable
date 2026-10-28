@@ -316,6 +316,8 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/pos/registers":                                    {KeyBranchClassWalled, "the register's location branch, else pos_registers.branch_id, active registers only (a bound key sees only its pin's registers); TestRegistersListHoldsTheBranchWalls"},
 	"GET /api/v1/pos/products/search":                              {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
 	"GET /api/v1/pos/return-reasons":                               {KeyBranchClassStatedLimit, "the dealer wide closed list of return reasons with the database wide restocking fee settings, no branch fact"},
+	"GET /api/v1/pos/settings":                                     {KeyBranchClassRefused, "the counter rules are a dealer wide configuration read for the signed in counter; a key replays sales, and the server holds the ID rule itself at the completion (CP-04)"},
+	"PUT /api/v1/pos/settings":                                     {KeyBranchClassRefused, "the counter rules are a dealer wide configuration write (admin and owner), and the route itself refuses a machine key, bound or not (CP-04)"},
 	"GET /api/v1/pos/tiles":                                        {KeyBranchClassWalled, "the yard's sales history and on hand follow the caller's branch (a bound key keeps its pin); the product list itself is the dealer wide catalogue; TestTilesHoldTheCallersReach"},
 	"GET /api/v1/pricing/categories":                               {KeyBranchClassStatedLimit, "product category reference data, no branch fact"},
 	"GET /api/v1/pricing/rebates/programs":                         {KeyBranchClassStatedLimit, "programs are dealer wide and a claim uses supplied volumes"},

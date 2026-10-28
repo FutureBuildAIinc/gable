@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     chargeRefusal, money, standingOf, holdStanding,
-    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal,
+    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords,
 } from './standing';
 import type { CounterCustomer, CounterStanding, WayForward } from '../../types/pos';
 
@@ -13,6 +13,7 @@ const base: CounterCustomer = {
     account_number: 'A-100',
     name: 'Smith Builders',
     po_required: false,
+    job_required: false,
     credit_limit_cents: 500000,
     open_receivable_cents: 120050,
     available_credit_cents: 379950,
@@ -63,6 +64,15 @@ describe('chargeRefusal', () => {
         const c = { ...base, po_required: true };
         expect(chargeRefusal(c, 1000, '  ')).toMatch(/purchase order/);
         expect(chargeRefusal(c, 1000, 'PO-9')).toBeNull();
+    });
+    it('asks for the job the account requires, and says when none is on file', () => {
+        const c = { ...base, job_required: true };
+        const withJob = { ...c, jobs: [{ id: 'j1', name: 'Ridge Build' }] };
+        expect(chargeRefusal(withJob, 1000, '')).toMatch(/requires a job on every charge sale/);
+        expect(chargeRefusal(withJob, 1000, '', false, 'j1')).toBeNull();
+        expect(chargeRefusal(c, 1000, '')).toMatch(/none on file/);
+        // a job is never asked of a walk-in style account that does not require one
+        expect(chargeRefusal(base, 1000, '', false, '')).toBeNull();
     });
     it('offers the charge to an account with no limit', () => {
         const c = { ...base, credit_limit_cents: null, available_credit_cents: null, standing: 'no_limit' as const };
@@ -173,6 +183,31 @@ describe('check limits, store credit and the tenders offered', () => {
         expect(chargeRefusal(over, 100, 'PO-1', true)).toBeNull();
         expect(chargeRefusal(over, 100, '', true)).toMatch(/purchase order/);
         expect(chargeRefusal(over, 100, 'PO-1')).toMatch(/Over the credit limit/);
+    });
+});
+
+describe('the dealer check ID rule, as the counter reads it', () => {
+    const never = { mode: 'never' as const, over_cents: null };
+    const every = { mode: 'every_check' as const, over_cents: null };
+    const over50 = { mode: 'over_amount' as const, over_cents: 5000 };
+
+    it('never asks when no rule is set or the rule is never', () => {
+        expect(idRequired(null, 100000)).toBe(false);
+        expect(idRequired(never, 100000)).toBe(false);
+        expect(idRequiredWords(null, 100000)).toBeNull();
+    });
+
+    it('asks on every check when the rule is every check', () => {
+        expect(idRequired(every, 1)).toBe(true);
+        expect(idRequiredWords(every, 1))
+            .toBe(`This check needs the customer's ID: check it and pick the ID type`);
+    });
+
+    it('asks only on checks over the figure, not at it', () => {
+        expect(idRequired(over50, 5000)).toBe(false);
+        expect(idRequired(over50, 5001)).toBe(true);
+        expect(idRequiredWords(over50, 6000))
+            .toBe(`Checks over $50.00 in total need the customer's ID: check it and pick the ID type`);
     });
 });
 

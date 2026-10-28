@@ -94,7 +94,7 @@ func customerGroups() []groupDef {
 	}
 	// A PUT carries the controls it must not reset by leaving them out.
 	putHeader := func(extra map[string]any) map[string]any {
-		return header(map[string]any{"payment_terms_id": "{myTerms}", "po_required": false}, extra)
+		return header(map[string]any{"payment_terms_id": "{myTerms}", "po_required": false, "job_required": false}, extra)
 	}
 	return []groupDef{{
 		name: "customer",
