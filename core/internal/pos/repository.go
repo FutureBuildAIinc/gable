@@ -478,6 +478,14 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
 	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
 
+// saleZoneSQL is the zone of a sale row's branch, UTC when it has none: the
+// rule the branch day uses everywhere (the Z report list's own idiom).
+const saleZoneSQL = `COALESCE((SELECT l.timezone FROM locations l WHERE l.id = t.branch_id), 'UTC')`
+
+// saleDaySQL is a sale's business day: the day it was made on in its
+// branch's own zone, never a UTC day and never the server's clock.
+const saleDaySQL = `(t.created_at AT TIME ZONE ` + saleZoneSQL + `)::date`
+
 // saleCols is the full sale's columns: the list item's head and the purchase
 // order and job a charge sale names.
 const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
@@ -576,14 +584,14 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 	if f.Status != "" {
 		args[1] = f.Status
 	}
-	// The day's bounds are absolute timestamps computed from the date
-	// string in the server's zone: a timestamptz never meets a date cast,
-	// whose midnight belongs to the session's zone, not the caller's. An
-	// empty date names no bound: a search ranges over every day.
+	// A named date bounds the search by the sale's business day in its
+	// branch's own zone (UTC when it has none): a timestamptz never meets a
+	// date cast, whose midnight belongs to the branch, not the session or
+	// the server's clock. An empty date names no bound: a search ranges
+	// over every day.
 	if f.Date != "" {
-		start, end := dayBounds(f.Date)
-		args = append(args, start, end)
-		predicate += fmt.Sprintf(` AND t.created_at >= $%d AND t.created_at < $%d`, len(args)-1, len(args))
+		args = append(args, f.Date)
+		predicate += fmt.Sprintf(` AND `+saleDaySQL+` = $%d::date`, len(args))
 	}
 	if f.Query != "" {
 		args = append(args, "%"+likeEscape.Replace(f.Query)+"%")
@@ -593,7 +601,7 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 	args = append(args, limit)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleHeadCols+`,
 		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT'),
-		c.name, i.number
+		c.name, i.number, `+saleDaySQL+` AS business_day
 		FROM pos_transactions t
 		LEFT JOIN customers c ON c.id = t.customer_id
 		LEFT JOIN invoices i ON i.id = t.invoice_id `+predicate+
@@ -609,9 +617,10 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		var completed *time.Time
 		var created time.Time
 		var customerName, invoiceNumber *string
+		var businessDay time.Time
 		if err := rows.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID,
 			&s.Currency, &s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status,
-			&s.InvoiceID, &completed, &created, &count, &customerName, &invoiceNumber); err != nil {
+			&s.InvoiceID, &completed, &created, &count, &customerName, &invoiceNumber, &businessDay); err != nil {
 			return nil, err
 		}
 		s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -619,7 +628,8 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		out = append(out, SaleSummary{ID: s.ID, Number: s.Number, Revision: s.Revision, BranchID: s.BranchID,
 			RegisterID: s.RegisterID, CashierID: s.CashierID, CustomerID: s.CustomerID, Currency: s.Currency,
 			TotalCents: s.TotalCents, Status: s.Status, InvoiceID: s.InvoiceID, CompletedAt: s.CompletedAt,
-			CreatedAt: s.CreatedAt, ItemCount: count, CustomerName: customerName, InvoiceNumber: invoiceNumber})
+			CreatedAt: s.CreatedAt, ItemCount: count, CustomerName: customerName, InvoiceNumber: invoiceNumber,
+			BusinessDay: businessDay.Format("2006-01-02")})
 	}
 	return out, rows.Err()
 }

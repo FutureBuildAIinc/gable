@@ -1021,6 +1021,7 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1039,6 +1040,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1057,6 +1059,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1075,6 +1078,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1179,6 +1183,7 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1197,6 +1202,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1215,6 +1221,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1233,6 +1240,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1269,6 +1277,7 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -1287,6 +1296,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -2285,6 +2295,7 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
@@ -2303,6 +2314,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
@@ -2321,6 +2333,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
@@ -2339,6 +2352,7 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",

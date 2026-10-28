@@ -165,6 +165,11 @@ type SaleSummary struct {
 	// invoice's number (null until the sale completes).
 	CustomerName  *string `json:"customer_name"`
 	InvoiceNumber *string `json:"invoice_number"`
+
+	// BusinessDay is the day the sale was made on in its branch's own
+	// zone, YYYY-MM-DD (the search's date bound reads the same day); never
+	// the UTC slice of the timestamp.
+	BusinessDay string `json:"business_day"`
 }
 
 // Tender is one payment taken at the counter, stored net: the tendered

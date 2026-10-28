@@ -1728,9 +1728,11 @@ paths:
         settled claim and a paid back credit leave the list. Only the
         finance and owner roles, the resolve and pay back routes' own guard;
         the sale join carries the branch wall, so the list never crosses the
-        caller's branch. The page is the whole open set, so next_cursor is
-        null and limit echoes the 50 the route serves; cursor, limit and
-        include are accepted query names. An empty list is [] in the bytes.
+        caller's branch. The page is the oldest 50 of the open set, the
+        route's own cap: a claim past the fiftieth shows as the queue drains,
+        so the list never claims to be the whole set. next_cursor is null and
+        limit echoes the 50 the route serves; cursor, limit and include are
+        accepted query names. An empty list is [] in the bytes.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/PageLimit"
@@ -2802,7 +2804,7 @@ components:
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count, customer_name, invoice_number]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count, customer_name, invoice_number, business_day]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -2820,6 +2822,7 @@ components:
         item_count: {type: integer}
         customer_name: {type: [string, "null"], description: "The account the sale names; null on a walk-in."}
         invoice_number: {type: [string, "null"], description: "The invoice's number; null until the sale completes."}
+        business_day: {type: string, description: "The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp."}
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."

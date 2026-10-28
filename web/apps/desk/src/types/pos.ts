@@ -205,6 +205,8 @@ export interface SaleSummary {
     invoice_number: string | null;
     completed_at: string | null;
     created_at: string;
+    /** The day the sale was made on in its branch's own zone (the search's date bound reads the same day). */
+    business_day: string;
     item_count: number;
 }
 
