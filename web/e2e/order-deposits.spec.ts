@@ -129,6 +129,14 @@ test.describe('Deposits on an order', () => {
     // --- The counter: with the account attached, a deposit on another order
     // of the same customer through the same route.
     const second = await confirmedOrder(request, customer, product);
+    // The session the deposit must name: the terminal's own read of the
+    // open drawer, or the open call itself when this run opens it.
+    const tillProbe = page.waitForResponse(
+      (r) =>
+        (r.url().includes('/api/v1/pos/till/current') ||
+          (r.url().endsWith('/api/v1/pos/till/open') && r.request().method() === 'POST')) &&
+        r.ok(),
+    );
     await page.goto('/pos');
     await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
     const tillState = page.getByTestId('pos-till-state');
@@ -138,6 +146,7 @@ test.describe('Deposits on an order', () => {
       await page.getByRole('button', { name: 'Open Till' }).last().click();
     }
     await expect(tillState).toContainText('Till open');
+    const tillID = ((await (await tillProbe).json()) as { id: string }).id;
 
     await page.locator('#pos-customer-search').fill(customer.name);
     await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(customer.account_number) }).click();
@@ -159,7 +168,7 @@ test.describe('Deposits on an order', () => {
     expect(counterRes.request().postDataJSON()).toMatchObject({
       customer_id: customer.id,
       order_id: second.id,
-      till_session_id: expect.any(String),
+      till_session_id: tillID,
       amount_cents: 300,
     });
     await expect(depositDialog).toHaveCount(0);
