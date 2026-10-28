@@ -2847,7 +2847,7 @@ describe('the dealer check ID rule at the counter', () => {
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
-      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }], []);
     el.remove();
   });
 
@@ -2879,7 +2879,7 @@ describe('the dealer check ID rule at the counter', () => {
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
       { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
-    ]);
+    ], []);
     el.remove();
   });
 
