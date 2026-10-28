@@ -33,6 +33,7 @@ export class GableCustomerForm extends LitElement {
     @state() private creditLimit = '';
     @state() private checkLimit = '';
     @state() private poRequired = false;
+    @state() private jobRequired = false;
     @state() private isActive = true;
     @state() private creditError = '';
 
@@ -40,21 +41,22 @@ export class GableCustomerForm extends LitElement {
     private seeded = false;
 
     willUpdate() {
-        if (!this.seeded) {
+        // Seed from the customer once it is there: the page may render the
+        // form before the customer has loaded.
+        if (!this.seeded && this.customer) {
             this.seeded = true;
             const c = this.customer;
-            if (c) {
-                this.name = c.name;
-                this.accountNumber = c.account_number;
-                this.email = c.email ?? '';
-                this.phone = c.phone ?? '';
-                this.address = c.address ?? '';
-                this.termsId = c.payment_terms_id;
-                this.creditLimit = creditLimitInputText(c.credit_limit_cents);
-                this.checkLimit = creditLimitInputText(c.check_limit_cents);
-                this.poRequired = c.po_required;
-                this.isActive = c.is_active;
-            }
+            this.name = c.name;
+            this.accountNumber = c.account_number;
+            this.email = c.email ?? '';
+            this.phone = c.phone ?? '';
+            this.address = c.address ?? '';
+            this.termsId = c.payment_terms_id;
+            this.creditLimit = creditLimitInputText(c.credit_limit_cents);
+            this.checkLimit = creditLimitInputText(c.check_limit_cents);
+            this.poRequired = c.po_required;
+            this.jobRequired = c.job_required;
+            this.isActive = c.is_active;
         }
         // Create: preselect the dealer's usual terms once they have loaded.
         if (!this.customer && this.termsId === '' && this.terms.length > 0) {
@@ -90,6 +92,7 @@ export class GableCustomerForm extends LitElement {
             credit_limit_cents: limit.cents,
             check_limit_cents: checkLimit.cents,
             po_required: this.poRequired,
+            job_required: this.jobRequired,
             is_active: this.isActive,
         };
         if (this.termsId) request.payment_terms_id = this.termsId;
@@ -148,8 +151,12 @@ export class GableCustomerForm extends LitElement {
                     )}
                     <div class="flex flex-col justify-end gap-2 pb-1">
                         ${checkbox(id('po'), 'Purchase order required', this.poRequired, v => { this.poRequired = v; })}
+                        ${checkbox(id('job'), 'Job required', this.jobRequired, v => { this.jobRequired = v; })}
                         ${editing ? checkbox(id('active'), 'Active', this.isActive, v => { this.isActive = v; }) : nothing}
                         ${err.po_required ? html`<p class="text-xs text-red-400" role="alert">${err.po_required}</p>` : nothing}
+                        ${err.job_required ? html`<p class="text-xs text-red-400" role="alert">${err.job_required}</p>` : nothing}
+                        ${editing && (this.customer?.branch_ids.length ?? 0) > 1 ? html`
+                            <p class="text-xs text-zinc-400" data-testid="cust-shared-controls-note">This account is held by more than one branch: changing Purchase order required or Job required takes the finance or owner role.</p>` : nothing}
                     </div>
                 </div>
                 <div class="flex justify-end gap-2">

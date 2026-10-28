@@ -10916,6 +10916,8 @@ export interface components {
             payment_terms: components["schemas"]["PaymentTermsRef"];
             /** @description Whether an order of this customer must carry a purchase order number. */
             po_required: boolean;
+            /** @description Whether every charge sale at the counter for this customer names a job. */
+            job_required: boolean;
             /** @description Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer. */
             named_buyer_required: boolean;
             /**
@@ -10975,6 +10977,7 @@ export interface components {
              */
             payment_terms_id?: string;
             po_required?: boolean;
+            job_required?: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -10988,7 +10991,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
         CustomerUpdateRequest: {
             account_number: string;
             name: string;
@@ -11021,6 +11024,7 @@ export interface components {
              */
             payment_terms_id: string;
             po_required: boolean;
+            job_required: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -16732,6 +16736,8 @@ export interface components {
             name: string;
             /** @description The account asks for a purchase order on a charge sale (409 po_required at completion without one). */
             po_required: boolean;
+            /** @description The account asks for a job on a charge sale (409 job_required at completion without one). */
+            job_required: boolean;
             /**
              * Format: int64
              * @description Null: no limit. 0: no credit.
