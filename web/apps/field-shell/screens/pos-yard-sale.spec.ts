@@ -115,9 +115,18 @@ async function assertNoSidewaysScroll(page: Page): Promise<void> {
   expect(over, 'the framed document is never wider than the frame').toBe(0);
 }
 
-async function assertTouchTargets(page: Page): Promise<void> {
+async function assertTouchTargets(page: Page, width: number): Promise<void> {
   const frame = page.frameLocator('iframe[data-testid="app-frame"]');
-  for (const id of ['catalog-scan', 'catalog-add', 'pos-till-menu-button', 'tender-cash', 'pos-pay-bar-button']) {
+  // The tenders live in the payment step of the sheet: open it before
+  // measuring them.
+  const head = frame.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+  const ids = ['catalog-scan', 'catalog-add', 'pos-till-menu-button', 'tender-cash'];
+  // The pinned pay bar is the phone's Pay; at 768 and wider it is hidden by
+  // design and the order summary card's Pay is the affordance.
+  ids.push(width < 768 ? 'pos-pay-bar-button' : 'pos-pay');
+  for (const id of ids) {
     const box = await frame.getByTestId(id).boundingBox();
     expect(box, `bounding box for ${id}`).not.toBeNull();
     expect(box!.height, `${id} height >= 44px`).toBeGreaterThanOrEqual(44);
@@ -221,7 +230,7 @@ for (const theme of ['dark', 'light'] as const) {
         expect(items!.y).toBeLessThanOrEqual(panels!.y);
 
         // Every control clears the touch floor.
-        await assertTouchTargets(page);
+        await assertTouchTargets(page, width);
         await page.screenshot({ path: join(SHOTS_DIR, `yard-sale-${width}-${theme}.png`) });
       });
     }
