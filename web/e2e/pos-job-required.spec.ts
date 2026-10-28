@@ -116,13 +116,11 @@ async function prepareAccountWithJob(
     );
     expect(lookupRes.status(), await lookupRes.text()).toBe(200);
     const lookup = (await lookupRes.json()) as {
-      items: {
-        id: string;
-        open_receivable_cents: number;
-        jobs: { id: string; name: string }[];
-      }[];
-    };
-    const counter = lookup.items.find((item) => item.id === c.id);
+      id: string;
+      open_receivable_cents: number;
+      jobs: { id: string; name: string }[];
+    }[];
+    const counter = lookup.find((item) => item.id === c.id);
     if (!counter || counter.jobs.length === 0) continue;
 
     const neededLimit = Math.max(c.balance_cents, counter.open_receivable_cents, 0) + saleRoomCents;
