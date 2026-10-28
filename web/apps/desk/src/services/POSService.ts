@@ -35,6 +35,8 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    PosRules,
+    PosSettings,
     StepUpManager,
     StepUpApproval,
 } from '../types/pos.ts';
@@ -307,6 +309,32 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/customers/${customerId}/standing?${params.toString()}`),
             'Failed to read the account\u2019s standing',
+        );
+        return response.json();
+    },
+
+    /**
+     * The dealer's counter rules (GET /api/v1/pos/settings): the database
+     * wide check limit and the check ID rule. The counter reads it to ask
+     * for the ID before Pay.
+     */
+    async settings(): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`),
+            'Failed to read the counter rules',
+        );
+        return response.json();
+    },
+
+    /** Writes the counter rules as one act on the revision (an owner or admin). */
+    async saveSettings(rules: PosRules, revision: number): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ rules, revision }),
+            }),
+            'Failed to save the counter rules',
         );
         return response.json();
     },

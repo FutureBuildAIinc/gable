@@ -617,6 +617,17 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-2 text-xs text-zinc-500">${noLimit ? 'No credit ceiling on this account' : customer.credit_limit_cents === 0 ? 'No credit: cash only' : 'Total approved credit line'}</div>
                     </div>
+
+                    <div class="p-5 border-l-4 border-l-violet-500 bg-gradient-to-br from-slate-steel to-transparent rounded-lg border border-white/10">
+                        <div class="flex items-center gap-3 mb-2 text-zinc-400 text-sm font-medium uppercase tracking-wide">
+                            ${icon(CreditCard, 16, 'text-violet-400')}
+                            Check Limit
+                        </div>
+                        <div class="text-3xl font-mono font-bold text-white" data-testid="account-check-limit">
+                            ${customer.check_limit_cents === null ? 'Counter rule' : formatCents(customer.check_limit_cents)}
+                        </div>
+                        <div class="mt-2 text-xs text-zinc-500">${customer.check_limit_cents === null ? 'Uses the dealer\'s counter rule' : customer.check_limit_cents === 0 ? 'No checks on this account' : 'The most any one check this customer may write'}</div>
+                    </div>
                 </div>
 
                 <!-- Tabs & Content -->

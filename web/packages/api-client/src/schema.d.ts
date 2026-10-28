@@ -6821,6 +6821,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's dealer rules
+         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+         */
+        get: operations["posSettingsGet"];
+        /**
+         * Write the counter's dealer rules
+         * @description Writes both rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision). Admin and owner only, never a machine key; audited. rules is an object of named rules so later rules (the restocking fees) sit beside these.
+         */
+        put: operations["posSettingsPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/refund-intents/{id}/resolve": {
         parameters: {
             query?: never;
@@ -17022,6 +17046,55 @@ export interface components {
              * @description Null clears the branch's override.
              */
             variance_threshold_cents: number | null;
+        };
+        PosSettings: {
+            /**
+             * Format: int64
+             * @description The settings resource's revision; a write names it (If-Match and/or the body's revision).
+             */
+            revision: number;
+            rules: {
+                /**
+                 * Format: int64
+                 * @description The database wide check limit; null is no limit. A customer's own limit wins over it.
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /**
+                     * @description Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale.
+                     * @enum {string}
+                     */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description The figure an over_amount rule names, read against the sale's checks in total; null on the other two.
+                     */
+                    over_cents: number | null;
+                };
+            };
+        };
+        PosSettingsRequest: {
+            rules: {
+                /**
+                 * Format: int64
+                 * @description Null clears the limit (no limit).
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /** @enum {string} */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description Read only when mode is over_amount; dropped otherwise.
+                     */
+                    over_cents?: number | null;
+                };
+            };
+            /**
+             * Format: int64
+             * @description The revision this write rides; If-Match serves the same role.
+             */
+            revision?: number;
         };
         PosEndOfDayCloseRequest: {
             /** Format: uuid */
@@ -34069,6 +34142,66 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules and their revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The rules now in force, with the revision the write made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
