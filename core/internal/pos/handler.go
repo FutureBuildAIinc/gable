@@ -507,15 +507,18 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	f := SaleFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02"), Query: strings.TrimSpace(q.Get("q"))}
+	f := SaleFilter{RegisterID: q.Get("register_id"), Query: strings.TrimSpace(q.Get("q"))}
 	if d := q.Get("date"); d != "" {
 		if _, err := time.Parse("2006-01-02", d); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
 		f.Date = d
-	} else if f.Query != "" {
-		f.Date = ""
+	}
+	if f.Query == "" {
+		// The plain list's own day is the branch's today, computed in the
+		// branch's zone in SQL, never the server's clock.
+		f.Today = true
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {

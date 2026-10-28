@@ -338,6 +338,11 @@ type SaleFilter struct {
 	Date       string
 	Status     string
 	Query      string
+	// Today is the plain list's own day (no search text): the bound is the
+	// branch's today, computed in the branch's zone, never the server's
+	// clock. A search names no day bound unless Date is set, and leaves
+	// both empty.
+	Today bool
 }
 
 // ReturnFilter is the return list's filters.
@@ -588,14 +593,16 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 	if f.Status != "" {
 		args[1] = f.Status
 	}
-	// A named date bounds the search by the sale's business day in its
-	// branch's own zone (UTC when it has none): a timestamptz never meets a
-	// date cast, whose midnight belongs to the branch, not the session or
-	// the server's clock. An empty date names no bound: a search ranges
-	// over every day.
-	if f.Date != "" {
+	// The day bound names the sale's business day in its branch's own zone
+	// (UTC when it has none): a timestamptz never meets a date cast, whose
+	// midnight belongs to the branch, not the session or the server's
+	// clock. A date the caller gave bounds by that date; the plain list's
+	// own day (Today, no search text) is the branch's today, computed in
+	// the same zone in SQL. A search leaves both empty and ranges over
+	// every day.
+	if f.Date != "" || f.Today {
 		args = append(args, f.Date)
-		predicate += fmt.Sprintf(` AND `+saleDaySQL+` = $%d::date`, len(args))
+		predicate += fmt.Sprintf(` AND `+saleDaySQL+` = COALESCE(NULLIF($%d::text, '')::date, (NOW() AT TIME ZONE `+saleZoneSQL+`)::date)`, len(args))
 	}
 	if f.Query != "" {
 		args = append(args, "%"+likeEscape.Replace(f.Query)+"%")

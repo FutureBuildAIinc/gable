@@ -74,9 +74,11 @@ paths:
       summary: List the day's sales, or search them
       description: >-
         The list envelope over one register's day: register_id filters (absent
-        lists every register's), date is a YYYY-MM-DD that defaults to the
-        branch's today, status takes one lowercase value (open, held,
-        completed, voided; an uppercase or unknown value is a 400 naming
+        lists every register's), date is a YYYY-MM-DD read against the sale's
+        business day in its branch's own zone, defaulting to the branch's
+        today (never the server's clock), status takes one lowercase value
+        (open, held, completed, voided; an uppercase or unknown value is a
+        400 naming
         status). q is the return counter's sale search (CP-06): a sale
         matches when its number (the receipt's barcode text), its invoice's
         number or its customer's name contains the text, case folded; a
