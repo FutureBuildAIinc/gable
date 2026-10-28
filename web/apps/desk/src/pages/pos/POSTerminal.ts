@@ -2019,15 +2019,16 @@ export class POSTerminal extends LitElement {
             <div style="padding:10px;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;margin-bottom:8px" data-testid="return-search-result">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
                 <span class="font-mono font-semibold" style="color:rgb(var(--gb-till-text))" data-testid="return-search-result-number">${s.number}</span>
-                <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-status">${s.status}</span>
+                <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-status">${({ completed: 'Completed', open: 'Open', held: 'Held', voided: 'Voided' } as Record<string, string>)[s.status] ?? s.status}</span>
               </div>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:rgb(var(--gb-till-soft));margin-bottom:6px">
                 <span data-testid="return-search-result-customer">${s.customer_name ?? 'Walk-in'}</span>
                 <span class="font-mono" data-testid="return-search-result-total">${formatCents(s.total_cents)}</span>
               </div>
-              <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px" data-testid="return-search-result-date">${s.created_at.slice(0, 10)}</div>
+              <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px" data-testid="return-search-result-date">${s.business_day}</div>
               ${s.status === 'voided' ? html`
-                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-bad))" data-testid="return-search-result-voided">Voided - cannot be returned</p>` : html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-bad))" data-testid="return-search-result-voided">Voided - cannot be returned</p>` : s.status !== 'completed' ? html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-not-completed">Not completed yet - cannot be returned</p>` : html`
                 <button @click=${() => void this._pickReturnSearchResult(s)} ?disabled=${this._returnSearchBusy}
                   style="width:100%;padding:8px;background:rgb(var(--gb-till-go));border:none;border-radius:6px;color:rgb(var(--gb-plate));font-size:13px;font-weight:700;cursor:pointer"
                   data-testid="return-search-result-pick">Return this sale</button>`}

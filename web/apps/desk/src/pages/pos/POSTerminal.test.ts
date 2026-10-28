@@ -2761,7 +2761,7 @@ describe('return a past sale', () => {
   const summary = (over: Partial<SaleSummary> = {}): SaleSummary => ({
     id: 'past1', number: 'POS-000042', revision: 2, branch_id: 'b', register_id: 'REG-01', cashier_id: 'c',
     customer_id: 'cu1', customer_name: 'Test Builders', currency: 'USD', total_cents: 12500, status: 'completed',
-    invoice_id: 'inv1', invoice_number: 'IN-000042', completed_at: new Date().toISOString(), created_at: new Date().toISOString(), item_count: 2,
+    invoice_id: 'inv1', invoice_number: 'IN-000042', completed_at: new Date().toISOString(), created_at: new Date().toISOString(), business_day: '2026-10-28', item_count: 2,
     ...over,
   });
 
@@ -2789,7 +2789,25 @@ describe('return a past sale', () => {
     expect(q(result, 'return-search-result-number').textContent).toContain('POS-000042');
     expect(q(result, 'return-search-result-customer').textContent).toContain('Test Builders');
     expect(q(result, 'return-search-result-total').textContent).toContain('$125.00');
-    expect(q(result, 'return-search-result-status').textContent).toContain('completed');
+    expect(q(result, 'return-search-result-status').textContent).toContain('Completed');
+    expect(q(result, 'return-search-result-date').textContent).toContain('2026-10-28');
+    el.remove();
+  });
+
+  it('shows an open result as not returnable, with no pick button', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary({ status: 'open', invoice_id: null, invoice_number: null })], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-result-status').textContent).toContain('Open');
+    expect(q(el, 'return-search-result-not-completed').textContent).toContain('Not completed yet');
+    expect(q(el, 'return-search-result-pick')).toBeNull();
     el.remove();
   });
 

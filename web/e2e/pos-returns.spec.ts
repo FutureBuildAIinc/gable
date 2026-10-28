@@ -105,7 +105,7 @@ test('CP-06: return a past sale with mixed restock choices and open refund inten
   await page.getByTestId('return-search-submit').click();
   await expect(page.getByTestId('return-search-result')).toBeVisible();
   await expect(page.getByTestId('return-search-result-number')).toContainText(saleNumber);
-  await expect(page.getByTestId('return-search-result-status')).toContainText('completed');
+  await expect(page.getByTestId('return-search-result-status')).toContainText('Completed');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-search-result.png'), fullPage: true });
 
   // Pick the sale and return the first line as damaged, the second as back to stock.
@@ -136,8 +136,9 @@ test('CP-06: return a past sale with mixed restock choices and open refund inten
   await expect(page.getByText(/\$[\d,.]+ refunded/)).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-return-complete.png'), fullPage: true });
 
-  // Open the refund intents manager screen from the menu and expect the heading.
-  await page.goto('/pos/refund-intents');
+  // Open the refund intents manager screen from the Daily Till menu and expect the heading.
+  await page.goto('/reports/daily-till');
+  await page.getByRole('link', { name: 'Refund intents' }).click();
   await expect(page.getByRole('heading', { name: 'Refund intents' })).toBeVisible();
   await expect(page.getByTestId('refund-intents-empty')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-refund-intents.png'), fullPage: true });
