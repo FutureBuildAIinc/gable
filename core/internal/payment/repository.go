@@ -299,19 +299,31 @@ func (r *Repository) TillSessionBranch(ctx context.Context, sessionID uuid.UUID)
 
 // LockTillSession locks the till session FOR SHARE inside the payment's
 // transaction so a till close cannot race past a counter deposit or void.
+// The branch wall applies, the way the pos package walls the same lock: a
+// session outside the caller's reach reads as a missing row, so a caller of
+// one branch never takes a lock on another branch's drawer.
 func (r *Repository) LockTillSession(ctx context.Context, sessionID uuid.UUID) (status string, err error) {
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT status FROM till_sessions WHERE id = $1 FOR SHARE`, sessionID).Scan(&status)
+		SELECT t.status FROM till_sessions t WHERE t.id = $3 AND `+wall("t", 1, 2)+` FOR SHARE`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), sessionID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", httpx.NotFound("till session not found")
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to lock the till session: %w", err)
 	}
 	return status, nil
 }
 
-// PaymentTillSessionID reads the till session a payment rode, when any.
+// PaymentTillSessionID reads the till session a payment rode, when any. The
+// branch wall applies: a payment outside the caller's reach reads as a
+// missing payment, so the void of another branch's till riding payment is
+// refused before any till session row is read or locked.
 func (r *Repository) PaymentTillSessionID(ctx context.Context, paymentID uuid.UUID) (*uuid.UUID, error) {
 	var sessionID *uuid.UUID
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT till_session_id FROM payments WHERE id = $1`, paymentID).Scan(&sessionID)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT p.till_session_id FROM payments p WHERE p.id = $3 AND `+wall("p", 1, 2),
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), paymentID).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errPaymentNotFound
 	}

@@ -922,6 +922,156 @@ func TestCP07_CounterDepositRidesTheOpenTillSession(t *testing.T) {
 	}
 }
 
+// RULE (MONEY-CHECKLIST 15): the void of a payment that rode another
+// branch's till session is refused by the branch wall before any till
+// session row is read or locked. The payment reads as a missing row (404,
+// the answer a payment that does not exist gets), the other branch's
+// drawer row is never touched (a close holding it FOR UPDATE is never
+// waited on), and the payment stands posted with no void audit row.
+func TestCP07_VoidOfAnotherBranchesTillRidingPaymentIsRefusedAtTheWall(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	// the kill switch is read when the fixture's middleware is built
+	setSetting(t, db, "multi_branch_enabled", "true")
+	setSetting(t, db, "default_branch_required", "false")
+	branchB := uuid.New()
+	subB := "cp07-void-" + uuid.NewString()[:8]
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, $2)`, branchB, "CP07-VWB-"+uuid.NewString()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, subB, branchB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		setSetting(t, db, "multi_branch_enabled", "false")
+		setSetting(t, db, "default_branch_required", "true")
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM user_locations WHERE user_sub = $1`, subB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, branchB)
+	})
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-CP07-" + uuid.NewString()[:8]
+	var branchID string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1))`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'till_session' AND entity_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	// Open this branch's till and take a cash deposit riding it.
+	r := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 20000,
+	}, "req-cp07-void-wall-open")
+	if r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	tillID := str(t, r.body, "id")
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+	rDep := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 3000, "method": "cash",
+	}, "req-cp07-void-wall-dep")
+	if rDep.status != http.StatusCreated {
+		t.Fatalf("counter deposit = %d: %s", rDep.status, rDep.raw)
+	}
+	depID := str(t, rDep.body, "id")
+
+	// Hold the drawer the way a close in progress does: FOR UPDATE on the
+	// till session row. A void that reads or locks the row before the wall
+	// parks behind this hold; the walled void must answer at once.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	holdDone := make(chan struct{})
+	go func() {
+		defer close(holdDone)
+		err := db.RunInTx(context.Background(), func(ctx context.Context) error {
+			// The lock belongs to this transaction: it goes through the
+			// executor the context resolves, never the pool.
+			if _, err := db.GetExecutor(ctx).Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, tillID); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+		if err != nil {
+			t.Errorf("hold the drawer: %v", err)
+		}
+	}()
+	<-held
+	// The hold is released however the assertion ends: the refused void
+	// under test (pre-fix) is blocked on this row, and the test server's
+	// close waits out every in-flight request.
+	releaseOnce := sync.Once{}
+	releaseHold := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHold()
+
+	// Branch B's finance caller voids branch A's till riding payment.
+	scoped := []string{
+		"X-Request-ID", "req-cp07-void-wall-refuse",
+		"X-Test-Role", "finance", "X-Test-Sub", subB, "X-Branch-Id", branchB.String(),
+	}
+	done := make(chan resp, 1)
+	go func() {
+		done <- f.do("POST", "/api/v1/payments/"+depID+"/transitions", map[string]any{
+			"to": "voided", "reason": "out of my branch", "revision": 1,
+		}, scoped...)
+	}()
+	select {
+	case r := <-done:
+		if r.status != http.StatusNotFound {
+			t.Fatalf("another branch's void of a till riding payment = %d: %s, want 404 (the wall refuses before the till session is read or locked)", r.status, r.raw)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("the cross branch void waited on the other branch's till session row: the wall came after the lock")
+	}
+	releaseHold()
+	<-holdDone
+
+	// Nothing moved: the payment stands posted, with no void audit row.
+	if status, _ := f.paymentRead(uuid.MustParse(depID)); status != "POSTED" {
+		t.Errorf("the refused void moved the payment: status %s, want POSTED", status)
+	}
+	var audits int
+	if err := db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'payment.voided' AND entity_id = $1`, depID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 0 {
+		t.Errorf("%d void audit rows for the refused void, want 0", audits)
+	}
+	// The control: the same void inside the payment's own branch answers 200.
+	r = f.do("POST", "/api/v1/payments/"+depID+"/transitions", map[string]any{
+		"to": "voided", "reason": "taken in error", "revision": 1,
+	}, "X-Request-ID", "req-cp07-void-wall-own")
+	if r.status != http.StatusOK {
+		t.Errorf("the in branch void = %d: %s, want 200", r.status, r.raw)
+	}
+}
+
+// setSetting upserts a system_settings row for the wall test.
+func setSetting(t *testing.T, db *database.DB, key, value string) {
+	t.Helper()
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO system_settings (key, value) VALUES ($1, $2)
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
+		t.Fatalf("set %s: %v", key, err)
+	}
+}
 // RULE: a database already past migration 101 (every demo and install on
 // origin/refactor/v1) gains payments.till_session_id and its index by applying
 // migration 147 on top, rolls back cleanly with 147's down file, and serves
