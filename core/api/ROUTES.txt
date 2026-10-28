@@ -156,6 +156,9 @@ GET	/api/v1/admin/staff	internal/staff	h.ListStaff
 POST	/api/v1/admin/staff	internal/staff	h.CreateStaff
 GET	/api/v1/admin/staff/{id}	internal/staff	h.GetStaff
 PUT	/api/v1/admin/staff/{id}	internal/staff	h.UpdateStaff
+DELETE	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.ClearStaffCounterPIN
+PUT	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.SetStaffCounterPIN
+POST	/api/v1/admin/staff/{id}/counter-pin/unlock	internal/staff	h.UnlockStaffCounterPIN
 POST	/api/v1/admin/staff/{id}/modules	internal/staff	h.GrantModule
 DELETE	/api/v1/admin/staff/{id}/modules/{module_id}	internal/staff	h.RevokeModule
 GET	/api/v1/ap/aging	internal/ap	h.HandleGetAgingSummary
@@ -405,6 +408,8 @@ GET	/api/v1/pos/return-reasons	internal/pos	h.ListReturnReasons
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
+POST	/api/v1/pos/step-up	internal/pos	h.StepUpHandler
+GET	/api/v1/pos/step-up/managers	internal/pos	h.StepUpManagersHandler
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
 POST	/api/v1/pos/terminal-intents/sweep	internal/pos	h.SweepTerminalIntentsHandler
 GET	/api/v1/pos/terminal-intents/{id}	internal/pos	h.GetTerminalIntentHandler

@@ -64,7 +64,8 @@ func (f ListFilter) listPredicate() (string, []any) {
 func (r *Repository) List(ctx context.Context, f ListFilter) ([]Staff, error) {
 	pred, args := f.listPredicate()
 	q := `SELECT s.id, s.email, s.full_name, s.staff_no, s.role, s.active, s.revision, s.created_at, s.updated_at,
-	       COALESCE(ARRAY_REMOVE(ARRAY_AGG(g.module_id ORDER BY g.module_id), NULL), '{}') AS modules
+	       COALESCE(ARRAY_REMOVE(ARRAY_AGG(g.module_id ORDER BY g.module_id), NULL), '{}') AS modules,
+	       (s.counter_pin_hash IS NOT NULL) AS counter_pin_set, s.counter_pin_locked
 		FROM staff s
 		LEFT JOIN module_grants g ON g.staff_id = s.id` +
 		pred + ` GROUP BY s.id ORDER BY s.created_at DESC, s.id DESC LIMIT $` + strconv.Itoa(len(args)+1)
@@ -99,7 +100,7 @@ func scanStaff(scan func(dest ...any) error) (*Staff, error) {
 	var s Staff
 	var created, updated time.Time
 	if err := scan(&s.ID, &s.Email, &s.FullName, &s.StaffNo, &s.Role, &s.Active, &s.Revision,
-		&created, &updated, &s.Modules); err != nil {
+		&created, &updated, &s.Modules, &s.CounterPinSet, &s.CounterPinLocked); err != nil {
 		return nil, err
 	}
 	s.CreatedAt = httpx.TimestampOf(created)
@@ -114,7 +115,8 @@ func scanStaff(scan func(dest ...any) error) (*Staff, error) {
 func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Staff, error) {
 	const q = `
 		SELECT s.id, s.email, s.full_name, s.staff_no, s.role, s.active, s.revision, s.created_at, s.updated_at,
-		       COALESCE(ARRAY_REMOVE(ARRAY_AGG(g.module_id ORDER BY g.module_id), NULL), '{}') AS modules
+		       COALESCE(ARRAY_REMOVE(ARRAY_AGG(g.module_id ORDER BY g.module_id), NULL), '{}') AS modules,
+		       (s.counter_pin_hash IS NOT NULL) AS counter_pin_set, s.counter_pin_locked
 		FROM staff s
 		LEFT JOIN module_grants g ON g.staff_id = s.id
 		WHERE s.id = $1
@@ -250,6 +252,52 @@ func (r *Repository) RevokeModule(ctx context.Context, staffID uuid.UUID, module
 func (r *Repository) BumpStaffRevision(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE staff SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetCounterPIN writes the hash, the set time and a clean slate of failures
+// and lock; the caller has locked the row inside the same transaction.
+func (r *Repository) SetCounterPIN(ctx context.Context, id uuid.UUID, hash string) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE staff SET counter_pin_hash = $2, counter_pin_set_at = NOW(),
+			counter_pin_failures = 0, counter_pin_locked = FALSE, updated_at = NOW()
+		WHERE id = $1`, id, hash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearCounterPIN empties every PIN column; the caller has locked the row.
+func (r *Repository) ClearCounterPIN(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE staff SET counter_pin_hash = NULL, counter_pin_set_at = NULL,
+			counter_pin_failures = 0, counter_pin_locked = FALSE, updated_at = NOW()
+		WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UnlockCounterPIN lifts the lock and clears the failures, leaving the hash;
+// the caller has locked the row.
+func (r *Repository) UnlockCounterPIN(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE staff SET counter_pin_failures = 0, counter_pin_locked = FALSE, updated_at = NOW()
+		WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}

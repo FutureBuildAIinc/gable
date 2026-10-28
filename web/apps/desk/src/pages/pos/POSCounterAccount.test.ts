@@ -29,6 +29,8 @@ const svc = vi.hoisted(() => ({
   emailReceipt: vi.fn(),
   standing: vi.fn(),
   approveOverride: vi.fn(),
+  stepUpManagers: vi.fn().mockResolvedValue([]),
+  stepUp: vi.fn(),
   captureSignature: vi.fn(),
   returnReasons: vi.fn(),
   createReturn: vi.fn(),
@@ -41,8 +43,21 @@ vi.mock('../../services/POSService', async (orig) => {
   return { ...real, posService: svc };
 });
 
+import { authCustody } from '@gable/auth';
 import './POSTerminal';
+import './StepUpDialog';
 import type { POSTerminal } from './POSTerminal';
+import type { StepUpDialog } from './StepUpDialog';
+
+/** Completes the step up dialog the terminal opened, as the manager's PIN would. */
+async function answerStepUp(el: HTMLElement, managerName = 'E2E Manager') {
+  const dlg = el.querySelector<StepUpDialog>('gable-step-up-dialog');
+  if (!dlg) throw new Error('no step up dialog opened');
+  dlg.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName }, bubbles: true }));
+  await flush();
+  await dlg.updateComplete;
+}
+
 import { answerAppDialog, typeIntoAppDialog, chooseOption, flush } from '../../test/dom';
 import type { CounterRegister } from '../../types/pos';
 
@@ -104,6 +119,7 @@ async function mount(s: Sale): Promise<POSTerminal> {
   svc.currentTill.mockResolvedValue({ id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 });
   svc.startSale.mockResolvedValue(s);
   svc.returnReasons.mockResolvedValue(reasons);
+  svc.stepUpManagers.mockResolvedValue([]);
   const el = document.createElement('gable-pos-terminal') as POSTerminal;
   document.body.appendChild(el);
   await flush();
@@ -206,10 +222,30 @@ describe('can this sale go on account? the standing line and its ways forward', 
     }));
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
-    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'agreed on the phone', 1198);
+    await answerStepUp(el);
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'agreed on the phone', 1198, 'tok-1');
     expect(q(el, 'pos-verdict-line').textContent).toContain('A manager approved this sale on account');
     expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('a signed in owner approves as themselves, with no PIN dialog', async () => {
+    const roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['owner']);
+    svc.approveOverride.mockResolvedValue({ id: 'o2', sale_id: 's1', kind: 'account', approved_by: 'owner-sub', reason: 'phone', cap_cents: 1198, created_at: '', consumed_at: null });
+    svc.standing.mockResolvedValue(standing({
+      on_account: { verdict: 'allowed', reason: 'manager_override', message: 'A manager approved this sale on account up to 11.98 USD.', over_cents: null, ways_forward: [] },
+    }));
+    const el = await withAccount(blockedStanding());
+    q(el, 'pos-way-manager_override').click();
+    await flush();
+    await typeIntoAppDialog('as the owner here');
+    await answerAppDialog(true);
+    await flush();
+    await el.updateComplete;
+    // the claims path, not the step up: no token, no dialog
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'account', 'as the owner here', 1198, undefined);
+    expect(el.querySelector('gable-step-up-dialog')).toBeNull();
+    roles.mockRestore();
     el.remove();
   });
 
@@ -222,7 +258,7 @@ describe('can this sale go on account? the standing line and its ways forward', 
     await typeIntoAppDialog('agreed');
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
+    await answerStepUp(el);
     expect(el.textContent).toContain('a manager other than the sale’s own cashier approves an override');
     expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
     el.remove();
@@ -345,6 +381,22 @@ describe('a check, its ID and its limit', () => {
     el.remove();
   });
 
+  it('refuses a split check over the customer’s limit even before the debounce timer fires', async () => {
+    svc.standing.mockResolvedValue(standing({ check_limit_cents: 1000 }));
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    inner(el)._customer = account;
+    await el.updateComplete;
+    await flush();
+    await el.updateComplete;
+    await checkEntry(el);
+    await typeAmount(el, '11.98');
+    q(el, 'pos-add-tender').click();
+    await flush();
+    await el.updateComplete;
+    expect(q(el, 'pos-check-over')?.textContent).toContain('over the check limit of $10.00');
+    el.remove();
+  });
+
   it('lets the check go once a manager approved a check that size for this sale', async () => {
     svc.approveOverride.mockResolvedValue({ id: 'o', sale_id: 's1', kind: 'check', approved_by: 'm', reason: 'r', cap_cents: 1198, created_at: '', consumed_at: null });
     svc.completeSale.mockResolvedValue(completed());
@@ -358,8 +410,8 @@ describe('a check, its ID and its limit', () => {
     await typeIntoAppDialog('regular customer');
     await answerAppDialog(true);
     await flush();
-    await el.updateComplete;
-    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'check', 'regular customer', 1198);
+    await answerStepUp(el);
+    expect(svc.approveOverride).toHaveBeenCalledWith('s1', 'check', 'regular customer', 1198, 'tok-1');
     q(el, 'pos-pay').click();
     await flush();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'check', amount_cents: 1198 }]);
