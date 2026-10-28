@@ -10,6 +10,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/google/uuid"
 )
 
@@ -127,6 +128,11 @@ type Sale struct {
 	// already fully returned as not returnable. Set on a completed sale's
 	// read; omitted when nothing of the sale was ever returned.
 	ReturnedQuantities map[string]httpx.Quantity `json:"returned_quantities,omitempty"`
+
+	// TaxExemption is the certificate that exempts this sale on the branch's
+	// business day (CP-10): why the tax is zero, so the counter can say it.
+	// Nil when no certificate covers the day.
+	TaxExemption *tax.ExemptionStanding `json:"tax_exemption,omitempty"`
 
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`

@@ -43,6 +43,8 @@ function roster(danaHasAILM = true): StaffMember[] {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
       modules: danaHasAILM ? ['ai_lm'] : [],
+      counter_pin_set: false,
+      locked: false,
     },
     {
       id: YUKI,
@@ -55,6 +57,8 @@ function roster(danaHasAILM = true): StaffMember[] {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
       modules: [],
+      counter_pin_set: false,
+      locked: false,
     },
   ]
 }
@@ -139,6 +143,25 @@ function serve(initial: Partial<Backend> = {}) {
         return Promise.resolve(jsonResponse(backend.staff.find((s) => s.id === staffId)))
       }
 
+      if (method === 'PUT' && path.includes('/counter-pin')) {
+        const staffId = path.split('/api/v1/admin/staff/')[1].split('/')[0]
+        const pin = JSON.parse(body ?? '{}').pin ?? ''
+        if (pin === '1111' || pin === '1234') {
+          return Promise.resolve(jsonResponse({ error: { message: 'must not be one repeated digit or a plain run like 1234' } }, 400))
+        }
+        backend.staff = backend.staff.map((s) => (s.id === staffId ? { ...s, counter_pin_set: true, locked: false } : s))
+        return Promise.resolve(jsonResponse({ counter_pin_set: true, locked: false }))
+      }
+      if (method === 'DELETE' && path.includes('/counter-pin')) {
+        const staffId = path.split('/api/v1/admin/staff/')[1].split('/')[0]
+        backend.staff = backend.staff.map((s) => (s.id === staffId ? { ...s, counter_pin_set: false, locked: false } : s))
+        return Promise.resolve(jsonResponse({ counter_pin_set: false, locked: false }))
+      }
+      if (method === 'POST' && path.includes('/counter-pin/unlock')) {
+        const staffId = path.split('/api/v1/admin/staff/')[1].split('/')[0]
+        backend.staff = backend.staff.map((s) => (s.id === staffId ? { ...s, locked: false, counter_pin_failures: 0 } : s))
+        return Promise.resolve(jsonResponse({ counter_pin_set: true, locked: false }))
+      }
       if (url.includes('/healthz/ready')) {
         return Promise.resolve(jsonResponse({ status: 'ok', uptime: '1h', checks: {} }))
       }
@@ -330,5 +353,82 @@ describe('Staff tab — the global AI_LM kill switch', () => {
     serve({ modules: [] })
     const el = await openStaffTab()
     expect(globalToggle(el).disabled).toBe(true)
+  })
+})
+
+describe("Staff tab: the manager's counter PIN", () => {
+  /** The row of the roster member named. */
+  function rowOf(el: TechAdminPage, name: string): HTMLElement {
+    const row = Array.from(el.querySelectorAll('tbody tr')).find((tr) => text(tr).includes(name))
+    if (!row) throw new Error(`no roster row for ${name}`)
+    return row as HTMLElement
+  }
+
+  /** The prompt dialog's input, once the page opened one. */
+  async function typePin(value: string) {
+    await flush()
+    await new Promise((r) => setTimeout(r, 0))
+    const dlg = document.querySelector('gable-app-dialog')
+    const input = dlg?.querySelector<HTMLInputElement>('[data-dialog-input]') ?? null
+    if (!input) throw new Error('no PIN prompt opened')
+    expect(input.type).toBe('password')
+    input.value = value
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const confirm = dlg!.querySelector<HTMLButtonElement>('[data-dialog-confirm]')
+    if (!confirm) throw new Error('no Set PIN confirm button')
+    confirm.click()
+    await flush()
+  }
+
+  it('shows the PIN state and sets a PIN with the server, never optimistically', async () => {
+    const el = await openStaffTab()
+    expect(rowOf(el, 'Dana Ramirez').querySelector('[data-testid="staff-pin-none"]')).not.toBeNull()
+    const setBtn = rowOf(el, 'Dana Ramirez').querySelector<HTMLButtonElement>('[data-testid="staff-pin-set-new"]')!
+    setBtn.click()
+    await typePin('4481')
+    await update(el, {})
+    const put = callsTo('PUT', `/api/v1/admin/staff/${DANA}/counter-pin`)
+    expect(put).toHaveLength(1)
+    expect(JSON.parse(put[0].body!)).toEqual({ pin: '4481' })
+    // the roster was re-read and now says Set
+    expect(rowOf(el, 'Dana Ramirez').querySelector('[data-testid="staff-pin-set"]')).not.toBeNull()
+  })
+
+  it('says the server refusal for a weak PIN and leaves the row as it was', async () => {
+    const el = await openStaffTab()
+    rowOf(el, 'Dana Ramirez').querySelector<HTMLButtonElement>('[data-testid="staff-pin-set-new"]')!.click()
+    await typePin('1234')
+    await update(el, {})
+    expect(callsTo('PUT', `/api/v1/admin/staff/${DANA}/counter-pin`)).toHaveLength(1)
+    const said = Array.from(el.querySelectorAll('div')).find((d) => (d.textContent ?? '').includes('plain run'))
+    expect(said).toBeTruthy()
+    expect(rowOf(el, 'Dana Ramirez').querySelector('[data-testid="staff-pin-none"]')).not.toBeNull()
+  })
+
+  it('clears a set PIN after a confirm, and unlocks a locked one', async () => {
+    serve({ staff: roster().map((s) => (s.id === DANA ? { ...s, counter_pin_set: true } : s)) })
+    const el = await openStaffTab()
+    rowOf(el, 'Dana Ramirez').querySelector<HTMLButtonElement>('[data-testid="staff-pin-clear"]')!.click()
+    await flush()
+    await new Promise((r) => setTimeout(r, 0))
+    const confirm = document.querySelector('gable-app-dialog')?.querySelector<HTMLButtonElement>('[data-dialog-confirm]')
+    if (!confirm) throw new Error('no Clear PIN confirm button')
+    confirm.click()
+    await flush()
+    await update(el, {})
+    expect(callsTo('DELETE', `/api/v1/admin/staff/${DANA}/counter-pin`)).toHaveLength(1)
+    expect(rowOf(el, 'Dana Ramirez').querySelector('[data-testid="staff-pin-none"]')).not.toBeNull()
+
+    serve({ staff: roster().map((s) => (s.id === YUKI ? { ...s, counter_pin_set: true, locked: true } : s)) })
+    const el2 = await openStaffTab()
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-locked"]')).not.toBeNull()
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-clear"]')).not.toBeNull()
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-set-new"]')).not.toBeNull()
+    rowOf(el2, 'Yuki Tan').querySelector<HTMLButtonElement>('[data-testid="staff-pin-unlock"]')!.click()
+    await flush()
+    await update(el2, {})
+    expect(callsTo('POST', `/api/v1/admin/staff/${YUKI}/counter-pin/unlock`)).toHaveLength(1)
+    expect(rowOf(el2, 'Yuki Tan').querySelector('[data-testid="staff-pin-set"]')).not.toBeNull()
   })
 })

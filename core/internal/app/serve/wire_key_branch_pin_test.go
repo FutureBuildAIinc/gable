@@ -286,8 +286,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		}
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, f.taxExempt, f.custB); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
@@ -1398,8 +1398,8 @@ func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UU
 func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, id, customer); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, id, customer); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 }
@@ -1452,7 +1452,7 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 	// Tax exemptions: the create's body names the customer, the delete's row
 	// belongs to one.
 	f.refuseForeign(t, "POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil)
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-B"}`, B), nil)
 	if n := f.exemptionsOf(t, f.custB); n != 1 {
 		t.Errorf("refused exemption create wrote the foreign customer's rows: %d", n)
 	}
@@ -1460,14 +1460,20 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 	f.seedTaxExempt(t, exemptA, f.custID)
 	f.allow(t, "bound", "DELETE", "/api/v1/tax/exemptions/"+exemptA.String(), "", nil, http.StatusNoContent)
 	f.refuseForeign(t, "DELETE", "/api/v1/tax/exemptions/"+f.taxExempt.String(), "", nil)
+	// the end route resolves the same row the delete does (CP-10): a bound
+	// key ends its own branch's certificate and never a foreign one's
+	endA := uuid.New()
+	f.seedTaxExempt(t, endA, f.custID)
+	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions/"+endA.String()+"/end", "", nil, http.StatusNoContent)
+	f.refuseForeign(t, "POST", "/api/v1/tax/exemptions/"+f.taxExempt.String()+"/end", "", nil)
 	if n := f.exemptionsOf(t, f.custB); n != 1 {
 		t.Errorf("refused exemption delete changed the foreign customer's rows: %d", n)
 	}
 	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, A), nil, http.StatusCreated)
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-A"}`, A), nil, http.StatusCreated)
 	for _, who := range []string{"unbound", "user"} {
 		f.allow(t, who, "POST", "/api/v1/tax/exemptions",
-			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B), nil, http.StatusCreated)
+			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT-B"}`, B), nil, http.StatusCreated)
 	}
 	for _, who := range []string{"unbound", "user"} {
 		id := uuid.New()

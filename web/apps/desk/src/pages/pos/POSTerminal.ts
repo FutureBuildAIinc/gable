@@ -14,7 +14,7 @@ import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -28,6 +28,7 @@ import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
 import '../../components/ui/gable-date-field';
+import './StepUpDialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
@@ -80,9 +81,19 @@ export class POSTerminal extends LitElement {
   @state() private _idChecked = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
+
+  // The manager step up waiting on the PIN dialog: the reason and cap are kept
+  // here, the token completes them (CP-04).
+  @state() private _stepUp: { kind: 'account' | 'check'; reason: string; capCents: number } | null = null;
   // The words a check over the limit was refused in (the server's, or the
   // screen's from the customer's own limit), with Ask a manager beside them.
   @state() private _checkOverWords: string | null = null;
+  // The dealer's check ID rule (never by default; a read failure reads as
+  // never: the server holds the rule itself at the completion).
+  @state() private _idRule: CheckIDRule | null = null;
+  // The dealer's database wide check limit from the same read, so a walk-in
+  // (no standing of its own) is warned at entry, not first at the server.
+  @state() private _dealerCheckLimitCents: number | null = null;
 
   // The linear panels: the sale's current step and the one panel open (or none).
   @state() private _step: PanelKey = 'customer';
@@ -180,6 +191,19 @@ export class POSTerminal extends LitElement {
     document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
+    void this._loadIDRule();
+  }
+
+  /** Reads the dealer's check ID rule and check limit; a read failure leaves them off (the server still holds both). */
+  private async _loadIDRule() {
+    try {
+      const s = await posService.settings();
+      this._idRule = s.rules.check_id_required;
+      this._dealerCheckLimitCents = s.rules.check_limit_cents;
+    } catch {
+      this._idRule = null;
+      this._dealerCheckLimitCents = null;
+    }
   }
 
   /**
@@ -447,6 +471,10 @@ export class POSTerminal extends LitElement {
 
   private _scheduleStanding() {
     if (this._standingTimer) clearTimeout(this._standingTimer);
+    if (this._standing === null) {
+      void this._syncStanding();
+      return;
+    }
     this._standingTimer = setTimeout(() => { void this._syncStanding(); }, 150);
   }
 
@@ -491,9 +519,11 @@ export class POSTerminal extends LitElement {
 
   /**
    * A manager approves this one sale (an account sale the verdict blocks, or a
-   * check over the limit), with a reason and a cap. The server wants a person
-   * with the manager role other than this sale's own cashier, so the manager
-   * signs in at this terminal; a refusal is said in the server's words.
+   * check over the limit), with a reason and a cap. A manager signed in here
+   * with the role approves as themselves (the claims path); anyone else asks
+   * the manager to step up with their own counter PIN (CP-04), and the
+   * approval the PIN mints is spent by this one sale's override, bound to the
+   * kind and the cap the manager saw.
    */
   private async _askManager(kind: 'account' | 'check', capCents: number) {
     const sale = this._sale;
@@ -503,20 +533,59 @@ export class POSTerminal extends LitElement {
       label: 'Reason', required: true, confirmLabel: 'Approve',
     });
     if (!reason) return;
+    this._error = null;
+    const roles = authCustody.roles ?? [];
+    const sub = authCustody.subject;
+    if (kind === 'account' || kind === 'check') {
+      if ((roles.includes('admin') || roles.includes('owner')) && (!sub || sale.cashier_id !== sub)) {
+        await this._recordOverride(sale, kind, reason, capCents);
+        return;
+      }
+    }
+    this._stepUp = { kind, reason, capCents };
+  }
+
+  /** Records the override, with a manager's approval token when the PIN minted one. */
+  private async _recordOverride(sale: Sale, kind: 'account' | 'check', reason: string, capCents: number, approvalToken?: string, managerName?: string) {
     try {
       this._error = null;
-      const approval = await posService.approveOverride(sale.id, kind, reason, capCents);
+      const approval = await posService.approveOverride(sale.id, kind, reason, capCents, approvalToken);
       if (kind === 'check') {
         this._checkApprovedCents = approval.cap_cents;
         this._checkOverWords = null;
       }
       await this._syncStanding();
-      this._success = 'Approved for this sale';
+      this._success = managerName ? `Approved by ${managerName}` : 'Approved for this sale';
       if (this._errorTimer) clearTimeout(this._errorTimer);
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
     } catch (err: unknown) {
       this._error = apiErrorMessage(err, 'Failed to record the approval');
     }
+  }
+
+  /** The PIN dialog's approval completes the override the cashier asked for. */
+  private async _onStepUpApproved(detail: { token: string; managerName: string }) {
+    const ask = this._stepUp;
+    const sale = this._sale;
+    this._stepUp = null;
+    if (!ask || !sale) return;
+    await this._recordOverride(sale, ask.kind, ask.reason, ask.capCents, detail.token, detail.managerName);
+  }
+
+  /** The step up dialog, over everything, whatever panel is open. The
+   * manager sees the kind and the cap they are approving. */
+  private _renderStepUp() {
+    if (!this._stepUp || !this._sale) return nothing;
+    return html`
+      <gable-step-up-dialog act="override" .kind=${this._stepUp.kind} .amountCents=${this._stepUp.capCents}
+        target-id=${this._sale.id}
+        heading=${this._stepUp.kind === 'account' ? 'A manager approves this sale on account' : 'A manager approves this check'}
+        .detail=${this._stepUp.kind === 'account'
+          ? `Approve ${fmt(this._stepUp.capCents)} on account for this sale`
+          : `Approve a check of ${fmt(this._stepUp.capCents)} for this sale`}
+        @step-up-cancel=${() => { this._stepUp = null; }}
+        @step-up-approved=${(e: CustomEvent<{ token: string; managerName: string }>) => void this._onStepUpApproved(e.detail)}></gable-step-up-dialog>
+    `;
   }
 
   /* ---- The sale's customer ---- */
@@ -555,6 +624,7 @@ export class POSTerminal extends LitElement {
       // the job; Next: Payment moves on once there is a line.
       this._step = 'customer';
       this._open = 'customer';
+      await this._syncStanding();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
@@ -582,7 +652,7 @@ export class POSTerminal extends LitElement {
     this._step = key;
   }
 
-  /** Back to a walk-in sale (only before the first line). */
+  /** Back to a walk-in sale (the tax follows the account now standing on it). */
   private async _clearCustomer() {
     if (!this._sale || this._sale.status !== 'open') return;
     try {
@@ -690,6 +760,9 @@ export class POSTerminal extends LitElement {
       tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
     if (c) {
       const st = standingOf(c);
+      // a hold record the AR core placed holds the account: the standing line
+      // says so in its own words, the same blocked treatment the zero limit gets
+      const held = holdStanding(this._standing);
       return html`
         <div id="pos-customer" class="rounded-lg bg-deep-space p-3" data-testid="pos-customer">
           <div class="flex items-start justify-between gap-2">
@@ -699,12 +772,12 @@ export class POSTerminal extends LitElement {
             </div>
             <button
               @click=${() => this._clearCustomer()}
-              ?disabled=${hasLines || finished || this._loading}
-              title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              ?disabled=${finished || this._loading}
+              title=${finished ? 'Start a new sale to change the customer' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Walk-in sale</button>
           </div>
-          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
+          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(held !== null ? held.tone : st.tone)}" data-testid="pos-customer-standing">${held !== null ? held.text : st.text}</div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}
@@ -752,7 +825,7 @@ export class POSTerminal extends LitElement {
           placeholder="Find by name or account number"
           aria-label="Find a customer by name or account number"
           .value=${this._custQuery}
-          ?disabled=${hasLines || this._till === null}
+          ?disabled=${this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
         ${this._till === null ? nothing : html`<div class="mt-1 text-xs text-slate-400">Name the customer, then add products</div>`}
@@ -964,7 +1037,56 @@ export class POSTerminal extends LitElement {
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
-    return payPlan(sale.total_cents, this._pendingTenders, this._entry).ok;
+    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry);
+    return plan.ok && this._idHoldWords(plan.tenders) === null;
+  }
+
+  /** The sale's checks in total: the added check tenders plus the entry. */
+  private _checksTotalCents(tenders: TenderIn[]): number {
+    return tenders.filter((t) => t.method === 'check').reduce((n, t) => n + t.amount_cents, 0);
+  }
+
+  /**
+   * Why the dealer's ID rule holds the plan's checks (why, or null when it
+   * does not): the rule reads the sale's checks in total, and when it bites,
+   * every check tender must record the ID was checked, so a split cannot
+   * avoid it. A manager's approval covers the limit, never the ID.
+   */
+  private _idHoldWords(tenders: TenderIn[]): string | null {
+    const total = this._checksTotalCents(tenders);
+    for (const t of tenders) {
+      if (t.method === 'check' && !t.id_checked) {
+        const why = idRequiredWords(this._idRule, total);
+        if (why) return why;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * One ID check covers the sale's checks: when the rule bites on the checks'
+   * total and the clerk ticks the ID with its kind on the entry, the checked
+   * ID stamps onto every added check that has none, so a split added before
+   * the total passed the figure is not trapped with no way to record the ID.
+   */
+  private _stampEntryIDOntoAddedChecks(entry: TenderIn) {
+    if (!entry.id_checked || entry.id_type === undefined) return;
+    const total = this._checksTotalCents([...this._pendingTenders, entry]);
+    if (!idRequired(this._idRule, total)) return;
+    this._pendingTenders = this._pendingTenders.map((t) =>
+      t.method === 'check' && !t.id_checked ? { ...t, id_checked: true, id_type: entry.id_type } : t);
+  }
+
+  /**
+   * An added check's ID state in words, when the rule reaches it: the ID
+   * checked once, with its kind, or not checked yet. Other tenders, and checks
+   * while the rule does not bite, say nothing.
+   */
+  private _addedCheckIDWords(t: TenderIn, entry: TenderIn | null, saleTotal: number): string {
+    if (t.method !== 'check') return '';
+    if (t.id_checked) return `ID checked: ${ID_TYPES.find((o) => o.value === t.id_type)?.label ?? ''}`;
+    const planTenders = [...this._pendingTenders, ...(entry !== null && this._tenderedSoFar < saleTotal ? [entry] : [])];
+    return this._idHoldWords(planTenders) !== null ? 'ID not checked yet' : '';
   }
 
   /** The same facts the controls disable on, so a dimmed key means a disabled control. */
@@ -978,8 +1100,8 @@ export class POSTerminal extends LitElement {
       case 'add':
         return till && open;
       case 'customer':
-        // the lookup is off once the sale has a line: the customer is named first
-        return till && open && this._customer === null && !hasLines;
+        // the account is named before or after the lines (CP-10: the tax follows it)
+        return till && open && this._customer === null;
       case 'quantity':
         return open && hasLines;
       case 'next':
@@ -1212,12 +1334,20 @@ export class POSTerminal extends LitElement {
       if (why) return why;
     }
     if (entry.method === 'check') {
-      const overLimit = checkRefusal(this._standing, null, entry.amount_cents);
+      const overLimit = checkRefusal(this._standing, this._dealerCheckLimitCents, entry.amount_cents);
       const approved = this._checkApprovedCents !== null && entry.amount_cents <= this._checkApprovedCents;
       if (overLimit && !approved) {
         // said beside Ask a manager as well as in the band
         this._checkOverWords = overLimit;
         return overLimit;
+      }
+      // the dealer's ID rule holds the check until the ID is checked; it
+      // reads the sale's checks in total (the added ones plus this entry), so
+      // a split cannot slip under the figure; a manager's check approval
+      // covers the limit, never the ID
+      if (!entry.id_checked) {
+        const why = idRequiredWords(this._idRule, this._checksTotalCents([...this._pendingTenders, entry]));
+        if (why) return why;
       }
     }
     if (entry.method === 'store_credit') {
@@ -1267,11 +1397,18 @@ export class POSTerminal extends LitElement {
       this._error = 'Invalid tender amount';
       return;
     }
+    if (this._customer !== null && this._standing === null && (entry.method === 'check' || entry.method === 'store_credit')) {
+      void this._syncStanding().then(() => {
+        if (this._standing !== null) this._addPendingTender();
+      });
+      return;
+    }
     const refusal = this._entryRefusal(entry);
     if (refusal) {
       this._error = refusal;
       return;
     }
+    this._stampEntryIDOntoAddedChecks(entry);
     this._pendingTenders = [...this._pendingTenders, entry];
     this._tenderAmount = '';
     this._checkRef = '';
@@ -1296,9 +1433,16 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    if (entry !== null) this._stampEntryIDOntoAddedChecks(entry);
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
+      return;
+    }
+    // the ID rule holds added checks the same way it holds the entry
+    const idHold = this._idHoldWords(plan.tenders);
+    if (idHold) {
+      this._error = idHold;
       return;
     }
     // Every account tender on its way out is rechecked here, whether it was just
@@ -1758,7 +1902,8 @@ export class POSTerminal extends LitElement {
 
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
-    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
+    const by = m.kind === 'pickup' && m.taken_by ? ` by ${m.taken_by}` : '';
+    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded${by}`;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }
@@ -2225,10 +2370,13 @@ export class POSTerminal extends LitElement {
           <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
           ${this._pendingTenders.length > 0 ? html`
             <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
-              ${this._pendingTenders.map((t) => html`
+              ${this._pendingTenders.map((t) => {
+                const idWords = this._addedCheckIDWords(t, entry, total);
+                return html`
                 <div class="flex justify-between py-0.5 text-sm text-slate-200">
-                  <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
-                </div>`)}
+                  <span class="capitalize">${t.method}${idWords !== '' ? html` <span class="text-xs ${t.id_checked ? 'text-gable-green' : 'text-amber-400'}" data-testid="pos-added-check-id">${idWords}</span>` : nothing}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
+                </div>`;
+              })}
               <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
                 <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
               </div>
@@ -2304,7 +2452,11 @@ export class POSTerminal extends LitElement {
   /** The check number, the ID checked and its kind (never an ID number), and a check over the limit with its way forward. */
   private _renderCheckExtras() {
     const isCheck = this._tenderMethod === 'check';
-    const limit = this._standing?.check_limit_cents ?? null;
+    const limit = this._standing?.check_limit_cents ?? this._dealerCheckLimitCents;
+    const amount = this._entry?.amount_cents ?? this._owedCents;
+    // the rule reads the sale's checks in total: the added ones plus what is typed
+    const checksTotal = isCheck ? this._checksTotalCents([...this._pendingTenders, { method: 'check', amount_cents: amount }]) : 0;
+    const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, checksTotal) : null;
     return html`
       <div class="mt-3 rounded-lg border border-white/10 p-3" data-testid="pos-tender-extras">
         ${isCheck ? html`
@@ -2313,16 +2465,20 @@ export class POSTerminal extends LitElement {
             @input=${(e: Event) => { this._checkRef = (e.target as HTMLInputElement).value; }}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-2 py-2 font-mono text-sm text-white outline-none focus:border-gable-green" />
           ${limit !== null ? html`<p class="mt-1 text-xs text-slate-400" data-testid="pos-check-limit">Check limit ${money(limit)}</p>` : nothing}` : nothing}
+        ${idNeeded !== null ? html`
+          <div class="${isCheck ? 'mt-3 ' : ''}rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-300" role="status" data-testid="pos-check-id-needed">
+            <p>${idNeeded}</p>
+          </div>` : nothing}
         <label class="${isCheck ? 'mt-3 ' : ''}flex items-center gap-2 text-sm text-slate-200" for="pos-id-checked">
           <input id="pos-id-checked" data-testid="pos-id-checked" type="checkbox" .checked=${this._idChecked}
-            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; }} />
+            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }} />
           ID checked
         </label>
         ${this._idChecked ? html`
           <div class="mt-2">
             <gable-select id="pos-id-type" data-testid="pos-id-type" .value=${this._idType}
               .options=${[{ value: '', label: 'Kind of ID' }, ...ID_TYPES]}
-              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; }}
+              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }}
             ></gable-select>
             <p class="mt-1 text-xs text-slate-400">Only the kind of ID is kept, never its number</p>
           </div>` : nothing}
@@ -2379,10 +2535,12 @@ export class POSTerminal extends LitElement {
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
     const canPay = this._canPay;
+    const idHold = plan.ok ? this._idHoldWords(plan.tenders) : null;
     const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
+      : plan.ok && idHold !== null ? "Check the customer's ID"
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
       : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`
@@ -2415,8 +2573,11 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
           <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
+          ${sale?.tax_exemption ? html`
+          <div class="flex items-baseline justify-between gap-2 py-1 text-slate-400"><dt>Tax</dt>
+            <dd class="text-right text-xs" data-testid="summary-tax-exempt">Tax exempt${sale.tax_exemption.certificate_number ? html` &middot; ${sale.tax_exemption.certificate_number}` : nothing}${sale.tax_exemption.expiry_day ? html` &middot; expires ${sale.tax_exemption.expiry_day}` : nothing}</dd></div>` : html`
           <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
-            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
+            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>`}
           <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-white" data-testid="summary-total">${fmt(total)}</dd></div>
           ${completed ? html`
@@ -2616,6 +2777,7 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderStepUp()}
         ${this._renderXReportModal()}
         ${this._renderZReportsModal()}
         ${this._renderReturnSearchModal()}

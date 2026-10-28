@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -230,7 +231,11 @@ type Repository interface {
 	// SetSaleAccount names the customer, currency, purchase order and job of
 	// an open sale and moves its revision.
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
-	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// CustomerExemption reads the certificate that exempts a sale on day
+	// (the branch's business day) through tax.ExemptionCovering: the one
+	// window rule the counter's totals, its completion and the order path
+	// share. Nil when no certificate exempts that day.
+	CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	// The counter's account sale reads and writes (migration 126): the open
 	// store credit, the database wide check limit, the buyer roster and the
@@ -241,6 +246,14 @@ type Repository interface {
 	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	CheckIDRequiredOverCents(ctx context.Context) (*int64, error)
+	// The settings write half (CP-04): the system_settings rows and the
+	// revision anchor, inside the caller's transaction.
+	writeSetting(ctx context.Context, key, value string) error
+	deleteSetting(ctx context.Context, key string) error
+	readPosSettingsRevision(ctx context.Context) (int64, error)
+	lockPosSettingsRevision(ctx context.Context) (int64, error)
+	bumpPosSettingsRevision(ctx context.Context, to int64) error
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
 	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
@@ -261,6 +274,17 @@ type Repository interface {
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
+
+	// The manager step up (CP-04 slice 3)
+	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	ListStepUpManagers(ctx context.Context, roles []string) ([]StepUpManagerSummary, error)
+	RecordStepUpFailure(ctx context.Context, id uuid.UUID, max int) error
+	ResetStepUpFailuresUnlocked(ctx context.Context, id uuid.UUID) (bool, error)
+	InsertStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string, managerID uuid.UUID, managerName string, expires time.Time) error
+	ConsumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string) (StepUpManagerRef, bool, error)
 }
 
 // CustomerFacts is what the counter reads about the sale's customer: the
@@ -280,6 +304,9 @@ type CustomerFacts struct {
 	// CheckLimitCents is the customer's own check limit; null defers to the
 	// database wide setting.
 	CheckLimitCents *int64
+	// Hold is the account's standing hold record (credit_holds, the meaning
+	// the AR core gives it), nil when the account holds none.
+	Hold *standingHold
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -2067,14 +2094,26 @@ func (r *PostgresRepository) WalkInCustomer(ctx context.Context) (uuid.UUID, str
 func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error) {
 	var f CustomerFacts
 	var limit *int64
+	var holdStatus, holdReason *string
+	var holdUntil *time.Time
+	var holdMax *int64
+	// the standing hold record rides the same read, with the meaning the AR
+	// core gives it (the ACTIVE and OVERRIDDEN statuses, the override window
+	// and its cap), so the verdict the counter states and enforces is a fact
+	// of the same row under the same lock
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
 			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
 			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
-			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END
+			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
+			h.status, h.reason, h.override_until, h.max_order_cents
 		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
+		LEFT JOIN LATERAL (
+			SELECT status, reason, override_until, max_order_cents FROM credit_holds
+			WHERE customer_id = c.id AND status IN ('ACTIVE', 'OVERRIDDEN')
+			ORDER BY placed_at DESC LIMIT 1) h ON TRUE
 		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
-		&f.NamedBuyerRequired, &f.CheckLimitCents)
+		&f.NamedBuyerRequired, &f.CheckLimitCents, &holdStatus, &holdReason, &holdUntil, &holdMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -2082,13 +2121,18 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 		return f, err
 	}
 	f.CreditLimitCents = limit
+	if holdReason != nil {
+		var st string
+		if holdStatus != nil {
+			st = *holdStatus
+		}
+		f.Hold = &standingHold{status: st, reason: *holdReason, overrideUntil: holdUntil, maxOrderCents: holdMax}
+	}
 	return f, nil
 }
 
-func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	var exempt bool
-	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND is_active)`, customerID).Scan(&exempt)
-	return exempt, err
+func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	return tax.ExemptionCovering(ctx, r.ex(ctx), customerID, day)
 }
 
 func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error) {

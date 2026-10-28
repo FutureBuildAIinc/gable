@@ -25,6 +25,7 @@ const svc = vi.hoisted(() => ({
   recordMovement: vi.fn(),
   printReceipt: vi.fn(),
   emailReceipt: vi.fn(),
+  settings: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -2141,14 +2142,11 @@ describe('the counter hotkeys and their pinned legend', () => {
     expect(document.activeElement).toBe(q(el, 'catalog-search'));
     await key(el, 'q', { altKey: true });
     expect(document.activeElement).toBe(el.querySelector('[aria-label="Quantity of Item b"]'));
-    // the customer is named before the first line, so the lookup key is for an empty sale
+    // the account is named before or after the lines (CP-10), so the lookup
+    // key focuses the search either way
     await key(el, 'F3');
-    expect(document.activeElement).not.toBe(el.querySelector('#pos-customer-search'));
+    expect(document.activeElement).toBe(el.querySelector('#pos-customer-search'));
     el.remove();
-    const empty = await mount(sale({ lines: [] }));
-    await key(empty, 'F3');
-    expect(document.activeElement).toBe(empty.querySelector('#pos-customer-search'));
-    empty.remove();
   });
 
   it('never fires while a dialog of the app is open, and a bare letter is only typing', async () => {
@@ -2907,6 +2905,161 @@ describe('return a past sale', () => {
       lines: [{ line_id: 'a', quantity: '1', restock: false }],
     }));
     expect(el.textContent).toContain('Return RTN-000001 complete - $75.00 refunded cash');
+    el.remove();
+  });
+});
+
+describe('the dealer check ID rule at the counter', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const rule = (mode: 'never' | 'every_check' | 'over_amount', over_cents: number | null = null) =>
+    ({ revision: 2, rules: { check_limit_cents: null, check_id_required: { mode, over_cents } } });
+  const chooseCheck = async (el: POSTerminal) => {
+    q(el, 'tender-check').click();
+    await el.updateComplete;
+  };
+  const checkTheID = async (el: POSTerminal) => {
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).checked = true;
+    (el.querySelector('#pos-id-checked') as HTMLInputElement).dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    await chooseOption(el.querySelector('#pos-id-type') as HTMLElement & { value: string }, 'drivers_license');
+  };
+
+  it('asks for the ID before Pay on a check the rule covers, and pays once it is checked', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-pay').textContent).toContain("Check the customer's ID");
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
+      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+    el.remove();
+  });
+
+  it('carries the one ID check onto an added check once the split passes the figure', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // the first check, under the figure alone, is added with no ID asked
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    // the second check passes the figure together: the one ID stamps both
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID not checked yet');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect(q(el, 'pos-added-check-id').textContent).toContain('ID checked');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+      { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
+    ]);
+    el.remove();
+  });
+
+  it('holds the ID when two checks together pass the figure, each under it', async () => {
+    svc.settings.mockResolvedValue(rule('over_amount', 5000));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // a first check under the figure, with the ID, joins the split
+    (el as unknown as { _pendingTenders: { method: string; amount_cents: number; id_checked: boolean; id_type: string }[] })
+      ._pendingTenders = [{ method: 'check', amount_cents: 4325, id_checked: true, id_type: 'state_id' }];
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '43.25');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`Checks over $50.00 in total need the customer's ID`);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    await checkTheID(el);
+    expect(el.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('warns a walk-in at entry when the check is over the dealer wide limit the same read carries', async () => {
+    svc.settings.mockResolvedValue(
+      { revision: 2, rules: { check_limit_cents: 10000, check_id_required: { mode: 'never', over_cents: null } } });
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '150.00');
+    expect(q(el, 'pos-check-limit').textContent).toContain('Check limit $100.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    expect(q(el, 'pos-check-over').textContent).toContain('over the check limit');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('asks on every check when the rule is every check, and never when no rule is set', async () => {
+    svc.settings.mockResolvedValue(rule('every_check'));
+    const el = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    await chooseCheck(el);
+    await typeInto(el, '86.50');
+    expect(q(el, 'pos-check-id-needed').textContent)
+      .toContain(`This check needs the customer's ID`);
+    el.remove();
+
+    svc.settings.mockResolvedValue(rule('never'));
+    const el2 = await mount(sale());
+    await new Promise((r) => setTimeout(r, 0));
+    await el2.updateComplete;
+    q(el2, 'tender-check').click();
+    await el2.updateComplete;
+    await typeInto(el2, '86.50');
+    expect(el2.querySelector('[data-testid="pos-check-id-needed"]')).toBeNull();
+    expect((q(el2, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el2.remove();
+  });
+});
+
+describe('the summary when the attached customer is tax exempt', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('shows Tax exempt with the certificate number and its expiry in place of the tax figure', async () => {
+    const el = await mount(sale({ tax_cents: 0, total_cents: 8000,
+      tax_exemption: { certificate_number: 'CERT-88', expiry_day: '2027-01-31' } }));
+    const line = q(el, 'summary-tax-exempt');
+    expect(line).toBeTruthy();
+    expect(line.textContent).toContain('Tax exempt');
+    expect(line.textContent).toContain('CERT-88');
+    expect(line.textContent).toContain('expires 2027-01-31');
+    expect(q(el, 'summary-tax')).toBeNull();
+    expect(q(el, 'summary-total')?.textContent).toContain('80.00');
+    el.remove();
+  });
+
+  it('shows the tax as normal when the certificate has expired (the sale carries no exemption)', async () => {
+    const el = await mount(sale({ tax_cents: 650, total_cents: 8650, tax_exemption: null }));
+    expect(q(el, 'summary-tax-exempt')).toBeNull();
+    expect(q(el, 'summary-tax')?.textContent).toContain('6.50');
     el.remove();
   });
 });

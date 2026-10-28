@@ -5,9 +5,11 @@ package pos
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -72,7 +74,7 @@ func writeKeysetList[T any](w http.ResponseWriter, r *http.Request, items []T, m
 // CreateMovement is POST /pos/till/{id}/movements.
 func (h *Handler) CreateMovement(w http.ResponseWriter, r *http.Request) {
 	// a movement is a person's act, as the open and the close are
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	id, ok := pathUUID(w, r, "id")
@@ -84,12 +86,12 @@ func (h *Handler) CreateMovement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	in, err := req.parse()
+	in, token, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	m, confirmed, err := h.service.RecordMovement(r.Context(), id, in, actorFrom(r))
+	m, confirmed, err := h.service.RecordMovement(r.Context(), id, in, h.actorFrom(r), token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -132,10 +134,12 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 }
 
 // SignOffTill is POST /pos/till/{id}/signoff: a manager's release of a
-// counted drawer whose variance passed the threshold.
+// counted drawer whose variance passed the threshold, either by a manager
+// signed in themselves or by a manager's step up approval token spent in
+// the release.
 func (h *Handler) SignOffTill(w http.ResponseWriter, r *http.Request) {
 	// a sign off is a person's act, never a machine key's
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	id, ok := pathUUID(w, r, "id")
@@ -151,7 +155,20 @@ func (h *Handler) SignOffTill(w http.ResponseWriter, r *http.Request) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	report, err := h.service.SignOffTill(r.Context(), id, reason, actorFrom(r))
+	token := ""
+	if req.ApprovalToken != nil {
+		token = strings.TrimSpace(*req.ApprovalToken)
+	}
+	if token == "" {
+		// the claims path keeps the resolve mount's own role rule: finance
+		// and owner; a token's PIN already spoke for the manager
+		if claims := middleware.ClaimsFromContext(r.Context()); claims != nil &&
+			!middleware.ClaimsHaveAnyRole(claims, "finance", "owner") {
+			httpx.WriteError(w, r, httpx.Forbidden("a sign off is made by a manager, or with a manager's approval at the counter"))
+			return
+		}
+	}
+	report, err := h.service.SignOffTill(r.Context(), id, reason, h.actorFrom(r), token)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -216,7 +233,7 @@ func (h *Handler) GetVariancePolicy(w http.ResponseWriter, r *http.Request) {
 
 // PutVariancePolicy is PUT /pos/till/policy: a branch's own threshold.
 func (h *Handler) PutVariancePolicy(w http.ResponseWriter, r *http.Request) {
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	var req variancePolicyRequest
@@ -229,7 +246,7 @@ func (h *Handler) PutVariancePolicy(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	p, err := h.service.SetVariancePolicy(r.Context(), branch, cents, actorFrom(r))
+	p, err := h.service.SetVariancePolicy(r.Context(), branch, cents, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -262,7 +279,7 @@ func (h *Handler) GetBranchDay(w http.ResponseWriter, r *http.Request) {
 // CloseBranchDay is POST /pos/end-of-day/close.
 func (h *Handler) CloseBranchDay(w http.ResponseWriter, r *http.Request) {
 	// the close is a person's act, as the sign off is
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	var req dayCloseRequest
@@ -275,7 +292,7 @@ func (h *Handler) CloseBranchDay(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	day, err := h.service.CloseBranchDay(r.Context(), branch, date, slip, bank, actorFrom(r))
+	day, err := h.service.CloseBranchDay(r.Context(), branch, date, slip, bank, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -316,7 +333,7 @@ func (h *Handler) ListDepositCandidates(w http.ResponseWriter, r *http.Request) 
 
 // MatchDeposit is POST /pos/end-of-day/{id}/deposit-match.
 func (h *Handler) MatchDeposit(w http.ResponseWriter, r *http.Request) {
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	id, ok := pathUUID(w, r, "id")
@@ -333,7 +350,7 @@ func (h *Handler) MatchDeposit(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	c, err := h.service.MatchDeposit(r.Context(), id, line, actorFrom(r))
+	c, err := h.service.MatchDeposit(r.Context(), id, line, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -344,7 +361,7 @@ func (h *Handler) MatchDeposit(w http.ResponseWriter, r *http.Request) {
 // ReopenBranchDay is POST /pos/end-of-day/{id}/reopen.
 func (h *Handler) ReopenBranchDay(w http.ResponseWriter, r *http.Request) {
 	// a reopen is a person's act, as the close is
-	if _, ok := cashierOf(w, r); !ok {
+	if _, ok := h.cashierOf(w, r); !ok {
 		return
 	}
 	id, ok := pathUUID(w, r, "id")
@@ -360,7 +377,7 @@ func (h *Handler) ReopenBranchDay(w http.ResponseWriter, r *http.Request) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	day, err := h.service.ReopenBranchDay(r.Context(), id, reason, actorFrom(r))
+	day, err := h.service.ReopenBranchDay(r.Context(), id, reason, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

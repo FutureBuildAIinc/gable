@@ -100,6 +100,8 @@ export interface Sale {
     exchange_return_id: string | null;
     /** For a completed sale that has returns: sale line id -> quantity already returned. */
     returned_quantities?: Record<string, string>;
+    /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
+    tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -126,7 +128,7 @@ export interface CounterCustomer {
 
 // --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
 
-export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'account_hold' | 'manager_override';
 
 export interface WayForward {
     kind: 'pay_down' | 'manager_override' | 'switch_tender';
@@ -167,6 +169,24 @@ export interface CounterStanding {
     check_limit_cents: number | null;
     payment_options: TenderMethod[];
     on_account: OnAccountVerdict;
+}
+
+/** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
+export interface PosRules {
+    check_limit_cents: number | null;
+    check_id_required: CheckIDRule;
+}
+
+/** The counter settings resource: its rules and the revision a write rides. */
+export interface PosSettings {
+    revision: number;
+    rules: PosRules;
 }
 
 export interface SaleSummary {
@@ -367,6 +387,23 @@ export interface MovementRequest {
     reason_code?: MovementReason;
     note?: string;
     taken_by?: string;
+    /** A manager's step up approval: the manager it names is the taker. */
+    approval_token?: string;
+}
+
+/** A manager the step up picker offers: active, a PIN set, a role the act admits. */
+export interface StepUpManager {
+    id: string;
+    full_name: string;
+    staff_no: string;
+    role: string;
+}
+
+/** The single use approval a verified step up mints; one act spends it. */
+export interface StepUpApproval {
+    token: string;
+    manager_name: string;
+    expires_at: string;
 }
 
 export interface DayFigures {
