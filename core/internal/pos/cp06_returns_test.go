@@ -225,6 +225,34 @@ func TestCP06_SearchDateBoundByBranchZone(t *testing.T) {
 	}
 }
 
+// RULE (CP-06 item 3, money checklist line 11): the plain list's own day,
+// when the caller names no date and no search, is the branch's business day
+// computed in the branch's own zone, never the server's clock. The branch
+// here sits 25 hours behind the server, so a sale made now is on the branch's
+// day while the server's date has already moved on: the plain list still
+// finds it.
+func TestCP06_PlainListUsesTheBranchDay(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
+	f := newFixture(t, db)
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	body := f.completeSale(saleID, f.cashFor("1"))
+	if body.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", body.status, body.raw)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+		t.Fatalf("sale status = %q, want completed", got)
+	}
+
+	if items := f.listSales(t, "register_id="+f.register); len(items) != 1 {
+		t.Fatalf("the plain list = %d items, want the branch's own sale of today", len(items))
+	}
+}
+
 // RULE (CP-06 item 5, money checklist line 15): the claims list carries the
 // branch wall on the claim's sale, so a finance caller scoped to one branch
 // never sees another branch's open claim, and the caller scoped to that
