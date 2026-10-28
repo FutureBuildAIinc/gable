@@ -3,8 +3,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-    chargeRefusal, money, standingOf,
-    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal,
+    chargeRefusal, money, standingOf, holdStanding,
+    verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal, storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords,
 } from './standing';
 import type { CounterCustomer, CounterStanding, WayForward } from '../../types/pos';
 
@@ -13,6 +13,7 @@ const base: CounterCustomer = {
     account_number: 'A-100',
     name: 'Smith Builders',
     po_required: false,
+    job_required: false,
     credit_limit_cents: 500000,
     open_receivable_cents: 120050,
     available_credit_cents: 379950,
@@ -63,6 +64,15 @@ describe('chargeRefusal', () => {
         const c = { ...base, po_required: true };
         expect(chargeRefusal(c, 1000, '  ')).toMatch(/purchase order/);
         expect(chargeRefusal(c, 1000, 'PO-9')).toBeNull();
+    });
+    it('asks for the job the account requires, and says when none is on file', () => {
+        const c = { ...base, job_required: true };
+        const withJob = { ...c, jobs: [{ id: 'j1', name: 'Ridge Build' }] };
+        expect(chargeRefusal(withJob, 1000, '')).toMatch(/requires a job on every charge sale/);
+        expect(chargeRefusal(withJob, 1000, '', false, 'j1')).toBeNull();
+        expect(chargeRefusal(c, 1000, '')).toMatch(/none on file/);
+        // a job is never asked of a walk-in style account that does not require one
+        expect(chargeRefusal(base, 1000, '', false, '')).toBeNull();
     });
     it('offers the charge to an account with no limit', () => {
         const c = { ...base, credit_limit_cents: null, available_credit_cents: null, standing: 'no_limit' as const };
@@ -174,5 +184,73 @@ describe('check limits, store credit and the tenders offered', () => {
         expect(chargeRefusal(over, 100, 'PO-1', true)).toBeNull();
         expect(chargeRefusal(over, 100, '', true)).toMatch(/purchase order/);
         expect(chargeRefusal(over, 100, 'PO-1')).toMatch(/Over the credit limit/);
+    });
+});
+
+describe('the dealer check ID rule, as the counter reads it', () => {
+    const never = { mode: 'never' as const, over_cents: null };
+    const every = { mode: 'every_check' as const, over_cents: null };
+    const over50 = { mode: 'over_amount' as const, over_cents: 5000 };
+
+    it('never asks when no rule is set or the rule is never', () => {
+        expect(idRequired(null, 100000)).toBe(false);
+        expect(idRequired(never, 100000)).toBe(false);
+        expect(idRequiredWords(null, 100000)).toBeNull();
+    });
+
+    it('asks on every check when the rule is every check', () => {
+        expect(idRequired(every, 1)).toBe(true);
+        expect(idRequiredWords(every, 1))
+            .toBe(`This check needs the customer's ID: check it and pick the ID type`);
+    });
+
+    it('asks only on checks over the figure, not at it', () => {
+        expect(idRequired(over50, 5000)).toBe(false);
+        expect(idRequired(over50, 5001)).toBe(true);
+        expect(idRequiredWords(over50, 6000))
+            .toBe(`Checks over $50.00 in total need the customer's ID: check it and pick the ID type`);
+    });
+});
+
+describe('an account held by a credit hold record', () => {
+    const holdWays = [way('pay_down', false, { message: 'Paying the balance does not lift a hold; accounts receivable releases it.' }), way('manager_override', true), way('switch_tender', true)];
+    const heldRecord: CounterStanding = {
+        ...allowed,
+        on_hold: true,
+        payment_options: ['cash', 'check', 'card'],
+        on_account: {
+            verdict: 'blocked', reason: 'account_hold', over_cents: null,
+            message: 'This account is on credit hold: past due 60 days. Nothing can be put on the account.',
+            ways_forward: holdWays,
+        },
+    };
+    it('states the hold in its own words on the standing line, the same blocked treatment the zero limit gets', () => {
+        expect(holdStanding(heldRecord)).toEqual({ tone: 'stop', text: 'On credit hold' });
+    });
+    it('carries the hold’s reason in the verdict line, and the ways forward never offer a pay down', () => {
+        expect(verdictLine(heldRecord)).toEqual({ tone: 'stop', text: heldRecord.on_account.message });
+        expect(waysForward(heldRecord).map((w) => w.kind)).toEqual(['manager_override', 'switch_tender']);
+        expect(holdWays[0].message).toMatch(/accounts receivable releases it/);
+    });
+    it('is not a held record when the verdict is another reason, allowed, or nothing was read', () => {
+        expect(holdStanding(blocked)).toBeNull();
+        expect(holdStanding(allowed)).toBeNull();
+        expect(holdStanding(null)).toBeNull();
+    });
+    it('is not a held record when only the sale is over the cap of a live override window: the on_hold flag says the account is not held', () => {
+        const overCap: CounterStanding = {
+            ...heldRecord,
+            on_hold: false,
+            on_account: {
+                verdict: 'blocked', reason: 'account_hold', over_cents: null,
+                message: 'The hold on this account is overridden up to 5.99 USD a sale: this sale asks 6.00 USD.',
+                ways_forward: holdWays,
+            },
+        };
+        expect(holdStanding(overCap)).toBeNull();
+        expect(verdictLine(overCap).text).toContain('overridden up to');
+    });
+    it('offers no account tender while the hold stands', () => {
+        expect(heldRecord.payment_options).not.toContain('account');
     });
 });

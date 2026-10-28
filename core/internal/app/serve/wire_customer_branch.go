@@ -586,9 +586,9 @@ func userCustomerWall(db *database.DB, resolve func(ctx context.Context, r *http
 }
 
 // taxCustomerWall composes the tax role guard with the customer branch wall:
-// the exemption create's body names the customer, the delete's row belongs
-// to one, the read's path names one, and the preview's body names one when
-// it names any. Every route runs behind the branch middleware, so a user is
+// the exemption create's body names the customer, the delete's and the end's
+// row belongs to one, the read's path names one, and the preview's body
+// names one when it names any. Every route runs behind the branch middleware, so a user is
 // held to the customer's branches whether or not a header is sent
 // (userCustomerWall) and a bound key to its pin (the key wall).
 func taxCustomerWall(wall *branchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
@@ -606,6 +606,8 @@ func taxCustomerWall(wall *branchWall, db *database.DB, roles ...string) func(ht
 			case "POST /api/v1/tax/exemptions":
 				createHandler.ServeHTTP(w, r)
 			case "DELETE /api/v1/tax/exemptions/{id}":
+				removeHandler.ServeHTTP(w, r)
+			case "POST /api/v1/tax/exemptions/{id}/end":
 				removeHandler.ServeHTTP(w, r)
 			case "GET /api/v1/tax/exemptions/{customerID}":
 				readHandler.ServeHTTP(w, r)

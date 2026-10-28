@@ -15,10 +15,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens@example.com",
         "full_name": "Golden Staff",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 1,
         "role": "sales",
@@ -40,10 +42,12 @@
         "items": [
           {
             "active": true,
+            "counter_pin_set": false,
             "created_at": "<ts+0d>",
             "email": "goldens@example.com",
             "full_name": "Golden Staff",
             "id": "<id-1>",
+            "locked": false,
             "modules": [],
             "revision": 1,
             "role": "sales",
@@ -109,10 +113,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens@example.com",
         "full_name": "Golden Staff",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 1,
         "role": "sales",

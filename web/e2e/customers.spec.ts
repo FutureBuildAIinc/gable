@@ -163,7 +163,7 @@ test.describe('Customer flow on the new contract', () => {
       data: {
         account_number: current.account_number, name: elsewhereName, email: current.email, phone: current.phone,
         address: current.address, price_profile_id: current.price_profile_id, is_active: current.is_active, credit_limit_cents: null,
-        payment_terms_id: current.payment_terms_id, po_required: current.po_required,
+        payment_terms_id: current.payment_terms_id, po_required: current.po_required, job_required: current.job_required,
       },
       headers: { 'If-Match': '"2"' },
     });

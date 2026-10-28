@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -226,7 +227,11 @@ type Repository interface {
 	// SetSaleAccount names the customer, currency, purchase order and job of
 	// an open sale and moves its revision.
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
-	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// CustomerExemption reads the certificate that exempts a sale on day
+	// (the branch's business day) through tax.ExemptionCovering: the one
+	// window rule the counter's totals, its completion and the order path
+	// share. Nil when no certificate exempts that day.
+	CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	// The counter's account sale reads and writes (migration 126): the open
 	// store credit, the database wide check limit, the buyer roster and the
@@ -237,6 +242,14 @@ type Repository interface {
 	LockCreditMemo(ctx context.Context, memoID uuid.UUID) (openMemo, error)
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	DefaultCheckLimitCents(ctx context.Context) (*int64, error)
+	CheckIDRequiredOverCents(ctx context.Context) (*int64, error)
+	// The settings write half (CP-04): the system_settings rows and the
+	// revision anchor, inside the caller's transaction.
+	writeSetting(ctx context.Context, key, value string) error
+	deleteSetting(ctx context.Context, key string) error
+	readPosSettingsRevision(ctx context.Context) (int64, error)
+	lockPosSettingsRevision(ctx context.Context) (int64, error)
+	bumpPosSettingsRevision(ctx context.Context, to int64) error
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
 	// CounterAlerts are the customer's alerts that speak at the counter: the
@@ -260,6 +273,17 @@ type Repository interface {
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
+
+	// The manager step up (CP-04 slice 3)
+	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	ListStepUpManagers(ctx context.Context, roles []string) ([]StepUpManagerSummary, error)
+	RecordStepUpFailure(ctx context.Context, id uuid.UUID, max int) error
+	ResetStepUpFailuresUnlocked(ctx context.Context, id uuid.UUID) (bool, error)
+	InsertStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string, managerID uuid.UUID, managerName string, expires time.Time) error
+	ConsumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string) (StepUpManagerRef, bool, error)
 }
 
 // CustomerFacts is what the counter reads about the sale's customer: the
@@ -270,6 +294,10 @@ type CustomerFacts struct {
 	Name             string
 	Currency         string
 	PORequired       bool
+	JobRequired      bool
+	// JobsOnFile says the customer holds at least one open job, so the
+	// requirement can be met at the counter.
+	JobsOnFile bool
 	// TermsKind is the terms master's kind of the customer's payment terms
 	// (NET_DAYS, DAY_OF_MONTH, DUE_ON_RECEIPT), read from the master and never
 	// from a text.
@@ -279,6 +307,9 @@ type CustomerFacts struct {
 	// CheckLimitCents is the customer's own check limit; null defers to the
 	// database wide setting.
 	CheckLimitCents *int64
+	// Hold is the account's standing hold record (credit_holds, the meaning
+	// the AR core gives it), nil when the account holds none.
+	Hold *standingHold
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -2007,14 +2038,27 @@ func (r *PostgresRepository) WalkInCustomer(ctx context.Context) (uuid.UUID, str
 func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error) {
 	var f CustomerFacts
 	var limit *int64
+	var holdStatus, holdReason *string
+	var holdUntil *time.Time
+	var holdMax *int64
+	// the standing hold record rides the same read, with the meaning the AR
+	// core gives it (the ACTIVE and OVERRIDDEN statuses, the override window
+	// and its cap), so the verdict the counter states and enforces is a fact
+	// of the same row under the same lock
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT c.name, ROUND(c.credit_limit * 100)::bigint,
 			COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-			COALESCE(c.po_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
-			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END
+			COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE), COALESCE(pt.kind, 'NET_DAYS'), c.named_buyer_required,
+			CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
+			EXISTS(SELECT 1 FROM projects p WHERE p.customer_id = c.id AND lower(p.status) = 'active'),
+			h.status, h.reason, h.override_until, h.max_order_cents
 		FROM customers c LEFT JOIN payment_terms pt ON pt.id = c.payment_terms_id
-		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.TermsKind,
-		&f.NamedBuyerRequired, &f.CheckLimitCents)
+		LEFT JOIN LATERAL (
+			SELECT status, reason, override_until, max_order_cents FROM credit_holds
+			WHERE customer_id = c.id AND status IN ('ACTIVE', 'OVERRIDDEN')
+			ORDER BY placed_at DESC LIMIT 1) h ON TRUE
+		WHERE c.id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired, &f.JobRequired, &f.TermsKind,
+		&f.NamedBuyerRequired, &f.CheckLimitCents, &f.JobsOnFile, &holdStatus, &holdReason, &holdUntil, &holdMax)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -2022,13 +2066,18 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 		return f, err
 	}
 	f.CreditLimitCents = limit
+	if holdReason != nil {
+		var st string
+		if holdStatus != nil {
+			st = *holdStatus
+		}
+		f.Hold = &standingHold{status: st, reason: *holdReason, overrideUntil: holdUntil, maxOrderCents: holdMax}
+	}
 	return f, nil
 }
 
-func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	var exempt bool
-	err := r.ex(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND is_active)`, customerID).Scan(&exempt)
-	return exempt, err
+func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	return tax.ExemptionCovering(ctx, r.ex(ctx), customerID, day)
 }
 
 func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
@@ -2101,6 +2150,7 @@ type CounterCustomer struct {
 	AccountNumber        string       `json:"account_number"`
 	Name                 string       `json:"name"`
 	POrequired           bool         `json:"po_required"`
+	JobRequired          bool         `json:"job_required"`
 	CreditLimitCents     *httpx.Cents `json:"credit_limit_cents"`
 	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
 	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
@@ -2117,7 +2167,7 @@ type CounterJob struct {
 	Name string    `json:"name"`
 }
 
-const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE),
+const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE), COALESCE(c.job_required, FALSE),
 	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END`
 
 // counterCustomerReach is the customer wall's two parameters at the counter
@@ -2149,7 +2199,7 @@ func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string,
 	out := []CounterCustomer{}
 	for rows.Next() {
 		var c CounterCustomer
-		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents); err != nil {
+		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -2172,7 +2222,7 @@ func (r *PostgresRepository) CounterCustomerByID(ctx context.Context, id uuid.UU
 	err := r.ex(ctx).QueryRow(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE c.id = $1 AND COALESCE(c.is_active, TRUE) AND `+customer.Wall("c", 2, 3),
 		id, branch, grants).
-		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents)
+		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.JobRequired, &c.CreditLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}

@@ -83,7 +83,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 	if s.tax == nil || !s.tax.ProviderConfigured() {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, customerID)
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	}
 	estimate := priced
 	if estimate == nil {
-		exempt, err := s.repo.CustomerExempt(ctx, realCustomerID)
+		exempt, err := s.exemptOn(ctx, pre.BranchID, realCustomerID)
 		if err != nil {
 			return nil, err
 		}
@@ -213,6 +213,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("po_required",
 				"the customer requires a purchase order number: name it on the sale before charging it to the account")
 		}
+		// The job the same account rule asks for, with its own words when
+		// the requirement cannot be met at the counter at all.
+		if err := jobRequiredRefusal(facts, pre.JobID); err != nil {
+			return nil, err
+		}
 		if err := s.checkBuyer(ctx, realCustomerID, facts, pre.BuyerContactID, accountPortion); err != nil {
 			return nil, err
 		}
@@ -246,6 +251,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 	}
 	if err := s.checkTenderLimits(ctx, saleID, realCustomerID, tenders, false, actor); err != nil {
+		return nil, err
+	}
+	// The ID rule reads the same settings the limit does, before any card is
+	// charged: a check that needs the ID is refused before money moves.
+	if err := s.checkTenderIDRule(ctx, realCustomerID, tenders); err != nil {
 		return nil, err
 	}
 	// Card charges: outside the transaction, with the sale's own currency
@@ -408,7 +418,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			taxCents = int64(priced.taxCents)
 			taxSource = string(salesdoc.TaxSourceProvider)
 		} else {
-			exempt, err := s.repo.CustomerExempt(ctx, customerID)
+			exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 			if err != nil {
 				return err
 			}
@@ -500,6 +510,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return conflict("po_required",
 					"the customer requires a purchase order number: name it on the sale before charging it to the account")
 			}
+			if err := jobRequiredRefusal(facts, sale.JobID); err != nil {
+				return err
+			}
 			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
 				return err
 			}
@@ -528,6 +541,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// open credit memos locked in id order (section 11, step 3) when the
 		// sale pays with store credit: both before the stock moves.
 		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+			return err
+		}
+		if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
 			return err
 		}
 		var storeMemos []openMemo
