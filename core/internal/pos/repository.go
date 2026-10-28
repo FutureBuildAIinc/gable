@@ -262,6 +262,17 @@ type Repository interface {
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
 	LogSyncBatch(ctx context.Context, batch LogBatch) error
+
+	// The manager step up (CP-04 slice 3)
+	FindStepUpManager(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	FindStepUpManagerForUpdate(ctx context.Context, manager string) (*StepUpManager, bool, error)
+	ListStepUpManagers(ctx context.Context, roles []string) ([]StepUpManagerSummary, error)
+	RecordStepUpFailure(ctx context.Context, id uuid.UUID, max int) error
+	ResetStepUpFailuresUnlocked(ctx context.Context, id uuid.UUID) (bool, error)
+	InsertStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string, managerID uuid.UUID, managerName string, expires time.Time) error
+	ConsumeStepUpApproval(ctx context.Context, act, kind string, target uuid.UUID, amountCents *int64,
+		tokenHash string) (StepUpManagerRef, bool, error)
 }
 
 // CustomerFacts is what the counter reads about the sale's customer: the

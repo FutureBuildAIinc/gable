@@ -15,10 +15,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 1,
         "role": "counter",
@@ -38,10 +40,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 1,
         "role": "counter",
@@ -162,10 +166,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 2,
         "role": "yard",
@@ -377,10 +383,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [
           "ai_lm"
         ],
@@ -406,10 +414,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [
           "ai_lm"
         ],
@@ -547,10 +557,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 4,
         "role": "yard",
@@ -573,10 +585,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 4,
         "role": "yard",
@@ -643,10 +657,12 @@
       "content_type": "application/json",
       "body": {
         "active": true,
+        "counter_pin_set": false,
         "created_at": "<ts+0d>",
         "email": "goldens-d@example.com",
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
+        "locked": false,
         "modules": [],
         "revision": 4,
         "role": "yard",
