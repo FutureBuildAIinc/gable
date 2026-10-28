@@ -1072,6 +1072,137 @@ func setSetting(t *testing.T, db *database.DB, key, value string) {
 		t.Fatalf("set %s: %v", key, err)
 	}
 }
+
+// RULE (MONEY-CHECKLIST 4): a counter deposit and a till close contend on
+// the drawer's till_sessions row, the deposit's FOR SHARE against the
+// close's FOR UPDATE (ADR 0005 section 11 step 1b). Driven on the real
+// payments and till routes at pool size 4 with three contenders: each
+// deposit is counted by the close or refused once the drawer is closed,
+// never both (a refused deposit is absent from the expected count), never
+// lost (a counted deposit is a POSTED payment the close's expected count
+// carries).
+func TestCP07_CounterDepositRacingTheTillCloseIsCountedOrRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-CP07-" + uuid.NewString()[:8]
+	var branchID string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1))`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'till_session' AND entity_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 20000,
+	}, "req-cp07-race-open")
+	if r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	tillID := str(t, r.body, "id")
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+
+	// Three contenders on the drawer's row: a cash deposit, a check
+	// deposit, and the close counting the float plus both.
+	start := make(chan struct{})
+	results := make([]resp, 3)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		results[0] = f.do("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": orderID,
+			"till_session_id": tillID, "amount_cents": 3000, "method": "cash",
+		}, "X-Request-ID", "req-cp07-race-dep-cash")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		results[1] = f.do("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": orderID,
+			"till_session_id": tillID, "amount_cents": 1500, "method": "check", "reference": "CHK-RACE",
+		}, "X-Request-ID", "req-cp07-race-dep-check")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		results[2] = f.do("POST", "/api/v1/pos/till/"+tillID+"/close", map[string]any{
+			"counted_by_method": map[string]any{"cash": 23000, "check": 1500},
+		}, "X-Request-ID", "req-cp07-race-close")
+	}()
+	close(start)
+	wg.Wait()
+
+	for i, r := range results[:2] {
+		if r.status != http.StatusCreated && r.status != http.StatusConflict {
+			t.Errorf("deposit contender %d = %d: %s, want 201 (counted by the close) or 409 (the drawer closed first)", i, r.status, r.raw)
+		}
+	}
+	if results[2].status != http.StatusOK {
+		t.Fatalf("the close = %d: %s, want 200", results[2].status, results[2].raw)
+	}
+	cashLanded := results[0].status == http.StatusCreated
+	checkLanded := results[1].status == http.StatusCreated
+
+	// The close's expected count carries exactly the deposits that landed:
+	// a refused one is absent (never both), a landed one is present (never
+	// lost).
+	rRep := f.do("GET", "/api/v1/pos/till/"+tillID+"/report", nil)
+	if rRep.status != http.StatusOK {
+		t.Fatalf("till report = %d: %s", rRep.status, rRep.raw)
+	}
+	expected, _ := rRep.body["expected_by_method"].(map[string]any)
+	wantCash, wantCheck := int64(20000), int64(0)
+	if cashLanded {
+		wantCash += 3000
+	}
+	if checkLanded {
+		wantCheck += 1500
+	}
+	if got := num(t, expected, "CASH"); got != wantCash {
+		t.Errorf("expected_by_method.CASH = %d, want %d (cash deposit landed: %v): the close and the deposit disagree", got, wantCash, cashLanded)
+	}
+	// A method with nothing expected is absent from the map.
+	gotCheck := int64(0)
+	if _, ok := expected["CHECK"].(json.Number); ok {
+		gotCheck = num(t, expected, "CHECK")
+	}
+	if gotCheck != wantCheck {
+		t.Errorf("expected_by_method.CHECK = %d, want %d (check deposit landed: %v): the close and the deposit disagree", gotCheck, wantCheck, checkLanded)
+	}
+	// The drawer's POSTED payments are the expected count less the float,
+	// method for method: nothing the close counted is unposted, nothing
+	// posted went uncounted.
+	var sumCash, sumCheck int64
+	if err := db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE(SUM(ROUND(p.amount * 100)::bigint) FILTER (WHERE p.method = 'CASH'), 0),
+		       COALESCE(SUM(ROUND(p.amount * 100)::bigint) FILTER (WHERE p.method = 'CHECK'), 0)
+		FROM payments p WHERE p.till_session_id = $1 AND p.status = 'POSTED'`, tillID).Scan(&sumCash, &sumCheck); err != nil {
+		t.Fatal(err)
+	}
+	if sumCash != wantCash-20000 || sumCheck != wantCheck {
+		t.Errorf("the drawer's POSTED payments = cash %d check %d, want cash %d check %d: a deposit was lost or counted twice", sumCash, sumCheck, wantCash-20000, wantCheck)
+	}
+}
+
 // RULE: a database already past migration 101 (every demo and install on
 // origin/refactor/v1) gains payments.till_session_id and its index by applying
 // migration 147 on top, rolls back cleanly with 147's down file, and serves
