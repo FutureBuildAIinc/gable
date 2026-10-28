@@ -1399,6 +1399,10 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       // a check over the limit the screen could not know of (a walk-in's, or the database wide limit) says so beside Ask a manager
       if (err instanceof ApiError && err.hasBlocker('check_over_limit')) this._checkOverWords = err.message;
+      // a warning the office added after the standing on screen was read: the
+      // server is the authority, so read the standing again and let the next
+      // Pay offer the read dialog instead of looping on the same refusal
+      if (err instanceof ApiError && err.hasBlocker('alert_unacknowledged')) void this._syncStanding();
       const words = err instanceof Error ? err.message : 'Failed to complete sale';
       // The terminal's own outcomes are said by the waiting card, in words,
       // not by the error band: a card the device still holds waits here, and
@@ -1688,6 +1692,7 @@ export class POSTerminal extends LitElement {
       this._completed = done.sale;
       this._sealed = null;
     } catch (err: unknown) {
+      if (err instanceof ApiError && err.hasBlocker('alert_unacknowledged')) void this._syncStanding();
       this._error = apiErrorMessage(err, 'Failed to take the exchange');
     } finally {
       this._loading = false;

@@ -41,6 +41,7 @@ vi.mock('../../services/POSService', async (orig) => {
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
 import { answerAppDialog, flush } from '../../test/dom';
+import { ApiError } from '../../services/apiError';
 import type { CounterRegister } from '../../types/pos';
 
 const REG_01: CounterRegister = {
@@ -189,6 +190,38 @@ describe('the counter and the customer alerts', () => {
     q(el, 'pos-pay').click();
     await flush();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 1198 }], []);
+    el.remove();
+  });
+
+  it('reads a warning added after the customer was attached when Pay refuses, and asks on the next Pay', async () => {
+    const el = await withAlerts([]);
+    // The office adds the warning after the standing on screen was read: the
+    // server is the authority and refuses the first Pay with the blocker.
+    svc.standing.mockResolvedValue(standing({ alerts: [ACK_WARNING] }));
+    svc.completeSale.mockRejectedValue(new ApiError(409, 'conflict',
+      'This account has a warning that must be read before the sale',
+      [{ code: 'alert_unacknowledged', message: 'warning a3 is not acknowledged' }]));
+    await chooseCash(el);
+    q(el, 'pos-pay').click();
+    await flush();
+    expect(svc.completeSale).toHaveBeenCalledTimes(1);
+    // The refusal names itself in the band; no dialog is up yet.
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('must be read');
+    expect(document.querySelector('gable-app-dialog')).toBeNull();
+
+    // The clerk clicks Pay again: the refreshed standing carries the warning,
+    // so the read dialog is offered before a second attempt leaves the till.
+    q(el, 'pos-pay').click();
+    await flush();
+    const dialog = document.querySelector('gable-app-dialog') as HTMLElement | null;
+    expect(dialog).toBeTruthy();
+    expect(dialog!.textContent).toContain('Check the site before the delivery');
+    expect(svc.completeSale).toHaveBeenCalledTimes(1);
+
+    await answerAppDialog(true);
+    await flush();
+    expect(svc.completeSale).toHaveBeenCalledTimes(2);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 1198 }], ['a3']);
     el.remove();
   });
 
