@@ -1188,6 +1188,26 @@ func TestCP07_CounterDepositRacingTheTillCloseIsCountedOrRefused(t *testing.T) {
 	if gotCheck != wantCheck {
 		t.Errorf("expected_by_method.CHECK = %d, want %d (check deposit landed: %v): the close and the deposit disagree", gotCheck, wantCheck, checkLanded)
 	}
+	// The close's own stored count is the figure the Z report freezes and
+	// the variance is measured against. The live report map above
+	// recomputes from the payments table, so it cannot see a deposit that
+	// lands after the close; the stored count can, and it is what proves
+	// the drawer's FOR SHARE and the close's FOR UPDATE serialize the
+	// deposit with the count.
+	var stored json.RawMessage
+	if err := db.Pool.QueryRow(context.Background(), `SELECT expected_by_method FROM till_sessions WHERE id = $1`, tillID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	storedExpected := map[string]int64{}
+	if err := json.Unmarshal(stored, &storedExpected); err != nil {
+		t.Fatalf("decode the close's stored expected_by_method: %v", err)
+	}
+	if got := storedExpected["CASH"]; got != wantCash {
+		t.Errorf("the close's stored expected CASH = %d, want %d (cash deposit landed: %v): the close did not count the deposit", got, wantCash, cashLanded)
+	}
+	if got := storedExpected["CHECK"]; got != wantCheck {
+		t.Errorf("the close's stored expected CHECK = %d, want %d (check deposit landed: %v): the close did not count the deposit", got, wantCheck, checkLanded)
+	}
 	// The drawer's POSTED payments are the expected count less the float,
 	// method for method: nothing the close counted is unposted, nothing
 	// posted went uncounted.
