@@ -1,0 +1,1341 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package order_test
+
+// CP-07: a deposit taken on an order through the payments route, on the wire.
+// The order page's figures come from the order answer: each deposit, the
+// total deposited, what is applied and what is still unapplied, and the
+// balance due after deposits. The refusals a dealer needs: a deposit larger
+// than the balance due after deposits, and one on a cancelled (voided) or
+// fully invoiced order.
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
+	"github.com/google/uuid"
+)
+
+type spyGateway struct {
+	charges atomic.Int64
+}
+
+func (g *spyGateway) Charge(_ context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
+	g.charges.Add(1)
+	return &payment.GatewayResult{TransactionID: "gw-cp07", Status: payment.GatewayStatusApproved, AmountCents: req.AmountCents}, nil
+}
+func (g *spyGateway) Capture(_ context.Context, txID string, cents int64) (*payment.GatewayResult, error) {
+	return &payment.GatewayResult{TransactionID: txID, Status: payment.GatewayStatusApproved, AmountCents: cents}, nil
+}
+func (g *spyGateway) Void(_ context.Context, txID string) (*payment.GatewayResult, error) {
+	return &payment.GatewayResult{TransactionID: txID, Status: payment.GatewayStatusVoided}, nil
+}
+func (g *spyGateway) Refund(_ context.Context, txID string, cents int64) (*payment.GatewayResult, error) {
+	return &payment.GatewayResult{TransactionID: txID, Status: payment.GatewayStatusRefunded, AmountCents: cents}, nil
+}
+
+// serveOrdersAndPayments mounts the order, payment and counter routes on one
+// server, wired the way serve wires them, so a deposit rides the real payments
+// route against the same order the fulfilment bills and the same till session
+// the counter closes.
+func (f *fixture) serveOrdersAndPayments() *spyGateway {
+	f.t.Helper()
+	glSvc := gl.NewService(gl.NewRepository(f.db), nil, slog.Default())
+	acct := account.NewService(f.db, glSvc, slog.Default())
+	inv := invoice.NewService(invoice.NewRepository(f.db), glSvc, acct, f.db).WithAuditLog(audit.NewLogger(f.db))
+	osvc := order.NewService(order.NewRepository(f.db)).WithOutbox(outbox.NewWriter(f.db, "")).WithTxRunner(f.db).
+		WithAuditLog(audit.NewLogger(f.db)).WithInvoices(inv).WithDeposits(acct)
+	osvc = osvc.WithInventory(inventory.NewService(inventory.NewRepository(f.db)))
+	gw := &spyGateway{}
+	psvc := payment.NewService(f.db, payment.NewRepository(f.db), acct).WithGateway(gw, "pk_test").
+		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
+	posSvc := pos.NewService(f.db, pos.NewRepository(f.db), slog.Default()).
+		WithAR(acct).WithLedger(glSvc).WithInvoices(inv).WithTxRunner(f.db).
+		WithAuditLog(audit.NewLogger(f.db)).WithOutbox(outbox.NewWriter(f.db, ""))
+	mux := http.NewServeMux()
+	order.NewHandler(osvc).RegisterRoutes(mux)
+	payment.NewHandler(psvc).RegisterRoutes(mux)
+	pos.NewHandler(posSvc).WithBranchGuard(middleware.NewBranchGuard(f.db)).RegisterRoutes(mux)
+	f.srv = httptest.NewServer(middleware.Idempotency(f.db)(roleClaims(middleware.NewBranchMiddleware(f.db).Handler(mux))))
+	f.t.Cleanup(f.srv.Close)
+	return gw
+}
+
+// doUnique posts with a request id of its own, so the idempotency layer
+// never answers a earlier identical post for a later one.
+func (f *fixture) doUnique(method, path string, body any, reqID string) resp {
+	f.t.Helper()
+	var raw []byte
+	switch b := body.(type) {
+	case nil:
+	default:
+		raw, _ = json.Marshal(b)
+	}
+	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(string(raw)))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if raw != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Request-ID", reqID)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	buf, err := io.ReadAll(res.Body)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	out := resp{status: res.StatusCode, header: res.Header, raw: buf}
+	dec := json.NewDecoder(bytes.NewReader(buf))
+	dec.UseNumber()
+	_ = dec.Decode(&out.body)
+	return out
+}
+
+// takeDeposit posts a deposit on the order through the payments route.
+func (f *fixture) takeDeposit(orderID string, cents int64, method string) resp {
+	f.t.Helper()
+	return f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"amount_cents": cents, "method": method, "reference": "CP-07 deposit",
+	}, "req-cp07-"+orderID[:8]+"-"+fmt.Sprint(cents)+"-"+method)
+}
+
+// depositLegs reads the legs of the deposit's own entries (cents, debit less
+// credit by account code): its receipt and the applications of it.
+func depositLegs(t *testing.T, db *database.DB, paymentID string) string {
+	t.Helper()
+	rows, err := db.Pool.Query(context.Background(), `
+		SELECT a.code, ROUND(SUM(l.debit - l.credit) * 100)::bigint FROM gl_journal_lines l
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id JOIN gl_accounts a ON a.id = l.account_id
+		WHERE e.source_ref_id = $1 OR e.source_ref_id IN (SELECT id FROM ar_applications WHERE payment_id = $1::uuid)
+		GROUP BY a.code ORDER BY a.code`, paymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var code string
+		var net int64
+		if err := rows.Scan(&code, &net); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fmt.Sprintf("%s=%d", code, net))
+	}
+	return strings.Join(out, ",")
+}
+
+// RULE: a deposit on an order is held unapplied (DR 1010 / CR 2200), the
+// order answer carries its figures, and the fulfilment applies it to the
+// invoice it bills (DR 2200 / CR 1020), leaving the balance the deposit did
+// not cover.
+func TestCP07_DepositOnOrderAppliedAtInvoice(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // 10 PCS pickup at 5.50 = 5500, tax 8.875% = 488, total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+
+	r = f.takeDeposit(id, 4000, "check")
+	if r.status != http.StatusCreated {
+		t.Fatalf("take the deposit = %d: %s", r.status, r.raw)
+	}
+	depositID := str(t, r.body, "id")
+	if got := num(t, r.body, "unapplied_cents"); got != 4000 {
+		t.Errorf("the deposit is %d unapplied, want 4000", got)
+	}
+	if got := depositLegs(t, db, depositID); got != "1010=4000,2200=-4000" {
+		t.Errorf("the deposit's receipt entry nets %s, want 1010=4000,2200=-4000", got)
+	}
+
+	// The order answer carries the deposit figures the panel shows.
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	if r.status != http.StatusOK {
+		t.Fatalf("read the order = %d: %s", r.status, r.raw)
+	}
+	deps, ok := r.body["deposits"].([]any)
+	if !ok || len(deps) != 1 {
+		t.Fatalf("the order answer carries %v deposits, want 1", r.body["deposits"])
+	}
+	dep, _ := deps[0].(map[string]any)
+	if str(t, dep, "id") != depositID {
+		t.Errorf("the deposit's id is %v, want the payment just taken", dep["id"])
+	}
+	if str(t, dep, "method") != "check" {
+		t.Errorf("the deposit's method is %v, want check", dep["method"])
+	}
+	if got := num(t, dep, "amount_cents"); got != 4000 {
+		t.Errorf("the deposit's amount is %d, want 4000", got)
+	}
+	if got := num(t, dep, "unapplied_cents"); got != 4000 {
+		t.Errorf("the deposit's unapplied is %d, want 4000", got)
+	}
+	if apps, ok := dep["applications"].([]any); !ok || len(apps) != 0 {
+		t.Errorf("the deposit's applications are %v, want none yet", dep["applications"])
+	}
+	if got := num(t, r.body, "deposit_total_cents"); got != 4000 {
+		t.Errorf("deposit_total_cents = %d, want 4000", got)
+	}
+	if got := num(t, r.body, "deposit_unapplied_cents"); got != 4000 {
+		t.Errorf("deposit_unapplied_cents = %d, want 4000", got)
+	}
+	if got := num(t, r.body, "balance_due_after_deposits_cents"); got != 1988 {
+		t.Errorf("balance_due_after_deposits_cents = %d, want 1988", got)
+	}
+
+	// The fulfilment applies the deposit to the invoice it bills.
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer"})
+	if r.status != http.StatusCreated {
+		t.Fatalf("fulfil = %d: %s", r.status, r.raw)
+	}
+	inv := invoiceIDOf(t, r)
+	var applied int64
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(SUM(ROUND(a.amount * 100)::bigint), 0) FROM ar_applications a
+		 WHERE a.payment_id = $1 AND a.invoice_id = $2 AND a.reversed_at IS NULL`, depositID, inv).Scan(&applied); err != nil || applied != 4000 {
+		t.Errorf("the invoice carries %d of the deposit (%v), want 4000", applied, err)
+	}
+	if got := depositLegs(t, db, depositID); got != "1010=4000,1020=-4000,2200=0" {
+		t.Errorf("the deposit's entries net %s, want the receipt (1010=4000, 2200=-4000) undone by the application (2200=4000, 1020=-4000)", got)
+	}
+
+	// The order answer moves the deposit from unapplied to applied.
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	if r.status != http.StatusOK {
+		t.Fatalf("read the order again = %d: %s", r.status, r.raw)
+	}
+	deps, _ = r.body["deposits"].([]any)
+	dep, _ = deps[0].(map[string]any)
+	if got := num(t, dep, "unapplied_cents"); got != 0 {
+		t.Errorf("after the invoice the deposit is %d unapplied, want 0", got)
+	}
+	apps, _ := dep["applications"].([]any)
+	if len(apps) != 1 {
+		t.Fatalf("the deposit names %d applications, want 1", len(apps))
+	}
+	app, _ := apps[0].(map[string]any)
+	if str(t, app, "invoice_id") != inv {
+		t.Errorf("the application's invoice is %v, want the one just billed", app["invoice_id"])
+	}
+	if got := num(t, app, "amount_cents"); got != 4000 {
+		t.Errorf("the application is %d, want 4000", got)
+	}
+	if got := num(t, r.body, "deposit_unapplied_cents"); got != 0 {
+		t.Errorf("deposit_unapplied_cents = %d, want 0", got)
+	}
+	if got := num(t, r.body, "balance_due_after_deposits_cents"); got != 1988 {
+		t.Errorf("balance_due_after_deposits_cents = %d, want 1988", got)
+	}
+}
+
+// RULE: two deposits on an order apply to its invoices oldest first, across
+// partial fulfilments.
+func TestCP07_TwoDepositsPartialFulfilmentsAppliedOldestFirst(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // 10 PCS pickup at 5.50 = 5500, tax 8.875% = 488, total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+
+	r = f.takeDeposit(id, 1000, "cash")
+	if r.status != http.StatusCreated {
+		t.Fatalf("the first deposit = %d: %s", r.status, r.raw)
+	}
+	first := str(t, r.body, "id")
+	r = f.takeDeposit(id, 2000, "check")
+	if r.status != http.StatusCreated {
+		t.Fatalf("the second deposit = %d: %s", r.status, r.raw)
+	}
+	second := str(t, r.body, "id")
+
+	// The line's id and the order's revision, to bill half of it.
+	lineID := str(t, f.bodyOfLine(t, id), "id")
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+
+	// The first fulfilment bills 5 of 10: an invoice of 2994, and the
+	// deposits apply to it oldest first: the first fully, the second in part.
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer",
+		"lines": []map[string]any{{"order_line_id": lineID, "quantity": "5"}}})
+	if r.status != http.StatusCreated {
+		t.Fatalf("the first fulfilment = %d: %s", r.status, r.raw)
+	}
+	inv1 := invoiceIDOf(t, r)
+	var firstApplied, secondApplied int64
+	for _, pd := range []struct {
+		id   string
+		dest *int64
+	}{{first, &firstApplied}, {second, &secondApplied}} {
+		if err := db.Pool.QueryRow(context.Background(),
+			`SELECT COALESCE(SUM(ROUND(a.amount * 100)::bigint), 0) FROM ar_applications a
+			 WHERE a.invoice_id = $1 AND a.payment_id = $2 AND a.reversed_at IS NULL`, inv1, pd.id).Scan(pd.dest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if firstApplied != 1000 || secondApplied != 1994 {
+		t.Errorf("the first invoice applied %d of the first deposit and %d of the second, want 1000 and 1994", firstApplied, secondApplied)
+	}
+
+	// The second fulfilment bills the rest: an invoice of 2994, and the 6
+	// cents the second deposit still holds apply to it.
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer"})
+	if r.status != http.StatusCreated {
+		t.Fatalf("the second fulfilment = %d: %s", r.status, r.raw)
+	}
+	inv2 := invoiceIDOf(t, r)
+	secondApplied = 0
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(SUM(ROUND(a.amount * 100)::bigint), 0) FROM ar_applications a
+		 WHERE a.payment_id = $1 AND a.invoice_id = $2 AND a.reversed_at IS NULL`, second, inv2).Scan(&secondApplied); err != nil {
+		t.Fatal(err)
+	}
+	if secondApplied != 6 {
+		t.Errorf("the second invoice applied %d of the second deposit, want 6", secondApplied)
+	}
+
+	// The order answer holds nothing unapplied and both applications named.
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	if got := num(t, r.body, "deposit_unapplied_cents"); got != 0 {
+		t.Errorf("deposit_unapplied_cents = %d, want 0", got)
+	}
+	deps, _ := r.body["deposits"].([]any)
+	if len(deps) != 2 {
+		t.Fatalf("the order names %d deposits, want 2", len(deps))
+	}
+	totalApplied := int64(0)
+	for _, d := range deps {
+		dm, _ := d.(map[string]any)
+		for _, a := range dm["applications"].([]any) {
+			am, _ := a.(map[string]any)
+			totalApplied += num(t, am, "amount_cents")
+		}
+	}
+	if totalApplied != 3000 {
+		t.Errorf("the deposits' applications sum to %d, want 3000", totalApplied)
+	}
+}
+
+// bodyOfLine reads the order answer's first billable line, for its id.
+func (f *fixture) bodyOfLine(t *testing.T, orderID string) map[string]any {
+	t.Helper()
+	r := f.do("GET", "/api/v1/orders/"+orderID, nil)
+	if r.status != http.StatusOK {
+		t.Fatalf("read the order = %d: %s", r.status, r.raw)
+	}
+	lines, _ := r.body["lines"].([]any)
+	for _, l := range lines {
+		lm, _ := l.(map[string]any)
+		if lm["line_type"] != "product" {
+			continue
+		}
+		return lm
+	}
+	t.Fatalf("no product line on the order")
+	return nil
+}
+
+// RULE: a deposit larger than the order's balance due after deposits is
+// refused with plain words, and so is one on a cancelled (voided) or fully
+// invoiced order.
+func TestCP07_DepositOverBalanceRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	f.transition(id, 1, "confirmed")
+
+	r = f.takeDeposit(id, 5988, "cash")
+	if r.status != http.StatusCreated {
+		t.Fatalf("a deposit of exactly the balance due = %d: %s", r.status, r.raw)
+	}
+	// The balance due after deposits is now 0: any further deposit is over.
+	r = f.takeDeposit(id, 100, "cash")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit past the balance due = %d: %s, want 409", r.status, r.raw)
+	}
+	if msg, _ := r.body["error"].(map[string]any); true {
+		m, _ := msg["message"].(string)
+		if !strings.Contains(strings.ToLower(m), "balance") {
+			t.Errorf("the refusal says %q, want plain words about the balance due", m)
+		}
+	}
+
+	// A single deposit larger than the order's total is refused outright.
+	r2 := f.create(f.line("10"))
+	id2 := str(t, r2.body, "id")
+	f.transition(id2, 1, "confirmed")
+	r = f.takeDeposit(id2, 5989, "check")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit larger than the order = %d: %s, want 409", r.status, r.raw)
+	}
+}
+
+func TestCP07_DepositOnVoidedOrderRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "cancelled", "reason", "CP-07: the customer walked away")
+	if r.status != http.StatusOK {
+		t.Fatalf("cancel = %d: %s", r.status, r.raw)
+	}
+
+	r = f.takeDeposit(id, 1000, "cash")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit on a cancelled order = %d: %s, want 409", r.status, r.raw)
+	}
+	if msg, _ := r.body["error"].(map[string]any); true {
+		m, _ := msg["message"].(string)
+		if !strings.Contains(strings.ToLower(m), "cancelled") {
+			t.Errorf("the refusal says %q, want plain words about the cancelled order", m)
+		}
+	}
+
+	// A deposit on a fully invoiced order is refused with its own words.
+	r2 := f.create(f.line("10"))
+	id2 := str(t, r2.body, "id")
+	r2 = f.transition(id2, 1, "confirmed")
+	r2 = f.fulfil(id2, revision(t, r2), map[string]any{"picked_up_by": "Counter customer"})
+	if r2.status != http.StatusCreated {
+		t.Fatalf("fulfil = %d: %s", r2.status, r2.raw)
+	}
+	r = f.takeDeposit(id2, 1000, "cash")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit on a fully invoiced order = %d: %s, want 409", r.status, r.raw)
+	}
+	if msg, _ := r.body["error"].(map[string]any); true {
+		m, _ := msg["message"].(string)
+		if !strings.Contains(strings.ToLower(m), "invoiced") {
+			t.Errorf("the refusal says %q, want plain words about the fully invoiced order", m)
+		}
+	}
+}
+
+// RULE: two deposits that together would pass the balance rule cannot both
+// land: the check runs inside the payment's transaction on a locked order.
+func TestCP07_DepositContendersCannotBothPassTheBalance(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	f.transition(id, 1, "confirmed")
+
+	var wg sync.WaitGroup
+	statuses := make([]int, 3)
+	for i := range statuses {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			res := f.doUnique("POST", "/api/v1/payments", map[string]any{
+				"customer_id": f.customerID.String(), "order_id": id,
+				"amount_cents": 4000, "method": "cash", "reference": "CP-07 contender",
+			}, fmt.Sprintf("req-cp07-race-%d", i))
+			statuses[i] = res.status
+		}(i)
+	}
+	wg.Wait()
+	created := 0
+	for _, s := range statuses {
+		if s == http.StatusCreated {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Errorf("%d of 3 contending deposits of 4000 on a 5988 order landed, want exactly 1: %v", created, statuses)
+	}
+}
+
+// RULE (ADR 0005 section 11 step 1): the deposit takes the order row with
+// FOR NO KEY UPDATE, which stays compatible with the FOR KEY SHARE a foreign
+// key insert takes on the row, so a deposit never waits behind one and never
+// deadlocks a payment that names the same order.
+func TestCP07_DepositDoesNotWaitBehindAnOrderKeyShare(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.create()
+	id := str(t, r.body, "id")
+	f.transition(id, 1, "confirmed")
+
+	// Hold the order's key share the way the allocation subscriber's request
+	// insert takes it, then take a deposit: it must answer at once.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		err := db.RunInTx(context.Background(), func(ctx context.Context) error {
+			// The lock belongs to this transaction: it goes through the
+			// executor the context resolves, never the pool.
+			if _, err := db.GetExecutor(ctx).Exec(ctx, `SELECT 1 FROM orders WHERE id = $1 FOR KEY SHARE`, id); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+		if err != nil {
+			t.Errorf("hold the key share: %v", err)
+		}
+	}()
+	<-held
+	defer close(release)
+	done := make(chan resp, 1)
+	go func() { done <- f.takeDeposit(id, 100, "cash") }()
+	select {
+	case r := <-done:
+		if r.status != http.StatusCreated {
+			t.Fatalf("the deposit behind a key share = %d: %s, want 201", r.status, r.raw)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatalf("the deposit waited behind a FOR KEY SHARE on the order row (ADR 0005 section 11 step 1 wants FOR NO KEY UPDATE)")
+	}
+}
+
+// RULE: a deposit and a payment that names the same order with an
+// application race without deadlocking: the clerk sees two payments, never a
+// 500.
+func TestCP07_DepositAndAnOrderedPaymentDoNotDeadlock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+	lineID := str(t, f.bodyOfLine(t, id), "id")
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer",
+		"lines": []map[string]any{{"order_line_id": lineID, "quantity": "5"}}})
+	if r.status != http.StatusCreated {
+		t.Fatalf("fulfil half = %d: %s", r.status, r.raw)
+	}
+	inv := invoiceIDOf(t, r)
+
+	var wg sync.WaitGroup
+	statuses := make([]int, 2)
+	start := make(chan struct{})
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		res := f.doUnique("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": id,
+			"amount_cents": 100, "method": "cash",
+		}, "req-cp07-dl-a")
+		statuses[0] = res.status
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		res := f.doUnique("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": id,
+			"amount_cents": 500, "method": "check",
+			"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 500}},
+		}, "req-cp07-dl-b")
+		statuses[1] = res.status
+	}()
+	close(start)
+	wg.Wait()
+	for i, s := range statuses {
+		if s != http.StatusCreated {
+			t.Errorf("contender %d = %d, want 201 (a deadlock on the order row shows as a 500)", i, s)
+		}
+	}
+}
+
+// RULE: the cash of a payment that names an order and carries applications
+// obeys the deposit rules too, judged on the part that stays unapplied: the
+// same money is not refused one way and held the other, and only the unapplied
+// portion at receipt is counted as the order's deposit.
+func TestCP07_UnappliedCashOfAnOrderedPaymentHonoursTheDepositRules(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	gw := f.serveOrdersAndPayments()
+	f.cleanMoney()
+	f.cleanDeposits()
+	f.stock(f.productID, "30")
+	f.setCost(f.productID, "3.2500")
+
+	r := f.create() // total 5988
+	id := str(t, r.body, "id")
+	r = f.transition(id, 1, "confirmed")
+	r = f.fulfil(id, revision(t, r), map[string]any{"picked_up_by": "Counter customer"})
+	if r.status != http.StatusCreated {
+		t.Fatalf("fulfil = %d: %s", r.status, r.raw)
+	}
+	inv := invoiceIDOf(t, r)
+
+	// The whole order is invoiced: a deposit is refused...
+	r = f.takeDeposit(id, 1000, "cash")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a deposit on the fully invoiced order = %d, want 409", r.status)
+	}
+	// ...and the same cash is not let in as the unapplied part of a payment
+	// that names the order: 1000 applied, 2000 left over.
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": id,
+		"amount_cents": 3000, "method": "check",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 1000}},
+	}, "req-cp07-app-rule")
+	if r.status != http.StatusConflict {
+		t.Fatalf("a payment leaving unapplied cash on the fully invoiced order = %d: %s, want 409", r.status, r.raw)
+	}
+	// A payment fully applied to the order's own invoice is a payment, not a
+	// deposit: it lands and is not listed as a deposit on the order.
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": id,
+		"amount_cents": 1000, "method": "cash",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 1000}},
+	}, "req-cp07-app-ok")
+	if r.status != http.StatusCreated {
+		t.Fatalf("a payment fully applied to the order's invoice = %d: %s, want 201", r.status, r.raw)
+	}
+	if got := num(t, r.body, "unapplied_cents"); got != 0 {
+		t.Errorf("the fully applied payment holds %d unapplied, want 0", got)
+	}
+	r = f.do("GET", "/api/v1/orders/"+id, nil)
+	if deps, _ := r.body["deposits"].([]any); len(deps) != 0 {
+		t.Errorf("the fully applied invoice payment appears in the order's deposits (%d rows), want 0", len(deps))
+	}
+	if got := num(t, r.body, "deposit_total_cents"); got != 0 {
+		t.Errorf("the fully invoiced order's deposit_total_cents = %d after a fully applied invoice payment, want 0", got)
+	}
+
+	// A payment naming the fully invoiced order while applying its full amount
+	// to an unrelated invoice is refused too (held == 0 does not bypass the
+	// order deposit rules).
+	f.stock(f.productID, "40")
+	rOther := f.create()
+	otherID := str(t, rOther.body, "id")
+	rOther = f.transition(otherID, 1, "confirmed")
+	rOther = f.fulfil(otherID, revision(t, rOther), map[string]any{"picked_up_by": "Counter customer"})
+	if rOther.status != http.StatusCreated {
+		t.Fatalf("fulfil other order = %d: %s", rOther.status, rOther.raw)
+	}
+	otherInv := invoiceIDOf(t, rOther)
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": id,
+		"amount_cents": 500, "method": "cash",
+		"applications": []map[string]any{{"invoice_id": otherInv, "amount_cents": 500}},
+	}, "req-cp07-unrelated-inv")
+	if r.status != http.StatusConflict {
+		t.Errorf("a payment naming a fully invoiced order while settling another invoice = %d: %s, want 409", r.status, r.raw)
+	}
+
+	// A payment naming a cancelled order is refused even when held == 0.
+	rCancel := f.create()
+	cancelID := str(t, rCancel.body, "id")
+	f.transition(cancelID, 1, "cancelled", "reason", "Customer cancelled")
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": cancelID,
+		"amount_cents": 500, "method": "cash",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 500}},
+	}, "req-cp07-cancelled-zero-held")
+	if r.status != http.StatusConflict {
+		t.Errorf("a payment naming a cancelled order with held == 0 = %d: %s, want 409", r.status, r.raw)
+	}
+
+	// On a confirmed order (total 5988), one check of 4500 that applies 1000
+	// at receipt to the earlier invoice and leaves 3500 unapplied as a deposit
+	// for this order counts only the 3500 deposit, never the 1000 applied to
+	// the other invoice.
+	rOrd2 := f.create()
+	ord2 := str(t, rOrd2.body, "id")
+	f.transition(ord2, 1, "confirmed")
+	r = f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": ord2,
+		"amount_cents": 4500, "method": "check",
+		"applications": []map[string]any{{"invoice_id": inv, "amount_cents": 1000}},
+	}, "req-cp07-partial-dep")
+	if r.status != http.StatusCreated {
+		t.Fatalf("a payment applying 1000 and holding 3500 as deposit = %d: %s, want 201", r.status, r.raw)
+	}
+	r = f.do("GET", "/api/v1/orders/"+ord2, nil)
+	if got := num(t, r.body, "deposit_total_cents"); got != 3500 {
+		t.Errorf("deposit_total_cents = %d, want 3500 (only the unapplied part at receipt)", got)
+	}
+	if got := num(t, r.body, "deposit_unapplied_cents"); got != 3500 {
+		t.Errorf("deposit_unapplied_cents = %d, want 3500", got)
+	}
+	if got := num(t, r.body, "balance_due_after_deposits_cents"); got != 2488 {
+		t.Errorf("balance_due_after_deposits_cents = %d, want 2488 (5988 less 3500)", got)
+	}
+	if deps, _ := r.body["deposits"].([]any); len(deps) != 1 {
+		t.Fatalf("deposits = %v, want 1", r.body["deposits"])
+	} else {
+		dep, _ := deps[0].(map[string]any)
+		if got := num(t, dep, "amount_cents"); got != 3500 {
+			t.Errorf("deposit amount_cents = %d, want 3500", got)
+		}
+		if apps, _ := dep["applications"].([]any); len(apps) != 0 {
+			t.Errorf("deposit applications = %v, want none (the receipt application to another invoice is not a deposit application)", apps)
+		}
+	}
+	// A second deposit of 2000 fits inside the remaining 2488 (3500 + 2000 = 5500 <= 5988).
+	r = f.takeDeposit(ord2, 2000, "cash")
+	if r.status != http.StatusCreated {
+		t.Errorf("second deposit of 2000 after 3500 held = %d: %s, want 201", r.status, r.raw)
+	}
+
+	// The card route (/api/v1/payments/card) obeys the same deposit rules before
+	// charging the card: a card deposit larger than the remaining 488 balance
+	// due after deposits is refused 409 with zero gateway charges.
+	beforeCharges := gw.charges.Load()
+	r = f.doUnique("POST", "/api/v1/payments/card", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": ord2,
+		"amount_cents": 1000, "token_id": "tok_visa_4242",
+	}, "req-cp07-card-over")
+	if r.status != http.StatusConflict {
+		t.Errorf("a card deposit past the balance due = %d: %s, want 409", r.status, r.raw)
+	}
+	if got := gw.charges.Load() - beforeCharges; got != 0 {
+		t.Errorf("the refused card deposit called the gateway %d times, want 0", got)
+	}
+}
+
+// RULE: a counter deposit taken in cash or check rides the open till session,
+// so the till report, the till close, and the branch Z report count its cash
+// and checks in expected_by_method and tendered_by_method.
+func TestCP07_CounterDepositRidesTheOpenTillSession(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-CP07-" + uuid.NewString()[:8]
+	var branchID string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1))`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'till_session' AND entity_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	// Open a till session at the counter with a $200.00 float.
+	r := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 20000,
+	}, "req-cp07-till-open")
+	if r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	tillID := str(t, r.body, "id")
+
+	// Create and confirm an order (total 5988).
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+
+	// Take a $30.00 cash deposit and a $15.00 check deposit against the open till session.
+	rCash := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 3000, "method": "cash",
+	}, "req-cp07-till-cash")
+	if rCash.status != http.StatusCreated {
+		t.Fatalf("cash counter deposit = %d: %s, want 201", rCash.status, rCash.raw)
+	}
+	cashDepID := str(t, rCash.body, "id")
+
+	rCheck := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 1500, "method": "check", "reference": "CHK-901",
+	}, "req-cp07-till-check")
+	if rCheck.status != http.StatusCreated {
+		t.Fatalf("check counter deposit = %d: %s, want 201", rCheck.status, rCheck.raw)
+	}
+
+	// An order of another branch is refused on the server when a counter
+	// deposit names this branch's open till session.
+	otherBranch := uuid.New()
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO locations (id, name, code, type, branch_id, default_tax_rate) VALUES ($1, $2, $3, 'BRANCH', $1, 0.088750)`, otherBranch, "Other Yard "+otherBranch.String()[:6], "OY-"+otherBranch.String()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, otherBranch)
+	})
+	rOtherOrd := f.create()
+	otherOrderID := str(t, rOtherOrd.body, "id")
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE orders SET branch_id = $2 WHERE id = $1`, otherOrderID, otherBranch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `UPDATE orders SET branch_id = $2::uuid WHERE id = $1`, otherOrderID, branchID)
+	})
+	rCrossBranch := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": otherOrderID,
+		"till_session_id": tillID, "amount_cents": 500, "method": "cash",
+	}, "req-cp07-till-cross-branch")
+	if rCrossBranch.status != http.StatusConflict {
+		t.Errorf("counter deposit on an order of another branch = %d: %s, want 409", rCrossBranch.status, rCrossBranch.raw)
+	}
+
+	// The live till report includes both counter deposits in tendered_by_method and expected_by_method.
+	rRep := f.do("GET", "/api/v1/pos/till/"+tillID+"/report", nil)
+	if rRep.status != http.StatusOK {
+		t.Fatalf("till report = %d: %s", rRep.status, rRep.raw)
+	}
+	tendered, _ := rRep.body["tendered_by_method"].(map[string]any)
+	expected, _ := rRep.body["expected_by_method"].(map[string]any)
+	if got := num(t, tendered, "CASH"); got != 3000 {
+		t.Errorf("till report tendered_by_method.CASH = %d, want 3000", got)
+	}
+	if got := num(t, tendered, "CHECK"); got != 1500 {
+		t.Errorf("till report tendered_by_method.CHECK = %d, want 1500", got)
+	}
+	if got := num(t, expected, "CASH"); got != 23000 {
+		t.Errorf("till report expected_by_method.CASH = %d, want 23000 (20000 float + 3000 cash deposit)", got)
+	}
+	if got := num(t, expected, "CHECK"); got != 1500 {
+		t.Errorf("till report expected_by_method.CHECK = %d, want 1500", got)
+	}
+
+	// Closing the till with $230.00 cash and $15.00 check reconciles to zero over/short.
+	rClose := f.doUnique("POST", "/api/v1/pos/till/"+tillID+"/close", map[string]any{
+		"counted_by_method": map[string]any{"cash": 23000, "check": 1500},
+	}, "req-cp07-till-close")
+	if rClose.status != http.StatusOK {
+		t.Fatalf("close till = %d: %s", rClose.status, rClose.raw)
+	}
+	closeSession, _ := rClose.body["session"].(map[string]any)
+	if got := num(t, closeSession, "over_short_cents"); got != 0 {
+		t.Errorf("close till session.over_short_cents = %d, want 0", got)
+	}
+	rZ := f.do("GET", "/api/v1/pos/till/"+tillID+"/zreport", nil)
+	if rZ.status != http.StatusOK {
+		t.Fatalf("zreport = %d: %s", rZ.status, rZ.raw)
+	}
+	zPayload, _ := rZ.body["payload"].(map[string]any)
+	zExpected, _ := zPayload["expected_by_method"].(map[string]any)
+	if got := num(t, zExpected, "CASH"); got != 23000 {
+		t.Errorf("zreport expected_by_method.CASH = %d, want 23000", got)
+	}
+	if got := num(t, zExpected, "CHECK"); got != 1500 {
+		t.Errorf("zreport expected_by_method.CHECK = %d, want 1500", got)
+	}
+
+	// Once the till session is closed, taking another deposit on it is refused 409,
+	// and voiding a deposit taken in the closed till session is refused 409.
+	rClosedDep := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 500, "method": "cash",
+	}, "req-cp07-till-closed-dep")
+	if rClosedDep.status != http.StatusConflict {
+		t.Errorf("deposit on a closed till session = %d: %s, want 409", rClosedDep.status, rClosedDep.raw)
+	}
+	rVoid := f.doUnique("POST", "/api/v1/payments/"+cashDepID+"/transitions", map[string]any{
+		"to": "voided", "reason": "Wrong drawer", "revision": 1,
+	}, "req-cp07-till-closed-void")
+	if rVoid.status != http.StatusConflict {
+		t.Errorf("voiding a payment from a closed till session = %d: %s, want 409", rVoid.status, rVoid.raw)
+	}
+}
+
+// RULE (MONEY-CHECKLIST 15): the void of a payment that rode another
+// branch's till session is refused by the branch wall before any till
+// session row is read or locked. The payment reads as a missing row (404,
+// the answer a payment that does not exist gets), the other branch's
+// drawer row is never touched (a close holding it FOR UPDATE is never
+// waited on), and the payment stands posted with no void audit row.
+func TestCP07_VoidOfAnotherBranchesTillRidingPaymentIsRefusedAtTheWall(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	// the kill switch is read when the fixture's middleware is built
+	setSetting(t, db, "multi_branch_enabled", "true")
+	setSetting(t, db, "default_branch_required", "false")
+	branchB := uuid.New()
+	subB := "cp07-void-" + uuid.NewString()[:8]
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, $2)`, branchB, "CP07-VWB-"+uuid.NewString()[:6]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, subB, branchB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		setSetting(t, db, "multi_branch_enabled", "false")
+		setSetting(t, db, "default_branch_required", "true")
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM user_locations WHERE user_sub = $1`, subB)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, branchB)
+	})
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-CP07-" + uuid.NewString()[:8]
+	var branchID string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1))`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'till_session' AND entity_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	// Open this branch's till and take a cash deposit riding it.
+	r := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 20000,
+	}, "req-cp07-void-wall-open")
+	if r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	tillID := str(t, r.body, "id")
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+	rDep := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 3000, "method": "cash",
+	}, "req-cp07-void-wall-dep")
+	if rDep.status != http.StatusCreated {
+		t.Fatalf("counter deposit = %d: %s", rDep.status, rDep.raw)
+	}
+	depID := str(t, rDep.body, "id")
+
+	// Hold the drawer the way a close in progress does: FOR UPDATE on the
+	// till session row. A void that reads or locks the row before the wall
+	// parks behind this hold; the walled void must answer at once.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	holdDone := make(chan struct{})
+	go func() {
+		defer close(holdDone)
+		err := db.RunInTx(context.Background(), func(ctx context.Context) error {
+			// The lock belongs to this transaction: it goes through the
+			// executor the context resolves, never the pool.
+			if _, err := db.GetExecutor(ctx).Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, tillID); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+		if err != nil {
+			t.Errorf("hold the drawer: %v", err)
+		}
+	}()
+	<-held
+	// The hold is released however the assertion ends: the refused void
+	// under test (pre-fix) is blocked on this row, and the test server's
+	// close waits out every in-flight request.
+	releaseOnce := sync.Once{}
+	releaseHold := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHold()
+
+	// Branch B's finance caller voids branch A's till riding payment.
+	scoped := []string{
+		"X-Request-ID", "req-cp07-void-wall-refuse",
+		"X-Test-Role", "finance", "X-Test-Sub", subB, "X-Branch-Id", branchB.String(),
+	}
+	done := make(chan resp, 1)
+	go func() {
+		done <- f.do("POST", "/api/v1/payments/"+depID+"/transitions", map[string]any{
+			"to": "voided", "reason": "out of my branch", "revision": 1,
+		}, scoped...)
+	}()
+	select {
+	case r := <-done:
+		if r.status != http.StatusNotFound {
+			t.Fatalf("another branch's void of a till riding payment = %d: %s, want 404 (the wall refuses before the till session is read or locked)", r.status, r.raw)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("the cross branch void waited on the other branch's till session row: the wall came after the lock")
+	}
+	releaseHold()
+	<-holdDone
+
+	// Nothing moved: the payment stands posted, with no void audit row.
+	if status, _ := f.paymentRead(uuid.MustParse(depID)); status != "POSTED" {
+		t.Errorf("the refused void moved the payment: status %s, want POSTED", status)
+	}
+	var audits int
+	if err := db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'payment.voided' AND entity_id = $1`, depID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 0 {
+		t.Errorf("%d void audit rows for the refused void, want 0", audits)
+	}
+	// The control: the same void inside the payment's own branch answers 200.
+	r = f.do("POST", "/api/v1/payments/"+depID+"/transitions", map[string]any{
+		"to": "voided", "reason": "taken in error", "revision": 1,
+	}, "X-Request-ID", "req-cp07-void-wall-own")
+	if r.status != http.StatusOK {
+		t.Errorf("the in branch void = %d: %s, want 200", r.status, r.raw)
+	}
+}
+
+// setSetting upserts a system_settings row for the wall test.
+func setSetting(t *testing.T, db *database.DB, key, value string) {
+	t.Helper()
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO system_settings (key, value) VALUES ($1, $2)
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
+		t.Fatalf("set %s: %v", key, err)
+	}
+}
+
+// RULE (MONEY-CHECKLIST 4): a counter deposit and a till close contend on
+// the drawer's till_sessions row, the deposit's FOR SHARE against the
+// close's FOR UPDATE (ADR 0005 section 11 step 1b). Driven on the real
+// payments and till routes at pool size 4 with three contenders: each
+// deposit is counted by the close or refused once the drawer is closed,
+// never both (a refused deposit is absent from the expected count), never
+// lost (a counted deposit is a POSTED payment the close's expected count
+// carries).
+func TestCP07_CounterDepositRacingTheTillCloseIsCountedOrRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+
+	f := newFixture(t, db)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-CP07-" + uuid.NewString()[:8]
+	var branchID string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Counter "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1))`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'till_session' AND entity_id IN (SELECT id FROM till_sessions WHERE register_id = $1)`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	r := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 20000,
+	}, "req-cp07-race-open")
+	if r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	tillID := str(t, r.body, "id")
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+
+	// Three contenders on the drawer's row: a cash deposit, a check
+	// deposit, and the close counting the float plus both.
+	start := make(chan struct{})
+	results := make([]resp, 3)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		results[0] = f.do("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": orderID,
+			"till_session_id": tillID, "amount_cents": 3000, "method": "cash",
+		}, "X-Request-ID", "req-cp07-race-dep-cash")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		results[1] = f.do("POST", "/api/v1/payments", map[string]any{
+			"customer_id": f.customerID.String(), "order_id": orderID,
+			"till_session_id": tillID, "amount_cents": 1500, "method": "check", "reference": "CHK-RACE",
+		}, "X-Request-ID", "req-cp07-race-dep-check")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		results[2] = f.do("POST", "/api/v1/pos/till/"+tillID+"/close", map[string]any{
+			"counted_by_method": map[string]any{"cash": 23000, "check": 1500},
+		}, "X-Request-ID", "req-cp07-race-close")
+	}()
+	close(start)
+	wg.Wait()
+
+	for i, r := range results[:2] {
+		if r.status != http.StatusCreated && r.status != http.StatusConflict {
+			t.Errorf("deposit contender %d = %d: %s, want 201 (counted by the close) or 409 (the drawer closed first)", i, r.status, r.raw)
+		}
+	}
+	if results[2].status != http.StatusOK {
+		t.Fatalf("the close = %d: %s, want 200", results[2].status, results[2].raw)
+	}
+	cashLanded := results[0].status == http.StatusCreated
+	checkLanded := results[1].status == http.StatusCreated
+
+	// The close's expected count carries exactly the deposits that landed:
+	// a refused one is absent (never both), a landed one is present (never
+	// lost).
+	rRep := f.do("GET", "/api/v1/pos/till/"+tillID+"/report", nil)
+	if rRep.status != http.StatusOK {
+		t.Fatalf("till report = %d: %s", rRep.status, rRep.raw)
+	}
+	expected, _ := rRep.body["expected_by_method"].(map[string]any)
+	wantCash, wantCheck := int64(20000), int64(0)
+	if cashLanded {
+		wantCash += 3000
+	}
+	if checkLanded {
+		wantCheck += 1500
+	}
+	if got := num(t, expected, "CASH"); got != wantCash {
+		t.Errorf("expected_by_method.CASH = %d, want %d (cash deposit landed: %v): the close and the deposit disagree", got, wantCash, cashLanded)
+	}
+	// A method with nothing expected is absent from the map.
+	gotCheck := int64(0)
+	if _, ok := expected["CHECK"].(json.Number); ok {
+		gotCheck = num(t, expected, "CHECK")
+	}
+	if gotCheck != wantCheck {
+		t.Errorf("expected_by_method.CHECK = %d, want %d (check deposit landed: %v): the close and the deposit disagree", gotCheck, wantCheck, checkLanded)
+	}
+	// The close's own stored count is the figure the Z report freezes and
+	// the variance is measured against. The live report map above
+	// recomputes from the payments table, so it cannot see a deposit that
+	// lands after the close; the stored count can, and it is what proves
+	// the drawer's FOR SHARE and the close's FOR UPDATE serialize the
+	// deposit with the count.
+	var stored json.RawMessage
+	if err := db.Pool.QueryRow(context.Background(), `SELECT expected_by_method FROM till_sessions WHERE id = $1`, tillID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	storedExpected := map[string]int64{}
+	if err := json.Unmarshal(stored, &storedExpected); err != nil {
+		t.Fatalf("decode the close's stored expected_by_method: %v", err)
+	}
+	if got := storedExpected["CASH"]; got != wantCash {
+		t.Errorf("the close's stored expected CASH = %d, want %d (cash deposit landed: %v): the close did not count the deposit", got, wantCash, cashLanded)
+	}
+	if got := storedExpected["CHECK"]; got != wantCheck {
+		t.Errorf("the close's stored expected CHECK = %d, want %d (check deposit landed: %v): the close did not count the deposit", got, wantCheck, checkLanded)
+	}
+	// The drawer's POSTED payments are the expected count less the float,
+	// method for method: nothing the close counted is unposted, nothing
+	// posted went uncounted.
+	var sumCash, sumCheck int64
+	if err := db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE(SUM(ROUND(p.amount * 100)::bigint) FILTER (WHERE p.method = 'CASH'), 0),
+		       COALESCE(SUM(ROUND(p.amount * 100)::bigint) FILTER (WHERE p.method = 'CHECK'), 0)
+		FROM payments p WHERE p.till_session_id = $1 AND p.status = 'POSTED'`, tillID).Scan(&sumCash, &sumCheck); err != nil {
+		t.Fatal(err)
+	}
+	if sumCash != wantCash-20000 || sumCheck != wantCheck {
+		t.Errorf("the drawer's POSTED payments = cash %d check %d, want cash %d check %d: a deposit was lost or counted twice", sumCash, sumCheck, wantCash-20000, wantCheck)
+	}
+}
+
+// RULE: a database already past migration 101 (every demo and install on
+// origin/refactor/v1) gains payments.till_session_id and its index by applying
+// migration 147 on top, rolls back cleanly with 147's down file, and serves
+// counter deposits on the upgraded database.
+func TestCP07_Migration147UpgradeFromV1AndDown(t *testing.T) {
+	conn, _ := scratchDB(t)
+	all, err := filepath.Glob("../../migrations/*.sql")
+	if err != nil || len(all) == 0 {
+		t.Fatalf("no migrations found: %v", err)
+	}
+	sort.Strings(all)
+	var up147 string
+	for _, file := range all {
+		base := filepath.Base(file)
+		switch {
+		case strings.HasSuffix(base, "_down.sql"):
+		case strings.HasPrefix(base, "147_"):
+			up147 = file
+		case base < "147_":
+			apply(t, conn, file)
+		}
+	}
+	if up147 == "" {
+		t.Fatal("migration 147_payments_till_session.sql not found")
+	}
+	down147 := "../../migrations/down/147_payments_till_session_down.sql"
+
+	ctx := context.Background()
+	hasCol := func() int {
+		var n int
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'payments' AND column_name = 'till_session_id'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	hasIdx := func() int {
+		var n int
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE tablename = 'payments' AND indexname = 'idx_payments_till_session'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// On the v1 schema (already past 101), till_session_id is not on payments yet.
+	if hasCol() != 0 || hasIdx() != 0 {
+		t.Fatalf("before 147: column=%d index=%d, want 0 and 0 (101 must not be edited in place)", hasCol(), hasIdx())
+	}
+
+	// Apply 147 (and a second time as an idempotent no-op), then roll back with down, then re-apply 147.
+	apply(t, conn, up147)
+	apply(t, conn, up147)
+	if hasCol() != 1 || hasIdx() != 1 {
+		t.Fatalf("after 147 up: column=%d index=%d, want 1 and 1", hasCol(), hasIdx())
+	}
+	apply(t, conn, down147)
+	if hasCol() != 0 || hasIdx() != 0 {
+		t.Fatalf("after 147 down: column=%d index=%d, want 0 and 0", hasCol(), hasIdx())
+	}
+	apply(t, conn, up147)
+	if hasCol() != 1 || hasIdx() != 1 {
+		t.Fatalf("after 147 re-apply: column=%d index=%d, want 1 and 1", hasCol(), hasIdx())
+	}
+
+	// Drive the counter deposit flow against the upgraded database.
+	upgradedDB, err := database.Connect(conn.Config().ConnString())
+	if err != nil {
+		t.Fatalf("connect upgraded db: %v", err)
+	}
+	t.Cleanup(upgradedDB.Close)
+
+	f := newFixture(t, upgradedDB)
+	f.serveOrdersAndPayments()
+	f.cleanMoney()
+	regID := "REG-UPG-" + uuid.NewString()[:8]
+	var branchID string
+	if err := upgradedDB.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upgradedDB.Pool.Exec(ctx, `INSERT INTO pos_registers (id, name, location_id, branch_id) VALUES ($1, $2, $3::uuid, $3::uuid)`, regID, "Upgrade "+regID, branchID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = upgradedDB.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, regID)
+		_, _ = upgradedDB.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, regID)
+	})
+	f.cleanDeposits()
+	f.stock(f.productID, "10")
+
+	rTill := f.doUnique("POST", "/api/v1/pos/till/open", map[string]any{
+		"register_id": regID, "opening_float_cents": 10000,
+	}, "req-cp07-upg-till")
+	if rTill.status != http.StatusCreated {
+		t.Fatalf("open till on upgraded db = %d: %s", rTill.status, rTill.raw)
+	}
+	tillID := str(t, rTill.body, "id")
+
+	rOrd := f.create()
+	orderID := str(t, rOrd.body, "id")
+	f.transition(orderID, 1, "confirmed")
+
+	rDep := f.doUnique("POST", "/api/v1/payments", map[string]any{
+		"customer_id": f.customerID.String(), "order_id": orderID,
+		"till_session_id": tillID, "amount_cents": 2500, "method": "cash",
+	}, "req-cp07-upg-dep")
+	if rDep.status != http.StatusCreated {
+		t.Fatalf("counter deposit on upgraded db = %d: %s", rDep.status, rDep.raw)
+	}
+	rRep := f.do("GET", "/api/v1/pos/till/"+tillID+"/report", nil)
+	if rRep.status != http.StatusOK {
+		t.Fatalf("till report on upgraded db = %d: %s", rRep.status, rRep.raw)
+	}
+	expected, _ := rRep.body["expected_by_method"].(map[string]any)
+	if got := num(t, expected, "CASH"); got != 12500 {
+		t.Errorf("upgraded db till expected_by_method.CASH = %d, want 12500", got)
+	}
+}

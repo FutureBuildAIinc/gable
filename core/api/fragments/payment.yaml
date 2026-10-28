@@ -606,6 +606,7 @@ components:
         received_on: {type: string, format: date, description: "Defaults to the branch's business date."}
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
