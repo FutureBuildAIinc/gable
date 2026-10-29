@@ -98,6 +98,10 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** The sale's delivery answer (CP-10): a delivery is taxed at the ship to's zone, a pickup at the branch. */
+    delivery_type: 'pickup' | 'delivery';
+    /** The ship to a delivered sale carries. */
+    ship_to_id: string | null;
     /** For a completed sale that has returns: sale line id -> quantity already returned. */
     returned_quantities?: Record<string, string>;
     /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */

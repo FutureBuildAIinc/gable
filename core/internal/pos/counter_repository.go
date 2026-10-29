@@ -337,6 +337,7 @@ func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID
 		Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 			&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
 			&completed, &created, &s.CustomerPO, &s.JobID, &s.BuyerContactID, &s.PrintCount, &s.ExchangeReturnID,
+			&s.DeliveryType, &s.ShipToID,
 			&out.cashierName, &out.customerName, &out.accountNumber, &out.jobName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("sale not found")
@@ -346,6 +347,10 @@ func (r *PostgresRepository) ReceiptSaleByInvoice(ctx context.Context, invoiceID
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
 	s.CreatedAt = httpx.TimestampOf(created)
+	s.DeliveryType = strings.ToLower(s.DeliveryType)
+	if s.DeliveryType == "" {
+		s.DeliveryType = "pickup"
+	}
 	return &out, nil
 }
 

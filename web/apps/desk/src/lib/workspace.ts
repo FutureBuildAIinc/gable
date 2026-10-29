@@ -118,6 +118,9 @@ const staticZones: AppZone[] = [
   { prefix: '/admin/branches', key: 'location', label: 'Branches', icon: Building2, menu: [
     { label: 'Branches', path: '/admin/branches' },
   ] },
+  { prefix: '/admin/tax-zones', key: 'taxzone', label: 'Tax Zones', icon: Building2, menu: [
+    { label: 'Tax Zones', path: '/admin/tax-zones' },
+  ] },
   { prefix: '/admin', key: 'techadmin', label: 'Tech Admin', icon: Settings, menu: [
     { label: 'Settings', path: '/admin' },
     { label: 'Apps', path: '/admin/apps' },

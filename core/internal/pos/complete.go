@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -421,12 +423,15 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		totals := salesdoc.SumTotals(lines)
 
 		// Tax: the provider's answer (verified against what is billed now)
-		// or the rate resolver. A pickup sale takes the branch rate
-		// (ADR 0005 section 5.5).
+		// or the same resolver the order runs (CP-10): an exempt customer
+		// pays nothing, a delivered sale takes its ship-to's zone rate, a
+		// pickup takes the branch rate (ADR 0005 section 5.5).
 		var taxCents int64
 		var taxRate *string
 		taxExempt := false
 		taxSource := ""
+		var zone *taxzone.Snapshot
+		var shipToRaw []byte
 		if priced != nil {
 			if linesFingerprint(lines) != priced.fingerprint {
 				return conflict("tax_quote_stale",
@@ -435,31 +440,44 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			taxCents = int64(priced.taxCents)
 			taxSource = string(salesdoc.TaxSourceProvider)
 		} else {
-			exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
+			// the ship to is frozen onto the sale inside the same
+			// transaction, the record a delivered sale owes the audit
+			if sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY" {
+				if sale.ShipToID != nil {
+					snap, _, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+					if err != nil {
+						return err
+					}
+					if raw, merr := json.Marshal(snap); merr == nil {
+						shipToRaw = raw
+						if err := s.repo.SaveSaleShipTo(ctx, saleID, raw); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			zone, err = s.zoneFor(ctx, sale)
 			if err != nil {
 				return err
 			}
-			rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
+			resolved, err := s.ResolveSaleTax(ctx, sale, customerID)
 			if err != nil {
+				if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
+					return conflict("tax_rate_not_configured",
+						"set the branch's default tax rate before completing a sale")
+				}
 				return err
 			}
-			switch {
-			case exempt:
-				taxSource = string(salesdoc.TaxSourceExempt)
-				zero := "0"
-				taxRate = &zero
-			case ok:
-				scaled, _, err := salesdoc.ParseTaxRate(rate)
+			if resolved.Rate != nil {
+				scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
 				if err != nil {
 					return err
 				}
 				taxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
-				taxRate = &rate
-				taxSource = string(salesdoc.TaxSourceBranchRate)
-			default:
-				return conflict("tax_rate_not_configured",
-					"set the branch's default tax rate before completing a sale")
+				taxRate = resolved.Rate
 			}
+			taxSource = string(resolved.Source)
+			taxExempt = resolved.Source == salesdoc.TaxSourceExempt
 		}
 		total := int64(totals.SubtotalCents) + taxCents
 		// The tender check against the LIVE total (the tax is known now, the
@@ -668,10 +686,22 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		inv := &invoice.CounterInvoice{
 			BranchID: sale.BranchID, CustomerID: customerID, Currency: sale.Currency,
+			DeliveryType: sale.DeliveryType, ShipToID: sale.ShipToID, ShipToSnapshot: shipToRaw,
 			PickedUpBy: pickedBy, InvoiceDate: date, Actor: actor,
 			SubtotalCents: int64(totals.SubtotalCents), TaxCents: taxCents, TotalCents: total,
 			TaxRate: taxRate, TaxExempt: taxExempt, TaxSource: taxSource,
 			CustomerPO: sale.CustomerPO, JobID: sale.JobID,
+		}
+		// the zone that answered a delivered sale is frozen onto the invoice
+		// (CP-10), beside the rate it explains
+		if zone != nil && taxSource == string(salesdoc.TaxSourceZoneRate) {
+			id := zone.ZoneID
+			inv.TaxZoneID = &id
+			if raw, merr := json.Marshal(zone); merr == nil {
+				inv.TaxRateParts = raw
+			}
+			src := zone.DataSource
+			inv.TaxZoneSource = &src
 		}
 		refs, err := s.costRefs(ctx, lines)
 		if err != nil {
