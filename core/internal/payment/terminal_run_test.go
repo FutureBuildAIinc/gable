@@ -225,8 +225,15 @@ func newRunDriver(t *testing.T, fs *runFakeServer, ledger *payment.TerminalLedge
 // claimRunLeg claims and dispatch-moves one sale leg the driver takes.
 func claimRunLeg(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, amount int64) *payment.TerminalIntent {
 	t.Helper()
+	return claimRunLegAt(t, l, sale, m29BranchOf(t, l), amount)
+}
+
+// claimRunLegAt is claimRunLeg with the branch already read (a scenario
+// iteration must not reread it per leg).
+func claimRunLegAt(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, branch uuid.UUID, amount int64) *payment.TerminalIntent {
+	t.Helper()
 	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
-		RegisterID: "REG-" + sale.String()[:12], BranchID: m29BranchOf(t, l), AmountCents: amount,
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: amount,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(time.Minute)}
 	if err := l.Claim(context.Background(), in); err != nil {
@@ -239,18 +246,25 @@ func claimRunLeg(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, amount
 }
 
 // waitForIntentState polls the ledger until the intent holds one of the
-// wanted states, and fails the test on timeout.
-func waitForIntentState(t *testing.T, l *payment.TerminalLedger, id uuid.UUID, want ...payment.TerminalIntentState) *payment.TerminalIntent {
+// wanted states. A row that vanished was deleted by another suite's terminal
+// table cleanup (the counter suite empties the tables whole without the
+// advisory lock): ok=false says so and the caller runs its scenario again
+// rather than reading a foreign state; nothing the code under test deletes
+// an intent.
+func waitForIntentState(t *testing.T, l *payment.TerminalLedger, id uuid.UUID, want ...payment.TerminalIntentState) (*payment.TerminalIntent, bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		in, err := l.Get(context.Background(), id)
+		if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+			return nil, false
+		}
 		if err != nil {
 			t.Fatalf("get intent: %v", err)
 		}
 		for _, w := range want {
 			if in.State == w {
-				return in
+				return in, true
 			}
 		}
 		if time.Now().After(deadline) {
@@ -258,6 +272,56 @@ func waitForIntentState(t *testing.T, l *payment.TerminalLedger, id uuid.UUID, w
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// runUntilItSticks runs one scenario until an iteration completes without a
+// foreign cleanup deleting its leg mid flight (the scenario answers false);
+// an iteration that completes is the test's evidence, so no run passes
+// vacuously.
+func runUntilItSticks(t *testing.T, scenario func(t *testing.T) bool) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		if scenario(t) {
+			return
+		}
+	}
+	t.Fatal("every iteration lost its leg to another suite's terminal table cleanup")
+}
+
+// newRunLedger builds a run suite's ledger: the terminal tables lock ONCE
+// per test (the intent fixture takes it per call, and a second session's
+// request for the same advisory lock would wait for the test's own cleanup),
+// the shared pool, and the default branch a sale row points at.
+func newRunLedger(t *testing.T) (*payment.TerminalLedger, uuid.UUID) {
+	t.Helper()
+	testutil.LockTerminalTables(t)
+	db := testutil.RequireDB(t)
+	var branch uuid.UUID
+	if err := db.Pool.QueryRow(context.Background(), `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
+		t.Fatalf("default branch: %v", err)
+	}
+	return payment.NewTerminalLedger(db), branch
+}
+
+// runSaleRow inserts one open sale row an intent can point at, and removes
+// it with the test. One per scenario iteration: a foreign cleanup that took
+// the row must not poison the next iteration.
+func runSaleRow(t *testing.T, branch uuid.UUID) uuid.UUID {
+	t.Helper()
+	db := testutil.RequireDB(t)
+	sale := uuid.New()
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO pos_transactions
+		(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
+		VALUES ($1, $2, $3, 0, 0, 0, 'OPEN', $4, 0, 1, 'USD', $5, NOW(), NOW())`,
+		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
+		t.Fatalf("sale row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+	})
+	return sale
 }
 
 // runFakeServer pairs the fake with its server.
@@ -361,26 +425,33 @@ func TestRunTerminalPollOutcomes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ledger, sale := newTerminalFixture(t)
-			fs := newRunFake(t)
-			fs.fake.pollStep = tc.step
-			term := newRunDriver(t, fs, ledger)
-			in := claimRunLeg(t, ledger, sale, 2500)
-			if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-				IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
-				DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
-				t.Fatalf("dispatch: %v", err)
-			}
-			got := waitForIntentState(t, ledger, in.ID, tc.wantState)
-			if got.AnswerVerdict != tc.wantVerdt {
-				t.Fatalf("verdict %s, want %s", got.AnswerVerdict, tc.wantVerdt)
-			}
-			if tc.wantRef != "" && got.AnswerProviderRef != tc.wantRef {
-				t.Fatalf("answer provider ref %s, want Run's trans id %s", got.AnswerProviderRef, tc.wantRef)
-			}
-			if tc.wantState == payment.TerminalAuthorized && got.AnswerBrand != "VISA" {
-				t.Fatalf("brand %s, want the charge result's card_type", got.AnswerBrand)
-			}
+			ledger, branch := newRunLedger(t)
+			runUntilItSticks(t, func(t *testing.T) bool {
+				sale := runSaleRow(t, branch)
+				fs := newRunFake(t)
+				fs.fake.pollStep = tc.step
+				term := newRunDriver(t, fs, ledger)
+				in := claimRunLegAt(t, ledger, sale, branch, 2500)
+				if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+					IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+					DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+					t.Fatalf("dispatch: %v", err)
+				}
+				got, ok := waitForIntentState(t, ledger, in.ID, tc.wantState)
+				if !ok {
+					return false
+				}
+				if got.AnswerVerdict != tc.wantVerdt {
+					t.Fatalf("verdict %s, want %s", got.AnswerVerdict, tc.wantVerdt)
+				}
+				if tc.wantRef != "" && got.AnswerProviderRef != tc.wantRef {
+					t.Fatalf("answer provider ref %s, want Run's trans id %s", got.AnswerProviderRef, tc.wantRef)
+				}
+				if tc.wantState == payment.TerminalAuthorized && got.AnswerBrand != "VISA" {
+					t.Fatalf("brand %s, want the charge result's card_type", got.AnswerBrand)
+				}
+				return true
+			})
 		})
 	}
 }
@@ -390,34 +461,41 @@ func TestRunTerminalPollOutcomes(t *testing.T) {
 // is the only documented recovery: the found charge authorizes the leg with
 // Run's trans id.
 func TestRunTerminalExpiryResolvedByTransactionLookup(t *testing.T) {
-	ledger, sale := newTerminalFixture(t)
-	fs := newRunFake(t)
-	fs.fake.pollStep = func(string, int) (int, map[string]any) {
-		return 404, map[string]any{"error": "not found"}
-	}
-	fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
-		"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-FOUND", "result": "A",
-		"auth_code": "OK42", "card_number": "XXXXXXXXXXXX4242", "amount": 2500.0, "resp_text": "APPROVED"}
-	term := newRunDriver(t, fs, ledger)
-	in := claimRunLeg(t, ledger, sale, 2500)
-	if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-		IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
-		DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	got := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized, payment.TerminalDeclined)
-	if got.State != payment.TerminalAuthorized {
-		t.Fatalf("the lookup should authorize the leg, it is %s", got.State)
-	}
-	if got.AnswerProviderRef != "TRX-FOUND" {
-		t.Fatalf("answer ref %s, want TRX-FOUND", got.AnswerProviderRef)
-	}
-	if got.AnswerAuthCode != "OK42" {
-		t.Fatalf("auth code %s, want OK42", got.AnswerAuthCode)
-	}
-	if got.AnswerLast4 != "4242" {
-		t.Fatalf("last four %s, want the masked card number's 4242", got.AnswerLast4)
-	}
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs := newRunFake(t)
+		fs.fake.pollStep = func(string, int) (int, map[string]any) {
+			return 404, map[string]any{"error": "not found"}
+		}
+		fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
+			"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-FOUND", "result": "A",
+			"auth_code": "OK42", "card_number": "XXXXXXXXXXXX4242", "amount": 2500.0, "resp_text": "APPROVED"}
+		term := newRunDriver(t, fs, ledger)
+		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+			IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		got, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized, payment.TerminalDeclined)
+		if !ok {
+			return false
+		}
+		if got.State != payment.TerminalAuthorized {
+			t.Fatalf("the lookup should authorize the leg, it is %s", got.State)
+		}
+		if got.AnswerProviderRef != "TRX-FOUND" {
+			t.Fatalf("answer ref %s, want TRX-FOUND", got.AnswerProviderRef)
+		}
+		if got.AnswerAuthCode != "OK42" {
+			t.Fatalf("auth code %s, want OK42", got.AnswerAuthCode)
+		}
+		if got.AnswerLast4 != "4242" {
+			t.Fatalf("last four %s, want the masked card number's 4242", got.AnswerLast4)
+		}
+		return true
+	})
 }
 
 // TestRunTerminalFailedInteractionConsultsTheTransactionLookup: a failed or
@@ -437,29 +515,36 @@ func TestRunTerminalFailedInteractionConsultsTheTransactionLookup(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ledger, sale := newTerminalFixture(t)
-			fs := newRunFake(t)
-			// the charge reaches the report only after the dispatch: the
-			// pre dispatch lookup must not see it, the poll's own lookup must
-			fs.fake.pollStep = tc.step
-			fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
-				"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-LATE", "result": "A",
-				"auth_code": "OK77", "card_number": "XXXXXXXXXXXX1881", "amount": 2500.0, "resp_text": "APPROVED"}
-			fs.fake.deferredReport = 1
-			term := newRunDriver(t, fs, ledger)
-			in := claimRunLeg(t, ledger, sale, 2500)
-			if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-				IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
-				DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
-				t.Fatalf("dispatch: %v", err)
-			}
-			got := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized, payment.TerminalDeclined)
-			if got.State != payment.TerminalAuthorized {
-				t.Fatalf("the charge the report shows must authorize the leg, it is %s", got.State)
-			}
-			if got.AnswerProviderRef != "TRX-LATE" {
-				t.Fatalf("answer ref %s, want the report's trans id TRX-LATE", got.AnswerProviderRef)
-			}
+			ledger, branch := newRunLedger(t)
+			runUntilItSticks(t, func(t *testing.T) bool {
+				sale := runSaleRow(t, branch)
+				fs := newRunFake(t)
+				// the charge reaches the report only after the dispatch: the
+				// pre dispatch lookup must not see it, the poll's own lookup must
+				fs.fake.pollStep = tc.step
+				fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
+					"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-LATE", "result": "A",
+					"auth_code": "OK77", "card_number": "XXXXXXXXXXXX1881", "amount": 2500.0, "resp_text": "APPROVED"}
+				fs.fake.deferredReport = 1
+				term := newRunDriver(t, fs, ledger)
+				in := claimRunLegAt(t, ledger, sale, branch, 2500)
+				if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+					IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+					DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+					t.Fatalf("dispatch: %v", err)
+				}
+				got, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized, payment.TerminalDeclined)
+				if !ok {
+					return false
+				}
+				if got.State != payment.TerminalAuthorized {
+					t.Fatalf("the charge the report shows must authorize the leg, it is %s", got.State)
+				}
+				if got.AnswerProviderRef != "TRX-LATE" {
+					t.Fatalf("answer ref %s, want the report's trans id TRX-LATE", got.AnswerProviderRef)
+				}
+				return true
+			})
 		})
 	}
 }
@@ -468,24 +553,31 @@ func TestRunTerminalFailedInteractionConsultsTheTransactionLookup(t *testing.T) 
 // uncertain shapes with no charge in the report decline, and the sweep's
 // manager item path stays the fallback for a leg that stays unknown.
 func TestRunTerminalUncertainInteractionTheReportCannotFindDeclines(t *testing.T) {
-	ledger, sale := newTerminalFixture(t)
-	fs := newRunFake(t)
-	fs.fake.pollStep = failedStepOf("failed")
-	term := newRunDriver(t, fs, ledger)
-	in := claimRunLeg(t, ledger, sale, 2500)
-	if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-		IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
-		DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	before := fs.fake.lookupCount()
-	got := waitForIntentState(t, ledger, in.ID, payment.TerminalDeclined)
-	if got.AnswerVerdict != "declined" {
-		t.Fatalf("verdict %s, want declined", got.AnswerVerdict)
-	}
-	if fs.fake.lookupCount() == before {
-		t.Fatal("the poll never consulted the transaction lookup before declining")
-	}
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs := newRunFake(t)
+		fs.fake.pollStep = failedStepOf("failed")
+		term := newRunDriver(t, fs, ledger)
+		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+			IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		before := fs.fake.lookupCount()
+		got, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalDeclined)
+		if !ok {
+			return false
+		}
+		if got.AnswerVerdict != "declined" {
+			t.Fatalf("verdict %s, want declined", got.AnswerVerdict)
+		}
+		if fs.fake.lookupCount() == before {
+			t.Fatal("the poll never consulted the transaction lookup before declining")
+		}
+		return true
+	})
 }
 
 // TestRunTerminalNeverResendsADispatch (ruling: never re send a dispatch
@@ -493,40 +585,47 @@ func TestRunTerminalUncertainInteractionTheReportCannotFindDeclines(t *testing.T
 // every charge-card POST, so a second dispatch of the same idempotency key
 // finds the charge that already exists and never prompts the device again.
 func TestRunTerminalNeverResendsADispatch(t *testing.T) {
-	ledger, sale := newTerminalFixture(t)
-	fs := newRunFake(t)
-	fs.fake.pollStep = func(string, int) (int, map[string]any) {
-		return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
-	}
-	term := newRunDriver(t, fs, ledger)
-	in := claimRunLeg(t, ledger, sale, 2500)
-	d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
-		RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
-	_, err := term.Dispatch(context.Background(), d)
-	if err != nil {
-		t.Fatalf("first dispatch: %v", err)
-	}
-	if fs.fake.chargePostCount() != 1 {
-		t.Fatalf("the first dispatch posted %d charges, want 1", fs.fake.chargePostCount())
-	}
-	// the charge settled at Run after the 202: the lookup must find it
-	fs.fake.reporting[in.IdempotencyKey] = map[string]any{"order_id": in.IdempotencyKey,
-		"trans_id": "TRX-ONCE", "result": "A", "auth_code": "OK01", "card_number": "XXXXXXXXXXXX1111",
-		"amount": 2500.0, "resp_text": "APPROVED"}
-	second, err := term.Dispatch(context.Background(), d)
-	if err != nil {
-		t.Fatalf("second dispatch: %v", err)
-	}
-	if fs.fake.chargePostCount() != 1 {
-		t.Fatalf("the re dispatch posted a second charge (%d posts), want the lookup to answer it", fs.fake.chargePostCount())
-	}
-	if second.ProviderRef != "TRX-ONCE" {
-		t.Fatalf("the recovered receipt carries %s, want the found trans id", second.ProviderRef)
-	}
-	got := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized)
-	if got.AnswerProviderRef != "TRX-ONCE" {
-		t.Fatalf("answer ref %s, want TRX-ONCE", got.AnswerProviderRef)
-	}
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs := newRunFake(t)
+		fs.fake.pollStep = func(string, int) (int, map[string]any) {
+			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+		}
+		term := newRunDriver(t, fs, ledger)
+		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
+		_, err := term.Dispatch(context.Background(), d)
+		if err != nil {
+			t.Fatalf("first dispatch: %v", err)
+		}
+		if fs.fake.chargePostCount() != 1 {
+			t.Fatalf("the first dispatch posted %d charges, want 1", fs.fake.chargePostCount())
+		}
+		// the charge settled at Run after the 202: the lookup must find it
+		fs.fake.reporting[in.IdempotencyKey] = map[string]any{"order_id": in.IdempotencyKey,
+			"trans_id": "TRX-ONCE", "result": "A", "auth_code": "OK01", "card_number": "XXXXXXXXXXXX1111",
+			"amount": 2500.0, "resp_text": "APPROVED"}
+		second, err := term.Dispatch(context.Background(), d)
+		if err != nil {
+			t.Fatalf("second dispatch: %v", err)
+		}
+		if fs.fake.chargePostCount() != 1 {
+			t.Fatalf("the re dispatch posted a second charge (%d posts), want the lookup to answer it", fs.fake.chargePostCount())
+		}
+		if second.ProviderRef != "TRX-ONCE" {
+			t.Fatalf("the recovered receipt carries %s, want the found trans id", second.ProviderRef)
+		}
+		got, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized)
+		if !ok {
+			return false
+		}
+		if got.AnswerProviderRef != "TRX-ONCE" {
+			t.Fatalf("answer ref %s, want TRX-ONCE", got.AnswerProviderRef)
+		}
+		return true
+	})
 }
 
 // TestRunTerminalRefundAndVoidGoThroughVoidOrRefund: a refund and a void leg
@@ -534,8 +633,7 @@ func TestRunTerminalNeverResendsADispatch(t *testing.T) {
 // reference, the amount is cents on a refund and absent on a void, and the
 // answer the driver delivers carries Run's trans id of the reversal.
 func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
-	ledger, sale := newTerminalFixture(t)
-	fs, term := newRunTerminalFixtureOn(t, ledger)
+	ledger, branch := newRunLedger(t)
 	for _, tc := range []struct {
 		kind   string
 		amount int64
@@ -543,9 +641,61 @@ func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
 		{payment.TerminalKindRefund, 1200},
 		{payment.TerminalKindVoid, 2500},
 	} {
-		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: tc.kind + "-0",
-			RegisterID: "REG-" + sale.String()[:12], BranchID: m29BranchOf(t, ledger), AmountCents: tc.amount,
-			Kind: tc.kind, IdempotencyKey: tc.kind + "-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
+		runUntilItSticks(t, func(t *testing.T) bool {
+			sale := runSaleRow(t, branch)
+			fs, term := newRunTerminalFixtureOn(t, ledger)
+			in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: tc.kind + "-0",
+				RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: tc.amount,
+				Kind: tc.kind, IdempotencyKey: tc.kind + "-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
+			if err := ledger.Claim(context.Background(), in); err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
+				t.Fatalf("dispatch move: %v %v", ok, err)
+			}
+			if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+				IntentID: in.ID, Kind: tc.kind, AmountCents: tc.amount, RegisterID: in.RegisterID,
+				DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey, Reference: "TRX-SALE1"}); err != nil {
+				t.Fatalf("%s dispatch: %v", tc.kind, err)
+			}
+			if _, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized); !ok {
+				return false
+			}
+			posts := fs.fake.voidPosts_()
+			if len(posts) == 0 {
+				t.Fatalf("the %s never reached void-or-refund", tc.kind)
+			}
+			body := posts[len(posts)-1]
+			if body["trans_id"] != "TRX-SALE1" {
+				t.Fatalf("trans id %v, want the dispatch's reference", body["trans_id"])
+			}
+			if body["user_identifier"] != in.IdempotencyKey {
+				t.Fatalf("user identifier %v, want the idempotency key", body["user_identifier"])
+			}
+			if tc.kind == payment.TerminalKindRefund && body["amount"].(float64) != 1200 {
+				t.Fatalf("refund amount %v, want 1200 cents", body["amount"])
+			}
+			if tc.kind == payment.TerminalKindVoid && body["amount"] != nil {
+				t.Fatalf("the void body carries an amount (%v): a void is the full transaction", body["amount"])
+			}
+			return true
+		})
+	}
+}
+
+// TestRunTerminalRefundDecline: a void-or-refund answer of result C declines
+// the reversal leg, never authorizes it.
+func TestRunTerminalRefundDecline(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs, term := newRunTerminalFixtureOn(t, ledger)
+		fs.fake.voidAnswer = func(map[string]any) map[string]any {
+			return map[string]any{"result": "C", "trans_id": "", "resp_code": "05", "resp_text": "DECLINE"}
+		}
+		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "refund-1",
+			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 500,
+			Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
 		if err := ledger.Claim(context.Background(), in); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
@@ -553,57 +703,19 @@ func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
 			t.Fatalf("dispatch move: %v %v", ok, err)
 		}
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-			IntentID: in.ID, Kind: tc.kind, AmountCents: tc.amount, RegisterID: in.RegisterID,
-			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey, Reference: "TRX-SALE1"}); err != nil {
-			t.Fatalf("%s dispatch: %v", tc.kind, err)
+			IntentID: in.ID, Kind: payment.TerminalKindRefund, AmountCents: 500, RegisterID: in.RegisterID,
+			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey, Reference: "TRX-SALE2"}); err != nil {
+			t.Fatalf("dispatch: %v", err)
 		}
-		waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized)
-		posts := fs.fake.voidPosts_()
-		if len(posts) == 0 {
-			t.Fatalf("the %s never reached void-or-refund", tc.kind)
+		got, ok := waitForIntentState(t, ledger, in.ID, payment.TerminalDeclined)
+		if !ok {
+			return false
 		}
-		body := posts[len(posts)-1]
-		if body["trans_id"] != "TRX-SALE1" {
-			t.Fatalf("trans id %v, want the dispatch's reference", body["trans_id"])
+		if got.AnswerVerdict != "declined" {
+			t.Fatalf("verdict %s, want declined", got.AnswerVerdict)
 		}
-		if body["user_identifier"] != in.IdempotencyKey {
-			t.Fatalf("user identifier %v, want the idempotency key", body["user_identifier"])
-		}
-		if tc.kind == payment.TerminalKindRefund && body["amount"].(float64) != 1200 {
-			t.Fatalf("refund amount %v, want 1200 cents", body["amount"])
-		}
-		if tc.kind == payment.TerminalKindVoid && body["amount"] != nil {
-			t.Fatalf("the void body carries an amount (%v): a void is the full transaction", body["amount"])
-		}
-	}
-}
-
-// TestRunTerminalRefundDecline: a void-or-refund answer of result C declines
-// the reversal leg, never authorizes it.
-func TestRunTerminalRefundDecline(t *testing.T) {
-	ledger, sale := newTerminalFixture(t)
-	fs, term := newRunTerminalFixtureOn(t, ledger)
-	fs.fake.voidAnswer = func(map[string]any) map[string]any {
-		return map[string]any{"result": "C", "trans_id": "", "resp_code": "05", "resp_text": "DECLINE"}
-	}
-	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "refund-1",
-		RegisterID: "REG-" + sale.String()[:12], BranchID: m29BranchOf(t, ledger), AmountCents: 500,
-		Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
-	if err := ledger.Claim(context.Background(), in); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-		t.Fatalf("dispatch move: %v %v", ok, err)
-	}
-	if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
-		IntentID: in.ID, Kind: payment.TerminalKindRefund, AmountCents: 500, RegisterID: in.RegisterID,
-		DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey, Reference: "TRX-SALE2"}); err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	got := waitForIntentState(t, ledger, in.ID, payment.TerminalDeclined)
-	if got.AnswerVerdict != "declined" {
-		t.Fatalf("verdict %s, want declined", got.AnswerVerdict)
-	}
+		return true
+	})
 }
 
 // TestRunTerminalPollAndSweepRace (BRIEF-COMMON, transactions): the poll's
