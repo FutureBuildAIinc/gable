@@ -282,7 +282,7 @@ func (s *Service) PosSettings(ctx context.Context) (*PosSettings, error) {
 		return nil, err
 	}
 	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule),
-		RestockingFees:          effectiveRestockingFees(feeRows),
+		RestockingFees:        effectiveRestockingFees(feeRows),
 		RestockingFeeDefaults: maps.Clone(defaultRestockingFeeBps)}}
 	if limit != nil {
 		c := httpx.Cents(*limit)

@@ -643,10 +643,10 @@ type ReturnFigures struct {
 // names (null on a free line), its reason, its refund (negative, the memo
 // line's shape) and the fee withheld from it.
 type ReturnFigureLine struct {
-	LineID              *uuid.UUID   `json:"line_id"`
-	ReasonCode          string       `json:"reason_code"`
-	LineTotalCents      httpx.Cents  `json:"line_total_cents"`
-	RestockingFeeCents  httpx.Cents  `json:"restocking_fee_cents"`
+	LineID             *uuid.UUID  `json:"line_id"`
+	ReasonCode         string      `json:"reason_code"`
+	LineTotalCents     httpx.Cents `json:"line_total_cents"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
 }
 
 // PreviewReturn prices a return without taking it: the same read only

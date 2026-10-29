@@ -155,6 +155,12 @@ export class POSTerminal extends LitElement {
   // The figures of the plain return (its restocking fee and the money back),
   // stated by the server before the return is taken.
   @state() private _returnFigures: ReturnFigures | null = null;
+  // True while the figures of the plain return are pending: the debounce and
+  // the round trip after it. The taking waits for the statement.
+  @state() private _returnBusy = false;
+  // How many times the figures have been asked for: an answer from an older
+  // preview never clears the wait of a newer one.
+  private _returnAsked = 0;
   @state() private _exchangeBusy = false;
   @state() private _exchangeError: string | null = null;
   @state() private _exchangeTender: TenderMethod = 'cash';
@@ -1866,13 +1872,17 @@ export class POSTerminal extends LitElement {
     void this._loadReasons().then(() => { if (this._showReturn) this._scheduleDialogFigures(); });
   }
 
-  /** The closed list of reasons with each fee, read once; none loaded falls back to the note alone. */
+  /**
+   * The closed list of reasons with each fee, read when the dialog opens: a
+   * fee the dealer set since the last read shows in the reason's own words.
+   */
   private async _loadReasons() {
-    if (this._reasons.length > 0) return;
     try {
       this._reasons = (await posService.returnReasons()) ?? [];
     } catch {
-      this._reasons = [];
+      // A failed read keeps the list the page had: the reason dropdown is
+      // worth more than a fresh figure in its label, and the fee itself is
+      // the server's, stated in the figures.
     }
   }
 
@@ -2002,17 +2012,29 @@ export class POSTerminal extends LitElement {
     }
   }
 
-  /** States the return's figures before it is taken: the fee each line's reason withholds and the money back. */
-  private async _previewReturn() {
+  /**
+   * States the return's figures before it is taken: the fee each line's
+   * reason withholds and the money back. Always the server's own preview,
+   * never the reason list this page keeps: a fee set after the list was read
+   * is charged by the return, so it is stated here too.
+   */
+  private async _previewReturn(asked: number) {
+    if (asked !== this._returnAsked) return;
     const body = this._returnBody();
-    if (body === null || this._reasons.length === 0 || !this._reasons.some((r) => r.restocking_fee_bps > 0)) {
+    if (body === null) {
       this._returnFigures = null;
+      this._returnBusy = false;
       return;
     }
     try {
-      this._returnFigures = await posService.previewReturn(body);
+      const figures = await posService.previewReturn(body);
+      if (asked !== this._returnAsked) return;
+      this._returnFigures = figures ?? null;
     } catch {
+      if (asked !== this._returnAsked) return;
       this._returnFigures = null;
+    } finally {
+      if (asked === this._returnAsked) this._returnBusy = false;
     }
   }
 
@@ -2051,9 +2073,14 @@ export class POSTerminal extends LitElement {
     this._exchangeFigures = null;
     this._exchangeError = null;
     this._returnFigures = null;
+    // The figures are pending from here: the debounce, and the round trip
+    // after it. The return waits for the statement.
+    this._returnBusy = !this._exchangeOn;
+    const asked = this._returnAsked + 1;
+    this._returnAsked = asked;
     this._exchangeDebounce = setTimeout(() => {
       if (this._exchangeOn) void this._previewExchange();
-      else void this._previewReturn();
+      else void this._previewReturn(asked);
     }, 300);
   }
 
@@ -2409,7 +2436,8 @@ export class POSTerminal extends LitElement {
         @input=${(e: Event) => { this._returnReason = (e.target as HTMLInputElement).value; this._scheduleDialogFigures(); }}
         style="width:100%;box-sizing:border-box;padding:10px;${input};margin-bottom:6px"
         placeholder=${reasons.length > 0 ? (note ? 'Note (needed when the reason is other)' : 'Note') : 'Reason'} />
-      ${!this._exchangeOn && this._returnFigures !== null ? html`
+      ${!this._exchangeOn && this._returnFigures !== null && this._returnFigures.restocking_fee_cents > 0 ? html`
+        <p style="margin:0 0 6px;font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-fee-note">A restocking fee is withheld from the refund of the lines whose reason carries one.</p>
         <div style="margin:0 0 12px;padding:10px;border:1px solid rgb(var(--gb-till-edge));border-radius:8px" data-testid="return-figures">
           <div style="display:flex;justify-content:space-between;font-size:13px;color:rgb(var(--gb-till-soft))">
             <span>Restocking fee</span><span class="font-mono" data-testid="return-figures-fee">${money(this._returnFigures.restocking_fee_cents)}</span>
@@ -2427,8 +2455,6 @@ export class POSTerminal extends LitElement {
           </div>
           <p style="margin:6px 0 0;font-size:12px;color:rgb(var(--gb-till-muted))">Stated before the return is taken; the memo shows the fee as its own line.</p>
         </div>` : nothing}
-      ${!this._exchangeOn && this._returnFigures === null && reasons.some((r) => r.restocking_fee_bps > 0) ? html`
-        <p style="margin:0 0 12px;font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-fee-note">A restocking fee is withheld from the refund of lines whose reason carries one; the memo shows it as its own line.</p>` : nothing}
       ${this._exchangeOn && diff !== null && figures !== null ? html`
         <div style="margin:12px 0;padding:10px;border:1px solid rgb(var(--gb-till-edge));border-radius:8px" data-testid="exchange-totals">
           ${exchangeTotals(figures).map((row) => html`
@@ -2441,7 +2467,7 @@ export class POSTerminal extends LitElement {
         <button data-testid="return-exchange-toggle" @click=${() => { this._exchangeOn = !this._exchangeOn; this._scheduleDialogFigures(); }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-soft));font-size:14px;cursor:pointer">${this._exchangeOn ? 'Just a return' : 'Exchange'}</button>
         ${this._exchangeOn ? html`
           <button data-testid="exchange-take" @click=${() => this._confirmExchange()} ?disabled=${this._loading || this._exchangeBusy || this._exchangeLines.length === 0} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Exchange'}</button>` : html`
-          <button data-testid="return-take" @click=${() => this._confirmReturn()} ?disabled=${this._loading} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>`}
+          <button data-testid="return-take" @click=${() => this._confirmReturn()} ?disabled=${this._loading || this._returnBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>`}
       </div>
     `);
   }

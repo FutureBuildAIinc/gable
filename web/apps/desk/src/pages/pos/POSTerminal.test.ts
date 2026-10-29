@@ -2981,6 +2981,10 @@ describe('return a past sale', () => {
     svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
     svc.getSale.mockResolvedValue(fullSale());
     svc.returnReasons.mockResolvedValue([]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
     svc.createReturn.mockResolvedValue({ id: 'r1', number: 'RTN-000001', total_cents: -7500, restocking_fee_cents: 0, refund_method: 'cash' });
     const el = await mount(sale());
     q(el, 'return-search-open').click();
@@ -3006,6 +3010,9 @@ describe('return a past sale', () => {
     const note = q(el, 'return-note') as HTMLInputElement;
     note.value = 'customer reported damage';
     note.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the return waits for the server's figures, so the act waits for them too
+    await new Promise((r) => setTimeout(r, 350));
     await el.updateComplete;
     q(el, 'return-take').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -3059,13 +3066,8 @@ describe('return a past sale', () => {
     el.remove();
   });
 
-  it('states no figures while no reason carries a fee', async () => {
-    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
-    svc.getSale.mockResolvedValue(fullSale());
-    svc.returnReasons.mockResolvedValue([
-      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
-    ]);
-    const el = await mount(sale());
+  /** Opens the return dialog on the past sale, the way the counter does. */
+  async function openOnPastSale(el: POSTerminal) {
     q(el, 'return-search-open').click();
     await el.updateComplete;
     (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
@@ -3076,14 +3078,150 @@ describe('return a past sale', () => {
     q(el, 'return-search-result-pick').click();
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
+  }
+
+  it('asks the server for the figures even when no reason carries a fee', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
     const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
     qty.value = '1';
     qty.dispatchEvent(new Event('input'));
     await el.updateComplete;
     await new Promise((r) => setTimeout(r, 350));
     await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    el.remove();
+  });
+
+  it('states a fee that was set after the counter read the reason list', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    // the list the counter reads carries no fee in force
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    // the dealer sets a fee after the list was read: the server's preview is
+    // the only word on the fee in force, never the kept list
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect(q(el, 'return-figures-fee').textContent).toBe('$11.25');
+    expect(q(el, 'return-figures-refund').textContent).toBe('$63.75');
+    expect(el.querySelector('[data-testid="return-fee-note"]')).toBeTruthy();
+    el.remove();
+  });
+
+  it('reads the reason list again when the dialog opens, so a fee set since is in the label', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -7500, tax_cents: 0, restocking_fee_cents: 0, total_cents: -7500, refund_cents: 7500,
+      lines: [{ line_id: 'a', reason_code: 'other', line_total_cents: -7500, restocking_fee_cents: 0 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    expect(svc.returnReasons).toHaveBeenCalledTimes(1);
+    // the dealer sets a fee after the counter read the list
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    // the dialog is closed and opened again: the list is read again
+    const row = q(el, 'return-take').closest('div') as HTMLElement;
+    const cancel = [...row.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel');
+    cancel?.click();
+    await el.updateComplete;
+    await openOnPastSale(el);
+    expect(svc.returnReasons).toHaveBeenCalledTimes(2);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const select = q(el, 'return-reason') as HTMLElement & { options: { value: string; label: string }[] };
+    expect(select.options.map((o) => o.label)).toContain('Changed their mind (15% restocking fee)');
+    el.remove();
+  });
+
+  it('keeps Take the Return off while the figures are still being asked for', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the debounce has not fired yet: the figures are not on the screen
     expect(svc.previewReturn).not.toHaveBeenCalled();
     expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(true);
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('keeps Take the Return off while the figures are still in flight', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    let answer: (f: unknown) => void = () => {};
+    const held = new Promise((resolve) => { answer = resolve; });
+    svc.previewReturn.mockReturnValue(held as Promise<never>);
+    const el = await mount(sale());
+    await openOnPastSale(el);
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(true);
+    answer({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect((q(el, 'return-take') as HTMLButtonElement).disabled).toBe(false);
     el.remove();
   });
 });
