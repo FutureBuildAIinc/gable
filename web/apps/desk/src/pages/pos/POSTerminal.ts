@@ -9,7 +9,7 @@ import type { PayerCaptureIn } from '../../services/POSService.ts';
 import '../../pages/pos/PayerDialog.ts';
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
-  Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister,
+  Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, ExchangeTenderMethod, RefundMethod, CounterCustomer, CounterRegister,
   CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, IdType, SaleSummary,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
@@ -167,7 +167,7 @@ export class POSTerminal extends LitElement {
   @state() private _exchangeFigures: ExchangeFigures | null = null;
   @state() private _exchangeBusy = false;
   @state() private _exchangeError: string | null = null;
-  @state() private _exchangeTender: TenderMethod = 'cash';
+  @state() private _exchangeTender: ExchangeTenderMethod = 'cash';
   @state() private _exchangeRefund: 'cash' | 'account' = 'cash';
   // The return search modal: finding a past sale to return.
   @state() private _showReturnSearch = false;
@@ -2536,7 +2536,7 @@ export class POSTerminal extends LitElement {
             <div style="flex:1">
               <gable-select data-testid="exchange-tender" .value=${this._exchangeTender}
                 .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }, { value: 'card', label: 'Card' }]}
-                @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as TenderMethod; }}
+                @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as ExchangeTenderMethod; }}
               ></gable-select>
             </div>
           </div>

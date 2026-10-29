@@ -12,6 +12,7 @@ import type {
     SaleSummary,
     QuickSearchResult,
     TenderMethod,
+    ExchangeTenderMethod,
     CounterReturn,
     RefundMethod,
     TillSession,
@@ -154,7 +155,7 @@ export interface ExchangeIn {
     /** The manager's suspected avoidance mark (CP-17a). */
     suspected_avoidance?: boolean;
     /** The preview only: the method the counter will tender for the difference. */
-    tender_method?: 'cash' | 'check' | 'card';
+    tender_method?: ExchangeTenderMethod;
 }
 
 export const posService = {

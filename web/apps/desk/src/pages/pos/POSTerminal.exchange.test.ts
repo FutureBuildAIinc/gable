@@ -41,6 +41,7 @@ vi.mock('../../services/POSService', async (orig) => {
 
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
+import type { GablePayerDialog } from './PayerDialog';
 import { flush } from '../../test/dom';
 
 const REG_01: CounterRegister = {
@@ -173,7 +174,7 @@ describe('the exchange and the large cash rule of the branch country', () => {
         await el.updateComplete;
 
         // the payer's details are asked for, in the fields the server named
-        const dialog = document.querySelector('gable-payer-dialog') as (HTMLElement & { ask?: { fields: string[] } }) | null;
+        const dialog = document.querySelector('gable-payer-dialog') as GablePayerDialog | null;
         expect(dialog).toBeTruthy();
         expect(dialog!.ask?.fields).toContain('taxpayer_id');
         // and nothing is rung while the question is open

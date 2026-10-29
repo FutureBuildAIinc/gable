@@ -8,6 +8,8 @@
 
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
+/** The methods an exchange's difference can be tendered by (CP-17a). */
+export type ExchangeTenderMethod = 'cash' | 'check' | 'card';
 /** The kind of ID looked at beside a check or a charge; its number is never taken. */
 export type IdType = 'drivers_license' | 'state_id' | 'passport' | 'military_id' | 'other';
 export const ID_TYPES: Array<{ value: IdType; label: string }> = [
