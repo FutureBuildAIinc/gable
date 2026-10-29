@@ -91,6 +91,14 @@ export class TintLineDialog extends LitElement {
         return this.colors.find((c) => c.id === id) ?? undefined;
     }
 
+    /** The name of the formula book the chosen base belongs to, in the counter's own words. */
+    private get bookName(): string {
+        const base = this.bases.find((b) => b.id === this.baseId);
+        const sys = this.systems.find((s) => s.id === base?.tint_system_id);
+        if (!sys) return '';
+        return sys.manufacturer ? `${sys.manufacturer} ${sys.name}` : sys.name;
+    }
+
     private async pickBase(baseId: string) {
         this.baseId = baseId;
         this.colorId = '';
@@ -229,6 +237,7 @@ export class TintLineDialog extends LitElement {
         return html`
             <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Tint paint</h2>
             <p style="margin:0 0 14px;font-size:13px;color:rgb(var(--gb-till-muted))">Pick the base, the colour and the size. The formula shows below and every amount can be corrected at the counter.</p>
+            ${this.bookName ? html`<p style="margin:-8px 0 12px;font-size:12px;color:rgb(var(--gb-till-soft))" data-testid="tint-book">Formula book: ${this.bookName}</p>` : nothing}
 
             <label style=${LABEL} for="tint-base">Base paint</label>
             <gable-select id="tint-base" data-testid="tint-base" label="Base paint" .value=${this.baseId}

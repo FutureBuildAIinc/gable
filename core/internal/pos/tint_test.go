@@ -307,6 +307,14 @@ func TestTintedReturnNeverGoesBackIntoStock(t *testing.T) {
 	if onHand <= 0 {
 		t.Errorf("the tinted can is on the shelf: %v on hand", onHand)
 	}
+	// nothing was written: a refused return leaves no return row and no
+	// credit memo behind (the money self check, item 16)
+	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE original_transaction_id = $1`, sale).(int64); n != 0 {
+		t.Errorf("%d return rows were written by a refused return, want 0", n)
+	}
+	if n := f.scalar(`SELECT count(*) FROM credit_memos WHERE customer_id = (SELECT customer_id FROM pos_transactions WHERE id = $1)`, sale).(int64); n != 0 {
+		t.Errorf("%d credit memos were written by a refused return, want 0", n)
+	}
 }
 
 // RULE: a mis tint return of a tinted line is accepted and the can does not
@@ -349,6 +357,13 @@ func TestTintedReturnRules(t *testing.T) {
 	r := returnOf(f, sale, lineID, "changed_mind")
 	if r.status != http.StatusConflict || !strings.Contains(string(r.raw), "tinted_no_return") {
 		t.Errorf("a changed mind return of a tinted line = %d, want the tinted_no_return conflict: %s", r.status, r.raw)
+	}
+	// a refused return writes nothing (the money self check, item 16)
+	if n := f.scalar(`SELECT count(*) FROM pos_returns WHERE original_transaction_id = $1`, sale).(int64); n != 0 {
+		t.Errorf("%d return rows were written by a refused return, want 0", n)
+	}
+	if n := f.scalar(`SELECT count(*) FROM pos_return_lines WHERE sale_line_id = $1`, lineID).(int64); n != 0 {
+		t.Errorf("%d return lines were written by a refused return, want 0", n)
 	}
 	// the mis tint returns: the store's own error is the accepted exception
 	r = returnOf(f, sale, lineID, "mis_tint")
