@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { pickOptionByValue } from './app-controls';
+import { registerBranch, stockedProduct } from './pos-stock';
 import path from 'path';
 import fs from 'fs';
 
@@ -23,68 +24,6 @@ async function signIn(page: Page, name: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await catalog;
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
-}
-
-/** The branch the counter's register belongs to, the yard the whole run works in. */
-async function registerBranch(request: APIRequestContext): Promise<string> {
-  const registers = (await (await request.get('/api/v1/pos/registers')).json()) as {
-    items: { id: string; branch_id: string }[];
-  };
-  const reg = registers.items.find((r) => r.id === 'REG-01');
-  if (!reg) throw new Error('the seed holds no REG-01 register for the counter run');
-  return reg.branch_id;
-}
-
-/**
- * A product the counter's own yard holds free, for the item search, together
- * with its base price so the credit room check is measured against the sale.
- *
- * The CI run seeds with the multi yard switch off, which makes the branch
- * header inert: every stock read then sums every yard. The sale itself is
- * issued at the register's yard only, so this helper rebuilds the yard's free
- * stock (quantity minus allocated, the sale's own measure) by pairing each
- * inventory row with the branch its location names, and picks against the
- * register's yard with room to spare. Earlier specs in the same run spend and
- * allocate the same catalogue pick, so an all-yard figure can read healthy
- * while the register's yard holds nothing free.
- */
-async function stockedProduct(
-  request: APIRequestContext,
-  branchId: string,
-): Promise<{ sku: string; base_price_ten_thousandths: number }> {
-  const locations = (await (await request.get('/api/v1/locations?limit=200')).json()) as {
-    items: { id: string; branch_id: string }[];
-  };
-  const branchOf = new Map(locations.items.map((l) => [l.id, l.branch_id]));
-
-  const levels: { product_id: string; location_id: string | null; available: string }[] = [];
-  let cursor = '';
-  for (;;) {
-    const page = (await (
-      await request.get(`/api/v1/inventory?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
-    ).json()) as {
-      items: { product_id: string; location_id: string | null; available: string }[];
-      next_cursor: string | null;
-    };
-    levels.push(...page.items);
-    if (!page.next_cursor) break;
-    cursor = page.next_cursor;
-  }
-  const freeAtBranch = new Map<string, number>();
-  for (const lv of levels) {
-    if (!lv.location_id || branchOf.get(lv.location_id) !== branchId) continue;
-    freeAtBranch.set(lv.product_id, (freeAtBranch.get(lv.product_id) ?? 0) + (Number(lv.available) || 0));
-  }
-
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string; base_price_ten_thousandths: number }[];
-  };
-  // The sale takes one piece; ask for a yard's free stock comfortably above that.
-  const FLOOR = 10;
-  for (const p of products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse()) {
-    if ((freeAtBranch.get(p.id) ?? 0) >= FLOOR) return p;
-  }
-  throw new Error('no stocked product for the counter run');
 }
 
 interface CustomerHeader {
