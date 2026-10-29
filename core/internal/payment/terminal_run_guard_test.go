@@ -6,9 +6,12 @@ package payment_test
 // The no double charge rules of the Run driver (CP-05), proved against the
 // scripted fake: the transaction lookup answers three things, found, not
 // found and could not ask, and a report that could not answer refuses the
-// dispatch and leaves the leg for reconciliation, never charges blind; and
-// the driver's own guard holds the check and the charge-card POST together,
-// so four concurrent dispatches of one leg make one charge.
+// dispatch and leaves the leg for reconciliation, never charges blind; the
+// driver's own guard holds the check and the charge-card POST together, so
+// four concurrent dispatches of one leg make one charge; the refund and void
+// path takes the same guard, so a retried reversal refunds once; and the
+// poller's window fits inside the ledger's lease, so the sweep never closes
+// a leg the driver is still working.
 
 import (
 	"context"

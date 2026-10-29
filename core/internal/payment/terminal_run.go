@@ -666,7 +666,7 @@ func (t *RunTerminal) refreshAPIKey(ctx context.Context, base, currentKey string
 
 // reportingConfigured says whether the reporting credential set is present:
 // without it the transaction lookup cannot run at all, and the driver's own
-// in process refusal is what keeps a re dispatch from charging twice.
+// per order guard is what keeps a re dispatch from charging twice.
 func (t *RunTerminal) reportingConfigured() bool {
 	return t.reportingBase != "" && t.reportingID != ""
 }
