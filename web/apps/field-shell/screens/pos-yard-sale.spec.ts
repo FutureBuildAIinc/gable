@@ -247,3 +247,16 @@ test('1280: the legend is present on a desktop width', async ({ page }) => {
   const frame = page.frameLocator('iframe[data-testid="app-frame"]');
   await expect(frame.locator('[data-testid="pos-hotkey-legend"]')).toBeVisible();
 });
+
+test('390: the open Till menu opens fully on screen', async ({ page }) => {
+  await boot(page, 'dark', 390, 844);
+  const frame = page.frameLocator('iframe[data-testid="app-frame"]');
+  await frame.getByTestId('pos-till-menu-button').click();
+  const menu = frame.getByTestId('pos-till-menu-items');
+  await expect(menu).toBeVisible();
+  const box = await menu.boundingBox();
+  expect(box, 'the open menu has a box').not.toBeNull();
+  console.log(`till menu at 390: x=${box!.x} width=${box!.width}`);
+  expect(box!.x, "the menu's left edge stays on screen").toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width, "the menu's right edge stays on screen").toBeLessThanOrEqual(390);
+});

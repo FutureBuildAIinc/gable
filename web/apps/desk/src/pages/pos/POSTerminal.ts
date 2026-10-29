@@ -2282,7 +2282,7 @@ export class POSTerminal extends LitElement {
             ${this._progressChip('Summary', 3, progress.summary)}
           </nav>
         </div>
-        <div class="flex w-full min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:w-auto min-[900px]:flex-nowrap">
+        <div class="relative flex w-full min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:static min-[900px]:w-auto min-[900px]:flex-nowrap">
           ${this._till ? html`
             <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
             <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
@@ -2311,7 +2311,7 @@ export class POSTerminal extends LitElement {
   private _renderTillMenu() {
     const item = 'flex min-h-11 w-full items-center whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
     return html`
-      <div class="relative min-[900px]:contents" data-testid="pos-till-menu">
+      <div class="min-[900px]:contents" data-testid="pos-till-menu">
         <button type="button" data-testid="pos-till-menu-button" aria-label="Till" aria-haspopup="menu"
           aria-expanded=${this._tillMenu ? 'true' : 'false'} @click=${() => { this._tillMenu = !this._tillMenu; }}
           class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:bg-white/5 min-[900px]:hidden">
