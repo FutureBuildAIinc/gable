@@ -367,26 +367,49 @@ func TestManualReasonsAreAClosedList(t *testing.T) {
 func TestDensityConvertsTheNetToYards(t *testing.T) {
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db, withScale())
-	// Sold by the cubic yard at 2700 lb to the loose yard.
-	productID := f.bulkProduct(t, "CY", "42.00", "2700")
-	f.scale.SetWeightStableMilli(30000000, scale.UnitPound)
-	in := f.weighIn("TRUCK-D")
-	saleID := f.startSale(nil)
-	added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
-	lineID := str(t, firstLineOf(t, added.body), "id")
-	f.scale.SetWeightStableMilli(43500000, scale.UnitPound) // 13500 lb net
-	out := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
-		"sale_id": saleID, "line_id": lineID, "weigh_in_ticket_id": str(t, in.body, "id"),
-		"revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
-	if out.status != http.StatusOK {
-		t.Fatalf("weigh out = %d: %s", out.status, out.raw)
-	}
-	line := firstLineOf(t, out.body["sale"].(map[string]any))
-	if got := str(t, line, "quantity"); got != "5" {
-		t.Errorf("quantity = %q, want 5 yards (13500 lb at 2700 lb per yard)", got)
-	}
-	if got := num(t, line, "line_total_cents"); got != 21000 {
-		t.Errorf("line total = %d, want 21000 (5 yards at $42)", got)
+
+	// The priced quantity rounds once, half away from zero, at the wire's
+	// scale 4: an exact quotient stays exact, an inexact one rounds (1 lb at
+	// 2700 lb per yard is 0.0003703 yards, 0.0004, never a truncated
+	// 0.0003), and a quotient landing exactly on a half at the fifth decimal
+	// (1 lb at 4000 lb per yard is 0.00025) lands on the farther side,
+	// 0.0003, not 0.0002.
+	for _, tc := range []struct {
+		name           string
+		densityLbPerCY string
+		grossInMilli   int64
+		grossOutMilli  int64
+		wantQuantity   string
+		wantTotalCents int64
+	}{
+		{"an exact quotient", "2700", 30000000, 43500000, "5", 21000},            // 13500 lb net at 2700
+		{"an inexact quotient", "2700", 30000000, 30001000, "0.0004", 0},         // 1 lb net
+		{"a half at the fifth decimal", "4000", 30000000, 30001000, "0.0003", 0}, // 0.00025 yards
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			productID := f.bulkProduct(t, "CY", "42.00", tc.densityLbPerCY)
+			f.scale.SetWeightStableMilli(tc.grossInMilli, scale.UnitPound)
+			in := f.weighIn("TRUCK-D-" + tc.name)
+			saleID := f.startSale(nil)
+			added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
+			lineID := str(t, firstLineOf(t, added.body), "id")
+			f.scale.SetWeightStableMilli(tc.grossOutMilli, scale.UnitPound)
+			out := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+				"sale_id": saleID, "line_id": lineID, "weigh_in_ticket_id": str(t, in.body, "id"),
+				"revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+			if out.status != http.StatusOK {
+				t.Fatalf("weigh out = %d: %s", out.status, out.raw)
+			}
+			line := firstLineOf(t, out.body["sale"].(map[string]any))
+			if got := str(t, line, "quantity"); got != tc.wantQuantity {
+				t.Errorf("quantity = %q, want %s", got, tc.wantQuantity)
+			}
+			if tc.wantTotalCents != 0 {
+				if got := num(t, line, "line_total_cents"); got != tc.wantTotalCents {
+					t.Errorf("line total = %d, want %d", got, tc.wantTotalCents)
+				}
+			}
+		})
 	}
 }
 
