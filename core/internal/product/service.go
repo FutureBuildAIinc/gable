@@ -151,10 +151,6 @@ func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 		return httpx.BadRequest("one or more fields failed validation",
 			httpx.FieldError{Field: "description", Message: "is required"})
 	}
-	if !ValidUOM(p.UOMPrimary) {
-		return httpx.BadRequest("one or more fields failed validation",
-			httpx.FieldError{Field: "stock_uom", Message: "must be one of the unit codes the catalogue holds"})
-	}
 	// The stocking unit is a catalogue row from C3-2A-units (ADR 0006
 	// section 2): the closed enum is gone and the catalogue answers, so a
 	// dealer's own unit stocks a product too. A random length product is
@@ -387,6 +383,27 @@ func (s *Service) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consu
 			return err
 		}
 		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "consumer_durable")
+	})
+	return newRevision, err
+}
+
+// UpdateDensity writes the weighed sale's density (CP-19), audited and
+// versioned like the geometry write.
+func (s *Service) UpdateDensity(ctx context.Context, id uuid.UUID, density *httpx.Quantity, state *string, revision int64) (int64, error) {
+	var newRevision int64
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		newRevision, err = s.repo.UpdateDensity(ctx, id, density, state, revision)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		if err := s.auditChange(ctx, id, p.SKU, newRevision, EventProductUpdated, map[string]any{"parts": []string{"density"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "density")
 	})
 	return newRevision, err
 }

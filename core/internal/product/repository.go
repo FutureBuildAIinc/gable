@@ -40,6 +40,8 @@ type Repository interface {
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error)
+	// UpdateDensity writes the weighed sale's density (CP-19).
+	UpdateDensity(ctx context.Context, id uuid.UUID, density *httpx.Quantity, state *string, revision int64) (int64, error)
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error)
 	UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error)
 
@@ -87,6 +89,7 @@ var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::t
 		       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
 		       p.sale_uom, p.price_uom, p.purchase_uom,
 		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
+		       p.density_lb_per_cy::text, p.density_volume_state,
 		       ` + pictures.ImageSQL("p")
 
 // stockColumns and stockJoin read a product's stock totals in the same
@@ -125,6 +128,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 	var p Product
 	var basePrice, weight, reorderPoint, reorderQty, avgCost, onHand, allocated string
 	var boardThick, boardWidth, boardLength *string
+	var density *string
 	var created, updated time.Time
 	dest := []any{
 		&p.ID, &p.SKU, &p.Description, &p.UOMPrimary, &basePrice, &p.Vendor, &p.VendorID, &p.UPC,
@@ -135,6 +139,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
+		&density, &p.DensityVolumeState,
 		&p.ImageURL,
 	}
 	if withStock {
@@ -144,6 +149,13 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		return nil, err
 	}
 	var err error
+	if density != nil {
+		q, qerr := httpx.ParseQuantity(*density)
+		if qerr != nil {
+			return nil, fmt.Errorf("failed to read the density: %w", qerr)
+		}
+		p.DensityLbPerCY = &q
+	}
 	for _, col := range []struct {
 		text *string
 		dst  **httpx.Quantity
@@ -206,9 +218,11 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc,
 		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source,
 		                      reorder_point, reorder_qty,
-		                      board_thickness_in, board_width_in, board_length_ft, random_length, consumer_durable)
+		                      board_thickness_in, board_width_in, board_length_ft, random_length, consumer_durable,
+		                      density_lb_per_cy, density_volume_state)
 		VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14::numeric, $15::numeric,
-			$16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000, $19, $20)
+			$16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000, $19, $20,
+			$21::numeric / 10000, $22)
 		RETURNING id, created_at, updated_at, revision, average_unit_cost::text, target_margin, commission_rate,
 		          sale_uom, price_uom, purchase_uom`
 
@@ -220,6 +234,7 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		p.ReorderPointQ.DecimalString(), p.ReorderQtyQ.DecimalString(),
 		qtyArg(p.BoardThicknessIn), qtyArg(p.BoardWidthIn), qtyArg(p.BoardLengthFT), p.RandomLength,
 		p.ConsumerDurable,
+		qtyArg(p.DensityLbPerCY), p.DensityVolumeState,
 	).Scan(
 		&p.ID, &created, &updated, &p.Revision, &avgCost, &p.TargetMargin, &p.CommissionRate,
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
@@ -488,6 +503,28 @@ const updateDimensionsQuery = `
 	    stackable = $6, geometry_source = $7, revision = revision + 1
 	WHERE id = $1 AND revision = $2
 	RETURNING revision`
+
+// UpdateDensity writes the weighed sale's density (CP-19), null null
+// clearing it, guarded by the revision.
+func (r *PostgresRepository) UpdateDensity(ctx context.Context, id uuid.UUID, density *httpx.Quantity, state *string, revision int64) (int64, error) {
+	var newRevision int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		UPDATE products
+		SET density_lb_per_cy = $3::numeric / 10000, density_volume_state = $4, revision = revision + 1
+		WHERE id = $1 AND revision = $2
+		RETURNING revision`, id, revision, qtyArg(density), state).Scan(&newRevision)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			var exists bool
+			if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id = $1)`, id).Scan(&exists); err == nil && exists {
+				return 0, ErrStaleRevision
+			}
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to update the product's density: %w", err)
+	}
+	return newRevision, nil
+}
 
 // UpdateDimensions writes the parametric 3D geometry (inches) that the PIM owns
 // as the canonical digital-twin source consumed by AI_LM's Load Builder.

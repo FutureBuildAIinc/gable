@@ -63,6 +63,9 @@ func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string
 func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ Geometry, _ int64) (int64, error) {
 	return 0, nil
 }
+func (f *fakeProductRepo) UpdateDensity(_ context.Context, _ uuid.UUID, _ *httpx.Quantity, _ *string, _ int64) (int64, error) {
+	return 0, nil
+}
 func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
 	return 0, nil
 }

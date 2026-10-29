@@ -243,7 +243,7 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		if priceUOM == "" {
 			priceUOM = uom
 		}
-		r.Lines = append(r.Lines, document.ThermalLine{
+		tl := document.ThermalLine{
 			SKU:         sku,
 			Description: l.Description,
 			Quantity:    *l.Quantity,
@@ -251,10 +251,42 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			UnitPrice:   *l.UnitPrice,
 			PriceUOM:    priceUOM,
 			LineTotal:   *l.LineTotal,
-		})
+		}
+		// The weighed line's marking (CP-19): the ticket on the paper, MAN
+		// WT when the weight was typed.
+		if l.ScaleTicketNumber != nil {
+			tl.ScaleTicket = *l.ScaleTicketNumber
+			tl.WeightGrossLb, tl.WeightTareLb, tl.WeightNetLb = l.WeightGrossLb, l.WeightTareLb, l.WeightNetLb
+			tl.ManualWeight = l.WeightSource != nil && *l.WeightSource == "manual"
+		}
+		r.Lines = append(r.Lines, tl)
 	}
 	changeLeft := sale.ChangeCents
 	var accountCents int64
+	// The cash rounding the branch's rule made (CP-18), read from the
+	// drawer's cash: the cash the sale's payments kept, less the exact cash
+	// the sale needed (the total less the non-cash legs). An exchange's
+	// credit is one of those legs, the store credit tender row the
+	// completion added, so it is counted once here. A tender row the change
+	// swallowed whole has no payment and never reached the drawer, so it
+	// counts for nothing here; a sale the rule did not touch shows no
+	// rounding.
+	var cashKept, nonCash int64
+	for i := range tenders {
+		switch tenders[i].Method {
+		case TenderCash:
+			if tenders[i].PaymentID != nil {
+				cashKept += int64(tenders[i].AmountCents)
+			}
+		default:
+			nonCash += int64(tenders[i].AmountCents)
+		}
+	}
+	exactCash := int64(sale.TotalCents) - nonCash
+	if exactCash < 0 {
+		exactCash = 0
+	}
+	r.RoundingCents = httpx.Cents(cashKept - exactCash)
 	for i := range tenders {
 		t := &tenders[i]
 		tt := document.ThermalTender{

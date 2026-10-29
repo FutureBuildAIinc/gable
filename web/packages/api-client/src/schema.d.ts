@@ -6377,6 +6377,26 @@ export interface paths {
         patch: operations["posTransactionChangeItemQuantity"];
         trace?: never;
     };
+    "/api/v1/pos/transactions/{id}/items/{itemId}/weight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enter a weight by hand on a line (CP-19)
+         * @description The manual weight entry: a typed gross in pounds, an optional tare, and the reason from the closed list GET /api/v1/pos/scale/manual-reasons answers (other needs the note). The entry takes a consecutive ticket number like a scale reading, the line is repriced at the net in its sale unit (the density bridge for a volume unit, 409 density_required when the product has none), and the documents print MAN WT. Handbook 44: when the branch's scale answers and does not read zero the entry is refused (409 scale_not_zero); a scale that cannot be read is the reason scale_offline attests. The body carries the sale's revision (or If-Match); a stale one is 409 stale_revision and none is 428. A counted or otherwise unweighable unit is 409 weight_unit_mismatch, an already weighed line is 409 line_already_weighed.
+         */
+        post: operations["posTransactionEnterLineWeight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/transactions/{id}/complete": {
         parameters: {
             query?: never;
@@ -6858,6 +6878,163 @@ export interface paths {
          */
         get: operations["posZReportList"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The branch scale's current reading (CP-19)
+         * @description Whether the register's branch has a scale wired, the device (with its certificate of conformance number), and the current indication: the weight in pounds, the unit the indicator reported, the mode, the motion flag and at_zero for the manual entry's Handbook 44 check. The reading shown here is never sold; only the ticket flow's stable read becomes money. A counter with no scale answers configured false, and the manual entry with its reason is the path.
+         */
+        get: operations["posScaleStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/weigh-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Weigh the empty truck in (CP-19)
+         * @description Captures the stable gross reading against the vehicle's identification and opens the ticket the weigh out closes. A reading in motion, over capacity, in a zero error, or with no weight is refused (409 scale_reading_refused): the driver never hands the number over. A counter with no scale wired is 503 scale_not_configured.
+         */
+        post: operations["posScaleWeighIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/weigh-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Weigh the loaded truck out onto a sale line (CP-19)
+         * @description Captures the stable gross out, nets it against the weigh in's gross (double_draft: Gable's computation of two gross readings, never a scale tare operation), completes the weigh in ticket, writes the weigh out ticket and puts the weight with its consecutive ticket number on the sale line, repriced at the net in the line's sale unit (the product's density bridges a volume unit, 409 density_required without one). The weigh in is named by ticket or by vehicle (409 no_open_weigh_in when the truck never weighed in). A loaded weight at or under the weigh in's is 409 net_not_positive; the same refusals as the weigh in guard the reading. The body carries the sale's revision (or If-Match). The weigh runs as one transaction, so a retry or a race completes once.
+         */
+        post: operations["posScaleWeighOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The branch's weight tickets (CP-19)
+         * @description The register's branch's tickets in ticket number order, filtered by status (open, completed, void) and vehicle. A ticket is never deleted; a void keeps its row and its number.
+         */
+        get: operations["posScaleTicketList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One weight ticket (CP-19) */
+        get: operations["posScaleTicketGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/tickets/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a weight ticket (CP-19)
+         * @description Marks the ticket void with its reason, keeping the row and the consecutive number (the sequence is never reused and a void is never a delete). A ticket that prices a sale line cannot be voided (409 ticket_on_line); the line goes first. The body carries the ticket's revision (or If-Match): a stale one is 409 stale_revision and none is 428.
+         */
+        post: operations["posScaleTicketVoid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/manual-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The closed list of manual weight reasons (CP-19)
+         * @description The reasons a typed weight names; the reason is what makes the entry auditable, so it is never free text. A reason with needs_note requires the note.
+         */
+        get: operations["posScaleManualReasons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/scale/simulator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Drive the simulated scale (CP-19; demo stacks only)
+         * @description Mounted only when the counter was wired with the simulated scale (POS_SCALE_SIMULATOR, a demo configuration, never production). Puts a load on the deck in pounds or kilograms, pins the motion flag, or forces an indicator status, so the end to end walk drives the scale with no hardware.
+         */
+        put: operations["posScaleSimulatorDrive"];
         post?: never;
         delete?: never;
         options?: never;
@@ -8203,6 +8380,26 @@ export interface paths {
          * @description Every geometry field is a pointer: a null clears the column to SQL NULL ("not recorded"), a real zero is a measurement.
          */
         patch: operations["productUpdateDimensions"];
+        trace?: never;
+    };
+    "/api/v1/products/{id}/density": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the weighed sale's density (CP-19)
+         * @description The pounds per cubic yard with the volume state the figure was measured at (loose or compacted): the counter's only bridge between a scale weight and a price by the cubic yard. Both fields together, or a null pair to clear; one without the other is a 400. The body's revision or If-Match carries the precondition.
+         */
+        patch: operations["productUpdateDensity"];
         trace?: never;
     };
     "/api/v1/products/{id}/lead-time": {
@@ -13793,6 +13990,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -14062,6 +14283,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -14220,6 +14465,7 @@ export interface components {
             phone: string | null;
             tax_jurisdiction_code: string | null;
             default_tax_rate: number | null;
+            cash_rounding_mode: components["schemas"]["CashRoundingMode"];
             timezone: string | null;
             /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
             country_code: string | null;
@@ -14253,6 +14499,7 @@ export interface components {
             phone?: string | null;
             tax_jurisdiction_code?: string | null;
             default_tax_rate?: number | null;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string | null;
             /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
             country_code?: string | null;
@@ -14276,6 +14523,7 @@ export interface components {
             phone?: string;
             tax_jurisdiction_code?: string;
             default_tax_rate?: number;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string;
             /** @description The branch's country, two letters (CP-17a); null falls back to the dealer's country.default. */
             country_code?: string | null;
@@ -14290,7 +14538,13 @@ export interface components {
             active: boolean;
             is_home?: boolean;
             timezone?: string;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
         };
+        /**
+         * @description The branch's own cash rounding rule (CP-18): the rule off, or the nearest five cents. The Government of Canada elected symmetric rounding to the nearest five cents for cash, and the rounding touches the cash leg only.
+         * @enum {string}
+         */
+        CashRoundingMode: "OFF" | "NEAREST_5_CENTS";
         BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
@@ -14614,6 +14868,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -14703,6 +14981,30 @@ export interface components {
              * @description A unit cost at scale 4.
              */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs. */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used, whether read or stored. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
             /**
@@ -17237,8 +17539,186 @@ export interface components {
             vendor_id: string | null;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description Where the line's weight came from; null on a line that was not weighed (CP-19). */
+            weight_source: ("scale" | "manual") | null;
+            /** @description The gross reading in pounds, a decimal string. */
+            weight_gross_lb: string | null;
+            /** @description The tare used: the weigh in's gross on a double draft ticket. */
+            weight_tare_lb: string | null;
+            /** @description The net the quantity was priced from. */
+            weight_net_lb: string | null;
+            /** @description Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation. */
+            weight_net_basis: ("single_draft" | "double_draft") | null;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** Format: uuid */
+            scale_ticket_id: string | null;
+            /** @description The ticket's consecutive number (WT-000001). */
+            scale_ticket_number: string | null;
+            /** @description The closed-list reason a typed weight carries; the documents print MAN WT. */
+            manual_weight_reason: string | null;
+            weight_captured_by: string | null;
+            /** Format: date-time */
+            weight_captured_at: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description One weight ticket (CP-19): the consecutive never reused number, the device that produced the reading, the gross, tare and net, the vehicle, the source and the net basis, and the void state that replaces a delete. */
+        PosScaleTicket: {
+            /** Format: uuid */
+            id: string;
+            /** @description WT-000001, consecutive and never reused; a void keeps it. */
+            ticket_number: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            branch_id: string;
+            /**
+             * Format: uuid
+             * @description The certified scale that produced the reading; null on a manual weight.
+             */
+            scale_device_id: string | null;
+            /** @description The truck's plate or number. */
+            vehicle_ref: string | null;
+            /** @enum {string} */
+            direction: "weigh_in" | "weigh_out" | "single";
+            /** @enum {string} */
+            status: "open" | "completed" | "void";
+            /** @description A decimal string of pounds. */
+            gross_lb: string | null;
+            /** @description The weigh in's gross on a double draft ticket. */
+            tare_lb: string | null;
+            net_lb: string | null;
+            /**
+             * @description The unit the indicator reported; the weights are pounds.
+             * @enum {string}
+             */
+            reading_unit: "lb" | "kg";
+            /** @enum {string} */
+            source: "scale" | "manual";
+            /** @description The closed-list reason; set on every manual weight. */
+            manual_reason: string | null;
+            manual_note: string | null;
+            net_basis: ("single_draft" | "double_draft") | null;
+            /** Format: uuid */
+            weigh_in_ticket_id: string | null;
+            /** Format: uuid */
+            sale_line_id: string | null;
+            captured_by: string;
+            /** Format: date-time */
+            captured_at: string;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosScaleDevice: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            name: string;
+            /** @description SMA: the Scale Manufacturers Association standard. */
+            protocol: string;
+            endpoint: string;
+            /** @description The certificate of conformance number the ticket can prove. */
+            certificate_no: string | null;
+            location_note: string | null;
+        };
+        PosScaleReading: {
+            /** @description A decimal string of pounds; null when the indicator sent no weight. */
+            weight_lb: string | null;
+            /** @enum {string} */
+            unit: "lb" | "kg";
+            /** @enum {string} */
+            mode: "gross" | "tare" | "net";
+            motion: boolean;
+            /** @description The manual entry's Handbook 44 check reads this. */
+            at_zero: boolean;
+        };
+        PosScaleStatus: {
+            configured: boolean;
+            device: components["schemas"]["PosScaleDevice"] | null;
+            reading: components["schemas"]["PosScaleReading"] | null;
+            /** @description Why the scale cannot be read, when it cannot. */
+            detail?: string;
+        };
+        PosScaleWeighInRequest: {
+            register_id: string;
+            /** @description The truck's plate or number; the ticket carries it. */
+            vehicle_ref: string;
+        };
+        PosScaleWeighOutRequest: {
+            /** Format: uuid */
+            sale_id: string;
+            /** Format: uuid */
+            line_id: string;
+            /**
+             * Format: uuid
+             * @description The weigh in to net against; else the vehicle's latest open one.
+             */
+            weigh_in_ticket_id?: string | null;
+            vehicle_ref?: string;
+            /**
+             * Format: int64
+             * @description The sale's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleWeighOutResponse: {
+            sale: components["schemas"]["PosTransaction"];
+            ticket: components["schemas"]["PosScaleTicket"];
+        };
+        PosManualWeightRequest: {
+            /** @description The gross weight in pounds, a decimal string. */
+            weight_lb: string;
+            /** @description The tare in pounds when the entry carries one. */
+            tare_lb?: string | null;
+            /** @description One of the closed list GET /api/v1/pos/scale/manual-reasons answers. */
+            reason: string;
+            /** @description Required when the reason is other. */
+            note?: string;
+            /**
+             * Format: int64
+             * @description The sale's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleTicketVoidRequest: {
+            /** @description A void says why. */
+            reason: string;
+            /**
+             * Format: int64
+             * @description The ticket's revision; the If-Match header carries it instead.
+             */
+            revision?: number | null;
+        };
+        PosScaleTicketList: {
+            items: components["schemas"]["PosScaleTicket"][];
+        };
+        PosScaleManualReason: {
+            /** @enum {string} */
+            code: "scale_offline" | "scale_error" | "preweighed" | "other";
+            label: string;
+            needs_note: boolean;
+        };
+        PosScaleManualReasonList: {
+            items: components["schemas"]["PosScaleManualReason"][];
+        };
+        PosScaleSimulatorRequest: {
+            /** @description The load on the deck, a decimal string of the unit named. */
+            weight_lb?: string | null;
+            /** @enum {string} */
+            unit?: "lb" | "kg";
+            /** @description Pin the motion flag. */
+            motion?: boolean | null;
+            /**
+             * @description Force an indicator status; absent leaves it.
+             * @enum {string}
+             */
+            status?: "none" | "over_capacity" | "under_capacity" | "zero_error" | "initial_zero_error" | "tare_error";
         };
         /** @description One payment taken at the counter, stored net: the tendered amount less any change given from it, so the payment it became is the money kept. */
         PosTender: {
@@ -18739,6 +19219,10 @@ export interface components {
             random_length: boolean;
             /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
             units: components["schemas"]["UnitSetRow"][];
+            /** @description The weighed sale's density (CP-19): pounds per cubic yard, the only bridge between a scale weight and a price by the yard. */
+            density_lb_per_cy: components["schemas"]["Quantity"] | null;
+            /** @description The volume state the density was measured at. */
+            density_volume_state: ("LOOSE" | "COMPACTED") | null;
             /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
             image_url: string | null;
             /** Format: date-time */
@@ -18773,6 +19257,9 @@ export interface components {
             random_length?: boolean;
             /** @description The Form 8300 designated reporting transaction flag (CP-17a); false when absent. */
             consumer_durable?: boolean | null;
+            /** @description The weighed sale's density (CP-19); both fields together or neither. */
+            density_lb_per_cy?: components["schemas"]["Quantity"] | null;
+            density_volume_state?: ("loose" | "compacted") | null;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ProductPage: {
@@ -18821,6 +19308,13 @@ export interface components {
             commission_rate?: number;
             /** Format: int64 */
             revision?: number;
+        };
+        /** @description The density pair, both fields or a null pair to clear. */
+        ProductDensityUpdate: {
+            density_lb_per_cy?: components["schemas"]["Quantity"] | null;
+            density_volume_state?: ("loose" | "compacted") | null;
+            /** Format: int64 */
+            revision?: number | null;
         };
         ProductDimensionsUpdate: {
             length_in?: number | null;
@@ -33950,6 +34444,47 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTransactionEnterLineWeight: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosManualWeightRequest"];
+            };
+        };
+        responses: {
+            /** @description The whole sale with the weighed line. */
+            200: {
+                headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTransactionComplete: {
         parameters: {
             query?: never;
@@ -34817,6 +35352,275 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleStatus: {
+        parameters: {
+            query: {
+                register_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scale status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleStatus"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleWeighIn: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleWeighInRequest"];
+            };
+        };
+        responses: {
+            /** @description The open weigh in ticket. */
+            201: {
+                headers: {
+                    /** @description The ticket's path. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posScaleWeighOut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleWeighOutRequest"];
+            };
+        };
+        responses: {
+            /** @description The sale with the weighed line, and the weigh out ticket. */
+            200: {
+                headers: {
+                    /** @description The sale's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleWeighOutResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    posScaleTicketList: {
+        parameters: {
+            query: {
+                register_id: string;
+                status?: "open" | "completed" | "void";
+                vehicle_ref?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tickets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicketList"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleTicketGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticket. */
+            200: {
+                headers: {
+                    /** @description The ticket's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleTicketVoid: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleTicketVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description The voided ticket. */
+            200: {
+                headers: {
+                    /** @description The ticket's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleTicket"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleManualReasons: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reasons. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosScaleManualReasonList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posScaleSimulatorDrive: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosScaleSimulatorRequest"];
+            };
+        };
+        responses: {
+            /** @description The simulator took the state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -37607,6 +38411,46 @@ export interface operations {
         };
         responses: {
             /** @description The product with the persisted geometry, the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productUpdateDensity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductDensityUpdate"];
+            };
+        };
+        responses: {
+            /** @description The product with the persisted density, the new revision and its ETag. */
             200: {
                 headers: {
                     ETag?: string;

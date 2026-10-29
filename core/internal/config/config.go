@@ -138,6 +138,13 @@ type Config struct {
 	// the default in a production configuration.
 	POSTerminalSimulator string // POS_TERMINAL_SIMULATOR
 
+	// POSScaleSimulator selects the simulated scale on a demo stack (CP-19,
+	// ruling D8): the value "1" wires the SMA simulator on loopback and a
+	// device row per branch. An unset value wires no scale, so the simulator
+	// is never the default in a production configuration; the real device
+	// wires when one is named.
+	POSScaleSimulator string // POS_SCALE_SIMULATOR
+
 	// Database Pool
 	DBMaxConns        int32 // Max open connections (default: 10)
 	DBMinConns        int32 // Min idle connections (default: 2)
@@ -250,6 +257,7 @@ func Load() (*Config, error) {
 
 		RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
+		POSScaleSimulator:    getEnv("POS_SCALE_SIMULATOR", ""),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),

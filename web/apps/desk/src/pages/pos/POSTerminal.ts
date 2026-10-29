@@ -24,9 +24,12 @@ import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exch
 import { signatureRefusal, sealedWords } from './signatureLogic';
 import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
+import './ScalePanel';
+import { weightBadgeText } from './scale';
 import { formatPrice4, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 
@@ -205,6 +208,8 @@ export class POSTerminal extends LitElement {
   @state() private _showXReport = false;
   @state() private _xReport: TillReport | null = null;
   @state() private _showZReports = false;
+  // The scale panel overlay (CP-19).
+  @state() private _showScale = false;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -1183,7 +1188,7 @@ export class POSTerminal extends LitElement {
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
-    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry);
+    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry, this._roundingMode);
     return plan.ok && this._idHoldWords(plan.tenders) === null;
   }
 
@@ -1447,7 +1452,61 @@ export class POSTerminal extends LitElement {
 
   /** What is still owed once the added tenders are taken (never negative). */
   private get _owedCents(): number {
-    return Math.max((this._sale?.total_cents ?? 0) - this._tenderedSoFar, 0);
+    const total = this._sale?.total_cents ?? 0;
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    if (pendingCash > 0) {
+      const otherLegs = this._pendingTenders
+        .filter((t) => t.method !== 'cash')
+        .reduce((s, t) => s + t.amount_cents, 0);
+      const cashNeeded = roundCashFor(this._roundingMode, Math.max(total - otherLegs, 0)).rounded;
+      if (pendingCash >= cashNeeded) {
+        return 0;
+      }
+    }
+    return Math.max(total - this._tenderedSoFar, 0);
+  }
+
+  /**
+   * The branch's cash rounding rule (CP-18): the drawer keeps the rounded
+   * cash, and the change falls out of the rounded figure. The rule off
+   * changes nothing.
+   */
+  private get _roundingMode(): CashRoundingMode | null {
+    const regBranchId = this._register?.branch_id;
+    if (regBranchId) {
+      const regBranch = branchContext.branches.find((b) => b.id === regBranchId);
+      if (regBranch?.cash_rounding_mode) return regBranch.cash_rounding_mode;
+    }
+    return branchContext.current?.cash_rounding_mode ?? null;
+  }
+
+  /** The cash leg, before the branch's rule moves it. */
+  private get _cashLegCents(): number {
+    const total = this._sale?.total_cents ?? 0;
+    const otherLegs = this._pendingTenders
+      .filter((t) => t.method !== 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    if (this._tenderMethod !== null && this._tenderMethod !== 'cash') {
+      // The cashier is typing a card, a cheque or an account: whatever that
+      // tender does not cover is still a cash leg. A card sale that covers
+      // the total has no cash leg at all, and no rounding.
+      const typed = dollarsToCents(this._tenderAmount.trim());
+      const covered = Number.isFinite(typed) && typed > 0 ? typed : this._owedCents;
+      return Math.max(total - otherLegs - covered, 0);
+    }
+    return Math.max(total - otherLegs, 0);
+  }
+
+  /** The cash the drawer keeps: the cash leg, rounded by the branch's rule. */
+  private get _cashDueCents(): number {
+    return roundCashFor(this._roundingMode, this._cashLegCents).rounded;
+  }
+
+  /** What the branch's rounding moves on this sale, in cents. */
+  private get _roundingDiffCents(): number {
+    return roundCashFor(this._roundingMode, this._cashLegCents).diff;
   }
 
   /**
@@ -1459,7 +1518,16 @@ export class POSTerminal extends LitElement {
     if (this._tenderMethod === null) return null;
     const text = this._tenderAmount.trim();
     // store credit defaults to what the account holds, up to what is owed
-    const fallback = this._tenderMethod === 'store_credit' ? storeCreditOffer(this._standing, this._owedCents) : this._owedCents;
+    // Cash defaults to what the drawer keeps, which the branch's rounding
+    // rule may move (CP-18); the other methods default to what is owed.
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    const fallback = this._tenderMethod === 'store_credit'
+      ? storeCreditOffer(this._standing, this._owedCents)
+      : this._tenderMethod === 'cash'
+        ? Math.max(this._cashDueCents - pendingCash, 0)
+        : this._owedCents;
     const cents = text === '' ? fallback : dollarsToCents(text);
     if (isNaN(cents) || cents <= 0) return null;
     const entry: TenderIn = { method: this._tenderMethod, amount_cents: cents };
@@ -1591,7 +1659,7 @@ export class POSTerminal extends LitElement {
       }
     }
     if (entry !== null) this._stampEntryIDOntoAddedChecks(entry);
-    const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry);
+    const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry, this._roundingMode);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
       return;
@@ -2124,6 +2192,19 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  private _renderScaleModal() {
+    if (!this._showScale) return nothing;
+    return this._overlay(html`
+      <gable-pos-scale-panel
+        register-id=${this._registerId}
+        .sale=${this._sale}
+        @scale-sale=${(e: CustomEvent<Sale>) => { this._sale = e.detail; this._error = null; }}
+        @scale-error=${(e: CustomEvent<string>) => { this._error = e.detail; }}
+        @scale-close=${() => { this._showScale = false; }}>
+      </gable-pos-scale-panel>
+    `);
+  }
+
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
     const by = m.kind === 'pickup' && m.taken_by ? ` by ${m.taken_by}` : '';
@@ -2465,6 +2546,9 @@ export class POSTerminal extends LitElement {
           <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             ${this._renderTillMenu()}
+            <button @click=${() => { this._showScale = true; }} data-testid="pos-scale-button"
+              title="Weigh a truck in and out, or enter a weight by hand"
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">Scale</button>
             <button @click=${() => this._beginFresh()}
               class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200 hover:bg-white/5">New Sale</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
@@ -2608,7 +2692,7 @@ export class POSTerminal extends LitElement {
     const owed = this._owedCents;
     const entry = this._entry;
     const isCash = this._tenderMethod === 'cash';
-    const payPlanNow = payPlan(total, this._pendingTenders, entry);
+    const payPlanNow = payPlan(total, this._pendingTenders, entry, this._roundingMode);
     // the change due is the plan's: the tendered amount above the total, given from the cash
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
@@ -2630,6 +2714,10 @@ export class POSTerminal extends LitElement {
         <div id="pos-panel-payment-body" data-testid="panel-payment-body" ?hidden=${!isOpen} class="px-4 pb-4">
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Amount due</div>
           <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
+          ${this._roundingDiffCents !== 0 ? html`
+            <div class="mt-1 flex justify-between text-sm text-amber-300" data-testid="pos-cash-due">
+              <span>Cash due (rounded to the nearest 5 cents)</span><span class="font-mono">${fmt(this._cashDueCents)}</span>
+            </div>` : nothing}
           ${this._pendingTenders.length > 0 ? html`
             <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
               ${this._pendingTenders.map((t) => {
@@ -2808,7 +2896,7 @@ export class POSTerminal extends LitElement {
     const total = sale?.total_cents ?? 0;
     const open = sale?.status === 'open';
     const completed = sale?.status === 'completed';
-    const plan = payPlan(total, this._pendingTenders, this._entry);
+    const plan = payPlan(total, this._pendingTenders, this._entry, this._roundingMode);
     const canPay = this._canPay;
     const idHold = plan.ok ? this._idHoldWords(plan.tenders) : null;
     const clearable = open && hasLines && !this._loading;
@@ -2839,6 +2927,7 @@ export class POSTerminal extends LitElement {
                 ${this._renderThumb(item)}
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
+                  ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
                 ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
@@ -3069,6 +3158,7 @@ export class POSTerminal extends LitElement {
         ${this._renderZReportsModal()}
         ${this._renderReturnSearchModal()}
         ${this._renderReturnModal()}
+        ${this._renderScaleModal()}
 
         ${this._error ? html`
           <div class="flex items-center justify-between border-b border-safety-red/40 bg-safety-red/10 px-4 py-2 text-sm text-safety-red" role="alert">

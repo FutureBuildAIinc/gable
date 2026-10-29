@@ -63,6 +63,20 @@ type Repository interface {
 	AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error
 	RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) error
 	GetLines(ctx context.Context, saleID uuid.UUID) ([]salesdoc.Line, error)
+	// SetLineWeight writes a weighed line's weight block (CP-19).
+	SetLineWeight(ctx context.Context, lineID uuid.UUID, w LineWeight) error
+
+	// Scale tickets and the branch's device (CP-19)
+	InsertScaleTicket(ctx context.Context, t *ScaleTicket) error
+	GetScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error)
+	LockScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error)
+	FindOpenWeighIn(ctx context.Context, branchID uuid.UUID, vehicleRef string) (*ScaleTicket, error)
+	ListScaleTickets(ctx context.Context, branchID uuid.UUID, status, vehicleRef string) ([]ScaleTicket, error)
+	CompleteScaleTicket(ctx context.Context, id uuid.UUID, revision int64) error
+	VoidScaleTicket(ctx context.Context, id uuid.UUID, reason string, revision int64) error
+	// LinkScaleTicketLine names the sale line the ticket prices.
+	LinkScaleTicketLine(ctx context.Context, ticketID, lineID uuid.UUID) error
+	ActiveScaleDevice(ctx context.Context, branchID uuid.UUID) (*ScaleDevice, error)
 
 	// Tenders
 	AddTender(ctx context.Context, t *Tender) error
@@ -287,6 +301,9 @@ type Repository interface {
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
+	// BranchCashRoundingMode reads the branch's cash rounding rule (CP-18).
+	// A branch that has never set it rounds nothing.
+	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
 
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
@@ -409,8 +426,13 @@ func dayBounds(day string) (time.Time, time.Time) {
 	return start, start.Add(24 * time.Hour)
 }
 
-// posLineCols is the shared line projection over pos_line_items.
-var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`)
+// posLineCols is the shared line projection over pos_line_items, with the
+// counter's own weight block (CP-19) the other document tables pass NULLs
+// for.
+var posLineCols = salesdoc.LineColumns(`false, NULL::uuid, NULL::bigint`,
+	`l.weight_source, ROUND(l.weight_gross_lb * 10000)::bigint, ROUND(l.weight_tare_lb * 10000)::bigint,
+	ROUND(l.weight_net_lb * 10000)::bigint, l.weight_net_basis, l.scale_device_id, l.scale_ticket_id,
+	l.scale_ticket_number, l.manual_weight_reason, l.weight_captured_by, l.weight_captured_at`)
 
 func mapWriteError(err error) error {
 	var pgErr *pgconn.PgError
@@ -1905,7 +1927,8 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, COALESCE(sku, ''), COALESCE(description, ''), COALESCE(uom_primary::text, 'EA'),
 			COALESCE(ROUND(base_price * 10000)::bigint, 0), COALESCE(ROUND(average_unit_cost * 10000)::bigint, 0),
-			COALESCE(is_kit, FALSE), COALESCE(taxable, TRUE)
+			COALESCE(is_kit, FALSE), COALESCE(taxable, TRUE),
+			ROUND(density_lb_per_cy * 10000)::bigint, density_volume_state
 		FROM products WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
@@ -1913,10 +1936,12 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 	defer rows.Close()
 	for rows.Next() {
 		var ref salesdoc.ProductRef
+		var density *int64
 		if err := rows.Scan(&ref.ID, &ref.SKU, &ref.Description, &ref.UOMPrimary, &ref.BasePrice, &ref.AverageCost,
-			&ref.IsKit, &ref.Taxable); err != nil {
+			&ref.IsKit, &ref.Taxable, &density, &ref.DensityVolumeState); err != nil {
 			return nil, err
 		}
+		ref.DensityLbPerCY = salesdoc.PtrQuantity(density)
 		out[ref.ID.String()] = ref
 	}
 	return out, rows.Err()
@@ -2304,6 +2329,21 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID *uuid.U
 		return "", false, err
 	}
 	return *rate, true, nil
+}
+
+// BranchCashRoundingMode reads the branch's own cash rounding rule (CP-18):
+// off, or the nearest five cents. The branch is the unit that answers the
+// question, and a branch that has never set it takes the money exactly.
+func (r *PostgresRepository) BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error) {
+	var mode string
+	err := r.ex(ctx).QueryRow(ctx, `SELECT cash_rounding_mode FROM locations WHERE id = $1`, branchID).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RoundingOff, nil
+	}
+	if err != nil {
+		return RoundingOff, err
+	}
+	return ParseRoundingMode(mode), nil
 }
 
 func (r *PostgresRepository) SaleExists(ctx context.Context, id uuid.UUID) (bool, error) {
