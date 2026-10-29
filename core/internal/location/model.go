@@ -62,7 +62,11 @@ type Location struct {
 	Phone               *string    `json:"phone"`
 	TaxJurisdictionCode *string    `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64   `json:"default_tax_rate"`
-	Timezone            *string    `json:"timezone"`
+	// CashRoundingMode is the branch's own cash rounding rule (CP-18):
+	// OFF, or NEAREST_5_CENTS. The branch is the unit that answers the
+	// question, and the rule is off until a branch says otherwise.
+	CashRoundingMode string   `json:"cash_rounding_mode"`
+	Timezone         *string  `json:"timezone"`
 	Active              bool       `json:"active"`
 	BranchID            *uuid.UUID `json:"branch_id"`
 
@@ -76,6 +80,14 @@ func (l *Location) IsBranch() bool {
 	return l.Type == LocTypeBranch
 }
 
+// The branch's cash rounding rule (CP-18): the rule off, and the rule that
+// rounds the cash leg to the nearest five cents. The column carries these
+// names, so they are the wire's too.
+const (
+	CashRoundingOff      = "OFF"
+	CashRoundingNearest5 = "NEAREST_5_CENTS"
+)
+
 // BranchSummary is the lightweight projection used by selectors and
 // /me/branches responses.
 type BranchSummary struct {
@@ -85,6 +97,9 @@ type BranchSummary struct {
 	Active   bool      `json:"active"`
 	IsHome   bool      `json:"is_home,omitempty"` // populated by /me/branches
 	Timezone string    `json:"timezone,omitempty"`
+	// CashRoundingMode is the branch's cash rounding rule (CP-18), so a
+	// counter reads the branch's rule without a second call.
+	CashRoundingMode string `json:"cash_rounding_mode,omitempty"`
 }
 
 // UserLocation describes a user's grant to a single branch.

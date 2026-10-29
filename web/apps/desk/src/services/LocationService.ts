@@ -61,6 +61,7 @@ export function locationUpdateFromLocation(loc: Location): LocationUpdate {
         phone: loc.phone,
         tax_jurisdiction_code: loc.tax_jurisdiction_code,
         default_tax_rate: loc.default_tax_rate,
+        cash_rounding_mode: loc.cash_rounding_mode,
         timezone: loc.timezone,
         active: loc.active,
     };

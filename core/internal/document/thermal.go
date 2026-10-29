@@ -75,6 +75,11 @@ type ThermalReceipt struct {
 	TaxCents      httpx.Cents
 	TaxLabel      string // "TAX", "HST", "Sales tax"; empty prints "Tax"
 	TotalCents    httpx.Cents
+	// RoundingCents is the cash rounding the branch's rule made on this
+	// sale: the difference between the cash the drawer kept and the exact
+	// cash the sale needed. It prints only when it is not zero, the way the
+	// change prints only when there is change.
+	RoundingCents httpx.Cents
 	Tenders       []ThermalTender
 	BalanceCents  httpx.Cents       // 0 when the sale did not go on account
 	Signature     *ThermalSignature // nil when none captured
@@ -216,6 +221,9 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 	}
 	add(thermalRowBody, text.NewCol(thermalGridSize, label+": "+b.style.Money(r.TaxCents), props.Text{Size: 9, Align: align.Right}))
 	add(thermalRowLarge, text.NewCol(thermalGridSize, "Total: "+b.style.Money(r.TotalCents), props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Right}))
+	if r.RoundingCents != 0 {
+		add(thermalRowBody, text.NewCol(thermalGridSize, "Cash rounding: "+b.style.Money(r.RoundingCents), props.Text{Size: 9, Align: align.Right}))
+	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 
 	// Tenders.

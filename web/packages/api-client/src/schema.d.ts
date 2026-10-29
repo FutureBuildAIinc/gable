@@ -14166,6 +14166,7 @@ export interface components {
             phone: string | null;
             tax_jurisdiction_code: string | null;
             default_tax_rate: number | null;
+            cash_rounding_mode: components["schemas"]["CashRoundingMode"];
             timezone: string | null;
             active: boolean;
             /** Format: uuid */
@@ -14197,6 +14198,7 @@ export interface components {
             phone?: string | null;
             tax_jurisdiction_code?: string | null;
             default_tax_rate?: number | null;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string | null;
             active?: boolean;
             /** Format: int64 */
@@ -14218,6 +14220,7 @@ export interface components {
             phone?: string;
             tax_jurisdiction_code?: string;
             default_tax_rate?: number;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string;
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
@@ -14230,7 +14233,13 @@ export interface components {
             active: boolean;
             is_home?: boolean;
             timezone?: string;
+            cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
         };
+        /**
+         * @description The branch's own cash rounding rule (CP-18): the rule off, or the nearest five cents. The Government of Canada elected symmetric rounding to the nearest five cents for cash, and the rounding touches the cash leg only.
+         * @enum {string}
+         */
+        CashRoundingMode: "OFF" | "NEAREST_5_CENTS";
         BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
