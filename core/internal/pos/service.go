@@ -268,7 +268,7 @@ func eventJSON(v map[string]any) []byte {
 	return raw
 }
 
-// estimateTax is the cart's live estimate at the branch rate; the money
+// estimateTax is the cart's live estimate through the one resolver; the money
 // moment resolves its own tax through the provider or the resolver
 // (ADR 0005 section 3: the estimate is not the bill).
 func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents httpx.Cents) int64 {

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 /**
- * <gable-admin-tax-zones> — admin page for Gable's own tax zone tables
+ * <gable-admin-tax-zones> - admin page for Gable's own tax zone tables
  * (CP-10): the zones a delivered sale's tax is sourced to, their rate parts
  * and their boundaries. Mounted at `/admin/tax-zones` (erp layout,
  * admin-only). A zone that documents were taxed under is closed, never
@@ -247,14 +247,14 @@ export class GableAdminTaxZones extends LitElement {
                       <div class="text-white font-medium">${z.jurisdiction_name || z.jurisdiction_code}</div>
                       <div class="text-xs text-zinc-500 font-mono">${z.country} ${z.jurisdiction_code} (${z.jurisdiction_type})</div>
                     </td>
-                    <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${boundaryText(z) || '—'}</td>
+                    <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${boundaryText(z) || 'none'}</td>
                     <td class="px-4 py-3 text-white font-medium">${combinedRatePercent(z.rates)}%</td>
-                    <td class="px-4 py-3 text-zinc-400 text-xs">${partsText(z) || '—'}</td>
+                    <td class="px-4 py-3 text-zinc-400 text-xs">${partsText(z) || 'none'}</td>
                     <td class="px-4 py-3 text-zinc-400 text-xs font-mono">
                       ${z.effective_from} to ${z.effective_to ?? 'now'}
                     </td>
                     <td class="px-4 py-3 text-zinc-400 text-xs">
-                      ${[z.data_source, z.data_version].filter(Boolean).join(' ') || '—'}
+                      ${[z.data_source, z.data_version].filter(Boolean).join(' ') || 'none'}
                     </td>
                     <td class="px-4 py-3 text-right">
                       ${z.effective_to == null ? html`
