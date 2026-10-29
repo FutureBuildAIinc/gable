@@ -416,7 +416,15 @@ export const posService = {
     /** Names the sale's customer (before the first line), purchase order, job and buyer. */
     async attachCustomer(
         saleId: string,
-        input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null; buyer_contact_id?: string | null },
+        input: {
+            customer_id: string | null;
+            customer_po?: string | null;
+            job_id?: string | null;
+            buyer_contact_id?: string | null;
+            /** The ship to a delivered sale carries (CP-10); needs customer_id and delivery_type 'delivery'. */
+            ship_to_id?: string | null;
+            delivery_type?: 'pickup' | 'delivery';
+        },
     ): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/customer`, {

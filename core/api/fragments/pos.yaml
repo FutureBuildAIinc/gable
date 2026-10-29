@@ -2839,6 +2839,8 @@ components:
         register_id: {type: string, description: "Defaults REG-01."}
         cashier_id: {type: [string, "null"], format: uuid, description: "Defaults the JWT's subject."}
         customer_id: {type: [string, "null"], format: uuid, description: "Absent means the walk-in customer."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries. Needs the customer named and delivery_type delivery; 400 otherwise, and 400 when the ship to is another customer's."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "pickup is the default; a delivery is sourced to the ship to's zone for tax."}
     PosAddLineRequest:
       type: object
       required: [line]
@@ -3241,7 +3243,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -3265,6 +3267,8 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "The sale's own delivery answer: a delivery is taxed at the ship to's zone rate, a pickup at the branch rate."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries."}
         returned_quantities:
           type: object
           description: "Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it."
@@ -3314,6 +3318,8 @@ components:
         customer_po: {type: [string, "null"], maxLength: 100}
         job_id: {type: [string, "null"], format: uuid}
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to the goods are delivered to: the sale's tax comes from that zone (CP-10). Needs the customer named and delivery_type delivery; the ship to must be the customer's own."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "Pickup, the default, taxes at the branch rate; a delivery at the ship to's zone."}
     PosTransactionPage:
       type: object
       required: [items, next_cursor, limit]

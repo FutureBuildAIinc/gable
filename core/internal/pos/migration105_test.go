@@ -491,6 +491,8 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	mig105Apply(t, conn, "../../migrations/124_ar_credit_holds_worklist_statements.sql")
 	// and the customer job requirement the account facts read (136)
 	mig105Apply(t, conn, "../../migrations/136_customer_job_required.sql")
+	// and the zone columns 141 added to the sale (the sale read names them)
+	mig105Apply(t, conn, "../../migrations/141_tax_zone_tables.sql")
 	// and the weight block the counter line carries from 144 (the line
 	// projection reads it)
 	mig105Apply(t, conn, "../../migrations/144_scale_tickets.sql")

@@ -87,7 +87,7 @@ will-call, and what each item must build and test.
 | Units of measure | a stocked line is sold in its product's stocking unit (`products.uom_primary`); the price unit may differ through the conversion pair | cycle 3 adds unit conversions and lifts the stocking unit rule |
 | Pricing engine | wraps today's engine at the order and counter boundary, converting its result to a scale 4 price once | cycle 3 makes the engine return scaled prices |
 | Inventory cost | the cost basis is `products.average_unit_cost` (scale 4), read in the posting transaction | cycle 4 owns cost layers, lots and serials; it replaces the cost source behind one function (`costOf`, section 8.4) |
-| Tax | one rate per document, resolved from ship-to or branch, rounded once per document; a configured tax provider keeps answering through `tax.Service.PreviewTax` behind the resolver (section 3) | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
+| Tax | one rate per document, resolved by the order of section 3 (the exemption, then a delivery's ship-to zone in Gable's own zone tables, then the typed ship-to rate, then the branch), rounded once per document; a configured tax provider keeps answering through `tax.Service.PreviewTax` behind the resolver (section 3) | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
 | Inventory receipts in the ledger | `1030` is debited only where an AP invoice line names it (today's `SyncVendorInvoice`); a stock receipt posts nothing, so COGS relief can drive `1030` below the receipts' value until cycle 4 | cycle 4 posts receipts to `1030` |
 | General ledger routes | GL keeps its routes; cycle 2 adds `currency` to journal entries and groups the GL reports by it | cycle 5 converts the GL module |
 | Multi company | none; the series key for numbers is the entity | cycle 5 (GC-207) may widen series keys |
@@ -285,13 +285,20 @@ The rate is resolved when the document is created: an order's is refreshed
 on every draft edit and at confirm; an invoice resolves its own rate at its
 create (it does not copy the order's, so a ship-to or branch rate changed
 since confirm applies to the bill); a credit memo that names an invoice takes
-that invoice's rate. The order:
+that invoice's rate. The order (CP-10, migration 141):
 
-1. the customer has an active `tax_exemptions` row: rate 0, `tax_exempt`
-   true;
-2. the document is a delivery and its ship-to has a `tax_rate`: that rate;
-3. the branch's `locations.default_tax_rate`;
-4. none configured: the act is refused, 409 `conflict` with a blocker
+1. the customer's certificate covers the day under the one window rule
+   (`tax.ExemptionCovering`: active, effective on or before the branch's
+   business day in its own zone, not yet expired): rate 0, source `EXEMPT`;
+2. the document is a delivery and its ship-to's place of receipt resolves
+   through Gable's own zone tables (`tax_zones`, `tax_zone_rates`,
+   `tax_zone_boundaries`, the combined rate the exact sum of the parts live
+   on the branch's business day, a zone with no live part on the day does
+   not match): that rate, source `ZONE_RATE`;
+3. the document is a delivery and its ship-to has a `tax_rate`: that rate,
+   source `SHIP_TO_RATE`;
+4. the branch's `locations.default_tax_rate`, source `BRANCH_RATE`;
+5. none configured: the act is refused, 409 `conflict` with a blocker
    `tax_rate_not_configured` naming the branch. Zero is a valid configured
    rate.
 

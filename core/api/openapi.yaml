@@ -21172,6 +21172,136 @@ paths:
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones:
+    get:
+      operationId: taxZoneList
+      tags: [tax]
+      summary: List tax zones
+      description: >-
+        Roles admin, owner, finance. Every zone, newest first, each with its rate parts and its boundaries. The country and jurisdiction_type filters are optional; country matches the two letter code and jurisdiction_type must be STA, CTY, CIT, STJ or PROV (400 otherwise).
+      parameters:
+        - name: country
+          in: query
+          schema: {type: string}
+        - name: jurisdiction_type
+          in: query
+          schema: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+      responses:
+        "200":
+          description: The zones.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: taxZoneCreate
+      tags: [tax]
+      summary: Create a tax zone
+      description: >-
+        Roles admin, owner, finance. country (two letters), jurisdiction_code, jurisdiction_type (STA, CTY, CIT, STJ, PROV) and effective_from are required, with at least one rate part and, for a postal zone, at least one boundary. zone_kind defaults POSTAL; a PROVINCE zone needs province_code. sourcing defaults DESTINATION. Rates are decimal fractions between 0 and 1, such as 0.06.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxZoneCreateRequest"
+      responses:
+        "201":
+          description: The created zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequestEither"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones/{id}:
+    get:
+      operationId: taxZoneGet
+      tags: [tax]
+      summary: Read a tax zone
+      description: Roles admin, owner, finance. The zone with its rate parts and its boundaries.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      operationId: taxZoneDelete
+      tags: [tax]
+      summary: Delete a tax zone no document used
+      description: >-
+        Roles admin, owner, finance. A zone that an order or an invoice was taxed under answers 409: it is closed, never deleted, because the sale that used it must stay explainable from the records.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204":
+          description: The zone is gone.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones/{id}/close:
+    post:
+      operationId: taxZoneClose
+      tags: [tax]
+      summary: Close a tax zone
+      description: >-
+        Roles admin, owner, finance. Ends the zone's effective window on the named date, so sales before it keep the rate they were charged. A replacement rate is a new zone (or new rate parts from a later effective date), never an overwrite.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxZoneCloseRequest"
+      responses:
+        "200":
+          description: The closed zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequestEither"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/units:
     get:
       operationId: unitList
@@ -33354,6 +33484,8 @@ components:
         register_id: {type: string, description: "Defaults REG-01."}
         cashier_id: {type: [string, "null"], format: uuid, description: "Defaults the JWT's subject."}
         customer_id: {type: [string, "null"], format: uuid, description: "Absent means the walk-in customer."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries. Needs the customer named and delivery_type delivery; 400 otherwise, and 400 when the ship to is another customer's."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "pickup is the default; a delivery is sourced to the ship to's zone for tax."}
     PosAddLineRequest:
       type: object
       required: [line]
@@ -33744,7 +33876,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -33768,6 +33900,8 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "The sale's own delivery answer: a delivery is taxed at the ship to's zone rate, a pickup at the branch rate."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries."}
         returned_quantities:
           type: object
           description: "Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it."
@@ -33817,6 +33951,8 @@ components:
         customer_po: {type: [string, "null"], maxLength: 100}
         job_id: {type: [string, "null"], format: uuid}
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to the goods are delivered to: the sale's tax comes from that zone (CP-10). Needs the customer named and delivery_type delivery; the ship to must be the customer's own."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "Pickup, the default, taxes at the branch rate; a delivery at the ship to's zone."}
     PosTransactionPage:
       type: object
       required: [items, next_cursor, limit]
@@ -37870,6 +38006,84 @@ components:
         is_estimate:
           type: boolean
           description: True when the flat rate fallback was used.
+    TaxZoneRatePart:
+      type: object
+      required: [name, rate, effective_from]
+      properties:
+        name:
+          type: string
+          enum: [STATE, COUNTY, CITY, DISTRICT, GOODS_TAX, PROVINCIAL_SALES_TAX]
+        rate: {type: string, description: "The decimal fraction, such as 0.060000."}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        effective_to: {type: string, description: YYYY-MM-DD, absent while the part lives: ''}
+    TaxZoneBoundary:
+      type: object
+      required: [country, postal_code_low, postal_code_high]
+      properties:
+        country: {type: string, description: ISO 3166-1 alpha-2}
+        postal_code_low: {type: string}
+        postal_code_high: {type: string, description: Equals postal_code_low for an exact code}
+        extension_low: {type: string, description: The plus four the boundary narrows to, when it knows it: ''}
+        extension_high: {type: string}
+    TaxZone:
+      type: object
+      required: [id, country, jurisdiction_code, jurisdiction_type, jurisdiction_name, zone_kind, sourcing, effective_from, data_source, data_version, rates, boundaries]
+      properties:
+        id: {type: string, format: uuid}
+        country: {type: string}
+        jurisdiction_code: {type: string}
+        jurisdiction_type: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+        jurisdiction_name: {type: string}
+        state_code: {type: string}
+        county_code: {type: string}
+        place_code: {type: string}
+        province_code: {type: string, description: Set on a province zone}
+        zone_kind: {type: string, enum: [POSTAL, PROVINCE]}
+        sourcing: {type: string, enum: [ORIGIN, DESTINATION, BOTH]}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        effective_to: {type: [string, "null"], description: YYYY-MM-DD while the zone lives}
+        data_source: {type: string, description: Where the rate came from}
+        data_version: {type: string, description: Which version of the published data}
+        rates:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxZoneRatePart"
+        boundaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxZoneBoundary"
+    TaxZoneCreateRequest:
+      type: object
+      required: [country, jurisdiction_code, effective_from, rates]
+      properties:
+        country: {type: string, description: Two letter code}
+        jurisdiction_code: {type: string}
+        jurisdiction_type: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+        jurisdiction_name: {type: string}
+        state_code: {type: string}
+        county_code: {type: string}
+        place_code: {type: string}
+        province_code: {type: string, description: Required on a PROVINCE zone}
+        zone_kind: {type: string, enum: [POSTAL, PROVINCE], description: Defaults POSTAL}
+        sourcing: {type: string, enum: [ORIGIN, DESTINATION, BOTH], description: Defaults DESTINATION}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        data_source: {type: string}
+        data_version: {type: string}
+        rates:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/TaxZoneRatePart"
+        boundaries:
+          type: array
+          description: Required on a POSTAL zone; a boundary's country defaults to the zone's when omitted.
+          items:
+            $ref: "#/components/schemas/TaxZoneBoundary"
+    TaxZoneCloseRequest:
+      type: object
+      required: [effective_to]
+      properties:
+        effective_to: {type: string, description: YYYY-MM-DD}
     Unit:
       type: object
       description: >-

@@ -100,7 +100,13 @@ type FulfilmentInvoice struct {
 	TotalCents    int64
 	TaxRate       *string // the decimal rate "0.088750", nil when a provider priced it
 	TaxExempt     bool
-	TaxSource     string // EXEMPT, PROVIDER, SHIP_TO_RATE, BRANCH_RATE
+	TaxSource     string // EXEMPT, PROVIDER, ZONE_RATE, SHIP_TO_RATE, BRANCH_RATE
+
+	// The zone that answered a delivered sale's tax, frozen at the sale
+	// (CP-10): the zone row can change later, the invoice's rate may not.
+	TaxZoneID     *uuid.UUID
+	TaxRateParts  []byte // JSON, the zone's parts and combined rate
+	TaxZoneSource *string
 
 	Lines     []FulfilmentLine
 	Revenue   []RevenueLeg
@@ -124,8 +130,11 @@ type CounterInvoice struct {
 	CustomerID uuid.UUID
 	Currency   string
 
-	PickedUpBy  *string
-	InvoiceDate time.Time // the branch's local date
+	DeliveryType   string // DELIVERY or PICKUP (a delivered counter sale, CP-10)
+	ShipToID       *uuid.UUID
+	ShipToSnapshot []byte // JSON, or nil
+	PickedUpBy     *string
+	InvoiceDate    time.Time // the branch's local date
 
 	// CustomerPO and JobID are the purchase order and job the counter sale
 	// named: the invoice's customer_po and project.
@@ -137,7 +146,12 @@ type CounterInvoice struct {
 	TotalCents    int64
 	TaxRate       *string // the decimal rate "0.088750", nil when a provider priced it
 	TaxExempt     bool
-	TaxSource     string // EXEMPT, PROVIDER, BRANCH_RATE
+	TaxSource     string // EXEMPT, PROVIDER, ZONE_RATE, BRANCH_RATE
+
+	// The zone that answered a delivered counter sale's tax (CP-10).
+	TaxZoneID     *uuid.UUID
+	TaxRateParts  []byte
+	TaxZoneSource *string
 
 	Lines     []FulfilmentLine
 	Revenue   []RevenueLeg
@@ -156,7 +170,7 @@ type CounterInvoice struct {
 // immediately before the insert; the balanced entry (DR 1020 the total and
 // 5010 the cost; CR each revenue account, 2020 the tax and 1030 the cost)
 // and the subledger debit go through the AR core. origin POS,
-// delivery_type PICKUP, no order.
+// delivery_type the sale's own, no order.
 func (s *Service) CreateCounterInvoice(ctx context.Context, in *CounterInvoice) error {
 	if !database.InTx(ctx) {
 		return gl.ErrNoTransaction
@@ -181,12 +195,18 @@ func (s *Service) CreateCounterInvoice(ctx context.Context, in *CounterInvoice) 
 	if in.Number, err = store.NextInvoiceNumber(ctx); err != nil {
 		return err
 	}
+	deliveryType := "PICKUP"
+	if in.DeliveryType == "DELIVERY" || in.DeliveryType == "delivery" {
+		deliveryType = "DELIVERY"
+	}
 	inv := &FulfilmentInvoice{
 		ID: in.ID, Number: in.Number, BranchID: in.BranchID, CustomerID: in.CustomerID, Currency: in.Currency,
-		DeliveryType: "PICKUP", PickedUpBy: in.PickedUpBy, InvoiceDate: in.InvoiceDate,
+		DeliveryType: deliveryType, ShipToID: in.ShipToID, ShipToSnapshot: in.ShipToSnapshot,
+		PickedUpBy: in.PickedUpBy, InvoiceDate: in.InvoiceDate,
 		ProjectID: in.JobID, CustomerPO: in.CustomerPO,
 		SubtotalCents: in.SubtotalCents, TaxCents: in.TaxCents, TotalCents: in.TotalCents,
 		TaxRate: in.TaxRate, TaxExempt: in.TaxExempt, TaxSource: in.TaxSource,
+		TaxZoneID: in.TaxZoneID, TaxRateParts: in.TaxRateParts, TaxZoneSource: in.TaxZoneSource,
 		Lines: in.Lines, Revenue: in.Revenue, CostCents: in.CostCents, Actor: in.Actor,
 		PaymentTermsID: terms.ID,
 	}

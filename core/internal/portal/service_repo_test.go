@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
@@ -770,6 +771,10 @@ func (f *fakeOrderRepo) DefaultShipToID(context.Context, uuid.UUID) (*uuid.UUID,
 func (f *fakeOrderRepo) ShipTo(context.Context, uuid.UUID) (*order.ShipToSnapshot, *string, error) {
 	return nil, nil, nil
 }
+func (f *fakeOrderRepo) TaxZone(context.Context, string, string, string, time.Time) (*taxzone.Snapshot, error) {
+	return nil, nil
+}
+
 func (f *fakeOrderRepo) BranchTaxRate(context.Context, uuid.UUID) (*string, error) {
 	rate := "0.000000"
 	return &rate, nil

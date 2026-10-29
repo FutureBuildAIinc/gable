@@ -19,6 +19,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -270,19 +271,90 @@ func eventJSON(v map[string]any) []byte {
 	return raw
 }
 
-// estimateTax is the cart's live estimate at the branch rate; the money
+// estimateTax is the cart's live estimate through the one resolver; the money
 // moment resolves its own tax through the provider or the resolver
 // (ADR 0005 section 3: the estimate is not the bill).
 func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents httpx.Cents) int64 {
-	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
-	if err != nil || !ok {
+	// the estimate runs the same resolver the completion runs (CP-10): an
+	// exempt customer, a delivered sale's ship-to zone, then the branch rate
+	customerID := sale.CustomerID
+	if customerID == nil {
+		if id, _, err := s.repo.WalkInCustomer(ctx); err == nil {
+			customerID = &id
+		}
+	}
+	if customerID == nil {
 		return 0
 	}
-	scaled, _, err := salesdoc.ParseTaxRate(rate)
+	resolved, err := s.ResolveSaleTax(ctx, sale, *customerID)
+	if err != nil || resolved.Rate == nil {
+		return 0
+	}
+	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
 	if err != nil {
 		return 0
 	}
 	return int64(salesdoc.TaxAt(taxableCents, scaled))
+}
+
+// zoneFor resolves a delivered sale's ship to to the zone that covers it
+// (CP-10), nil when the sale is a pickup or names no ship to or no zone
+// covers the place of receipt.
+func (s *Service) zoneFor(ctx context.Context, sale *Sale) (*taxzone.Snapshot, error) {
+	if (sale.DeliveryType != "delivery" && sale.DeliveryType != "DELIVERY") || sale.ShipToID == nil {
+		return nil, nil
+	}
+	snap, _, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+	if err != nil {
+		return nil, err
+	}
+	country := ""
+	if snap.Country != nil {
+		country = *snap.Country
+	}
+	// The zone's effective window is read on the branch's own business day,
+	// never the server's clock (the exemption reads the same day).
+	day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
+}
+
+// ResolveSaleTax builds the counter sale's tax inputs (CP-10): the
+// exemption, the ship to a delivered sale names with its zone and its typed
+// rate, and the branch rate, and runs the one resolver Gable has. The
+// exemption reads through exemptOn, the one window rule on the branch's
+// business day the running totals, the completion, the returns and the
+// exchanges all read, and it still outranks the ship to's zone.
+func (s *Service) ResolveSaleTax(ctx context.Context, sale *Sale, customerID uuid.UUID) (salesdoc.ResolvedTax, error) {
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	inputs := salesdoc.TaxInputs{Exempt: exempt, Delivery: sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY"}
+	if inputs.Delivery && sale.ShipToID != nil {
+		_, typedRate, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		inputs.ShipToRate = typedRate
+		zone, err := s.zoneFor(ctx, sale)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		if zone != nil {
+			inputs.ZoneRate = &zone.CombinedRate
+		}
+	}
+	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	if ok {
+		inputs.BranchRate = &rate
+	}
+	return salesdoc.ResolveTax(inputs)
 }
 
 // exemptOn reads whether the customer's certificate exempts a sale on the
@@ -346,9 +418,26 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 		currency = facts.Currency
 	}
 	var out *Sale
+	// The ship to a delivered sale names must be the customer's own (CP-10):
+	// the read is unwalled, the customer was walled above.
+	if in.ShipToID != nil {
+		ok, err := s.repo.ShipToBelongsTo(ctx, *in.ShipToID, *in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, httpx.BadRequest("the ship to is not the customer's",
+				httpx.FieldError{Field: "ship_to_id", Message: "no such ship to for this customer"})
+		}
+	}
+	deliveryType := in.DeliveryType
+	if deliveryType == "" {
+		deliveryType = "pickup"
+	}
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
+			DeliveryType: deliveryType, ShipToID: in.ShipToID,
 			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
 		session, err := s.openDrawer(ctx, in.RegisterID)
 		if err != nil {
