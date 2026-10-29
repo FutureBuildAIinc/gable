@@ -76,21 +76,35 @@ import (
 // error, and the ledger's sweep and manager items resolve what the poller
 // could not.
 
-// runTerminalDefaults: the poll cadence and the interaction window. Run
-// keeps an interaction about three minutes; the window bounds how long the
-// poller keeps asking before it falls to the transaction lookup.
+// runTerminalDefaults: the poll cadence, the interaction window and the
+// longest one call the driver makes. Run keeps an interaction about three
+// minutes; the window bounds how long the poller keeps asking before it
+// falls to the transaction lookup.
 //
 // The window fits inside the ledger's lease (TerminalAnswerLease), with room
 // left for the charge-card call that precedes the poller: a poller that keeps
 // working past the lease is closed by the sweep while the device is still
 // answering, and the leg is filed as a manager item for an answer that is
 // about to land.
+//
+// The room covers the longest charge-card call the driver allows
+// (runTerminalCallTimeout), and everything the driver does before the poller
+// starts runs inside that call's budget, so the poller is always done before
+// the lease runs out.
 const (
 	runTerminalPollDefault   = 500 * time.Millisecond
 	runTerminalWindowDefault = TerminalAnswerLease - runTerminalDispatchRoom
+	// runTerminalCallTimeout is the longest one HTTP call the driver may
+	// take: the charge-card call, the reporting lookup and the reporting
+	// token. It is also the budget of everything the driver does before the
+	// poller starts.
+	runTerminalCallTimeout = 30 * time.Second
+	// runTerminalDispatchMargin is the room the poller's last answer needs:
+	// the poller is done before the lease runs out, not at the same instant.
+	runTerminalDispatchMargin = 5 * time.Second
 	// runTerminalDispatchRoom is the room the poller's window leaves inside
 	// the lease for the charge-card call that precedes it.
-	runTerminalDispatchRoom   = 15 * time.Second
+	runTerminalDispatchRoom = runTerminalCallTimeout + runTerminalDispatchMargin
 	runReportingTokenLifetime = 25 * time.Minute
 )
 
@@ -147,7 +161,7 @@ func NewRunTerminal(provider func() GatewayConfig, answers AnswerSink, logger *s
 	return &RunTerminal{
 		configProvider: provider, answers: answers, logger: logger,
 		pollInterval: runTerminalPollDefault, window: runTerminalWindowDefault,
-		client: &http.Client{Timeout: 30 * time.Second}, guards: map[string]*runOrderGuard{},
+		client: &http.Client{Timeout: runTerminalCallTimeout}, guards: map[string]*runOrderGuard{},
 	}
 }
 
@@ -192,6 +206,15 @@ func (t *RunTerminal) WithInteractionWindow(d time.Duration) *RunTerminal {
 // closes a leg whose lease ran out, and the poller has to be done before
 // that.
 func (t *RunTerminal) InteractionWindow() time.Duration { return t.window }
+
+// CallTimeout reports the longest one HTTP call the driver may take: the
+// charge-card call, the reporting lookup and the reporting token.
+//
+// The poller's window has to fit inside the lease with this much room left:
+// the lease clock starts before the dispatch and the poller's window starts
+// after the charge-card call answers, so a call that outlasted the room
+// would leave the poller asking Run after the sweep closed the leg.
+func (t *RunTerminal) CallTimeout() time.Duration { return t.client.Timeout }
 
 // guardFor returns the no double charge guard of one order id, making it on
 // first use.
@@ -280,6 +303,13 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	if err != nil {
 		return TerminalReceipt{}, err
 	}
+	// Everything before the poller starts runs inside one budget: the lease
+	// clock started before this dispatch, so the work that precedes the
+	// poller (the reporting token, the transaction lookup, the charge-card
+	// call) may not outlast the longest call the driver allows, or the
+	// poller's window would end past the lease.
+	dctx, cancel := context.WithTimeout(ctx, runTerminalCallTimeout)
+	defer cancel()
 	// The guard is held across the check and the act it guards: the
 	// transaction lookup, the in process refusal and the charge-card POST.
 	// Four concurrent dispatches of one leg make one charge.
@@ -290,7 +320,7 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	// a charge that already exists at Run under this order id is recovered
 	// from the transaction lookup, never prompted again.
 	if t.reportingConfigured() {
-		found, lerr := t.lookupByOrder(ctx, d.IdempotencyKey)
+		found, lerr := t.lookupByOrder(dctx, d.IdempotencyKey)
 		if lerr != nil {
 			// The report could not answer. That is not a report that holds no
 			// charge: the dispatch is refused, never sent blind, and the leg
@@ -314,7 +344,7 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	// (a timeout, a dropped 202) may still have charged, so this process
 	// never posts the same order id twice.
 	guard.attempted = true
-	raw, status, err := t.authed(ctx, cfg, http.MethodPost,
+	raw, status, err := t.authed(dctx, cfg, http.MethodPost,
 		"/api/terminal/"+d.DeviceID+"/charge-card", body, 0)
 	if err != nil {
 		return TerminalReceipt{}, fmt.Errorf("the run charge-card dispatch failed: %w", err)

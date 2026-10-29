@@ -520,3 +520,19 @@ func TestRunTerminalInteractionWindowFitsInsideTheIntentLease(t *testing.T) {
 	}
 }
 
+// TestRunTerminalTheDispatchRoomCoversTheLongestChargeCardCall: the lease
+// clock starts before the charge-card call and the poller's window starts
+// after that call answers, so the room the window leaves inside the lease has
+// to cover the longest charge-card call the driver allows. A call that
+// outlasted the room left the poller asking Run after the sweep had closed
+// the leg: the window and the call have to fit inside the lease together.
+func TestRunTerminalTheDispatchRoomCoversTheLongestChargeCardCall(t *testing.T) {
+	term := payment.NewRunTerminal(func() payment.GatewayConfig {
+		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: "http://127.0.0.1:1"}
+	}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	window, call := term.InteractionWindow(), term.CallTimeout()
+	if window+call > payment.TerminalAnswerLease {
+		t.Fatalf("the interaction window %s plus the longest charge-card call %s is %s, want at most the intent lease %s",
+			window, call, window+call, payment.TerminalAnswerLease)
+	}
+}
