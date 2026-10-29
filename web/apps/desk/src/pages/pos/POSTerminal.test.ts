@@ -18,6 +18,7 @@ const svc = vi.hoisted(() => ({
   getSale: vi.fn(),
   searchSales: vi.fn(),
   createReturn: vi.fn(),
+  previewReturn: vi.fn(),
   returnReasons: vi.fn(),
   openTill: vi.fn(),
   tillReport: vi.fn(),
@@ -2996,6 +2997,76 @@ describe('return a past sale', () => {
       lines: [{ line_id: 'a', quantity: '1', restock: false }],
     }));
     expect(el.textContent).toContain('Return RTN-000001 complete - $75.00 refunded cash');
+    el.remove();
+  });
+
+  it('states the restocking fee and the refund before the return is taken', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+      { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 1500, needs_note: false },
+    ]);
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -6375, tax_cents: 0, restocking_fee_cents: 1125, total_cents: -6375, refund_cents: 6375,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -7500, restocking_fee_cents: 1125 }],
+    });
+    svc.createReturn.mockResolvedValue({ id: 'r2', number: 'RTN-000002', total_cents: -6375, restocking_fee_cents: 1125, refund_method: 'cash' });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    // the figures come from the server, once the dialog's debounce settles
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).toHaveBeenCalledWith(expect.objectContaining({
+      original_sale_id: 'past1',
+      lines: [{ line_id: 'a', quantity: '1', restock: true }],
+    }));
+    expect(q(el, 'return-figures')).toBeTruthy();
+    expect(q(el, 'return-figures-fee').textContent).toBe('$11.25');
+    expect(q(el, 'return-figures-refund').textContent).toBe('$63.75');
+    expect(q(el, 'return-figures-line-fee').textContent).toContain('Item a');
+    expect(q(el, 'return-figures-line-fee').textContent).toContain('Changed their mind');
+    el.remove();
+  });
+
+  it('states no figures while no reason carries a fee', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([
+      { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+    ]);
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+    expect(svc.previewReturn).not.toHaveBeenCalled();
+    expect(el.querySelector('[data-testid="return-figures"]')).toBeNull();
     el.remove();
   });
 });
