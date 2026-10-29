@@ -364,4 +364,3 @@ func TestCreateDelivery_PopulatesScheduleAndInstructionsAndWallClockDST(t *testi
 		t.Errorf("ScheduledEnd in yard zone = %s, want 12:00 (not shifted by DST)", gotEnd)
 	}
 }
-

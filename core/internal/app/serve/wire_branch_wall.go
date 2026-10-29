@@ -29,6 +29,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/scheduling"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -293,6 +294,28 @@ func (w *branchWall) patternWall(base, hold func(http.Handler) http.Handler, pat
 func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) func(http.Handler) http.Handler {
 	return w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(draftPayloadCustomerOf(db)),
 		"POST /api/v1/drafts/"+kind+"/{id}/promote")
+}
+
+// tint mounts the paint tint catalogue (row CP-16): the dealer's own bases,
+// colorants, colours and per size formulas, the rescale, and the saved colours
+// per customer and job. The catalogue is dealer wide and every desk role
+// reads it mid sale, so those reads stay stated limits. The saved colours are
+// customer rows, so they are walled: the read is held to the customer its
+// query names and carries the customer predicate, so a branch bound key reads
+// only the saved colours of the customers that hold its pin, and the write is
+// held to the customer its body names. The counter dialogue offers saving a
+// colour, so the cashier may write one; the catalogue itself stays with admin
+// and owner.
+func (w *branchWall) tint(mux *http.ServeMux, svc *tint.Service) {
+	read := w.patternWall(w.scoped("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+		middleware.Compose(userCustomerWall(w.db, tintSavedColorQueryCustomer(), false),
+			w.keyWall.CustomerBranch(tintSavedColorQueryCustomer())),
+		"GET /api/v1/tint/saved-colors")
+	write := w.scoped("admin", "owner")
+	counter := middleware.Compose(w.scoped("admin", "owner", "cashier"),
+		userCustomerWall(w.db, tintSavedColorBodyCustomer(), true),
+		w.keyWall.CustomerBodyBranch())
+	tint.NewHandler(svc).RegisterRoutes(mux, read, write, counter)
 }
 
 // pos mounts the POS routes: the repositories hold the by id reads and writes

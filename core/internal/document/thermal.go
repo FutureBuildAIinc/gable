@@ -105,6 +105,33 @@ type ThermalLine struct {
 	WeightTareLb  *httpx.Quantity
 	WeightNetLb   *httpx.Quantity
 	ManualWeight  bool
+
+	// Tint is the paint line's tint record (row CP-16). Nil prints nothing;
+	// the block carries the colour code and name, the base, the container
+	// size and the colorant amounts, because that is what the customer needs
+	// in order to reorder the colour: the receipt is the only copy of the
+	// formula they will ever have.
+	Tint *ThermalTint
+}
+
+// ThermalTint is the tint block of one paint line: the colour, the base, the
+// container size, the tint charge when one was made, and each colorant with
+// its amount in the manufacturer's own layout.
+type ThermalTint struct {
+	ColorCode         string
+	ColorName         string
+	BaseCode          string
+	ContainerSizeCode string
+	Rescaled          bool
+	TintChargeCents   httpx.Cents
+	Components        []ThermalTintComponent
+}
+
+// ThermalTintComponent is one colorant of the block.
+type ThermalTintComponent struct {
+	Code   string
+	Name   string
+	Amount string
 }
 
 // ThermalTender is one tender leg: the method, the amount tendered, the
@@ -114,7 +141,7 @@ type ThermalLine struct {
 type ThermalTender struct {
 	Method      string
 	AmountCents httpx.Cents
-	LastFour    string // empty when not a card
+	LastFour    string      // empty when not a card
 	ChangeCents httpx.Cents // 0 when no change due
 }
 
@@ -218,6 +245,37 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 		ext := b.style.Money(l.LineTotal)
 		rightSide := qty + "    " + price + "    " + ext
 		add(thermalRowTiny, text.NewCol(thermalGridSize, rightSide, props.Text{Size: 7, Align: align.Right}))
+		// The tint block (row CP-16): what the customer needs to reorder the
+		// colour, wrapped to the same character budget as the description.
+		if l.Tint != nil {
+			head := "Tint: " + l.Tint.ColorName
+			if l.Tint.ColorCode != "" {
+				head += " (" + l.Tint.ColorCode + ")"
+			}
+			for _, d := range wrapForWidth(head, charsPerLineFull) {
+				add(thermalRowTiny, text.NewCol(thermalGridSize, d, props.Text{Size: 7}))
+			}
+			base := strings.TrimSpace(strings.Join([]string{l.Tint.BaseCode, l.Tint.ContainerSizeCode}, " "))
+			if base != "" {
+				for _, d := range wrapForWidth("Base: "+base, charsPerLineFull) {
+					add(thermalRowTiny, text.NewCol(thermalGridSize, d, props.Text{Size: 7}))
+				}
+			}
+			for _, c := range l.Tint.Components {
+				line := strings.TrimSpace(c.Code + " " + c.Name + "  " + c.Amount)
+				for _, d := range wrapForWidth(line, charsPerLineFull) {
+					add(thermalRowTiny, text.NewCol(thermalGridSize, d, props.Text{Size: 7}))
+				}
+			}
+			if l.Tint.TintChargeCents > 0 {
+				add(thermalRowTiny, text.NewCol(thermalGridSize,
+					"Tint charge: "+b.style.Money(l.Tint.TintChargeCents), props.Text{Size: 7}))
+			}
+			if l.Tint.Rescaled {
+				add(thermalRowTiny, text.NewCol(thermalGridSize,
+					"Amounts rescaled to this size: check them before mixing", props.Text{Size: 7}))
+			}
+		}
 		// The weighed line's ticket line (CP-19): the marking the handbook
 		// names for a typed weight, the ticket number, and the gross, tare
 		// and net the ticket proves.

@@ -8,9 +8,11 @@
 package salesdoc
 
 import (
+	"math/big"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	tint "github.com/gablelbm/gable/internal/tint"
 	"github.com/google/uuid"
 )
 
@@ -145,6 +147,11 @@ type Line struct {
 	// board_width_in columns.
 	Tally *Tally `json:"tally"`
 
+	// Tint is a paint line's tint record (row CP-16): the base, the colour
+	// and the formula frozen on the sale, so a later catalogue edit cannot
+	// rewrite history. Null on every line but a tinted paint line.
+	Tint *LineTint `json:"tint"`
+
 	UnitPrice       *httpx.Price `json:"unit_price_ten_thousandths"`
 	PricedUnitPrice *httpx.Price `json:"priced_unit_price_ten_thousandths"`
 	PriceSource     PriceSource  `json:"price_source"`
@@ -197,6 +204,47 @@ type Line struct {
 	WeightCapturedAt   *httpx.Timestamp `json:"weight_captured_at"`
 
 	CreatedAt httpx.Timestamp `json:"created_at"`
+}
+
+// LineTint is a paint line's tint record (row CP-16): the colour and base
+// text the documents print, the formula it came from, and the colorant
+// amounts actually sold, frozen as they were mixed. A tinted can is not
+// returnable by dealer policy, with a mis tint (the store's own error) as
+// the accepted exception everywhere.
+type LineTint struct {
+	FormulaID         *uuid.UUID      `json:"formula_id"`
+	ColorCode         string          `json:"color_code"`
+	ColorName         string          `json:"color_name"`
+	BaseCode          string          `json:"base_code"`
+	ContainerSizeCode string          `json:"container_size_code"`
+	Rescaled          bool            `json:"rescaled"`
+	TintChargeCents   *httpx.Cents    `json:"tint_charge_cents"`
+	Components        []TintComponent `json:"components"`
+}
+
+// TintComponent is one colorant of a sold tint: its code and name and its
+// amount, the amount an integer count of a named dispense unit and never a
+// decimal quantity.
+type TintComponent struct {
+	ColorantCode string      `json:"colorant_code"`
+	ColorantName string      `json:"colorant_name"`
+	Amount       tint.Amount `json:"amount"`
+}
+
+// TotalColorantOZ is a tint's colorant total in fluid ounces, exactly: every
+// component's amount read on its own dispense grid and summed without
+// rounding. It is the figure the dealer's charge rule reads, so it is never a
+// float and never rounded on the way.
+func TotalColorantOZ(components []TintComponent) *big.Rat {
+	total := new(big.Rat)
+	for _, c := range components {
+		if c.Amount.Denominator <= 0 {
+			continue
+		}
+		total.Add(total, new(big.Rat).SetFrac(
+			big.NewInt(c.Amount.FineUnits()), big.NewInt(int64(c.Amount.Denominator))))
+	}
+	return total
 }
 
 // IsStocked reports whether the line moves stock: a product line that names a

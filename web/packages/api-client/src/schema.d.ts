@@ -9636,6 +9636,215 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tint/systems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tint systems
+         * @description Every tinting system the dealer runs, with the dispense denominator that makes its colourant amount columns meaningful.
+         */
+        get: operations["tintSystemList"];
+        put?: never;
+        /**
+         * Create a tint system
+         * @description One manufacturer's tinting system. The unit_denominator is one of the trade's dispense increments (32, 48, 64, 128, 192, 384, 1024).
+         */
+        post: operations["tintSystemCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List bases
+         * @description The base paints, optionally filtered to a tint system or to the bases whose product link is a given products row.
+         */
+        get: operations["tintBaseList"];
+        put?: never;
+        /** Create a base */
+        post: operations["tintBaseCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colorants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List colorants */
+        get: operations["tintColorantList"];
+        put?: never;
+        /** Create a colorant */
+        post: operations["tintColorantCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List colours
+         * @description The colours, by name or manufacturer code fragment. A manufacturer code is an attribute, never a key.
+         */
+        get: operations["tintColorList"];
+        put?: never;
+        /**
+         * Create a colour
+         * @description A colour of a book (manufacturer_code set) or a store match (is_custom true, no manufacturer code, optionally the customer it was matched for).
+         */
+        post: operations["tintColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List formulas
+         * @description The formulas, optionally filtered to a colour, a base and a container size code, with their components in guide order.
+         */
+        get: operations["tintFormulaList"];
+        put?: never;
+        /**
+         * Create a formula
+         * @description One formula of a colour in a base at a container size. Every component's unit_denominator must be the one the colour's tint system declares.
+         */
+        post: operations["tintFormulaCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a formula */
+        get: operations["tintFormulaGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/formulas/{id}/rescale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescale a formula to another container size
+         * @description Each component is multiplied by the exact volume ratio and rounded independently to a whole count of its own dispense unit, half up; any_rounded reports whether at least one component was rounded, so the counter can see the value is a derived approximation and override it.
+         */
+        post: operations["tintFormulaRescale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List saved colours
+         * @description The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin.
+         */
+        get: operations["tintSavedColorList"];
+        put?: never;
+        /**
+         * Save a colour for a customer
+         * @description The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin.
+         */
+        post: operations["tintSavedColorCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/saved-colors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a saved colour */
+        delete: operations["tintSavedColorDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tint/charge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's tint charge
+         * @description The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default.
+         */
+        get: operations["tintChargeGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/units": {
         parameters: {
             query?: never;
@@ -13968,6 +14177,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14261,6 +14472,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14861,6 +15074,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -14974,6 +15189,8 @@ export interface components {
             stock_quantity: string | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
+            /** @description The paint line's tint record (row CP-16); null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /**
              * Format: int64
              * @description The price charged per price unit, after any override, before any discount.
@@ -17062,7 +17279,7 @@ export interface components {
          * @description The closed lowercase list of return reasons; an absent reason is other.
          * @enum {string}
          */
-        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "other";
+        PosReturnReasonCode: "defective" | "damaged" | "wrong_item" | "ordered_wrong" | "changed_mind" | "overbought" | "mis_tint" | "other";
         PosWayForward: {
             /** @enum {string} */
             kind: "pay_down" | "manager_override" | "switch_tender";
@@ -17401,6 +17618,8 @@ export interface components {
             /** Format: int64 */
             discount_cents?: number | null;
             discount_reason?: string | null;
+            /** @description The paint line's tint record (row CP-16), null or omitted on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
         };
         /** @description A sale's head, a list item. */
         PosTransactionSummary: {
@@ -17649,6 +17868,8 @@ export interface components {
             vendor_id: string | null;
             /** Format: int64 */
             special_order_unit_cost_ten_thousandths: number | null;
+            /** @description The paint line's tint record (row CP-16), null on every other line. */
+            tint: components["schemas"]["LineTint"] | null;
             /** @description Where the line's weight came from; null on a line that was not weighed (CP-19). */
             weight_source: ("scale" | "manual") | null;
             /** @description The gross reading in pounds, a decimal string. */
@@ -17928,6 +18149,10 @@ export interface components {
              * @description The fee this line's reason withheld from its refund, half even to the cent.
              */
             restocking_fee_cents: number;
+            /** @description The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned. */
+            mis_tint: boolean;
+            /** @description A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock. */
+            tinted_return: boolean;
         };
         /** @description One drawer shift. The expected cash is the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. */
         PosTillSession: {
@@ -18141,6 +18366,9 @@ export interface components {
                 restocking_fee_defaults: {
                     [key: string]: number;
                 };
+                tint_charge: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law. */
+                tinted_no_return: boolean;
             };
         };
         PosSettingsRequest: {
@@ -18163,6 +18391,9 @@ export interface components {
                 restocking_fees: {
                     [key: string]: number;
                 };
+                tint_charge?: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law). */
+                tinted_no_return?: boolean;
             };
             /**
              * Format: int64
@@ -20776,6 +21007,244 @@ export interface components {
         TaxZoneCloseRequest: {
             /** @description YYYY-MM-DD */
             effective_to: string;
+        };
+        TintSystem: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            name?: string;
+            manufacturer?: string;
+            unit_denominator?: number;
+            unit_label?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSystemCreate: {
+            code: string;
+            name: string;
+            manufacturer?: string;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            unit_label?: string;
+        };
+        TintSystemPage: {
+            items?: components["schemas"]["TintSystem"][];
+        };
+        TintBase: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            fill_volume_oz?: number;
+            is_deepest?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintBaseCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_base_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            fill_volume_oz: number;
+            is_deepest?: boolean;
+        };
+        TintBasePage: {
+            items?: components["schemas"]["TintBase"][];
+        };
+        TintColorant: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            code?: string;
+            name?: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorantCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            code: string;
+            name: string;
+            manufacturer_code?: string;
+            manufacturer_upc?: string;
+        };
+        TintColorantPage: {
+            items?: components["schemas"]["TintColorant"][];
+        };
+        TintColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tint_system_id?: string;
+            manufacturer_code?: string | null;
+            name?: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string | null;
+            note?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintColorCreate: {
+            /** Format: uuid */
+            tint_system_id: string;
+            manufacturer_code?: string;
+            name: string;
+            is_custom?: boolean;
+            /** Format: uuid */
+            customer_id?: string;
+            note?: string;
+        };
+        TintColorPage: {
+            items?: components["schemas"]["TintColor"][];
+        };
+        TintAmount: {
+            whole_oz: number;
+            /** @description The count of the coarse 1/32 step. */
+            increments_coarse: number;
+            /** @description The count of the fine 1/denominator step. */
+            increments_fine: number;
+            /** @enum {integer} */
+            unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+        };
+        TintComponent: {
+            /** Format: uuid */
+            colorant_id?: string;
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+        };
+        TintFormula: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            /** Format: uuid */
+            base_id?: string;
+            /** Format: uuid */
+            product_id?: string | null;
+            container_size_code?: string;
+            container_volume_oz?: number;
+            total_colorant_oz?: string;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: components["schemas"]["TintComponent"][];
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintFormulaCreate: {
+            /** Format: uuid */
+            color_id: string;
+            /** Format: uuid */
+            base_id: string;
+            /** Format: uuid */
+            product_id?: string;
+            container_size_code: string;
+            container_volume_oz: number;
+            /** @enum {string} */
+            source?: "book" | "match" | "manual";
+            components?: {
+                /** Format: uuid */
+                colorant_id: string;
+                whole_oz: number;
+                increments_coarse: number;
+                increments_fine: number;
+                /** @enum {integer} */
+                unit_denominator: 32 | 48 | 64 | 128 | 192 | 384 | 1024;
+            }[];
+        };
+        TintFormulaPage: {
+            items?: components["schemas"]["TintFormula"][];
+        };
+        TintRescaleRequest: {
+            /** @description The target container volume in whole fluid ounces. */
+            target_volume_oz: number;
+        };
+        TintRescaledComponent: {
+            colorant_code?: string;
+            colorant_name?: string;
+            amount?: components["schemas"]["TintAmount"];
+            rounded?: boolean;
+        };
+        TintRescale: {
+            formula?: components["schemas"]["TintFormula"];
+            target_volume_oz?: number;
+            components?: components["schemas"]["TintRescaledComponent"][];
+            any_rounded?: boolean;
+        };
+        TintSavedColor: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            color_id?: string;
+            name?: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string | null;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        TintSavedColorCreate: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            color_id: string;
+            name: string;
+            job_note?: string;
+            note?: string;
+            /** Format: uuid */
+            project_id?: string;
+        };
+        TintSavedColorPage: {
+            items?: components["schemas"]["TintSavedColor"][];
+        };
+        TintCharge: {
+            tint_charge_cents?: number;
+        };
+        /** @description One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents. */
+        TintChargeTier: {
+            /** @enum {string} */
+            base_tier: "" | "flat" | "deep";
+            min_colorant_oz: string;
+            charge_cents: number;
+        };
+        /** @description The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+        TintChargeRule: {
+            flat_cents: number;
+            tiers: components["schemas"]["TintChargeTier"][];
+        };
+        /** @description A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed. */
+        LineTint: {
+            /** Format: uuid */
+            formula_id: string | null;
+            color_code: string;
+            color_name: string;
+            base_code: string;
+            container_size_code: string;
+            /** @description True when the amounts were rescaled to this size; the counter may override any of them. */
+            rescaled: boolean;
+            /** Format: int64 */
+            tint_charge_cents: number | null;
+            components: {
+                colorant_code: string;
+                colorant_name: string;
+                amount: components["schemas"]["TintAmount"];
+            }[];
         };
         /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
         Unit: {
@@ -41052,6 +41521,451 @@ export interface operations {
             404: components["responses"]["NotFound"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tint systems. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystemPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSystemCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSystemCreate"];
+            };
+        };
+        responses: {
+            /** @description The created system. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSystem"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description Only the bases whose product link names this product. */
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bases. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBasePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintBaseCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintBaseCreate"];
+            };
+        };
+        responses: {
+            /** @description The created base. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintBase"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colorants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorantPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorantCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorantCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colorant. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorant"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by tint system. */
+                tint_system_id?: string;
+                /** @description A name or manufacturer code fragment. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The created colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaList: {
+        parameters: {
+            query?: {
+                /** @description Filter by colour. */
+                color_id?: string;
+                /** @description Filter by base. */
+                base_id?: string;
+                /** @description Filter by container size code. */
+                container_size_code?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formulas. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormulaPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintFormulaCreate"];
+            };
+        };
+        responses: {
+            /** @description The created formula. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The formula with its components. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintFormula"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintFormulaRescale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintRescaleRequest"];
+            };
+        };
+        responses: {
+            /** @description The source formula, the rescaled components and the rounding flag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintRescale"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorList: {
+        parameters: {
+            query?: {
+                /** @description Filter by customer. */
+                customer_id?: string;
+                /** @description A job note fragment. */
+                job_note?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colours. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColorPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TintSavedColorCreate"];
+            };
+        };
+        responses: {
+            /** @description The saved colour. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintSavedColor"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintSavedColorDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The saved colour is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tintChargeGet: {
+        parameters: {
+            query?: {
+                /** @description The tint's colorant total in the system's whole dispense units. */
+                colorant_units?: number;
+                /** @description The dispense grid the tint's units are counted on (the colour system's unit denominator). */
+                unit_denominator?: number;
+                /** @description The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one. */
+                base_tier?: "flat" | "deep";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The charge in cents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TintCharge"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };

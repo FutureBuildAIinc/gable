@@ -8,6 +8,16 @@ import { ShieldCheck } from 'lucide';
 import { apiErrorMessage, fieldErrorMap } from '../../services/apiError';
 import { posService, dollarsToCents } from '../../services/POSService';
 import type { PosSettings, ReturnReason } from '../../types/pos.ts';
+import '../../components/ui/gable-select.ts';
+
+interface DraftTier {
+    /** The base tier the tier covers: any base, the ordinary one or the deepest. */
+    baseTier: '' | 'flat' | 'deep';
+    /** The lowest colorant total the tier covers, in fluid ounces text; empty is any total. */
+    minOunces: string;
+    /** The charge for a tint the tier covers, in dollars text. */
+    charge: string;
+}
 
 interface Draft {
     /** The database wide check limit in dollars text; empty is no limit. */
@@ -18,6 +28,12 @@ interface Draft {
     idOver: string;
     /** Each return reason's restocking fee in percent text; empty is none. */
     fees: Record<string, string>;
+    /** The tint charge per container in dollars text; empty is no charge. */
+    tintFlat: string;
+    /** The dealer's tint tiers. */
+    tintTiers: DraftTier[];
+    /** The tinted no return policy: a tinted can is not taken back. */
+    tintedNoReturn: boolean;
 }
 
 const FIELD_CLASS =
@@ -72,7 +88,34 @@ function draftRules(d: Draft, reasons: ReturnReason[]): { ok: true; rules: PosSe
         }
         restocking_fees[r.code] = bps;
     }
-    return { ok: true, rules: { check_limit_cents, check_id_required: { mode: d.idMode, over_cents }, restocking_fees } };
+    // The tint charge rule: the flat figure per container and the tiers that
+    // may cover it. The rule follows the tint, not only the container.
+    const flat = d.tintFlat.trim() === '' ? 0 : dollarsToCents(d.tintFlat.trim());
+    if (isNaN(flat) || flat < 0) {
+        return { ok: false, message: 'The tint charge must be a dollar amount, 0 or more' };
+    }
+    const tiers = [];
+    for (const t of d.tintTiers) {
+        const floor = t.minOunces.trim();
+        if (floor !== '' && !/^\d+(\.\d{1,4})?$/.test(floor)) {
+            return { ok: false, message: "A tint tier's colorant floor must be a decimal number of ounces, like 2 or 1.5" };
+        }
+        const cents = t.charge.trim() === '' ? 0 : dollarsToCents(t.charge.trim());
+        if (isNaN(cents) || cents < 0) {
+            return { ok: false, message: "A tint tier's charge must be a dollar amount, 0 or more" };
+        }
+        tiers.push({ base_tier: t.baseTier, min_colorant_oz: floor, charge_cents: cents });
+    }
+    return {
+        ok: true,
+        rules: {
+            check_limit_cents,
+            check_id_required: { mode: d.idMode, over_cents },
+            restocking_fees,
+            tint_charge: { flat_cents: flat, tiers },
+            tinted_no_return: d.tintedNoReturn,
+        },
+    };
 }
 
 /**
@@ -101,11 +144,19 @@ export class GableCounterRules extends LitElement {
     private _adopt(s: PosSettings, reasons: ReturnReason[]) {
         this._settings = s;
         this._reasons = reasons;
+        const charge = s.rules.tint_charge ?? { flat_cents: 0, tiers: [] };
         this._draft = {
             limit: dollarsText(s.rules.check_limit_cents),
             idMode: s.rules.check_id_required.mode,
             idOver: dollarsText(s.rules.check_id_required.over_cents),
             fees: Object.fromEntries(reasons.map((r) => [r.code, bpsToPercent(s.rules.restocking_fees?.[r.code] ?? 0)])),
+            tintFlat: dollarsText(charge.flat_cents),
+            tintTiers: (charge.tiers ?? []).map((t) => ({
+                baseTier: t.base_tier,
+                minOunces: t.min_colorant_oz,
+                charge: dollarsText(t.charge_cents),
+            })),
+            tintedNoReturn: s.rules.tinted_no_return ?? false,
         };
     }
 
@@ -126,6 +177,27 @@ export class GableCounterRules extends LitElement {
         if (d === null || this._settings === null) return;
         const defaults = this._settings.rules.restocking_fee_defaults ?? {};
         this._draft = { ...d, fees: Object.fromEntries(this._reasons.map((r) => [r.code, bpsToPercent(defaults[r.code] ?? 0)])) };
+    }
+
+    /** Adds an empty tier to the draft. */
+    private _addTier() {
+        const d = this._draft;
+        if (d === null) return;
+        this._draft = { ...d, tintTiers: [...d.tintTiers, { baseTier: '', minOunces: '', charge: '' }] };
+    }
+
+    /** Removes the tier at the index. */
+    private _removeTier(i: number) {
+        const d = this._draft;
+        if (d === null) return;
+        this._draft = { ...d, tintTiers: d.tintTiers.filter((_, j) => j !== i) };
+    }
+
+    /** Changes one field of the tier at the index. */
+    private _setTier(i: number, patch: Partial<DraftTier>) {
+        const d = this._draft;
+        if (d === null) return;
+        this._draft = { ...d, tintTiers: d.tintTiers.map((t, j) => (j === i ? { ...t, ...patch } : t)) };
     }
 
     private async _save() {
@@ -239,6 +311,71 @@ export class GableCounterRules extends LitElement {
                             class="inline-flex items-center rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 min-h-11">
                             Use the suggested fees
                         </button>
+                    </fieldset>
+
+                    <fieldset class="space-y-3" data-testid="counter-rules-tint">
+                        <legend class="text-xs uppercase tracking-wider text-slate-400">Tint charge (row CP-16)</legend>
+                        <p class="text-xs text-slate-500">
+                            What the counter charges for a tinted can. The rule follows the tint, not only the container: a tier
+                            covers the base tier and the colorant floor it names, and the most specific tier that covers the mix
+                            wins. The flat figure covers every mix no tier covers; zero folds the tint into the shelf price.
+                        </p>
+                        <label class="block space-y-1">
+                            <span class="text-xs uppercase tracking-wider text-slate-400">Charge per container (dollars)</span>
+                            <input type="text" inputmode="decimal" name="tint-flat" data-testid="counter-rules-tint-flat"
+                                placeholder="0" .value=${d.tintFlat}
+                                @input=${(e: Event) => { this._draft = { ...d, tintFlat: (e.target as HTMLInputElement).value }; }}
+                                class="${FIELD_CLASS} font-mono max-w-28" />
+                            ${this._fieldErrors['rules.tint_charge.flat_cents']
+                                ? html`<span class="text-xs text-red-400">${this._fieldErrors['rules.tint_charge.flat_cents']}</span>` : nothing}
+                        </label>
+                        ${d.tintTiers.map((t, i) => html`
+                            <div class="flex items-end gap-2 flex-wrap" data-testid="counter-rules-tint-tier-${i}">
+                                <label class="block space-y-1">
+                                    <span class="block text-xs uppercase tracking-wider text-slate-400">Base tier</span>
+                                    <gable-select label="Base tier"
+                                        .value=${t.baseTier}
+                                        .options=${[
+                                            { value: '', label: 'Any base' },
+                                            { value: 'flat', label: 'Flat base' },
+                                            { value: 'deep', label: 'Deep base' },
+                                        ]}
+                                        @change=${(e: Event) => { this._setTier(i, { baseTier: (e.target as HTMLSelectElement).value as DraftTier['baseTier'] }); }}>
+                                    </gable-select>
+                                </label>
+                                <label class="block space-y-1">
+                                    <span class="block text-xs uppercase tracking-wider text-slate-400">Colorant floor (oz)</span>
+                                    <input type="text" inputmode="decimal" data-testid="counter-rules-tint-floor-${i}"
+                                        placeholder="Any amount" .value=${t.minOunces}
+                                        @input=${(e: Event) => { this._setTier(i, { minOunces: (e.target as HTMLInputElement).value }); }}
+                                        class="${FIELD_CLASS} font-mono max-w-28" />
+                                </label>
+                                <label class="block space-y-1">
+                                    <span class="block text-xs uppercase tracking-wider text-slate-400">Charge (dollars)</span>
+                                    <input type="text" inputmode="decimal" data-testid="counter-rules-tint-charge-${i}"
+                                        placeholder="0" .value=${t.charge}
+                                        @input=${(e: Event) => { this._setTier(i, { charge: (e.target as HTMLInputElement).value }); }}
+                                        class="${FIELD_CLASS} font-mono max-w-28" />
+                                </label>
+                                <button type="button" data-testid="counter-rules-tint-tier-remove-${i}"
+                                    @click=${() => this._removeTier(i)}
+                                    class="inline-flex items-center rounded border border-white/20 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 min-h-11">
+                                    Remove the tier
+                                </button>
+                            </div>`)}
+                        <button type="button" data-testid="counter-rules-tint-add-tier" @click=${() => this._addTier()}
+                            class="inline-flex items-center rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 min-h-11">
+                            Add a tier
+                        </button>
+                        <label class="flex items-center gap-2 text-sm text-slate-200" data-testid="counter-rules-tint-no-return">
+                            <input type="checkbox" name="tinted-no-return" .checked=${d.tintedNoReturn}
+                                @change=${(e: Event) => { this._draft = { ...d, tintedNoReturn: (e.target as HTMLInputElement).checked }; }} />
+                            A tinted can is not taken back
+                        </label>
+                        <span class="block text-xs text-slate-500">
+                            The trade rule for a can the store mixed to order: it is re-tinted and put on the marked down rack,
+                            never back on the shelf. A mis tint (the store mixed the wrong colour) is always returned.
+                        </span>
                     </fieldset>
 
                     <div class="flex justify-end">

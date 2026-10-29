@@ -3134,7 +3134,7 @@ components:
     PosReturnReasonCode:
       type: string
       description: "The closed lowercase list of return reasons; an absent reason is other."
-      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, mis_tint, other]
     PosWayForward:
       type: object
       required: [kind, available, message]
@@ -3395,6 +3395,11 @@ components:
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
         discount_reason: {type: [string, "null"]}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null or omitted on every other line.
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
@@ -3514,7 +3519,7 @@ components:
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit
         (with its component lines), charge and text lines, the priced fields
         null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -3548,6 +3553,11 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null on every other line.
         weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
         weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
         weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
@@ -3748,7 +3758,7 @@ components:
     PosReturnLine:
       type: object
       description: One returned line, its quantity and extension negative.
-      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents]
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents, mis_tint, tinted_return]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -3761,6 +3771,8 @@ components:
         restock: {type: boolean}
         reason_code: {$ref: "#/components/schemas/PosReturnReasonCode"}
         restocking_fee_cents: {type: integer, format: int64, description: "The fee this line's reason withheld from its refund, half even to the cent."}
+        mis_tint: {type: boolean, description: "The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned."}
+        tinted_return: {type: boolean, description: "A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock."}
     PosTillSession:
       type: object
       description: >-
@@ -3942,7 +3954,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -3961,6 +3973,11 @@ components:
               description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -3981,6 +3998,11 @@ components:
               description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)." 
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object

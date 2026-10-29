@@ -399,13 +399,19 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 			return err
 		}
 		mergeEffects(&fxAll, fx)
-		// The stock returns (step 6): each stocked line back on hand.
+		// The stock returns (step 6): each stocked line back on hand, except a
+		// tinted can (row CP-16): a mixed can never goes back into saleable
+		// stock, the same rule the return path holds, because a can the
+		// store mixed for a customer cannot be sold again as the plain base.
 		if err := s.checkLineStockUnits(ctx, lines); err != nil {
 			return err
 		}
 		for i := range lines {
 			l := &lines[i]
 			if !l.IsStocked() || l.Quantity == nil {
+				continue
+			}
+			if l.Tint != nil {
 				continue
 			}
 			if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, salesdoc.StockQty(l)); err != nil {

@@ -852,6 +852,3 @@ func TestExchangePreviewIsReadOnlyAndNeverLocksCountersCustomersOrAdvancesSequen
 		t.Errorf("invoice counter changed on preview: got %d, want %d", got, inBefore)
 	}
 }
-
-
-

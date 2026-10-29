@@ -50,6 +50,8 @@ import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
 import './TillReportView.ts';
 import './TillZReports.ts';
+import './TintLineDialog.ts';
+import { tintSummary } from './tint.ts';
 import { kindLabel } from './movements.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
@@ -242,6 +244,9 @@ export class POSTerminal extends LitElement {
   @state() private _showZReports = false;
   // The scale panel overlay (CP-19).
   @state() private _showScale = false;
+
+  // The tint line's dialog (row CP-16): the open sale line it was opened for.
+  @state() private _tintLine: SaleLine | null = null;
 
   // The register the counter works on: the current yard's, chosen from the
   // registers the caller may use. registersLoaded stays false until the first
@@ -2040,7 +2045,10 @@ export class POSTerminal extends LitElement {
     const restock: Record<string, boolean> = {};
     productLines.forEach((l) => {
       qty[l.id] = '0';
-      restock[l.id] = true;
+      // A tinted can does not go back into saleable stock (row CP-16): it is
+      // re-tinted and put on the marked down rack. The server refuses the
+      // restock of a tinted line, so the screen asks for the same thing.
+      restock[l.id] = !l.tint;
     });
     this._returnQty = qty;
     this._returnRestockByLine = restock;
@@ -2438,6 +2446,21 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  /** The tint line, in the counter's dialog frame (row CP-16). */
+  private _renderTintModal() {
+    const line = this._tintLine;
+    if (!line || !this._sale) return nothing;
+    return this._overlay(html`
+      <gable-tint-line-dialog sale-id=${this._sale.id} line-id=${line.id} product-id=${line.product_id ?? ''}
+        .quantity=${line.quantity ?? '1'}
+        .uom=${line.uom ?? ''}
+        .basePrice=${line.unit_price_ten_thousandths ?? 0}
+        .customerId=${this._customer?.id ?? ''}
+        @tint-cancel=${() => { this._tintLine = null; }}
+        @tint-added=${(e: CustomEvent<Sale>) => { this._tintLine = null; this._sale = e.detail; }}></gable-tint-line-dialog>
+    `);
+  }
+
   /** The drawer's cash movements, in the till dialog frame (CP-08). */
   private _renderMovementModal() {
     if (!this._showMovement || !this._till) return nothing;
@@ -2637,6 +2660,10 @@ export class POSTerminal extends LitElement {
               style="width:80px;${input};text-align:right" />
           </div>
           <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+            ${l.tint ? html`
+            <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-tint-rack">
+              Tinted: re-tinted and put on the marked down rack, not back into stock
+            </span>` : html`
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgb(var(--gb-till-soft));cursor:pointer">
               <input type="radio" name=${`restock-${l.id}`} .checked=${this._returnRestockByLine[l.id] !== false}
                 @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: true }; }}
@@ -2648,7 +2675,7 @@ export class POSTerminal extends LitElement {
                 @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: false }; }}
                 data-testid="return-restock-damaged" />
               Damaged, not restocked
-            </label>
+            </label>`}
           </div>
           ${reasons.length > 0 && Number(this._returnQty[l.id] ?? '0') > 0 ? html`
             <div style="margin-top:6px">
@@ -2819,8 +2846,8 @@ export class POSTerminal extends LitElement {
         </div>
         <div class="relative flex w-full min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:static min-[900px]:w-auto min-[900px]:flex-nowrap">
           ${this._till ? html`
-            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
-            <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
+            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="whitespace-nowrap rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
+            <span class="whitespace-nowrap rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
           <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             ${this._renderTillMenu()}
@@ -3211,7 +3238,16 @@ export class POSTerminal extends LitElement {
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
+                  ${item.tint ? html`
+                    <div class="font-mono text-xs text-slate-400" data-testid="pos-line-tint">
+                      ${item.tint.color_name}${item.tint.color_code ? ` (${item.tint.color_code})` : ''} on ${item.tint.base_code} ${item.tint.container_size_code}
+                      ${tintSummary(item.tint.components)}
+                    </div>` : nothing}
                 </div>
+                ${open && item.tint === null && hasQuantityControl(item) && item.product_id ? html`
+                  <button type="button" data-testid="pos-line-tint-button" title="Tint" aria-label="Tint ${item.description}"
+                    @click=${() => { this._tintLine = item; }}
+                    class="inline-flex h-11 shrink-0 items-center justify-center rounded border border-white/20 px-3 text-xs font-semibold text-slate-200 hover:bg-white/5">Tint</button>` : nothing}
                 ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
                 ${open ? html`
@@ -3439,6 +3475,7 @@ export class POSTerminal extends LitElement {
         ${this._renderXReportModal()}
         ${this._renderZReportsModal()}
         ${this._renderReturnSearchModal()}
+        ${this._renderTintModal()}
         ${this._renderReturnModal()}
         ${this._renderScaleModal()}
 

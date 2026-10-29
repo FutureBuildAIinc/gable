@@ -64,6 +64,7 @@ tags:
   - name: sales-team
   - name: scheduling
   - name: tax
+  - name: tint
   - name: units
   - name: uploads
   - name: vendors
@@ -21468,6 +21469,436 @@ paths:
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tint/systems:
+    get:
+      operationId: tintSystemList
+      tags: [tint]
+      summary: List tint systems
+      description: Every tinting system the dealer runs, with the dispense denominator that makes its colourant amount columns meaningful.
+      responses:
+        '200':
+          description: The tint systems.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSystemPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintSystemCreate
+      tags: [tint]
+      summary: Create a tint system
+      description: One manufacturer's tinting system. The unit_denominator is one of the trade's dispense increments (32, 48, 64, 128, 192, 384, 1024).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintSystemCreate'
+      responses:
+        '201':
+          description: The created system.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSystem'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/bases:
+    get:
+      operationId: tintBaseList
+      tags: [tint]
+      summary: List bases
+      description: The base paints, optionally filtered to a tint system or to the bases whose product link is a given products row.
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+        - name: product_id
+          in: query
+          description: Only the bases whose product link names this product.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The bases.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintBasePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintBaseCreate
+      tags: [tint]
+      summary: Create a base
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintBaseCreate'
+      responses:
+        '201':
+          description: The created base.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintBase'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/colorants:
+    get:
+      operationId: tintColorantList
+      tags: [tint]
+      summary: List colorants
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The colorants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorantPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintColorantCreate
+      tags: [tint]
+      summary: Create a colorant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintColorantCreate'
+      responses:
+        '201':
+          description: The created colorant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorant'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/colors:
+    get:
+      operationId: tintColorList
+      tags: [tint]
+      summary: List colours
+      description: The colours, by name or manufacturer code fragment. A manufacturer code is an attribute, never a key.
+      parameters:
+        - name: tint_system_id
+          in: query
+          description: Filter by tint system.
+          schema: {type: string, format: uuid}
+        - name: q
+          in: query
+          description: A name or manufacturer code fragment.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The colours.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColorPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintColorCreate
+      tags: [tint]
+      summary: Create a colour
+      description: A colour of a book (manufacturer_code set) or a store match (is_custom true, no manufacturer code, optionally the customer it was matched for).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintColorCreate'
+      responses:
+        '201':
+          description: The created colour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintColor'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas:
+    get:
+      operationId: tintFormulaList
+      tags: [tint]
+      summary: List formulas
+      description: The formulas, optionally filtered to a colour, a base and a container size code, with their components in guide order.
+      parameters:
+        - name: color_id
+          in: query
+          description: Filter by colour.
+          schema: {type: string, format: uuid}
+        - name: base_id
+          in: query
+          description: Filter by base.
+          schema: {type: string, format: uuid}
+        - name: container_size_code
+          in: query
+          description: Filter by container size code.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The formulas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormulaPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintFormulaCreate
+      tags: [tint]
+      summary: Create a formula
+      description: One formula of a colour in a base at a container size. Every component's unit_denominator must be the one the colour's tint system declares.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintFormulaCreate'
+      responses:
+        '201':
+          description: The created formula.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormula'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas/{id}:
+    get:
+      operationId: tintFormulaGet
+      tags: [tint]
+      summary: Read a formula
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The formula with its components.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintFormula'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/formulas/{id}/rescale:
+    post:
+      operationId: tintFormulaRescale
+      tags: [tint]
+      summary: Rescale a formula to another container size
+      description: Each component is multiplied by the exact volume ratio and rounded independently to a whole count of its own dispense unit, half up; any_rounded reports whether at least one component was rounded, so the counter can see the value is a derived approximation and override it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintRescaleRequest'
+      responses:
+        '200':
+          description: The source formula, the rescaled components and the rounding flag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintRescale'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/saved-colors:
+    get:
+      operationId: tintSavedColorList
+      tags: [tint]
+      summary: List saved colours
+      description: "The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin."
+      parameters:
+        - name: customer_id
+          in: query
+          description: Filter by customer.
+          schema: {type: string, format: uuid}
+        - name: job_note
+          in: query
+          description: A job note fragment.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The saved colours.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSavedColorPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      operationId: tintSavedColorCreate
+      tags: [tint]
+      summary: Save a colour for a customer
+      description: "The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TintSavedColorCreate'
+      responses:
+        '201':
+          description: The saved colour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintSavedColor'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/saved-colors/{id}:
+    delete:
+      operationId: tintSavedColorDelete
+      tags: [tint]
+      summary: Delete a saved colour
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: The saved colour is gone.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/tint/charge:
+    get:
+      operationId: tintChargeGet
+      tags: [tint]
+      summary: The dealer's tint charge
+      description: "The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default."
+      parameters:
+        - name: colorant_units
+          in: query
+          description: The tint's colorant total in the system's whole dispense units.
+          schema: {type: integer, minimum: 0}
+        - name: unit_denominator
+          in: query
+          description: The dispense grid the tint's units are counted on (the colour system's unit denominator).
+          schema: {type: integer, minimum: 1}
+        - name: base_tier
+          in: query
+          description: "The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one."
+          schema: {type: string, enum: [flat, deep]}
+      responses:
+        '200':
+          description: The charge in cents.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TintCharge'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/units:
     get:
       operationId: unitList
@@ -28871,6 +29302,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -28981,6 +29413,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -29471,6 +29908,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -29582,6 +30020,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -30487,6 +30930,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -30594,6 +31038,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -30746,6 +31195,7 @@ components:
         - stock_uom
         - stock_quantity
         - tally
+        - tint
         - unit_price_ten_thousandths
         - priced_unit_price_ten_thousandths
         - price_source
@@ -30857,6 +31307,11 @@ components:
             - $ref: '#/components/schemas/Tally'
             - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+            - $ref: '#/components/schemas/LineTint'
+            - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
             - integer
@@ -33902,7 +34357,7 @@ components:
     PosReturnReasonCode:
       type: string
       description: "The closed lowercase list of return reasons; an absent reason is other."
-      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+      enum: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, mis_tint, other]
     PosWayForward:
       type: object
       required: [kind, available, message]
@@ -34153,6 +34608,11 @@ components:
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
         discount_reason: {type: [string, "null"]}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null or omitted on every other line.
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
@@ -34270,7 +34730,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -34304,6 +34764,11 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null on every other line.
         weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
         weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
         weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
@@ -34498,7 +34963,7 @@ components:
     PosReturnLine:
       type: object
       description: One returned line, its quantity and extension negative.
-      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents]
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock, reason_code, restocking_fee_cents, mis_tint, tinted_return]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -34511,6 +34976,8 @@ components:
         restock: {type: boolean}
         reason_code: {$ref: "#/components/schemas/PosReturnReasonCode"}
         restocking_fee_cents: {type: integer, format: int64, description: "The fee this line's reason withheld from its refund, half even to the cent."}
+        mis_tint: {type: boolean, description: "The mis tint return (row CP-16): the store mixed the wrong colour, so the tinted line returned."}
+        tinted_return: {type: boolean, description: "A returned line whose sale carried a tint: the can goes to the mistint rack, never back into saleable stock."}
     PosTillSession:
       type: object
       description: >-
@@ -34690,7 +35157,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -34709,6 +35176,11 @@ components:
               description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -34729,6 +35201,11 @@ components:
               description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)."
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
@@ -38417,6 +38894,260 @@ components:
       required: [effective_to]
       properties:
         effective_to: {type: string, description: YYYY-MM-DD}
+    TintSystem:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer: {type: string}
+        unit_denominator: {type: integer}
+        unit_label: {type: string}
+        created_at: {type: string, format: date-time}
+    TintSystemCreate:
+      type: object
+      required: [code, name, unit_denominator]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        manufacturer: {type: string}
+        unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+        unit_label: {type: string}
+    TintSystemPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintSystem'}
+    TintBase:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_base_code: {type: string}
+        product_id: {type: string, format: uuid, nullable: true}
+        fill_volume_oz: {type: integer}
+        is_deepest: {type: boolean}
+        created_at: {type: string, format: date-time}
+    TintBaseCreate:
+      type: object
+      required: [tint_system_id, code, name, fill_volume_oz]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_base_code: {type: string}
+        product_id: {type: string, format: uuid}
+        fill_volume_oz: {type: integer}
+        is_deepest: {type: boolean}
+    TintBasePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintBase'}
+    TintColorant:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_code: {type: string}
+        manufacturer_upc: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+    TintColorantCreate:
+      type: object
+      required: [tint_system_id, code, name]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        manufacturer_code: {type: string}
+        manufacturer_upc: {type: string}
+    TintColorantPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintColorant'}
+    TintColor:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tint_system_id: {type: string, format: uuid}
+        manufacturer_code: {type: string, nullable: true}
+        name: {type: string}
+        is_custom: {type: boolean}
+        customer_id: {type: string, format: uuid, nullable: true}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+    TintColorCreate:
+      type: object
+      required: [tint_system_id, name]
+      properties:
+        tint_system_id: {type: string, format: uuid}
+        manufacturer_code: {type: string}
+        name: {type: string}
+        is_custom: {type: boolean}
+        customer_id: {type: string, format: uuid}
+        note: {type: string}
+    TintColorPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintColor'}
+    TintAmount:
+      type: object
+      required: [whole_oz, increments_coarse, increments_fine, unit_denominator]
+      properties:
+        whole_oz: {type: integer}
+        increments_coarse: {type: integer, description: The count of the coarse 1/32 step.}
+        increments_fine: {type: integer, description: The count of the fine 1/denominator step.}
+        unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+    TintComponent:
+      type: object
+      properties:
+        colorant_id: {type: string, format: uuid}
+        colorant_code: {type: string}
+        colorant_name: {type: string}
+        amount: {$ref: '#/components/schemas/TintAmount'}
+    TintFormula:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        base_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        container_size_code: {type: string}
+        container_volume_oz: {type: integer}
+        total_colorant_oz: {type: string}
+        source: {type: string, enum: [book, match, manual]}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/TintComponent'}
+        created_at: {type: string, format: date-time}
+    TintFormulaCreate:
+      type: object
+      required: [color_id, base_id, container_size_code, container_volume_oz]
+      properties:
+        color_id: {type: string, format: uuid}
+        base_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        container_size_code: {type: string}
+        container_volume_oz: {type: integer}
+        source: {type: string, enum: [book, match, manual]}
+        components:
+          type: array
+          items:
+            type: object
+            required: [colorant_id, whole_oz, increments_coarse, increments_fine, unit_denominator]
+            properties:
+              colorant_id: {type: string, format: uuid}
+              whole_oz: {type: integer}
+              increments_coarse: {type: integer}
+              increments_fine: {type: integer}
+              unit_denominator: {type: integer, enum: [32, 48, 64, 128, 192, 384, 1024]}
+    TintFormulaPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintFormula'}
+    TintRescaleRequest:
+      type: object
+      required: [target_volume_oz]
+      properties:
+        target_volume_oz: {type: integer, description: The target container volume in whole fluid ounces.}
+    TintRescaledComponent:
+      type: object
+      properties:
+        colorant_code: {type: string}
+        colorant_name: {type: string}
+        amount: {$ref: '#/components/schemas/TintAmount'}
+        rounded: {type: boolean}
+    TintRescale:
+      type: object
+      properties:
+        formula: {$ref: '#/components/schemas/TintFormula'}
+        target_volume_oz: {type: integer}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/TintRescaledComponent'}
+        any_rounded: {type: boolean}
+    TintSavedColor:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        name: {type: string}
+        job_note: {type: string}
+        note: {type: string}
+        project_id: {type: string, format: uuid, nullable: true}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+    TintSavedColorCreate:
+      type: object
+      required: [customer_id, color_id, name]
+      properties:
+        customer_id: {type: string, format: uuid}
+        color_id: {type: string, format: uuid}
+        name: {type: string}
+        job_note: {type: string}
+        note: {type: string}
+        project_id: {type: string, format: uuid}
+    TintSavedColorPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TintSavedColor'}
+    TintCharge:
+      type: object
+      properties:
+        tint_charge_cents: {type: integer}
+    TintChargeTier:
+      type: object
+      description: "One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents."
+      required: [base_tier, min_colorant_oz, charge_cents]
+      properties:
+        base_tier: {type: string, enum: ['', flat, deep]}
+        min_colorant_oz: {type: string}
+        charge_cents: {type: integer, minimum: 0}
+    TintChargeRule:
+      type: object
+      description: "The dealer's tint charge rule: the flat figure per container and the tiers that may cover it."
+      required: [flat_cents, tiers]
+      properties:
+        flat_cents: {type: integer, minimum: 0}
+        tiers:
+          type: array
+          items: {$ref: '#/components/schemas/TintChargeTier'}
+    LineTint:
+      type: object
+      description: A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed.
+      required: [formula_id, color_code, color_name, base_code, container_size_code, rescaled, tint_charge_cents, components]
+      properties:
+        formula_id: {type: [string, "null"], format: uuid}
+        color_code: {type: string}
+        color_name: {type: string}
+        base_code: {type: string}
+        container_size_code: {type: string}
+        rescaled: {type: boolean, description: True when the amounts were rescaled to this size; the counter may override any of them.}
+        tint_charge_cents: {type: [integer, "null"], format: int64}
+        components:
+          type: array
+          items:
+            type: object
+            required: [colorant_code, colorant_name, amount]
+            properties:
+              colorant_code: {type: string}
+              colorant_name: {type: string}
+              amount: {$ref: '#/components/schemas/TintAmount'}
     Unit:
       type: object
       description: >-

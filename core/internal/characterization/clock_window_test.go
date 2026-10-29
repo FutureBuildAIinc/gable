@@ -303,4 +303,3 @@ func TestWaitReadyRejectsStubAndRequiresCoreLiveResponse(t *testing.T) {
 		t.Fatalf("isCoreLiveResponse rejected valid core liveness response")
 	}
 }
-

@@ -886,7 +886,9 @@ product catalogue and its PIM content, the unit catalogue, vendors, EDI
 partners and their catalogs, millwork and configurator options, governance
 rfcs, the product pricing categories, the rebate programs and their claims,
 the price level vocabulary, the market index history, the price escalation
-calculator, the match tolerances, the charge codes, the payment terms), the
+calculator, the match tolerances, the charge codes, the payment terms, the
+paint tint catalogue (the systems, bases, colorants, colours and formulas,
+and the charge rule they are priced by)), the
 delivery fleet's vehicles, the AI settings and routing reads, the module and
 app switches' reads, and the two calculators that spend the dealer's AI
 credit (the parsing upload and the vision scan; each call is audited with
@@ -899,7 +901,13 @@ pricing categories, rebate programs, millwork options, governance rfcs and
 their transitions, the market index metadata, the product catalogue writes
 and the PIM writes (products, PIM content, margins, dimensions, lead time,
 kit components, unit sets; the PIM generate routes spend the dealer's AI
-credit), the charge codes and payment terms, and the reorder target refresh.
+credit), the charge codes and payment terms, the paint tint catalogue's
+writes (the systems, bases, colorants, colours and formulas are dealer wide),
+and the reorder target refresh. The tint catalogue's saved colours are the
+exception among the tint rows: they are customer rows, so their read is WALLED
+(the read carries the customer predicate of section 5.8) and their create is
+CONFINED (the customer branch wall holds the write to the customer its body
+names), never a stated limit.
 The drivers are refused reads included: driver rows carry personal data and
 no branch column. REFUSED outright, whatever scope a key holds: the GL, AP
 and bank reconciliation surfaces (reads and writes alike), the AR

@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -221,3 +222,26 @@ func TestConcurrentConfirmsOfOneCustomerCannotBothPassTheCreditCheck(t *testing.
 		}
 	}
 }
+
+// RULE (row CP-16): an order line does not carry a tint in v1; a create or edit
+// request that sends tint on a line is refused with a 400 naming lines[0].tint,
+// never silently dropped.
+func TestOrderRefusesTintOnALine(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	line := f.line("1")
+	line["tint"] = map[string]any{
+		"color_code": "HC-188", "color_name": "Essex Green",
+		"base_code": "DEEP", "container_size_code": "GAL",
+		"components": []map[string]any{{
+			"colorant_code": "B1", "colorant_name": "Black",
+			"amount": map[string]any{"whole_oz": 1, "increments_coarse": 0, "increments_fine": 0, "unit_denominator": 384},
+		}},
+	}
+	r := f.do("POST", "/api/v1/orders", f.createBody(line))
+	if r.status != 400 || !strings.Contains(string(r.raw), "lines[0].tint") {
+		t.Errorf("an order line with tint = %d, want 400 naming lines[0].tint: %s", r.status, r.raw)
+	}
+}
+
