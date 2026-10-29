@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -87,7 +88,9 @@ func upperOrNil(s *string) any {
 }
 
 func (r *PostgresRepository) GetScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error) {
-	row := r.ex(ctx).QueryRow(ctx, `SELECT `+scaleTicketCols+` FROM scale_tickets WHERE id = $1`, id)
+	row := r.ex(ctx).QueryRow(ctx, `SELECT `+scaleTicketCols+` FROM scale_tickets t
+		WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3),
+		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	t, err := scanScaleTicket(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -99,9 +102,14 @@ func (r *PostgresRepository) GetScaleTicket(ctx context.Context, id uuid.UUID) (
 }
 
 // LockScaleTicket reads one ticket FOR UPDATE inside the caller's
-// transaction: the void and the weigh out serialize on it.
+// transaction: the void and the weigh out serialize on it. The branch wall
+// applies, the way the pos package walls its other reads: a ticket outside
+// the caller's reach is a missing row, so the void of another branch's
+// ticket is refused before anything moves.
 func (r *PostgresRepository) LockScaleTicket(ctx context.Context, id uuid.UUID) (*ScaleTicket, error) {
-	row := r.ex(ctx).QueryRow(ctx, `SELECT `+scaleTicketCols+` FROM scale_tickets WHERE id = $1 FOR UPDATE`, id)
+	row := r.ex(ctx).QueryRow(ctx, `SELECT `+scaleTicketCols+` FROM scale_tickets t
+		WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3)+` FOR UPDATE`,
+		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	t, err := scanScaleTicket(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
