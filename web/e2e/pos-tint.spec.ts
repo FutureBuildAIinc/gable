@@ -5,6 +5,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import path from 'path';
 import fs from 'fs';
 import { pickOptionByValue } from './app-controls';
+import { openCounter } from './pos-till';
 
 /**
  * The counter's tint line (row CP-16), end to end in the UI: the catalogue is
@@ -67,14 +68,14 @@ async function tintChargeRule(request: APIRequestContext): Promise<void> {
  * reads false on the receipt and in the cart).
  */
 async function paintProduct(request: APIRequestContext): Promise<{ id: string; sku: string }> {
-  const run = Date.now().toString(36);
-  const sku = `E2E-PAINT-${run}`;
+  const run = Date.now().toString(36).slice(-5).toUpperCase();
+  const sku = `PT-INT-${run}`;
   const created = await request.post('/api/v1/products', {
     data: {
       sku,
-      description: 'Interior latex paint, gallon',
+      description: 'Interior Latex Eggshell Base, 1 Gallon',
       stock_uom: 'GAL',
-      base_price_ten_thousandths: 72500,
+      base_price_ten_thousandths: 725000,
     },
   });
   expect(created.status(), await created.text()).toBe(201);
@@ -88,7 +89,7 @@ async function paintProduct(request: APIRequestContext): Promise<{ id: string; s
       product_id: product.id,
       location_id: branch.id,
       quantity: 50,
-      reason: 'e2e paint stock for the tint run',
+      reason: 'initial paint stock for counter tint walk',
       is_delta: false,
     },
   });
@@ -98,16 +99,16 @@ async function paintProduct(request: APIRequestContext): Promise<{ id: string; s
 
 /** Seeds one tint system, a base linked to the product, a colorant, a colour and a gallon formula. */
 async function seedTintCatalogue(request: APIRequestContext, productId: string) {
-  const run = Date.now().toString(36);
+  const run = Date.now().toString(36).slice(-5).toUpperCase();
   const system = (await (await request.post('/api/v1/tint/systems', {
-    data: { code: `E2E-${run}`, name: `E2E Tint ${run}`, manufacturer: 'E2E Paints', unit_denominator: 384 },
+    data: { code: `GEN-${run}`, name: 'Waterborne Colorant', manufacturer: 'Harbor Coatings', unit_denominator: 384 },
   })).json()) as { id: string };
   expect(system.id).toBeTruthy();
   const base = (await (await request.post('/api/v1/tint/bases', {
     data: { tint_system_id: system.id, code: 'DEEP', name: 'Deep base', product_id: productId, fill_volume_oz: 122 },
   })).json()) as { id: string };
   const colorant = (await (await request.post('/api/v1/tint/colorants', {
-    data: { tint_system_id: system.id, code: 'B1', name: 'Black' },
+    data: { tint_system_id: system.id, code: 'B1', name: 'Lamp Black' },
   })).json()) as { id: string };
   const color = (await (await request.post('/api/v1/tint/colors', {
     data: { tint_system_id: system.id, manufacturer_code: 'HC-188', name: 'Essex Green' },
@@ -121,21 +122,8 @@ async function seedTintCatalogue(request: APIRequestContext, productId: string) 
   return { system, base, colorant, color, formula };
 }
 
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
-}
-
 test('the counter: a tinted paint line, its receipt and its mis tint return', async ({ page, request }) => {
-  await signIn(page, 'POS Tint E2E');
+  await signIn(page, 'Alex Rivera');
   const product = await paintProduct(request);
   await seedTintCatalogue(request, product.id);
   await tintChargeRule(request);
@@ -152,12 +140,14 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
   await page.getByTestId('tint-color-search').fill('Essex');
   await page.getByTestId('tint-color-results').getByRole('option', { name: /Essex Green/ }).click();
   await expect(page.getByTestId('tint-components')).toBeVisible();
-  await expect(page.getByTestId('tint-components')).toContainText('B1 Black');
+  await expect(page.getByTestId('tint-components')).toContainText('B1 Lamp Black');
+  await expect(page.getByTestId('tint-price')).toContainText('$75.00 (includes the $2.50 tint charge)');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tint-dialog.png'), fullPage: true });
 
   await page.getByTestId('tint-add').click();
   await expect(page.getByTestId('pos-line-tint')).toContainText('Essex Green');
   await expect(page.getByTestId('pos-line-tint')).toContainText('1 OZ + 12/32');
+  await expect(page.locator('[data-testid="pos-lines"] li')).toHaveCount(1);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tint-line.png'), fullPage: true });
 
   // Pay in cash.
@@ -171,21 +161,26 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
 
-  // The books: the sale's line carries the frozen tint.
+  // The books: the sale's one line carries the frozen tint and the dealer's tint charge.
   const sales = (await (await request.get('/api/v1/pos/transactions?register_id=REG-01')).json()) as {
     items: { id: string; status: string }[];
   };
   const saleID = sales.items[0].id;
   const full = (await (await request.get(`/api/v1/pos/transactions/${saleID}`)).json()) as {
-    lines: Array<{ tint: { color_name: string; color_code: string; tint_charge_cents: number | null; components: Array<{ amount: { whole_oz: number; increments_coarse: number; unit_denominator: number } }> } | null }>;
+    lines: Array<{
+      unit_price_ten_thousandths: number | null;
+      tint: { color_name: string; color_code: string; tint_charge_cents: number | null; components: Array<{ amount: { whole_oz: number; increments_coarse: number; unit_denominator: number } }> } | null;
+    }>;
   };
-  const tint = full.lines.find((l) => l.tint)?.tint;
+  expect(full.lines, 'the tinted line replaced the scanned plain base line').toHaveLength(1);
+  const tint = full.lines[0].tint;
   expect(tint, 'the sale line carries its tint').toBeTruthy();
   expect(tint!.color_name).toBe('Essex Green');
   expect(tint!.components[0].amount).toEqual({ whole_oz: 1, increments_coarse: 12, increments_fine: 0, unit_denominator: 384 });
   // The dealer's charge rides the line: the mix is 1.375 oz, under the tier's
-  // floor, so the flat figure is the charge.
+  // floor, so the flat figure is the charge ($72.50 base + $2.50 tint = $75.00).
   expect(tint!.tint_charge_cents, 'the tinted line carries the dealer charge').toBe(250);
+  expect(full.lines[0].unit_price_ten_thousandths).toBe(750000);
 
   // The receipt is a PDF the customer can reorder the colour from.
   const receipt = await request.get(`/api/v1/pos/transactions/${saleID}/receipt?layout=thermal80`);
