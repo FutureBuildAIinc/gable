@@ -21,17 +21,31 @@
 //! needs for the API's Authorization header, and the refresh token never
 //! crosses the IPC at all. Nothing here logs or prints.
 
+use std::sync::Arc;
+
+use gable_shell_core::custody;
+use gable_shell_core::fence::OriginFence;
+use gable_shell_core::offline::OfflineCounter;
 use gable_shell_core::profiles;
 use gable_shell_core::shell::{self, TokenState};
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use gable_shell_core::tokens::TokenStore;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Environment variable naming the Gable to load instead of the bundle.
+/// Fallback environment variable naming the Gable to load before the register
+/// is enrolled; once enrolled, the keychain's enrolled `gable_url` replaces it
+/// (ADR 0011 section 5.2).
 pub const URL_VAR: &str = "GABLE_WORK_URL";
 
 /// The Tauri command wrappers. They live in their own module because the
 /// command macro exports its hidden wrapper at the crate root, which would
 /// collide with a command defined in the root module itself.
 pub mod commands {
+    use std::sync::Arc;
+
+    use gable_shell_core::offline::{
+        EnrolmentPublic, OfflineCounter, OfflineError, OfflineSnapshot, QueueStatusView,
+        SignSaleRequest, SignedOfflineSale, SyncBatchOutcome,
+    };
     use gable_shell_core::shell::{self, TokenState};
 
     /// `core_token`'s answer shape: the access token, and nothing else.
@@ -72,23 +86,152 @@ pub mod commands {
         .await
         .map_err(|_| shell::ERR_CUSTODY.to_string())?
     }
+
+    #[tauri::command]
+    pub async fn enrol_offline_register(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        register_id: String,
+        device_epoch: i64,
+        gable_url: String,
+    ) -> Result<EnrolmentPublic, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.enrol_register(Some(url.as_str()), &register_id, device_epoch, &gable_url)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn offline_enrolment_status(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+    ) -> Result<EnrolmentPublic, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || counter.enrolment_status(Some(url.as_str())))
+            .await
+            .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn store_offline_snapshot(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        snapshot: OfflineSnapshot,
+    ) -> Result<(), OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.store_snapshot(Some(url.as_str()), snapshot)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn load_offline_snapshot(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+    ) -> Result<OfflineSnapshot, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || counter.load_snapshot(Some(url.as_str())))
+            .await
+            .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn sign_and_queue_offline_sale(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        request: SignSaleRequest,
+    ) -> Result<SignedOfflineSale, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.sign_and_queue_sale(Some(url.as_str()), request)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn offline_queue_status(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+    ) -> Result<QueueStatusView, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || counter.queue_status(Some(url.as_str())))
+            .await
+            .map_err(|_| OfflineError::keychain_unavailable())?
+    }
+
+    #[tauri::command]
+    pub async fn record_offline_sync_outcomes(
+        window: tauri::WebviewWindow,
+        counter: tauri::State<'_, Arc<OfflineCounter>>,
+        outcome: SyncBatchOutcome,
+    ) -> Result<QueueStatusView, OfflineError> {
+        let url = window.url().map_err(|_| OfflineError::origin_denied())?;
+        let counter = counter.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            counter.record_sync_outcomes(Some(url.as_str()), outcome)
+        })
+        .await
+        .map_err(|_| OfflineError::keychain_unavailable())?
+    }
 }
 
 pub fn run() {
     let profile = profiles::work();
-    let override_url = shell::configured_url(URL_VAR);
-    let state = TokenState::for_profile(profile, override_url.as_ref())
-        .expect("the app's own origins build a fence");
+    let custody: Arc<dyn custody::Custody> = Arc::from(custody::platform_custody());
+    let override_url = shell::enrolled_or_configured_url(&*custody, profile, URL_VAR);
+    let state = TokenState::build(
+        TokenStore::new(custody.clone()),
+        profile,
+        override_url.as_ref(),
+    )
+    .expect("the app's own origins build a fence");
 
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::core_token,
-            commands::clear_tokens
+            commands::clear_tokens,
+            commands::enrol_offline_register,
+            commands::offline_enrolment_status,
+            commands::store_offline_snapshot,
+            commands::load_offline_snapshot,
+            commands::sign_and_queue_offline_sale,
+            commands::offline_queue_status,
+            commands::record_offline_sync_outcomes
         ])
         .setup(move |app| {
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir());
+            let store_path = data_dir.join("offline-counter.sqlite");
+            let offline_fence = override_url
+                .as_ref()
+                .and_then(|u| OriginFence::from_starts(&[u.as_str()]).ok());
+            let counter = Arc::new(OfflineCounter::new(
+                profile.identifier,
+                custody.clone(),
+                store_path,
+                offline_fence,
+            ));
+            app.manage(counter);
+
             let url = match override_url {
-                Some(url) => WebviewUrl::External(url),
+                Some(url) => {
+                    app.add_capability(shell::work_remote_capability_json(&url))?;
+                    WebviewUrl::External(url)
+                }
                 None => WebviewUrl::App("index.html".into()),
             };
             WebviewWindowBuilder::new(app, "main", url)
@@ -246,6 +389,124 @@ mod tests {
         assert!(shell::parse_shell_url("file:///etc/passwd").is_none());
         assert!(shell::parse_shell_url("gable://quotes/1").is_none());
         assert!(shell::parse_shell_url("not a url").is_none());
+    }
+
+    // RULE (ADR 0011 section 5.2 and section 7): the runtime capability built
+    // for the configured Gable URL grants the queue commands and the two token
+    // commands to that Gable's origin and `/pos` on the `main` window only,
+    // with `local: false`, and carries no extra permissions.
+    #[test]
+    fn the_runtime_capability_for_gable_url_grants_queue_commands_to_origin_and_pos_on_main_only() {
+        use tauri::ipc::RuntimeCapability;
+
+        let url = shell::parse_shell_url("https://gable.yard.internal:8443/").unwrap();
+        let cap_json = shell::work_remote_capability_json(&url);
+        let _built = cap_json.clone().build();
+
+        let cap: serde_json::Value =
+            serde_json::from_str(&cap_json).expect("runtime capability JSON parses");
+        assert_eq!(cap["local"].as_bool(), Some(false));
+        assert_eq!(
+            cap["windows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["main"]
+        );
+        let remote_urls: Vec<&str> = cap["remote"]["urls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            remote_urls,
+            vec![
+                "https://gable.yard.internal:8443/",
+                "https://gable.yard.internal:8443/pos",
+                "https://gable.yard.internal:8443/pos/*",
+            ]
+        );
+        let perms: Vec<&str> = cap["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(perms, shell::WORK_REMOTE_PERMISSIONS);
+        for banned in [
+            "sql:",
+            "updater",
+            "shell:",
+            "fs:",
+            "camera",
+            "geolocation",
+            "core:default",
+        ] {
+            assert!(!cap_json.contains(banned), "{banned} must not be granted");
+        }
+    }
+
+    // RULE (ADR 0011 section 5.2 and section 7): the Gable URL comes from the
+    // enrolled device's keychain setting, and the queue commands answer that
+    // Gable's origin and refuse every other origin and the embedded bundle.
+    #[test]
+    fn the_enrolled_device_url_takes_precedence_and_queue_commands_enforce_the_origin_fence() {
+        use gable_shell_core::fence::OriginFence;
+        use gable_shell_core::offline::OfflineCounter;
+
+        let custody = Arc::new(MemoryCustody::new());
+        let db_path = std::env::temp_dir().join("gable-work-fence-test.sqlite");
+        let gable_origin = "https://gable.yard.internal:8443";
+        let fence = OriginFence::from_starts(&[gable_origin]).unwrap();
+        let counter = OfflineCounter::new(profile_id(), custody.clone(), &db_path, Some(fence));
+
+        counter
+            .enrol_register(
+                Some("https://gable.yard.internal:8443/pos"),
+                "REG-01",
+                1,
+                "https://gable.yard.internal:8443/",
+            )
+            .expect("enrol succeeds from /pos on the loaded Gable origin");
+
+        let resolved =
+            shell::enrolled_or_configured_url(&*custody, profiles::work(), "UNSET_GABLE_VAR")
+                .expect("enrolled URL resolves from keychain");
+        assert_eq!(resolved.as_str(), "https://gable.yard.internal:8443/");
+
+        // Queue status answers `/pos` on the Gable origin and refuses every other origin.
+        let status = counter
+            .queue_status(Some("https://gable.yard.internal:8443/pos"))
+            .expect("answers loaded Gable origin");
+        assert_eq!(status.register_id, "REG-01");
+
+        for refused in [
+            FOREIGN,
+            OWN,
+            "https://gable.yard.internal:9443/pos",
+            "http://gable.yard.internal:8443/pos",
+        ] {
+            assert_eq!(
+                counter.queue_status(Some(refused)).unwrap_err().code,
+                "origin_denied",
+                "{refused}"
+            );
+        }
+
+        // Embedded bundle (no fence) refuses every caller.
+        let embedded = OfflineCounter::new(profile_id(), custody, &db_path, None);
+        assert_eq!(
+            embedded
+                .queue_status(Some("https://gable.yard.internal:8443/pos"))
+                .unwrap_err()
+                .code,
+            "embedded_bundle_refused"
+        );
+
+        let _ = std::fs::remove_file(&db_path);
     }
 
     #[test]
