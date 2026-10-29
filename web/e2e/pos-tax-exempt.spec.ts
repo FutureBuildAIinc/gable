@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { answerAppDialog } from './app-controls';
 import { stockedProduct } from './pos-stock';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -33,27 +34,6 @@ async function makeAccount(request: APIRequestContext, tag: string, extra: Recor
   });
   expect(res.status(), await res.text()).toBe(201);
   return (await res.json()) as { id: string; name: string; account_number: string };
-}
-
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
-}
-
-/** Back at the counter (the account page work is done). */
-async function backToCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toContainText('Till open');
 }
 
 async function addOne(page: Page, sku: string) {
@@ -157,7 +137,7 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
     .toHaveText('Ended', { timeout: 10000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tax-exempt-ended.png'), fullPage: true });
 
-  await backToCounter(page);
+  await openCounter(page);
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await addOne(page, product.sku);
@@ -173,7 +153,7 @@ test('the counter honours a tax exemption end to end', async ({ page, request })
   await addCertificate(page, account.id, oldCert, old, yesterday);
   await expect(page.getByTestId('tax-exemption-row').filter({ hasText: oldCert }).getByTestId('tax-exemption-status'))
     .toHaveText('Expired');
-  await backToCounter(page);
+  await openCounter(page);
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
   await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await addOne(page, product.sku);

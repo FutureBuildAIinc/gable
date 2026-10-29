@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-controls';
 import { stockedProduct } from './pos-stock';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -25,20 +26,6 @@ async function signIn(page: Page, name: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await catalog;
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
-}
-
-/** Opens the counter (the Panels board) and the drawer when none is open (a run may find one open). */
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
 }
 
 /** Adds one unit of the product through the Items card: the exact SKU in its search, then Enter. */

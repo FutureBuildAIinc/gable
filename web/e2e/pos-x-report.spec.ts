@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { stockedProduct } from './pos-stock';
+import { openCounter, tillState } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -51,17 +52,6 @@ async function closeAnyOpenTill(request: APIRequestContext) {
   expect(close.ok(), await close.text()).toBe(true);
 }
 
-/** Opens the counter and a fresh drawer with a $100.00 float. */
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  await expect(page.getByTestId('pos-till-state')).toContainText('No till');
-  await page.getByRole('button', { name: 'Open Till' }).click();
-  await page.getByTestId('till-float-amount').fill('100.00');
-  await page.getByRole('button', { name: 'Open Till' }).last().click();
-  await expect(page.getByTestId('pos-till-state')).toContainText('Till open');
-}
-
 /** Adds one unit of the product through the Items card. */
 async function addOne(page: Page, sku: string) {
   const lines = page.locator('[data-testid="pos-lines"] li');
@@ -81,7 +71,10 @@ test('the counter: X report mid shift, then the close and its stored Z report', 
   await signIn(page, 'POS X Report E2E');
   const product = await stockedProduct(request);
   await closeAnyOpenTill(request);
-  await openCounter(page);
+  // The spec closed any drawer the run left open, so this one is fresh and
+  // the float the report below is measured against is the one it opened.
+  const { opened } = await openCounter(page);
+  expect(opened, 'the spec opened its own drawer').toBe(true);
 
   // One sale paid split: $1.00 in cash, the rest by check.
   await addOne(page, product.sku);
@@ -133,7 +126,7 @@ test('the counter: X report mid shift, then the close and its stored Z report', 
   await page.getByTestId('till-report-close').click();
 
   // The drawer stayed open: the X read is not a close.
-  await expect(page.getByTestId('pos-till-state')).toContainText('Till open');
+  await expect(tillState(page)).toContainText('Till open');
 
   // The blind close on the figures the X report named: balanced.
   await page.getByRole('button', { name: 'Close Till' }).click();
@@ -144,7 +137,7 @@ test('the counter: X report mid shift, then the close and its stored Z report', 
   await expect(page.getByRole('heading', { name: 'Z-Report - Till Closed' })).toBeVisible({ timeout: 15000 });
   await expect(page.getByText('BALANCED')).toBeVisible();
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByTestId('pos-till-state')).toContainText('No till');
+  await expect(tillState(page)).toContainText('No till');
 
   // Z Reports lists the frozen close just written and opens it read only.
   await page.getByTestId('pos-z-reports').click();
