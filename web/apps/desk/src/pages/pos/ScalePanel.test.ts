@@ -46,6 +46,8 @@ const sale = (lines: Sale['lines'] = []): Sale => ({
   buyer_contact_id: null,
   print_count: 0,
   exchange_return_id: null,
+  delivery_type: 'pickup',
+  ship_to_id: null,
   lines,
   tenders: [],
 });
