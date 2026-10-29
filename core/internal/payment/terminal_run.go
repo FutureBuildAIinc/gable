@@ -79,9 +79,18 @@ import (
 // runTerminalDefaults: the poll cadence and the interaction window. Run
 // keeps an interaction about three minutes; the window bounds how long the
 // poller keeps asking before it falls to the transaction lookup.
+//
+// The window fits inside the ledger's lease (TerminalAnswerLease), with room
+// left for the charge-card call that precedes the poller: a poller that keeps
+// working past the lease is closed by the sweep while the device is still
+// answering, and the leg is filed as a manager item for an answer that is
+// about to land.
 const (
-	runTerminalPollDefault    = 500 * time.Millisecond
-	runTerminalWindowDefault  = 3 * time.Minute
+	runTerminalPollDefault   = 500 * time.Millisecond
+	runTerminalWindowDefault = TerminalAnswerLease - runTerminalDispatchRoom
+	// runTerminalDispatchRoom is the room the poller's window leaves inside
+	// the lease for the charge-card call that precedes it.
+	runTerminalDispatchRoom   = 15 * time.Second
 	runReportingTokenLifetime = 25 * time.Minute
 )
 
@@ -165,13 +174,24 @@ func (t *RunTerminal) WithPollInterval(d time.Duration) *RunTerminal {
 	return t
 }
 
-// WithInteractionWindow bounds how long the poller asks one interaction.
+// WithInteractionWindow bounds how long the poller asks one interaction. A
+// window longer than the ledger's lease is clamped to it: the sweep closes a
+// leg whose lease ran out, and the poller has to be done before that.
 func (t *RunTerminal) WithInteractionWindow(d time.Duration) *RunTerminal {
 	if d > 0 {
 		t.window = d
+		if t.window > TerminalAnswerLease {
+			t.window = TerminalAnswerLease
+		}
 	}
 	return t
 }
+
+// InteractionWindow reports how long the poller asks one interaction. It is
+// never longer than the ledger's lease (TerminalAnswerLease): the sweep
+// closes a leg whose lease ran out, and the poller has to be done before
+// that.
+func (t *RunTerminal) InteractionWindow() time.Duration { return t.window }
 
 // guardFor returns the no double charge guard of one order id, making it on
 // first use.

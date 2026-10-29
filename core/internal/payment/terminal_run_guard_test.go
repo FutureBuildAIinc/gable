@@ -389,3 +389,21 @@ func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		t.Fatalf("iteration %d: %d reversals were answered, want 1", i, answered)
 	}
 }
+
+// TestRunTerminalInteractionWindowFitsInsideTheIntentLease: the poller has
+// to be done before the ledger's lease runs out, or the sweep closes the leg
+// while the device is still answering and files a manager item for an answer
+// that is about to land. The driver's window is at most the lease, and a
+// window set beyond it is clamped to it.
+func TestRunTerminalInteractionWindowFitsInsideTheIntentLease(t *testing.T) {
+	term := payment.NewRunTerminal(func() payment.GatewayConfig {
+		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: "http://127.0.0.1:1"}
+	}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if got := term.InteractionWindow(); got > payment.TerminalAnswerLease {
+		t.Fatalf("the interaction window is %s, want at most the intent lease %s", got, payment.TerminalAnswerLease)
+	}
+	term.WithInteractionWindow(10 * time.Minute)
+	if got := term.InteractionWindow(); got > payment.TerminalAnswerLease {
+		t.Fatalf("the interaction window is %s, want at most the intent lease %s", got, payment.TerminalAnswerLease)
+	}
+}
