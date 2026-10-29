@@ -16,7 +16,7 @@ vi.mock('../../services/product.service.ts', async (orig) => {
 
 import '../inventory/tabs/ProductOverviewTab';
 import type { GableProductOverviewTab } from '../inventory/tabs/ProductOverviewTab';
-import type { ProductDetail } from '../../../types/pim.ts';
+import type { ProductDetail } from '../../types/pim.ts';
 
 const detail = (consumerDurable: boolean): ProductDetail => ({
     product: {

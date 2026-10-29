@@ -31,7 +31,7 @@ const fill = (el: Element, testid: string, value: string) => {
 };
 
 const choose = (el: Element, testid: string, value: string) => {
-    const select = el.querySelector(`[data-testid="${testid}"]`) as HTMLSelectElement;
+    const select = el.querySelector(`[data-testid="${testid}"]`) as HTMLInputElement;
     select.value = value;
     select.dispatchEvent(new Event('change', { bubbles: true }));
 };
@@ -67,11 +67,11 @@ describe('the payer capture dialog', () => {
         fill(el, 'payer-taxpayer_id', '00-1234567');
         await el.updateComplete;
         expect(save.disabled).toBe(false);
-        let saved: PayerCapture | null = null;
-        el.addEventListener('payer-save', (e: Event) => { saved = (e as CustomEvent<PayerCapture>).detail; });
+        const saved: { current: PayerCapture | null } = { current: null };
+        el.addEventListener('payer-save', (e: Event) => { saved.current = (e as CustomEvent<PayerCapture>).detail; });
         save.click();
-        expect(saved).not.toBeNull();
-        expect((saved as PayerCapture).taxpayer_id).toBe('00-1234567');
+        expect(saved.current).not.toBeNull();
+        expect(saved.current?.taxpayer_id).toBe('00-1234567');
     });
 
     it('says the refusal in words when the completion was refused without the details', async () => {

@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import path from 'path';
+import { pickOptionByValue } from './app-controls';
 import fs from 'fs';
 
 /**
@@ -81,10 +82,10 @@ async function ringOverTenThousand(page: Page, sku: string, qty: number) {
   await page.getByTestId('catalog-search').fill(sku);
   await page.getByTestId('catalog-search').press('Enter');
   await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
-  const quantity = lines.nth(0).getByLabel(/Quantity of/i);
+  const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
   await quantity.fill(String(qty));
   await quantity.press('Enter');
-  await expect(page.getByTestId('summary-total')).toContainText(/[1-9][0-9],[0-9]{3}/);
+  await expect(page.getByTestId('summary-total')).toContainText(/[1-9][0-9],?[0-9]{3}/);
 }
 
 /** Adds a cash tender for the whole total through the Payment panel. */
@@ -102,8 +103,8 @@ async function payWholeInCash(page: Page) {
 }
 
 test.afterEach(async ({ request }) => {
-  // the dealer default country returns to the seeded state for the next spec
-  await request.put('/api/v1/admin/large-cash/settings', { data: { country_default: '', ca_enabled: false } });
+  // the dealer default country returns to the seeded state (Canada, threshold off) for the next spec
+  await request.put('/api/v1/admin/large-cash/settings', { data: { country_default: 'CA', ca_enabled: false } });
 });
 
 test('a United States cash sale over the threshold asks for the payer, refuses without the taxpayer id, completes with it', async ({ page, request }) => {
@@ -126,7 +127,7 @@ test('a United States cash sale over the threshold asks for the payer, refuses w
   await page.getByTestId('payer-address').fill('12 Mill Road, Kelowna');
   await page.getByTestId('payer-date_of_birth').fill('1984-05-06');
   await page.getByTestId('payer-occupation').fill('Contractor');
-  await page.getByTestId('payer-id_type').selectOption('drivers_license');
+  await pickOptionByValue(page.getByTestId('payer-id_type'), 'drivers_license');
   await page.getByTestId('payer-id_number').fill('DL-00-1234567');
   // no taxpayer identification number yet: Save is held
   await expect(page.getByTestId('payer-save')).toBeDisabled();
@@ -172,7 +173,7 @@ test('the Canadian dealer threshold on asks and says it is not a FINTRAC report'
   await page.getByTestId('payer-address').fill('12 Mill Road, Kelowna');
   await page.getByTestId('payer-date_of_birth').fill('1984-05-06');
   await page.getByTestId('payer-occupation').fill('Contractor');
-  await page.getByTestId('payer-id_type').selectOption('passport');
+  await pickOptionByValue(page.getByTestId('payer-id_type'), 'passport');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-large-cash-ca-dialog.png'), fullPage: true });
   await page.getByTestId('payer-save').click();
 

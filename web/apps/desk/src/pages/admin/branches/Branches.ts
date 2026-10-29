@@ -393,16 +393,17 @@ export class GableAdminBranches extends LitElement {
           </div>
           <label class="text-xs uppercase tracking-wider text-zinc-500 font-semibold">
             Dealer default country
-            <select
+            <gable-select
+              class="mt-1 block font-normal normal-case tracking-normal"
               .value=${lc?.country_default ?? ''}
+              .options=${[
+                { value: '', label: 'Not set' },
+                { value: 'US', label: 'United States (Form 8300 rule)' },
+                { value: 'CA', label: 'Canada (dealer policy)' },
+              ]}
               ?disabled=${!lc}
-              @change=${(e: Event) => this._updateLargeCash({ country_default: (e.target as HTMLSelectElement).value })}
-              class="mt-1 block bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
-            >
-              <option value="">Not set</option>
-              <option value="US">United States (Form 8300 rule)</option>
-              <option value="CA">Canada (dealer policy)</option>
-            </select>
+              @change=${(e: Event) => this._updateLargeCash({ country_default: (e.target as HTMLInputElement).value })}
+            ></gable-select>
           </label>
           <label class="flex items-center gap-2 text-sm text-zinc-300">
             <input
@@ -474,15 +475,16 @@ export class GableAdminBranches extends LitElement {
             ${this._textField('Phone', 'phone', '')}
             <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
               Country
-              <select
+              <gable-select
+                class="mt-1 block font-normal normal-case tracking-normal"
                 .value=${this._form.country ?? ''}
-                @change=${(e: Event) => this._updateField('country', (e.target as HTMLSelectElement).value)}
-                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
-              >
-                <option value="">Dealer default</option>
-                <option value="US">United States (Form 8300 rule)</option>
-                <option value="CA">Canada (dealer policy)</option>
-              </select>
+                .options=${[
+                  { value: '', label: 'Dealer default' },
+                  { value: 'US', label: 'United States (Form 8300 rule)' },
+                  { value: 'CA', label: 'Canada (dealer policy)' },
+                ]}
+                @change=${(e: Event) => this._updateField('country', (e.target as HTMLInputElement).value)}
+              ></gable-select>
               <span class="mt-1 block text-xs normal-case tracking-normal font-normal text-zinc-500">
                 The country picks the branch's large cash rule. A branch saved with no country of its own needs the dealer's default country.
               </span>

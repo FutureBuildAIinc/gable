@@ -9,6 +9,7 @@ const svc = vi.hoisted(() => ({
   currentTill: vi.fn(),
   startSale: vi.fn(),
   completeSale: vi.fn(),
+  largeCashPreview: vi.fn().mockResolvedValue({ asks_details: false, fields: [], dealer_threshold: false }),
   searchProducts: vi.fn(),
   findCustomers: vi.fn(),
   attachCustomer: vi.fn(),

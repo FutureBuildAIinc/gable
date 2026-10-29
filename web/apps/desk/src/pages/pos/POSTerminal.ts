@@ -1533,7 +1533,8 @@ export class POSTerminal extends LitElement {
     const entry: TenderIn = { method: this._tenderMethod, amount_cents: cents };
     // the check number rides as the reference; the ID checked and its kind (never a number) on a check or a charge
     if (this._tenderMethod === 'check' && this._checkRef.trim() !== '') entry.reference = this._checkRef.trim();
-    if (this._tenderMethod === 'check') entry.instrument = this._checkInstrument;
+    // an ordinary check is the server's default instrument, so only a named kind rides the tender
+    if (this._tenderMethod === 'check' && this._checkInstrument !== 'personal_check') entry.instrument = this._checkInstrument;
     if ((this._tenderMethod === 'check' || this._tenderMethod === 'account') && this._idChecked && this._idType !== '') {
       entry.id_checked = true;
       entry.id_type = this._idType;
@@ -1735,10 +1736,11 @@ export class POSTerminal extends LitElement {
       this._error = null;
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
-      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts,
-        this._payer || this._suspectAvoidance
-            ? { payer: this._payer ?? undefined, suspected_avoidance: this._suspectAvoidance }
-            : undefined);
+      // the capture rides along only when the counter holds one
+      const completed = this._payer || this._suspectAvoidance
+        ? await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts,
+            { payer: this._payer ?? undefined, suspected_avoidance: this._suspectAvoidance })
+        : await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts);
       // the sale completed on the card: the waiting card has nothing left to say
       this._dismissCardWait();
       // the payer capture and the avoidance mark went with the sale that needed them
@@ -1793,6 +1795,18 @@ export class POSTerminal extends LitElement {
     } finally {
       this._loading = false;
     }
+  }
+
+  /**
+   * Forgets the large cash capture (CP-17a): the payer, the ask the preview
+   * made and the check's instrument kind belong to the sale they were taken
+   * for, so a finished, voided or new sale starts without them.
+   */
+  private _resetLargeCashCapture() {
+    this._payer = null;
+    this._payerAsk = null;
+    this._payerRefused = false;
+    this._checkInstrument = 'personal_check';
   }
 
   /** Reads the card leg's own record until the terminal answers or the waiting is dismissed. */

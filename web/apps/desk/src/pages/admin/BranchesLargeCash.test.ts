@@ -77,7 +77,7 @@ describe('the large cash settings card', () => {
         const amount = el.querySelector('input[type="number"]') as HTMLInputElement;
         amount.value = '25000';
         amount.dispatchEvent(new Event('input', { bubbles: true }));
-        const select = el.querySelector('select') as HTMLSelectElement;
+        const select = el.querySelector('gable-select') as unknown as HTMLInputElement;
         select.value = 'CA';
         select.dispatchEvent(new Event('change', { bubbles: true }));
         await el.updateComplete;

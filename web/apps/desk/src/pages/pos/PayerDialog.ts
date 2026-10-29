@@ -10,6 +10,7 @@
 // own records and is not a FINTRAC report.
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import '../../components/ui/gable-select.ts';
 
 /** What the preview said the rule needs. */
 export interface PayerAsk {
@@ -151,15 +152,13 @@ export class GablePayerDialog extends LitElement {
                         ${this._field('Occupation', 'occupation', 'Contractor')}
                         <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
                             ID type
-                            <select
+                            <gable-select
+                                class="mt-1 block font-normal normal-case tracking-normal"
                                 .value=${this._draft.id_type}
-                                @change=${(e: Event) => this._update('id_type', (e.target as HTMLSelectElement).value as never)}
-                                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
+                                .options=${[{ value: '', label: 'Choose the kind' }, ...ID_TYPES.map((t) => ({ value: t, label: ID_TYPE_LABELS[t] }))]}
+                                @change=${(e: Event) => this._update('id_type', (e.target as HTMLInputElement).value as never)}
                                 data-testid="payer-id_type"
-                            >
-                                <option value="">Choose the kind</option>
-                                ${ID_TYPES.map((t) => html`<option value=${t}>${ID_TYPE_LABELS[t]}</option>`)}
-                            </select>
+                            ></gable-select>
                         </label>
                         ${this._needs('id_number') ? this._field('ID number', 'id_number', 'Shown masked once captured') : nothing}
                         ${this._needs('taxpayer_id') ? this._field('Taxpayer identification number', 'taxpayer_id', 'Shown masked once captured') : nothing}
