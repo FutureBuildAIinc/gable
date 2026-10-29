@@ -413,6 +413,14 @@ GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 POST	/api/v1/pos/returns/preview	internal/pos	h.PreviewReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
+GET	/api/v1/pos/scale	internal/pos	h.GetScaleStatus
+GET	/api/v1/pos/scale/manual-reasons	internal/pos	h.ListManualWeightReasons
+PUT	/api/v1/pos/scale/simulator	internal/pos	h.DriveScaleSimulator
+GET	/api/v1/pos/scale/tickets	internal/pos	h.ListScaleTickets
+GET	/api/v1/pos/scale/tickets/{id}	internal/pos	h.GetScaleTicket
+POST	/api/v1/pos/scale/tickets/{id}/void	internal/pos	h.VoidScaleTicket
+POST	/api/v1/pos/scale/weigh-in	internal/pos	h.WeighIn
+POST	/api/v1/pos/scale/weigh-out	internal/pos	h.WeighOut
 GET	/api/v1/pos/settings	internal/pos	h.GetPosSettingsHandler
 PUT	/api/v1/pos/settings	internal/pos	h.PutPosSettingsHandler
 POST	/api/v1/pos/step-up	internal/pos	h.StepUpHandler
@@ -443,6 +451,7 @@ PUT	/api/v1/pos/transactions/{id}/customer	internal/pos	h.AttachCustomer
 POST	/api/v1/pos/transactions/{id}/items	internal/pos	h.AddItem
 DELETE	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.RemoveItem
 PATCH	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.ChangeItemQuantity
+POST	/api/v1/pos/transactions/{id}/items/{itemId}/weight	internal/pos	h.EnterLineWeight
 POST	/api/v1/pos/transactions/{id}/overrides	internal/pos	h.ApproveOverrideHandler
 GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleReceipt
 POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
@@ -502,6 +511,7 @@ GET	/api/v1/products	internal/product	h.HandleListProducts
 POST	/api/v1/products	internal/product	h.HandleCreateProduct
 GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts
 GET	/api/v1/products/{id}	internal/product	h.HandleGetProduct
+PATCH	/api/v1/products/{id}/density	internal/product	h.HandleUpdateDensity
 GET	/api/v1/products/{id}/detail	internal/pim	h.HandleGetProductDetail
 PATCH	/api/v1/products/{id}/dimensions	internal/product	h.HandleUpdateDimensions
 GET	/api/v1/products/{id}/kit-components	internal/product	h.HandleGetKitComponents

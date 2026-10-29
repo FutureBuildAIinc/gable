@@ -47,6 +47,17 @@ export function invoiceLine(overrides: Partial<InvoiceLine> = {}): InvoiceLine {
     order_line_id: '00000000-0000-4000-8000-000000000ol1',
     unit_cost_ten_thousandths: 228_000,
     cost_cents: 54_720,
+    weight_source: null,
+    weight_gross_lb: null,
+    weight_tare_lb: null,
+    weight_net_lb: null,
+    weight_net_basis: null,
+    scale_device_id: null,
+    scale_ticket_id: null,
+    scale_ticket_number: null,
+    manual_weight_reason: null,
+    weight_captured_by: null,
+    weight_captured_at: null,
     ...overrides,
   }
 }

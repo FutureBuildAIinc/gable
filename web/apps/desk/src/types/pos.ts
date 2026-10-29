@@ -52,6 +52,18 @@ export interface SaleLine {
     is_special_order: boolean;
     vendor_id: string | null;
     special_order_unit_cost_ten_thousandths: number | null;
+    /** How this line's quantity was set: a live scale reading, or a manual entry. */
+    weight_source: 'scale' | 'manual' | null;
+    weight_gross_lb: string | null;
+    weight_tare_lb: string | null;
+    weight_net_lb: string | null;
+    weight_net_basis: 'single_draft' | 'double_draft' | null;
+    scale_device_id: string | null;
+    scale_ticket_id: string | null;
+    scale_ticket_number: string | null;
+    manual_weight_reason: string | null;
+    weight_captured_by: string | null;
+    weight_captured_at: string | null;
     created_at: string;
 }
 
@@ -587,6 +599,80 @@ export interface TerminalLostItem {
 export interface TerminalSweepResult {
     claimed_closed: number;
     dispatched_lost: number;
+}
+
+// --- Scale integration (CP-19) ---
+
+export type ScaleDirection = 'weigh_in' | 'weigh_out' | 'single';
+export type ScaleTicketStatus = 'open' | 'completed' | 'void';
+export type ScaleSource = 'scale' | 'manual';
+export type ScaleNetBasis = 'single_draft' | 'double_draft' | null;
+
+export interface ScaleDevice {
+    id: string;
+    name: string;
+    certificate_no: string;
+    location_note: string;
+}
+
+export interface ScaleReading {
+    weight_lb: string | null;
+    unit: 'lb' | 'kg';
+    mode: 'gross' | 'tare' | 'net';
+    motion: boolean;
+    at_zero: boolean;
+}
+
+export interface ScaleStatus {
+    configured: boolean;
+    device: ScaleDevice | null;
+    reading: ScaleReading | null;
+    detail?: string;
+}
+
+export interface ScaleTicket {
+    id: string;
+    ticket_number: string;
+    revision: number;
+    branch_id: string;
+    scale_device_id: string;
+    vehicle_ref: string;
+    direction: ScaleDirection;
+    status: ScaleTicketStatus;
+    gross_lb: string | null;
+    tare_lb: string | null;
+    net_lb: string | null;
+    reading_unit: 'lb' | 'kg';
+    source: ScaleSource;
+    manual_reason: string | null;
+    manual_note: string | null;
+    net_basis: ScaleNetBasis;
+    weigh_in_ticket_id: string | null;
+    sale_line_id: string | null;
+    captured_by: string;
+    captured_at: string;
+    void_reason: string | null;
+    created_at: string;
+}
+
+export type ManualWeightReasonCode = 'scale_offline' | 'scale_error' | 'preweighed' | 'other';
+
+export interface ManualWeightReason {
+    code: ManualWeightReasonCode;
+    label: string;
+    needs_note: boolean;
+}
+
+export interface WeighOutResponse {
+    sale: Sale;
+    ticket: ScaleTicket;
+}
+
+export interface ScaleSimulatorInput {
+    weight_lb?: string;
+    unit?: 'lb' | 'kg';
+    motion?: boolean;
+    status?: 'none' | 'over_capacity' | 'under_capacity' | 'zero_error' | 'initial_zero_error' | 'tare_error';
 }
 
 // --- Refund intents (CP-06) ---

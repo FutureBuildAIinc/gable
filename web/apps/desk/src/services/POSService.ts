@@ -35,6 +35,11 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    ScaleStatus,
+    ScaleTicket,
+    ManualWeightReason,
+    WeighOutResponse,
+    ScaleSimulatorInput,
     RefundIntent,
     RefundIntentResolved,
     RefundIntentPaidBack,
@@ -770,6 +775,104 @@ export const posService = {
                 body: JSON.stringify({ bank_transaction_id: bankTransactionID }),
             }),
             'Failed to match the deposit',
+        );
+        return response.json();
+    },
+
+    // --- Scale integration (CP-19) ---
+
+    async getScaleStatus(registerID: string): Promise<ScaleStatus> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale?register_id=${encodeURIComponent(registerID)}`),
+            'Failed to read the scale',
+        );
+        return response.json();
+    },
+
+    async weighIn(registerID: string, vehicleRef: string): Promise<ScaleTicket> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/weigh-in`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ register_id: registerID, vehicle_ref: vehicleRef }),
+            }),
+            'Failed to weigh in',
+        );
+        return response.json();
+    },
+
+    async weighOut(
+        saleId: string,
+        lineId: string,
+        input: { weigh_in_ticket_id?: string; vehicle_ref?: string; revision: number },
+    ): Promise<WeighOutResponse> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/weigh-out`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ sale_id: saleId, line_id: lineId, ...input }),
+            }),
+            'Failed to weigh out',
+        );
+        return response.json();
+    },
+
+    async listScaleTickets(registerID: string, status: 'open', vehicleRef?: string): Promise<ScaleTicket[]> {
+        const params = new URLSearchParams({ register_id: registerID, status });
+        if (vehicleRef) params.append('vehicle_ref', vehicleRef);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/tickets?${params.toString()}`),
+            'Failed to list the scale tickets',
+        );
+        const page: { items: ScaleTicket[] } = await response.json();
+        return page.items;
+    },
+
+    async voidScaleTicket(ticketId: string, reason: string, revision: number): Promise<ScaleTicket> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/tickets/${ticketId}/void`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason, revision }),
+            }),
+            'Failed to void the scale ticket',
+        );
+        return response.json();
+    },
+
+    async scaleManualReasons(): Promise<ManualWeightReason[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/manual-reasons`),
+            'Failed to read the manual weight reasons',
+        );
+        const page: { items: ManualWeightReason[] } = await response.json();
+        return page.items;
+    },
+
+    async setManualWeight(
+        saleId: string,
+        lineId: string,
+        input: { weight_lb: string; tare_lb?: string; reason: string; note?: string; revision: number },
+    ): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items/${lineId}/weight`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to set the manual weight',
+        );
+        return response.json();
+    },
+
+    async setScaleSimulator(input: ScaleSimulatorInput): Promise<{ ok: true }> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/scale/simulator`, {
+                method: 'PUT',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to set the scale simulator',
         );
         return response.json();
     },

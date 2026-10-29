@@ -14523,6 +14523,55 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/items/{itemId}/weight:
+    post:
+      operationId: posTransactionEnterLineWeight
+      tags: [pos]
+      summary: Enter a weight by hand on a line (CP-19)
+      description: >-
+        The manual weight entry: a typed gross in pounds, an optional tare, and the reason from the closed list GET /api/v1/pos/scale/manual-reasons answers (other needs the note). The entry takes a consecutive ticket number like a scale reading, the line is repriced at the net in its sale unit (the density bridge for a volume unit, 409 density_required when the product has none), and the documents print MAN WT. Handbook 44: when the branch's scale answers and does not read zero the entry is refused (409 scale_not_zero); a scale that cannot be read is the reason scale_offline attests. The body carries the sale's revision (or If-Match); a stale one is 409 stale_revision and none is 428. A counted or otherwise unweighable unit is 409 weight_unit_mismatch, an already weighed line is 409 line_already_weighed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosManualWeightRequest"
+      responses:
+        "200":
+          description: The whole sale with the weighed line.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/complete:
     post:
       operationId: posTransactionComplete
@@ -15393,6 +15442,289 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale:
+    get:
+      operationId: posScaleStatus
+      tags: [pos]
+      summary: The branch scale's current reading (CP-19)
+      description: >-
+        Whether the register's branch has a scale wired, the device (with its certificate of conformance number), and the current indication: the weight in pounds, the unit the indicator reported, the mode, the motion flag and at_zero for the manual entry's Handbook 44 check. The reading shown here is never sold; only the ticket flow's stable read becomes money. A counter with no scale answers configured false, and the manual entry with its reason is the path.
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The scale status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleStatus"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/weigh-in:
+    post:
+      operationId: posScaleWeighIn
+      tags: [pos]
+      summary: Weigh the empty truck in (CP-19)
+      description: >-
+        Captures the stable gross reading against the vehicle's identification and opens the ticket the weigh out closes. A reading in motion, over capacity, in a zero error, or with no weight is refused (409 scale_reading_refused): the driver never hands the number over. A counter with no scale wired is 503 scale_not_configured.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleWeighInRequest"
+      responses:
+        "201":
+          description: The open weigh in ticket.
+          headers:
+            Location:
+              description: The ticket's path.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/scale/weigh-out:
+    post:
+      operationId: posScaleWeighOut
+      tags: [pos]
+      summary: Weigh the loaded truck out onto a sale line (CP-19)
+      description: >-
+        Captures the stable gross out, nets it against the weigh in's gross (double_draft: Gable's computation of two gross readings, never a scale tare operation), completes the weigh in ticket, writes the weigh out ticket and puts the weight with its consecutive ticket number on the sale line, repriced at the net in the line's sale unit (the product's density bridges a volume unit, 409 density_required without one). The weigh in is named by ticket or by vehicle (409 no_open_weigh_in when the truck never weighed in). A loaded weight at or under the weigh in's is 409 net_not_positive; the same refusals as the weigh in guard the reading. The body carries the sale's revision (or If-Match). The weigh runs as one transaction, so a retry or a race completes once.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleWeighOutRequest"
+      responses:
+        "200":
+          description: The sale with the weighed line, and the weigh out ticket.
+          headers:
+            ETag:
+              description: The sale's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleWeighOutResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/scale/tickets:
+    get:
+      operationId: posScaleTicketList
+      tags: [pos]
+      summary: The branch's weight tickets (CP-19)
+      description: >-
+        The register's branch's tickets in ticket number order, filtered by status (open, completed, void) and vehicle. A ticket is never deleted; a void keeps its row and its number.
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, completed, void]}
+        - name: vehicle_ref
+          in: query
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The tickets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicketList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/tickets/{id}:
+    get:
+      operationId: posScaleTicketGet
+      tags: [pos]
+      summary: One weight ticket (CP-19)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ticket.
+          headers:
+            ETag:
+              description: The ticket's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/tickets/{id}/void:
+    post:
+      operationId: posScaleTicketVoid
+      tags: [pos]
+      summary: Void a weight ticket (CP-19)
+      description: >-
+        Marks the ticket void with its reason, keeping the row and the consecutive number (the sequence is never reused and a void is never a delete). A ticket that prices a sale line cannot be voided (409 ticket_on_line); the line goes first. The body carries the ticket's revision (or If-Match): a stale one is 409 stale_revision and none is 428.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleTicketVoidRequest"
+      responses:
+        "200":
+          description: The voided ticket.
+          headers:
+            ETag:
+              description: The ticket's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/manual-reasons:
+    get:
+      operationId: posScaleManualReasons
+      tags: [pos]
+      summary: The closed list of manual weight reasons (CP-19)
+      description: >-
+        The reasons a typed weight names; the reason is what makes the entry auditable, so it is never free text. A reason with needs_note requires the note.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The reasons.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleManualReasonList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/simulator:
+    put:
+      operationId: posScaleSimulatorDrive
+      tags: [pos]
+      summary: Drive the simulated scale (CP-19; demo stacks only)
+      description: >-
+        Mounted only when the counter was wired with the simulated scale (POS_SCALE_SIMULATOR, a demo configuration, never production). Puts a load on the deck in pounds or kilograms, pins the motion flag, or forces an indicator status, so the end to end walk drives the scale with no hardware.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleSimulatorRequest"
+      responses:
+        "200":
+          description: The simulator took the state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns:
@@ -18401,6 +18733,60 @@ paths:
       responses:
         '200':
           description: The product with the persisted geometry, the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/density:
+    patch:
+      operationId: productUpdateDensity
+      tags: [product]
+      summary: Set or clear the weighed sale's density (CP-19)
+      description: >-
+        The pounds per cubic yard with the volume state the figure was measured at (loose or compacted): the counter's only bridge between a scale weight and a price by the cubic yard. Both fields together, or a null pair to clear; one without the other is a 400. The body's revision or If-Match carries the precondition.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductDensityUpdate'
+      responses:
+        '200':
+          description: The product with the persisted density, the new revision and its ETag.
           headers:
             ETag:
               schema:
@@ -28352,6 +28738,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - order_line_id
         - unit_cost_ten_thousandths
@@ -28507,6 +28904,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -28884,6 +29338,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - invoice_line_id
         - restock
@@ -29040,6 +29505,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -29806,6 +30328,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
       properties:
         id:
@@ -29958,6 +30491,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -29997,6 +30587,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - quote_line_id
         - quantity_allocated
@@ -30153,6 +30754,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -33379,7 +34037,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -33413,7 +34071,149 @@ components:
         is_special_order: {type: boolean}
         vendor_id: {type: [string, "null"], format: uuid}
         special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
+        weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
+        weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
+        weight_net_lb: {type: [string, "null"], description: "The net the quantity was priced from."}
+        weight_net_basis: {oneOf: [{type: string, enum: [single_draft, double_draft]}, {type: "null"}], description: "Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation."}
+        scale_device_id: {type: [string, "null"], format: uuid, description: "The certified scale that produced the reading; null on a manual weight."}
+        scale_ticket_id: {type: [string, "null"], format: uuid}
+        scale_ticket_number: {type: [string, "null"], description: "The ticket's consecutive number (WT-000001)."}
+        manual_weight_reason: {type: [string, "null"], description: "The closed-list reason a typed weight carries; the documents print MAN WT."}
+        weight_captured_by: {type: [string, "null"]}
+        weight_captured_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+    PosScaleTicket:
+      type: object
+      description: >-
+        One weight ticket (CP-19): the consecutive never reused number, the device that produced the reading, the gross, tare and net, the vehicle, the source and the net basis, and the void state that replaces a delete.
+      required: [id, ticket_number, revision, branch_id, scale_device_id, vehicle_ref, direction, status, gross_lb, tare_lb, net_lb, reading_unit, source, manual_reason, manual_note, net_basis, weigh_in_ticket_id, sale_line_id, captured_by, captured_at, void_reason, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        ticket_number: {type: string, description: "WT-000001, consecutive and never reused; a void keeps it."}
+        revision: {type: integer, format: int64}
+        branch_id: {type: string, format: uuid}
+        scale_device_id: {type: [string, "null"], format: uuid, description: "The certified scale that produced the reading; null on a manual weight."}
+        vehicle_ref: {type: [string, "null"], description: "The truck's plate or number."}
+        direction: {type: string, enum: [weigh_in, weigh_out, single]}
+        status: {type: string, enum: [open, completed, void]}
+        gross_lb: {type: [string, "null"], description: "A decimal string of pounds."}
+        tare_lb: {type: [string, "null"], description: "The weigh in's gross on a double draft ticket."}
+        net_lb: {type: [string, "null"]}
+        reading_unit: {type: string, enum: [lb, kg], description: "The unit the indicator reported; the weights are pounds."}
+        source: {type: string, enum: [scale, manual]}
+        manual_reason: {type: [string, "null"], description: "The closed-list reason; set on every manual weight."}
+        manual_note: {type: [string, "null"]}
+        net_basis: {oneOf: [{type: string, enum: [single_draft, double_draft]}, {type: "null"}]}
+        weigh_in_ticket_id: {type: [string, "null"], format: uuid}
+        sale_line_id: {type: [string, "null"], format: uuid}
+        captured_by: {type: string}
+        captured_at: {type: string, format: date-time}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    PosScaleDevice:
+      type: object
+      required: [id, branch_id, name, protocol, endpoint, certificate_no, location_note]
+      properties:
+        id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        name: {type: string}
+        protocol: {type: string, description: "SMA: the Scale Manufacturers Association standard."}
+        endpoint: {type: string}
+        certificate_no: {type: [string, "null"], description: "The certificate of conformance number the ticket can prove."}
+        location_note: {type: [string, "null"]}
+    PosScaleReading:
+      type: object
+      required: [weight_lb, unit, mode, motion, at_zero]
+      properties:
+        weight_lb: {type: [string, "null"], description: "A decimal string of pounds; null when the indicator sent no weight."}
+        unit: {type: string, enum: [lb, kg]}
+        mode: {type: string, enum: [gross, tare, net]}
+        motion: {type: boolean}
+        at_zero: {type: boolean, description: "The manual entry's Handbook 44 check reads this."}
+    PosScaleStatus:
+      type: object
+      required: [configured, device, reading]
+      properties:
+        configured: {type: boolean}
+        device:
+          oneOf: [{$ref: "#/components/schemas/PosScaleDevice"}, {type: "null"}]
+        reading:
+          oneOf: [{$ref: "#/components/schemas/PosScaleReading"}, {type: "null"}]
+        detail: {type: string, description: "Why the scale cannot be read, when it cannot."}
+    PosScaleWeighInRequest:
+      type: object
+      additionalProperties: false
+      required: [register_id, vehicle_ref]
+      properties:
+        register_id: {type: string}
+        vehicle_ref: {type: string, description: "The truck's plate or number; the ticket carries it."}
+    PosScaleWeighOutRequest:
+      type: object
+      additionalProperties: false
+      required: [sale_id, line_id]
+      properties:
+        sale_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        weigh_in_ticket_id: {type: [string, "null"], format: uuid, description: "The weigh in to net against; else the vehicle's latest open one."}
+        vehicle_ref: {type: string}
+        revision: {type: [integer, "null"], format: int64, description: "The sale's revision; the If-Match header carries it instead."}
+    PosScaleWeighOutResponse:
+      type: object
+      required: [sale, ticket]
+      properties:
+        sale:
+          $ref: "#/components/schemas/PosTransaction"
+        ticket:
+          $ref: "#/components/schemas/PosScaleTicket"
+    PosManualWeightRequest:
+      type: object
+      additionalProperties: false
+      required: [weight_lb, reason]
+      properties:
+        weight_lb: {type: string, description: "The gross weight in pounds, a decimal string."}
+        tare_lb: {type: [string, "null"], description: "The tare in pounds when the entry carries one."}
+        reason: {type: string, description: "One of the closed list GET /api/v1/pos/scale/manual-reasons answers."}
+        note: {type: string, description: "Required when the reason is other."}
+        revision: {type: [integer, "null"], format: int64, description: "The sale's revision; the If-Match header carries it instead."}
+    PosScaleTicketVoidRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, description: "A void says why."}
+        revision: {type: [integer, "null"], format: int64, description: "The ticket's revision; the If-Match header carries it instead."}
+    PosScaleTicketList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosScaleTicket"
+    PosScaleManualReason:
+      type: object
+      required: [code, label, needs_note]
+      properties:
+        code: {type: string, enum: [scale_offline, scale_error, preweighed, other]}
+        label: {type: string}
+        needs_note: {type: boolean}
+    PosScaleManualReasonList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosScaleManualReason"
+    PosScaleSimulatorRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        weight_lb: {type: [string, "null"], description: "The load on the deck, a decimal string of the unit named."}
+        unit: {type: string, enum: [lb, kg]}
+        motion: {type: [boolean, "null"], description: "Pin the motion flag."}
+        status: {type: string, enum: [none, over_capacity, under_capacity, zero_error, initial_zero_error, tare_error], description: "Force an indicator status; absent leaves it."}
     PosTender:
       type: object
       description: >-
@@ -34921,7 +35721,7 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state]
       properties:
         id:
           type: string
@@ -35009,6 +35809,15 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: >-
+            The weighed sale's density (CP-19): pounds per cubic yard, the only bridge between a scale weight and a price by the yard.
+        density_volume_state:
+          oneOf: [{type: string, enum: [LOOSE, COMPACTED]}, {type: "null"}]
+          description: The volume state the density was measured at.
         image_url:
           type: [string, "null"]
           description: >-
@@ -35066,6 +35875,13 @@ components:
         random_length:
           type: boolean
           description: The product is sold by tally; it stocks in LF and carries no fixed length.
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: The weighed sale's density (CP-19); both fields together or neither.
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
     ProductPage:
       type: object
       required: [items, next_cursor, limit]
@@ -35152,6 +35968,20 @@ components:
           type: number
         revision:
           type: integer
+          format: int64
+    ProductDensityUpdate:
+      type: object
+      additionalProperties: false
+      description: The density pair, both fields or a null pair to clear.
+      properties:
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
+        revision:
+          type: [integer, "null"]
           format: int64
     ProductDimensionsUpdate:
       type: object
