@@ -36,7 +36,8 @@ const POSITIVE_QTY = /^\d+(\.\d+)?$/;
 function price(cents: number, uom: string): string {
     const sign = cents < 0 ? '-' : '';
     const abs = Math.abs(cents);
-    return `${sign}$${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')} / ${uom}`;
+    const amount = `${sign}$${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`;
+    return uom === '' ? amount : `${amount} / ${uom}`;
 }
 
 @customElement('gable-pos-catalog')
@@ -318,7 +319,7 @@ export class GablePosCatalog extends LitElement {
 
     private _picture(item: CatalogItem) {
         const shown = item.image_url && !this._brokenImages.has(item.product_id);
-        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-picture-plate">
+        return html`<div data-testid="catalog-picture" class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-picture-plate min-[768px]:h-[72px] min-[768px]:w-[72px]">
             ${shown
                 ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover mix-blend-multiply"
                       @error=${() => { this._brokenImages = new Set(this._brokenImages).add(item.product_id); }} />`
@@ -340,7 +341,10 @@ export class GablePosCatalog extends LitElement {
               <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>
             </div>
             <div class="flex shrink-0 items-center justify-between gap-2 min-[768px]:mt-auto min-[768px]:w-full">
-                <span class="font-mono text-sm font-semibold text-white">${price(item.unit_price_cents, item.uom)}</span>
+                <span class="font-mono text-sm font-semibold text-white">
+                  <span class="min-[768px]:hidden">${price(item.unit_price_cents, '')}</span>
+                  <span class="hidden min-[768px]:inline">${price(item.unit_price_cents, item.uom)}</span>
+                </span>
                 <button type="button" data-testid="catalog-tile-add" ?disabled=${this.disabled}
                     aria-label=${`Add ${item.description}`}
                     @click=${() => this._emit(item)}
