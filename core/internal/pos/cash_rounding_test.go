@@ -433,6 +433,42 @@ func TestCP18_ReturnRefundsExactPaysRounded(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE: a completion the rounded cash due refuses (the tenders carry less
+// than the rounded cash) leaves nothing written: no payment, no invoice, no
+// ledger line, and the drawer expects nothing (money checklist line 16).
+func TestCP18_RoundedRefusalWritesNothing(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+
+	saleID, _ := f.saleAtPrice(103)
+	// The rounded cash due is 105; the tenders carry 104.
+	r := f.completeSale(saleID, tender("cash", 104))
+	if r.status != http.StatusConflict {
+		t.Fatalf("the under-rounded completion = %d, want 409: %s", r.status, r.raw)
+	}
+	if got := str(f.t, f.getSale(f.t, saleID), "status"); got != "open" {
+		t.Errorf("the sale's status = %q, want open", got)
+	}
+	if got := f.cashPayment(saleID); got != 0 {
+		t.Errorf("a payment = %d cents, want none", got)
+	}
+	if inv := f.scalar(`SELECT COUNT(*) FROM pos_transactions t JOIN invoices i ON i.id = t.invoice_id WHERE t.id = $1`, saleID); inv != int64(0) {
+		t.Errorf("an invoice exists after the refusal, want none")
+	}
+	if got := f.accountBalance("4010"); got != 0 {
+		t.Errorf("the revenue = %d cents, want none", got)
+	}
+	if got := f.accountBalance("4095"); got != 0 {
+		t.Errorf("the rounding income = %d cents, want none", got)
+	}
+	if got := f.tillExpectedCash(); got != 0 {
+		t.Errorf("the till expects %d cents of cash, want none", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // RULE: three concurrent rounded cash sales at pool size 4 serialize cleanly,
 // book every rounding leg, keep the till's expected cash exact, and preserve
 // the AR subledger invariants.
