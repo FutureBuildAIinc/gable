@@ -61,6 +61,14 @@ type runFakeTerminal struct {
 	// report only after the dispatch, so the pre dispatch lookup must not
 	// find it and the poll's own lookup must.
 	deferredReport int
+	// reportStatus is the status the reporting endpoint answers (0: 200).
+	// A 500 is a report that could not answer, which is not a report that
+	// holds no charge.
+	reportStatus int
+	// tokenStatus is the status the reporting token endpoint answers
+	// (0: 200). A 401 is an expired or refused token: the report could not
+	// answer.
+	tokenStatus int
 	// lookupCalls counts the reporting lookups served.
 	lookupCalls int
 	// pollsByOrder counts the polls served per order id.
@@ -97,6 +105,15 @@ func (f *runFakeTerminal) lookupCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lookupCalls
+}
+
+// breakReporting makes the report answer a status it cannot answer with a
+// charge: a 500 on the transaction list, a 401 on the token. The report can
+// no longer say whether an order id carries a charge.
+func (f *runFakeTerminal) breakReporting(reportStatus, tokenStatus int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reportStatus, f.tokenStatus = reportStatus, tokenStatus
 }
 
 // failedStepOf scripts one uncertain end: the first poll answers pending,
@@ -183,7 +200,13 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.deferredReport != 0 && f.pollsByOrder[order] < f.deferredReport {
 			row = nil
 		}
+		status := f.reportStatus
 		f.mu.Unlock()
+		if status >= 400 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "the report could not answer"})
+			return
+		}
 		items := []map[string]any{}
 		if row != nil {
 			items = append(items, row)
@@ -193,7 +216,13 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/oauth/token":
 		f.mu.Lock()
 		f.tokens++
+		status := f.tokenStatus
 		f.mu.Unlock()
+		if status >= 400 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "the token was refused"})
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "teststub" + "teststub", "token_type": "bearer"})
 	default:

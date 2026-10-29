@@ -57,9 +57,14 @@ import (
 //                   re sent without looking the interaction up first
 //                   (FROM-PRINCIPAL 222): a charge that already exists at
 //                   Run is recovered from the report, never prompted again.
-//                   Without the reporting credential set the lookup cannot
-//                   run; the driver still refuses a blind re send of an
-//                   order id its own process already posted.
+//                   The lookup answers three things, found, not found and
+//                   could not ask: a report that could not answer (a 500, a
+//                   timeout, a refused connection, an expired token) is not a
+//                   report that holds no charge, so the dispatch is refused,
+//                   never charged blind, and the leg is left for
+//                   reconciliation. Without the reporting credential set the
+//                   lookup cannot run; the driver still refuses a blind re
+//                   send of an order id its own process already posted.
 //
 //   settlement:     SettlementBatch reads the Reporting API's transaction
 //                   list filtered by terminal id, the documented source of
@@ -79,6 +84,11 @@ const (
 	runTerminalWindowDefault  = 3 * time.Minute
 	runReportingTokenLifetime = 25 * time.Minute
 )
+
+// errRunReportingUnset says the reporting credential set is absent: the
+// transaction lookup cannot run at all. It is not the same as a report that
+// could not answer, and every caller keeps the two apart.
+var errRunReportingUnset = errors.New("the run reporting credential set is not configured")
 
 // RunTerminal is the Run Terminal API driver of the TerminalProvider seam.
 // Safe for concurrent use.
@@ -228,11 +238,22 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	// Never re send a dispatch without looking the interaction up first:
 	// a charge that already exists at Run under this order id is recovered
 	// from the transaction lookup, never prompted again.
-	if found := t.lookupByOrder(ctx, d.IdempotencyKey); found != nil {
-		t.logger.Info("the Run charge already exists: recovered from the transaction lookup, the device is not prompted again",
-			"order_id", d.IdempotencyKey, "trans_id", found.TransID)
-		t.deliver(d, answerOfTransaction(d, found))
-		return TerminalReceipt{ProviderRef: found.TransID, DeviceID: d.DeviceID}, nil
+	if t.reportingConfigured() {
+		found, lerr := t.lookupByOrder(ctx, d.IdempotencyKey)
+		if lerr != nil {
+			// The report could not answer. That is not a report that holds no
+			// charge: the dispatch is refused, never sent blind, and the leg
+			// is left for reconciliation.
+			t.logger.Error("the Run transaction lookup could not answer: the dispatch is refused, never sent blind",
+				"order_id", d.IdempotencyKey, "error", lerr)
+			return TerminalReceipt{}, fmt.Errorf("the run transaction lookup could not answer for order %s, so the dispatch is not sent and the leg is left for reconciliation: %w", d.IdempotencyKey, lerr)
+		}
+		if found != nil {
+			t.logger.Info("the Run charge already exists: recovered from the transaction lookup, the device is not prompted again",
+				"order_id", d.IdempotencyKey, "trans_id", found.TransID)
+			t.deliver(d, answerOfTransaction(d, found))
+			return TerminalReceipt{ProviderRef: found.TransID, DeviceID: d.DeviceID}, nil
+		}
 	}
 	t.sentMu.Lock()
 	already := t.sent[d.IdempotencyKey]
@@ -283,7 +304,16 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 					// a charge the report shows is authorized by its own trans
 					// id, never booked declined with the money moved.
 					if uncertain {
-						if found := t.lookupByOrder(pctx, d.IdempotencyKey); found != nil {
+						found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
+						switch {
+						case lerr != nil && !errors.Is(lerr, errRunReportingUnset):
+							// the report could not answer: the leg is left for
+							// reconciliation, never booked declined with the
+							// money moved
+							t.logger.Error("the Run transaction lookup could not answer: the leg is left for reconciliation",
+								"order_id", d.IdempotencyKey, "error", lerr)
+							return
+						case found != nil:
 							t.logger.Info("the Run interaction ended with no verdict and the transaction lookup found the charge",
 								"order_id", d.IdempotencyKey, "trans_id", found.TransID)
 							t.deliver(d, answerOfTransaction(d, found))
@@ -296,19 +326,30 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 			}
 		case err == nil && status == http.StatusNotFound:
 			// the interaction vanished: the transaction lookup resolves it
-			if found := t.lookupByOrder(pctx, d.IdempotencyKey); found != nil {
+			found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
+			switch {
+			case lerr != nil && !errors.Is(lerr, errRunReportingUnset):
+				t.logger.Error("the Run interaction expired and the transaction lookup could not answer: the leg is left for reconciliation",
+					"order_id", d.IdempotencyKey, "interaction_id", interaction, "error", lerr)
+			case found != nil:
 				t.logger.Info("the Run interaction expired and the transaction lookup resolved the leg",
 					"order_id", d.IdempotencyKey, "trans_id", found.TransID)
 				t.deliver(d, answerOfTransaction(d, found))
-			} else {
+			default:
 				t.logger.Warn("the Run interaction expired and the transaction lookup found no charge: the sweep files the manager item",
 					"order_id", d.IdempotencyKey, "interaction_id", interaction)
 			}
 			return
 		}
 		if time.Now().After(deadline) {
-			if found := t.lookupByOrder(pctx, d.IdempotencyKey); found != nil {
+			found, lerr := t.lookupByOrder(pctx, d.IdempotencyKey)
+			if lerr == nil && found != nil {
 				t.deliver(d, answerOfTransaction(d, found))
+				return
+			}
+			if lerr != nil && !errors.Is(lerr, errRunReportingUnset) {
+				t.logger.Error("the Run interaction window ran out and the transaction lookup could not answer: the leg is left for reconciliation",
+					"order_id", d.IdempotencyKey, "interaction_id", interaction, "error", lerr)
 				return
 			}
 			t.logger.Warn("the Run interaction window ran out with no verdict: the sweep files the manager item",
@@ -476,9 +517,9 @@ func (t *RunTerminal) resolve() (GatewayConfig, error) {
 	return cfg, nil
 }
 
-// authed sends one request with the bearer api_key and the mid header. On a
-// 401 (the api_key is an expiring credential) it refreshes once, rotates
-// through onRotate and retries. The key is set on the wire and never logged.
+// authed sends one request with the bearer api_key. On a 401 (the api_key is
+// an expiring credential) it refreshes once, rotates through onRotate and
+// retries. The key is set on the wire and never logged.
 func (t *RunTerminal) authed(ctx context.Context, cfg GatewayConfig, method, path string, body []byte, attempt int) (raw []byte, status int, err error) {
 	req, err := t.request(ctx, cfg.BaseURL+path, method, body, "Bearer "+cfg.APIKey)
 	if err != nil {
@@ -561,25 +602,45 @@ func (t *RunTerminal) refreshAPIKey(ctx context.Context, base, currentKey string
 	return out.APIKey, out.RefreshToken, nil
 }
 
+// reportingConfigured says whether the reporting credential set is present:
+// without it the transaction lookup cannot run at all, and the driver's own
+// in process refusal is what keeps a re dispatch from charging twice.
+func (t *RunTerminal) reportingConfigured() bool {
+	return t.reportingBase != "" && t.reportingID != ""
+}
+
 // lookupByOrder reads the Reporting API's transaction list filtered by
 // order_id: the documented way back to a charge whose interaction is gone.
-// Nil when the reporting credential set is absent or the lookup finds
-// nothing.
-func (t *RunTerminal) lookupByOrder(ctx context.Context, orderID string) *runReportingTransaction {
-	if t.reportingBase == "" || t.reportingID == "" || orderID == "" {
-		return nil
+//
+// It answers three things, and every caller keeps them apart:
+//
+//   - found: the charge exists (the transaction, no error).
+//   - not found: the report answered and holds no such charge (nil, nil).
+//   - could not ask: the report could not answer at all (nil, an error: a
+//     500, a timeout, a refused connection, an expired token). A report that
+//     could not ask is never read as a report that holds no charge: a blind
+//     charge is the one thing the rule forbids.
+//
+// The reporting credential set being absent is errRunReportingUnset, which is
+// neither of the three: the lookup cannot run at all.
+func (t *RunTerminal) lookupByOrder(ctx context.Context, orderID string) (*runReportingTransaction, error) {
+	if !t.reportingConfigured() {
+		return nil, errRunReportingUnset
+	}
+	if orderID == "" {
+		return nil, nil
 	}
 	rows, err := t.reportingTransactions(ctx, map[string]any{"order_id": orderID})
 	if err != nil {
 		t.logger.Warn("the Run transaction lookup failed", "order_id", orderID, "error", err)
-		return nil
+		return nil, err
 	}
 	for i := range rows {
 		if rows[i].OrderID == orderID {
-			return &rows[i]
+			return &rows[i], nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // reportingTransactions reads the Reporting API's transaction list with a
