@@ -196,11 +196,13 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
     await page.getByTestId('pos-pay').click();
     await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
   } finally {
-    // The rules the walk found go back on the revision the walks left.
+    // The rules the walk found go back on the revision the walks left,
+    // without the read only suggested fees the GET carries beside them.
+    const { restocking_fee_defaults: _suggested, ...writable } = savedRules;
     const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };
     const put = await request.put('/api/v1/pos/settings', {
       headers: { 'If-Match': `"${now.revision}"` },
-      data: { rules: savedRules, revision: now.revision },
+      data: { rules: writable, revision: now.revision },
     });
     expect(await put.text(), `putting the rules back = ${put.status()}`).toContain('"rules"');
   }

@@ -161,11 +161,13 @@ test('CP-06: a dealer sets the restocking fees and the counter states the fee be
     await expect(page.getByText(/less a \$[\d,.]+ restocking fee/)).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'cp06-fee-taken.png'), fullPage: true });
   } finally {
-    // The rules the walk found go back on the revision the walk left.
+    // The rules the walk found go back on the revision the walk left, without
+    // the read only suggested figures the GET carries.
+    const { restocking_fee_defaults: _suggested, ...writable } = saved.rules;
     const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };
     const put = await request.put('/api/v1/pos/settings', {
       headers: { 'If-Match': `"${now.revision}"` },
-      data: { rules: saved.rules, revision: now.revision },
+      data: { rules: writable, revision: now.revision },
     });
     expect(await put.text(), `putting the rules back = ${put.status()}`).toContain('"rules"');
   }
