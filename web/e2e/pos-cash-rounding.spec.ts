@@ -120,17 +120,20 @@ async function pricedProduct(
 }
 
 /** Opens the counter (the Panels board) and the drawer when none is open. */
-async function openCounter(page: Page) {
+async function openCounter(page: Page): Promise<boolean> {
   await page.goto('/pos');
   await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
   const tillState = page.getByTestId('pos-till-state');
   await expect(tillState).toBeVisible();
+  let opened = false;
   if ((await tillState.textContent())?.includes('No till')) {
     await page.getByRole('button', { name: 'Open Till' }).click();
     await page.getByTestId('till-float-amount').fill('100.00');
     await page.getByRole('button', { name: 'Open Till' }).last().click();
+    opened = true;
   }
   await expect(tillState).toContainText('Till open');
+  return opened;
 }
 
 /** Adds one unit of the product through the Items card: the exact SKU in its search, then Enter. */
@@ -202,7 +205,7 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   await page.getByRole('button', { name: 'Save changes' }).click();
   await saved;
 
-  await openCounter(page);
+  const openedFresh = await openCounter(page);
 
   // A $1.03 sale paid in cash: the drawer keeps $1.05, so the counter asks
   // for the rounded cash due and says so.
@@ -247,4 +250,31 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
   await expect(page.getByTestId('pos-complete')).toContainText('$1.07');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-card-exact.png'), fullPage: true });
+
+  // Leave the counter as the suite found it: close the drawer counting
+  // exactly what it holds, so the close balances and no sale of this run
+  // leaks into the next spec's drawer. The expected figures are read over
+  // the API and keyed by the count field each method names; while the
+  // branch rounds, every cash figure in the drawer is a multiple of five
+  // cents.
+  const current = (await (await request.get('/api/v1/pos/till/current')).json()) as { id: string };
+  const report = (await (await request.get(`/api/v1/pos/till/${current.id}/report`)).json()) as {
+    expected_by_method: Record<string, number>;
+  };
+  if (openedFresh) {
+    expect(report.expected_by_method['CASH'] % 5, 'the drawer cash is rounded to the five cents').toBe(0);
+  }
+  await page.getByRole('button', { name: 'Close Till' }).click();
+  await expect(page.getByRole('heading', { name: 'Close Till - Blind Count' })).toBeVisible();
+  const countFields = page.locator('[data-testid^="till-count-"]');
+  for (let i = 0; i < (await countFields.count()); i++) {
+    const testid = await countFields.nth(i).getAttribute('data-testid');
+    const method = (testid ?? '').replace('till-count-', '').toUpperCase();
+    await countFields.nth(i).fill(((report.expected_by_method[method] ?? 0) / 100).toFixed(2));
+  }
+  await page.getByRole('button', { name: 'Post Count & Close' }).click();
+  await expect(page.getByRole('heading', { name: 'Z-Report - Till Closed' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('BALANCED')).toBeVisible();
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByTestId('pos-till-state')).toContainText('No till');
 });
