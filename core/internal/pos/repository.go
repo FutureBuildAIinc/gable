@@ -279,6 +279,8 @@ type Repository interface {
 	// revision anchor, inside the caller's transaction.
 	writeSetting(ctx context.Context, key, value string) error
 	deleteSetting(ctx context.Context, key string) error
+	// writeRestockingFees rewrites every reason's fee rows in one act (CP-06).
+	writeRestockingFees(ctx context.Context, fees map[string]int) error
 	readPosSettingsRevision(ctx context.Context) (int64, error)
 	lockPosSettingsRevision(ctx context.Context) (int64, error)
 	bumpPosSettingsRevision(ctx context.Context, to int64) error

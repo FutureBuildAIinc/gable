@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { pickOptionByValue } from './app-controls';
 import { registerBranch, stockedProduct } from './pos-stock';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -131,20 +132,6 @@ async function openPayment(page: Page) {
   const head = page.getByTestId('panel-payment-toggle');
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
   await expect(head).toHaveAttribute('aria-expanded', 'true');
-}
-
-/** The counter with the drawer open (see pos.spec.ts's openCounter). */
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
 }
 
 test('the counter: an account that requires a job is charged only with a job picked', async ({ page, request }) => {

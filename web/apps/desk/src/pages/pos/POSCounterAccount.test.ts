@@ -34,6 +34,7 @@ const svc = vi.hoisted(() => ({
   captureSignature: vi.fn(),
   returnReasons: vi.fn(),
   createReturn: vi.fn(),
+  previewReturn: vi.fn(),
   previewExchange: vi.fn(),
   createExchange: vi.fn(),
 }));
@@ -505,14 +506,25 @@ describe('returns: the reason on each line, the note, the fee', () => {
     input.dispatchEvent(new Event('input'));
     await el.updateComplete;
   };
+  // The return waits for the server's figures, so the act waits for them too.
+  const waitForFigures = async (el: POSTerminal) => {
+    await new Promise((r) => setTimeout(r, 350));
+    await el.updateComplete;
+  };
 
   it('lists the closed reasons with the fee each carries once a line is named', async () => {
+    svc.previewReturn.mockResolvedValue({
+      subtotal_cents: -551, tax_cents: 0, restocking_fee_cents: 82, total_cents: -469, refund_cents: 469,
+      lines: [{ line_id: 'a', reason_code: 'changed_mind', line_total_cents: -551, restocking_fee_cents: 82 }],
+    });
     const el = await openReturn();
     expect(q(el, 'return-reason')).toBeNull();
     await setQty(el, '1');
     expect(q(el, 'return-reason')).toBeTruthy();
     const labels = ((q(el, 'return-reason') as unknown as { options: Array<{ label: string }> }).options).map((o) => o.label);
     expect(labels).toEqual(['Why is it coming back?', 'Defective', 'Changed their mind (15% restocking fee)', 'Other (needs a note)']);
+    // the fee note is the server's word on the fee, never the list's
+    await waitForFigures(el);
     expect(q(el, 'return-fee-note').textContent).toContain('restocking fee');
     el.remove();
   });
@@ -520,12 +532,14 @@ describe('returns: the reason on each line, the note, the fee', () => {
   it('wants a reason on each returned line and the note when the reason is other', async () => {
     const el = await openReturn();
     await setQty(el, '1');
+    await waitForFigures(el);
     q(el, 'return-take').click();
     await flush();
     expect(svc.createReturn).not.toHaveBeenCalled();
     expect(el.textContent).toContain('Pick a reason for each line coming back');
     await chooseOption(q(el, 'return-reason') as HTMLElement & { value: string }, 'other');
     await el.updateComplete;
+    await waitForFigures(el);
     q(el, 'return-take').click();
     await flush();
     expect(svc.createReturn).not.toHaveBeenCalled();
@@ -539,6 +553,7 @@ describe('returns: the reason on each line, the note, the fee', () => {
     await setQty(el, '1');
     await chooseOption(q(el, 'return-reason') as HTMLElement & { value: string }, 'changed_mind');
     await el.updateComplete;
+    await waitForFigures(el);
     q(el, 'return-take').click();
     await flush();
     await el.updateComplete;

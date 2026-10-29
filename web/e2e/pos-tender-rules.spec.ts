@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { pickOptionByValue } from './app-controls';
+import { openCounter } from './pos-till';
 
 /**
  * The counter's tender rules a dealer sets (CP-04): the Counter rules screen
@@ -40,19 +41,6 @@ async function stockedProduct(request: APIRequestContext): Promise<{ sku: string
     if (atBranch >= 40) return p;
   }
   throw new Error('no stocked product for the counter run');
-}
-
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
 }
 
 async function addOne(page: Page, sku: string) {
@@ -196,11 +184,13 @@ test('the counter rules a dealer sets: the check ID rule, the check limit, and a
     await page.getByTestId('pos-pay').click();
     await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
   } finally {
-    // The rules the walk found go back on the revision the walks left.
+    // The rules the walk found go back on the revision the walks left,
+    // without the read only suggested fees the GET carries beside them.
+    const { restocking_fee_defaults: _suggested, ...writable } = savedRules;
     const now = (await (await request.get('/api/v1/pos/settings')).json()) as { revision: number };
     const put = await request.put('/api/v1/pos/settings', {
       headers: { 'If-Match': `"${now.revision}"` },
-      data: { rules: savedRules, revision: now.revision },
+      data: { rules: writable, revision: now.revision },
     });
     expect(await put.text(), `putting the rules back = ${put.status()}`).toContain('"rules"');
   }
