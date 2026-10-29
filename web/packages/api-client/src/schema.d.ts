@@ -6173,8 +6173,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the day's sales
-         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD that defaults to the branch's today, status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). The page is the whole day newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day is [] in the bytes.
+         * List the day's sales, or search them
+         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD read against the sale's business day in its branch's own zone, defaulting to the branch's today (never the server's clock), status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). q is the return counter's sale search (CP-06): a sale matches when its number (the receipt's barcode text), its invoice's number or its customer's name contains the text, case folded; a search names no day bound unless it also carries a date. The page is the whole day or the whole search newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day or a search nothing matches is [] in the bytes.
          */
         get: operations["posTransactionList"];
         put?: never;
@@ -6857,6 +6857,26 @@ export interface paths {
          * @description The return with its lines and its credit memo link.
          */
         get: operations["posReturnGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/refund-intents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the refund claims waiting on a manager
+         * @description The list envelope over the counter's open refund claims (CP-06), oldest first: every PENDING claim (a terminal answer still owed, or a claim waiting on the resolve route) and every void's FAILED claim whose tender's posted payment still holds the declined credit the pay back route returns to the card (held_credit_cents carries it). A settled claim and a paid back credit leave the list. Only the finance and owner roles, the resolve and pay back routes' own guard; the sale join carries the branch wall, so the list never crosses the caller's branch. The page is the oldest 50 of the open set, the route's own cap: a claim past the fiftieth shows as the queue drains, so the list never claims to be the whole set. next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty list is [] in the bytes.
+         */
+        get: operations["posRefundIntentList"];
         put?: never;
         post?: never;
         delete?: never;
@@ -16328,6 +16348,46 @@ export interface components {
             /** @description Why the record was made */
             reason: string;
         };
+        /** @description One open refund claim in the manager's list (CP-06). */
+        PosRefundIntentSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** @description The claim's sale, POS-000001. */
+            sale_number: string;
+            /** Format: uuid */
+            tender_id: string;
+            /** @enum {string} */
+            tender_method: "cash" | "check" | "card" | "account" | "store_credit";
+            /**
+             * Format: int64
+             * @description The claim's amount.
+             */
+            amount_cents: number;
+            /** @enum {string} */
+            act: "void" | "return" | "payback";
+            /**
+             * @description PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns.
+             * @enum {string}
+             */
+            state: "PENDING" | "FAILED";
+            /**
+             * Format: int64
+             * @description What the tender's posted payment still holds unapplied; the credit a pay back returns.
+             */
+            held_credit_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosRefundIntentPage: {
+            items: components["schemas"]["PosRefundIntentSummary"][];
+            /** @description Null: the page is the whole open set. */
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         PosRefundIntentResolved: {
             /** Format: uuid */
             id: string;
@@ -16734,6 +16794,12 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             item_count: number;
+            /** @description The account the sale names; null on a walk-in. */
+            customer_name: string | null;
+            /** @description The invoice's number; null until the sale completes. */
+            invoice_number: string | null;
+            /** @description The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp. */
+            business_day: string;
         };
         /** @description The full sale: the head with its lines and tenders. */
         PosTransaction: {
@@ -16794,6 +16860,10 @@ export interface components {
              * @description The return an exchange's replacement sale stands against.
              */
             exchange_return_id: string | null;
+            /** @description Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it. */
+            returned_quantities?: {
+                [key: string]: string;
+            };
             /** @description Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day. */
             tax_exemption?: {
                 /** @description The certificate's number as the counter shows it. */
@@ -33108,6 +33178,7 @@ export interface operations {
                 register_id?: string;
                 date?: string;
                 status?: "open" | "held" | "completed" | "voided";
+                q?: string;
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -34419,6 +34490,40 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRefundIntentList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open claims. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRefundIntentPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };

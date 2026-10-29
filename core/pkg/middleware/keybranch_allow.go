@@ -409,6 +409,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/orders/{id}/exposure-gate":                        {KeyBranchClassWalled, "orders.branch_id"},
 	"GET /api/v1/payments":                                         {KeyBranchClassWalled, "payments.branch_id (the payment repository wall)"},
 	"GET /api/v1/payments/{id}":                                    {KeyBranchClassWalled, "payments.branch_id (the payment repository wall)"},
+	"GET /api/v1/pos/refund-intents":                               {KeyBranchClassWalled, "the open claims query joins the sale's branch wall (the context branch, else the granted branches), so another branch's claims are never listed (CP-06)"},
 	"GET /api/v1/pos/returns":                                      {KeyBranchClassWalled, "pos_returns.branch_id; TestKeyBranchPin_PosAndAccountRows"},
 	"GET /api/v1/pos/returns/{id}":                                 {KeyBranchClassWalled, "pos_returns.branch_id; TestKeyBranchPin_PosAndAccountRows"},
 	"GET /api/v1/pos/terminal-intents/{id}":                        {KeyBranchClassWalled, "the intent's branch is held to the caller's reach (the context branch, else the grants), so a caller outside the branch finds a missing row or a 403 (CP-05)"},

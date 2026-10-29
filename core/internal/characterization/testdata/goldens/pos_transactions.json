@@ -1021,13 +1021,16 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-42>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000001",
             "register_id": "REG-01",
@@ -1037,13 +1040,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-9>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 1,
             "number": "POS-000002",
             "register_id": "REG-01",
@@ -1053,13 +1059,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-10>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000003",
             "register_id": "REG-01",
@@ -1069,13 +1078,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-11>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000004",
             "register_id": "REG-01",
@@ -1154,6 +1166,188 @@
         "meta": {
           "request_id": "<id-44>"
         }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_number",
+    "sort_envelope_items": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=POS-"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "customer_name": null,
+            "id": "<id-11>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000004",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "customer_name": null,
+            "id": "<id-10>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000003",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-9>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "open",
+            "total_cents": 1568
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_customer",
+    "sort_envelope_items": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=Golden"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-9>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "open",
+            "total_cents": 1568
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_no_match",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=zz-no-such-sale"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.refund_intents.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/refund-intents"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
       }
     }
   },
@@ -2101,13 +2295,16 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-9>",
             "invoice_id": "<id-52>",
+            "invoice_number": "IN-000054",
             "item_count": 1,
             "number": "POS-000002",
             "register_id": "REG-01",
@@ -2117,13 +2314,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-11>",
             "invoice_id": "<id-62>",
+            "invoice_number": "IN-000055",
             "item_count": 1,
             "number": "POS-000004",
             "register_id": "REG-01",
@@ -2133,13 +2333,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-42>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000001",
             "register_id": "REG-01",
@@ -2149,13 +2352,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-10>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 1,
             "number": "POS-000003",
             "register_id": "REG-01",

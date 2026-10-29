@@ -61,6 +61,10 @@ type Repository interface {
 	// ReturnedQtyByLine sums, per sale line, the quantity every earlier
 	// return of the sale brought back (the return's cap).
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
+	// ListOpenRefundIntents lists the refund claims a manager still owes an
+	// answer: every PENDING claim, and a void's FAILED claim while its
+	// tender's payment still holds the credit the pay back route returns.
+	ListOpenRefundIntents(ctx context.Context, limit int) ([]RefundIntentSummary, error)
 	// RefundedCentsByLine sums the cents every earlier return refunded per
 	// sale line, and RefundedTaxCents the tax they took back: the remainder
 	// rule of repeated partial returns reads them. CardRefundedCents sums
@@ -328,11 +332,20 @@ type TillAggregate struct {
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so
-// the day boundary is the caller's and never the session's timezone.
+// the day boundary is the caller's and never the session's timezone; an
+// empty Date names no day bound (a search ranges over every day). Query is
+// the search text: a sale matches when its number (the receipt's barcode
+// text), its invoice's number or its customer's name contains it.
 type SaleFilter struct {
 	RegisterID string
 	Date       string
 	Status     string
+	Query      string
+	// Today is the plain list's own day (no search text): the bound is the
+	// branch's today, computed in the branch's zone, never the server's
+	// clock. A search names no day bound unless Date is set, and leaves
+	// both empty.
+	Today bool
 }
 
 // ReturnFilter is the return list's filters.
@@ -477,6 +490,14 @@ const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.
 	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
 	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
 
+// saleZoneSQL is the zone of a sale row's branch, UTC when it has none: the
+// rule the branch day uses everywhere (the Z report list's own idiom).
+const saleZoneSQL = `COALESCE((SELECT l.timezone FROM locations l WHERE l.id = t.branch_id), 'UTC')`
+
+// saleDaySQL is a sale's business day: the day it was made on in its
+// branch's own zone, never a UTC day and never the server's clock.
+const saleDaySQL = `(t.created_at AT TIME ZONE ` + saleZoneSQL + `)::date`
+
 // saleCols is the full sale's columns: the list item's head and the purchase
 // order and job a charge sale names.
 const saleCols = saleHeadCols + `, t.customer_po, t.job_id, t.buyer_contact_id, t.print_count, t.exchange_return_id`
@@ -568,21 +589,37 @@ func (r *PostgresRepository) NextReturnNumber(ctx context.Context) (string, erro
 }
 
 func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit int) ([]SaleSummary, error) {
-	// The day's bounds are absolute timestamps computed from the date
-	// string in the server's zone: a timestamptz never meets a date cast,
-	// whose midnight belongs to the session's zone, not the caller's.
-	start, end := dayBounds(f.Date)
+	args := []any{f.RegisterID, nil, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
 	predicate := `WHERE ($1 = '' OR t.register_id = $1)
 		AND ($2::text IS NULL OR t.status = $2)
-		AND t.created_at >= $3 AND t.created_at < $4
-		AND ` + middleware.Wall("t", 5, 6)
-	args := []any{f.RegisterID, nil, start, end, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
+		AND ` + middleware.Wall("t", 3, 4)
 	if f.Status != "" {
 		args[1] = f.Status
 	}
+	// The day bound names the sale's business day in its branch's own zone
+	// (UTC when it has none): a timestamptz never meets a date cast, whose
+	// midnight belongs to the branch, not the session or the server's
+	// clock. A date the caller gave bounds by that date; the plain list's
+	// own day (Today, no search text) is the branch's today, computed in
+	// the same zone in SQL. A search leaves both empty and ranges over
+	// every day.
+	if f.Date != "" || f.Today {
+		args = append(args, f.Date)
+		predicate += fmt.Sprintf(` AND `+saleDaySQL+` = COALESCE(NULLIF($%d::text, '')::date, (NOW() AT TIME ZONE `+saleZoneSQL+`)::date)`, len(args))
+	}
+	if f.Query != "" {
+		args = append(args, "%"+likeEscape.Replace(f.Query)+"%")
+		predicate += fmt.Sprintf(` AND (t.number ILIKE $%[1]d ESCAPE '\'
+			OR i.number ILIKE $%[1]d ESCAPE '\' OR c.name ILIKE $%[1]d ESCAPE '\')`, len(args))
+	}
+	args = append(args, limit)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleHeadCols+`,
-		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT')
-		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $7`, append(args, limit)...)
+		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT'),
+		c.name, i.number, `+saleDaySQL+` AS business_day
+		FROM pos_transactions t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN invoices i ON i.id = t.invoice_id `+predicate+
+		fmt.Sprintf(` ORDER BY t.created_at DESC, t.id DESC LIMIT $%d`, len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sales: %w", err)
 	}
@@ -593,9 +630,11 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		var count int
 		var completed *time.Time
 		var created time.Time
+		var customerName, invoiceNumber *string
+		var businessDay time.Time
 		if err := rows.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID,
 			&s.Currency, &s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status,
-			&s.InvoiceID, &completed, &created, &count); err != nil {
+			&s.InvoiceID, &completed, &created, &count, &customerName, &invoiceNumber, &businessDay); err != nil {
 			return nil, err
 		}
 		s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -603,10 +642,15 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 		out = append(out, SaleSummary{ID: s.ID, Number: s.Number, Revision: s.Revision, BranchID: s.BranchID,
 			RegisterID: s.RegisterID, CashierID: s.CashierID, CustomerID: s.CustomerID, Currency: s.Currency,
 			TotalCents: s.TotalCents, Status: s.Status, InvoiceID: s.InvoiceID, CompletedAt: s.CompletedAt,
-			CreatedAt: s.CreatedAt, ItemCount: count})
+			CreatedAt: s.CreatedAt, ItemCount: count, CustomerName: customerName, InvoiceNumber: invoiceNumber,
+			BusinessDay: businessDay.Format("2006-01-02")})
 	}
 	return out, rows.Err()
 }
+
+// likeEscape escapes the ILIKE wildcards a search text could carry, so a
+// percent or an underscore the clerk typed matches itself alone.
+var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func (r *PostgresRepository) AddLines(ctx context.Context, saleID uuid.UUID, lines []salesdoc.Line) error {
 	for i := range lines {
@@ -1357,6 +1401,42 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 		return false, fmt.Errorf("failed to read the sale's refund intents: %w", err)
 	}
 	return pending, nil
+}
+
+// ListOpenRefundIntents is the manager list's read (CP-06): every claim still
+// waiting on a person, oldest first. A PENDING claim waits on the terminal's
+// answer or the resolve route; a void's FAILED claim waits on the pay back
+// route while its tender's posted payment still holds the credit unapplied.
+// The sale join carries the branch wall, so the list never crosses the
+// caller's branch.
+func (r *PostgresRepository) ListOpenRefundIntents(ctx context.Context, limit int) ([]RefundIntentSummary, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT i.id, i.sale_id, t.number, i.tender_id, d.method,
+		ROUND(ABS(i.amount) * 100)::bigint, i.act, i.state,
+		COALESCE(ROUND(p.amount_unapplied * 100)::bigint, 0), i.created_at
+		FROM pos_refund_intents i
+		JOIN pos_transactions t ON t.id = i.sale_id
+		JOIN pos_tenders d ON d.id = i.tender_id
+		LEFT JOIN payments p ON p.id = d.payment_id AND p.status = 'POSTED'
+		WHERE (i.state = 'PENDING' OR (i.state = 'FAILED' AND i.act = 'void' AND p.amount_unapplied > 0))
+		AND `+middleware.Wall("t", 2, 3)+`
+		ORDER BY i.created_at, i.id LIMIT $1`,
+		limit, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the open refund intents: %w", err)
+	}
+	defer rows.Close()
+	out := make([]RefundIntentSummary, 0)
+	for rows.Next() {
+		var it RefundIntentSummary
+		var created time.Time
+		if err := rows.Scan(&it.ID, &it.SaleID, &it.SaleNumber, &it.TenderID, &it.TenderMethod,
+			&it.AmountCents, &it.Act, &it.State, &it.HeldCreditCents, &created); err != nil {
+			return nil, err
+		}
+		it.CreatedAt = httpx.TimestampOf(created)
+		out = append(out, it)
+	}
+	return out, rows.Err()
 }
 
 // TenderCreditFacts is the declined void tender credit one payment still

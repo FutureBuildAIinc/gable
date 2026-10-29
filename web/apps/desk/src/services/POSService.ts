@@ -35,6 +35,9 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    RefundIntent,
+    RefundIntentResolved,
+    RefundIntentPaidBack,
     PosRules,
     PosSettings,
     StepUpManager,
@@ -251,6 +254,18 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions?${params.toString()}`),
             'Failed to list the day\u2019s sales',
+        );
+        return response.json();
+    },
+
+    /** Search completed sales by sale number, invoice number, customer name, or date. */
+    async searchSales(q: string, date?: string): Promise<SalePage> {
+        const params = new URLSearchParams();
+        if (q) params.append('q', q);
+        if (date) params.append('date', date);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions?${params.toString()}`),
+            'Failed to search the sales',
         );
         return response.json();
     },
@@ -584,6 +599,47 @@ export const posService = {
                 body: JSON.stringify({ outcome, reference, reason }),
             }),
             'Failed to resolve the lost card answer',
+        );
+        return response.json();
+    },
+
+    // --- Refund intents (CP-06) ---
+
+    /** The manager's queue of open refund claims: voids, returns and paybacks waiting on the terminal or on finance. */
+    async listRefundIntents(): Promise<RefundIntent[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents`),
+            'Failed to read the refund intents',
+        );
+        const body = await response.json() as { items?: RefundIntent[] };
+        return body.items ?? [];
+    },
+
+    /** Pays a failed void's held credit back to its card. */
+    async paybackRefundIntent(id: string, reason: string): Promise<RefundIntentPaidBack> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents/${id}/payback`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason }),
+            }),
+            'Failed to pay back the refund intent',
+        );
+        return response.json();
+    },
+
+    /** Resolves a pending refund claim by recording the terminal's actual outcome. */
+    async resolveRefundIntent(
+        id: string,
+        input: { outcome: 'refund' | 'no_refund'; refund_tx_id?: string; reconciliation_reference?: string; reason: string },
+    ): Promise<RefundIntentResolved> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents/${id}/resolve`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to resolve the refund intent',
         );
         return response.json();
     },
