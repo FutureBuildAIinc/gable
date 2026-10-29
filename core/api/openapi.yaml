@@ -34608,6 +34608,11 @@ components:
         discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
         discount_cents: {type: [integer, "null"], format: int64}
         discount_reason: {type: [string, "null"]}
+        tint:
+          oneOf:
+            - $ref: "#/components/schemas/LineTint"
+            - type: "null"
+          description: The paint line's tint record (row CP-16), null or omitted on every other line.
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.

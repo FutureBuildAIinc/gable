@@ -17618,6 +17618,8 @@ export interface components {
             /** Format: int64 */
             discount_cents?: number | null;
             discount_reason?: string | null;
+            /** @description The paint line's tint record (row CP-16), null or omitted on every other line. */
+            tint?: components["schemas"]["LineTint"] | null;
         };
         /** @description A sale's head, a list item. */
         PosTransactionSummary: {
