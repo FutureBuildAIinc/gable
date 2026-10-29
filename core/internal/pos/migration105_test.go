@@ -486,6 +486,11 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	mig105Apply(t, conn, "../../migrations/126_counter_buyers_returns_and_receipts.sql")
 	// and the till columns and tables 127 added (the session reads name them)
 	mig105Apply(t, conn, "../../migrations/127_till_movements_and_eod.sql")
+	// and the credit holds 124 added (the counter's account facts read the
+	// customer's standing hold record beside the credit limit)
+	mig105Apply(t, conn, "../../migrations/124_ar_credit_holds_worklist_statements.sql")
+	// and the customer job requirement the account facts read (136)
+	mig105Apply(t, conn, "../../migrations/136_customer_job_required.sql")
 	// and the zone columns 141 added to the sale (the sale read names them)
 	mig105Apply(t, conn, "../../migrations/141_tax_zone_tables.sql")
 	conn.Close(context.Background())

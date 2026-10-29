@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
 )
@@ -106,9 +107,14 @@ func (s *Service) namedCustomer(ctx context.Context, id uuid.UUID) (*CounterCust
 }
 
 // AttachCustomer names the sale's customer, purchase order and job. The
-// customer is named before the first line, because the lines price for the
-// customer (price level, tax exemption, currency); the purchase order and
-// the job may change while the sale is open.
+// customer may be named or changed while the sale is open, lines rung or not
+// (CP-10: the account is often named at Pay, and an exempt account must be
+// attachable there). The lines price for the customer, so when the customer
+// moves on a sale that already has lines every line is priced again for the
+// customer now standing on the sale (a price the cashier overrode keeps its
+// own price and its author), and the totals follow: the tax honours the
+// attached customer's exemption and detaching restores the walk-in's prices
+// and its tax.
 func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in AttachCustomerIn, actor string) (*Sale, error) {
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
@@ -132,6 +138,9 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 			return nil, invalid("ship_to_id", "no such ship to for this customer")
 		}
 	}
+	// walkIn is the walk-in customer's id when the sale goes back to one, for
+	// the reprice the detach owes (the engine prices the walk-in's tier).
+	walkIn := uuid.Nil
 	currency := ""
 	if in.CustomerID != nil {
 		c, facts, err := s.namedCustomer(ctx, *in.CustomerID)
@@ -159,11 +168,12 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		}
 		currency = facts.Currency
 	} else {
-		_, def, err := s.repo.WalkInCustomer(ctx)
+		id, def, err := s.repo.WalkInCustomer(ctx)
 		if err != nil {
 			return nil, err
 		}
 		currency = def
+		walkIn = id
 	}
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -176,18 +186,6 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		}
 		if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot change the customer of a %s sale", sale.Status.Status()))
-		}
-		same := (sale.CustomerID == nil && in.CustomerID == nil) ||
-			(sale.CustomerID != nil && in.CustomerID != nil && *sale.CustomerID == *in.CustomerID)
-		if !same {
-			lines, err := s.repo.GetLines(ctx, saleID)
-			if err != nil {
-				return err
-			}
-			if len(lines) > 0 {
-				return httpx.InvalidStateTransition(
-					"the customer is named before the first line: the lines price for the customer, so start a new sale to change it")
-			}
 		}
 		var po *string
 		if in.CustomerPO != "" {
@@ -203,6 +201,30 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		if in.DeliveryType != "" || in.ShipToID != nil {
 			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, in.DeliveryType); err != nil {
 				return err
+			}
+		}
+		// the lines and the totals follow the customer now standing on the
+		// sale, when the customer moved on a sale with lines: the engine
+		// prices for that customer (the account's level, the walk-in's
+		// retail), and the tax honours its exemption
+		customerMoved := (sale.CustomerID == nil) != (in.CustomerID == nil) ||
+			(sale.CustomerID != nil && in.CustomerID != nil && *sale.CustomerID != *in.CustomerID)
+		if customerMoved {
+			lines, err := s.repo.GetLines(ctx, saleID)
+			if err != nil {
+				return err
+			}
+			if len(lines) > 0 {
+				sale.CustomerID = in.CustomerID
+				if in.CustomerID == nil {
+					sale.WalkInID = walkIn
+				}
+				if err := s.repriceSaleLines(ctx, sale, lines, actor); err != nil {
+					return err
+				}
+				if err := s.recalcTotals(ctx, sale); err != nil {
+					return err
+				}
 			}
 		}
 		if s.auditLog != nil {
@@ -221,6 +243,54 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		return nil, err
 	}
 	return out, nil
+}
+
+// repriceSaleLines prices every top-level line of the sale again, for the
+// customer now standing on it: the engine's customer level is a rung of every
+// line's price, so the account is charged its own price and the walk-in its
+// own. A price the cashier overrode (or typed on a charge line) keeps its
+// price and its author, the way a quantity change keeps them; a kit's
+// components follow their kit; a text line carries no price to follow.
+func (s *Service) repriceSaleLines(ctx context.Context, sale *Sale, lines []salesdoc.Line, actor string) error {
+	for i := range lines {
+		old := &lines[i]
+		if old.ParentLineID != nil || old.LineType == salesdoc.LineText || old.Quantity == nil {
+			continue
+		}
+		line, _, err := s.priceLine(ctx, sale, parsedFromLine(old, *old.Quantity), actor)
+		if err != nil {
+			return err
+		}
+		line.ID = old.ID
+		// whoever set the price keeps the credit for it: naming the account
+		// does not make the cashier the author of a manager's override
+		line.PriceAdjustedBy = old.PriceAdjustedBy
+		family, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+		if err != nil {
+			return err
+		}
+		// the line and its components take the places the old family held
+		var places []int
+		for j := range lines {
+			if lines[j].ID == old.ID || (lines[j].ParentLineID != nil && *lines[j].ParentLineID == old.ID) {
+				places = append(places, lines[j].Position)
+			}
+		}
+		for j := range family {
+			if j < len(places) {
+				family[j].Position = places[j]
+			} else {
+				family[j].Position = places[len(places)-1] + (j - len(places) + 1)
+			}
+		}
+		if err := s.repo.RemoveLine(ctx, sale.ID, old.ID); err != nil {
+			return err
+		}
+		if err := s.repo.AddLines(ctx, sale.ID, family); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListRegisters is the counter's register list: the registers the caller's

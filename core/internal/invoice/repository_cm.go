@@ -12,6 +12,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -426,20 +427,30 @@ type CreditFacts struct {
 }
 
 // CustomerCreditFacts reads the customer's effective currency (the override,
-// else the dealer default), primary branch and tax exemption.
+// else the dealer default), primary branch and tax exemption. The exemption
+// is the one window rule (tax.ExemptionCovering) on the primary branch's
+// business day, the rule the counter and the orders read, so an expired or
+// not yet effective certificate exempts no memo (CP-10).
 func (r *PostgresRepository) CustomerCreditFacts(ctx context.Context, customerID uuid.UUID) (CreditFacts, error) {
 	var f CreditFacts
+	var day time.Time
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
 		       c.primary_branch_id,
-		       EXISTS(SELECT 1 FROM tax_exemptions t WHERE t.customer_id = c.id AND t.is_active)
-		FROM customers c WHERE c.id = $1`, customerID).Scan(&f.Currency, &f.PrimaryBranchID, &f.Exempt)
+		       (SELECT (timezone(COALESCE(l.timezone, 'UTC'), now())))::date
+		FROM customers c LEFT JOIN locations l ON l.id = c.primary_branch_id WHERE c.id = $1`, customerID).
+		Scan(&f.Currency, &f.PrimaryBranchID, &day)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, validationFailed("a referenced record does not exist", httpx.FieldError{Field: "customer_id", Message: "no such customer"})
 	}
 	if err != nil {
 		return f, fmt.Errorf("failed to read the customer: %w", err)
 	}
+	standing, err := tax.ExemptionCovering(ctx, r.db.GetExecutor(ctx), customerID, day)
+	if err != nil {
+		return f, fmt.Errorf("failed to read the customer's exemption: %w", err)
+	}
+	f.Exempt = standing != nil
 	return f, nil
 }
 

@@ -52,6 +52,13 @@ type Staff struct {
 	// never null. Not a DB column, and NOT filtered by the global enable flag
 	// (see the package doc).
 	Modules []string `json:"modules"`
+
+	// CounterPinSet and CounterPinLocked are the two facts the staff screen
+	// shows of the manager's counter PIN (CP-04): whether one is set and
+	// whether five wrong tries locked it. The hash itself never leaves the
+	// server.
+	CounterPinSet    bool `json:"counter_pin_set"`
+	CounterPinLocked bool `json:"locked"`
 }
 
 // Module is the global state of an integration module (e.g. AI_LM), toggled

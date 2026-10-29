@@ -31,6 +31,7 @@ import (
 	"github.com/gablelbm/gable/internal/configurator"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customeractor"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/dealerprofile"
@@ -346,7 +347,8 @@ func Run() {
 	customerSvc := customer.NewService(customerRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithTxRunner(db).
-		WithAudit(customeraudit.New(auditLog))
+		WithAudit(customeraudit.New(auditLog)).
+		WithActorResolver(customeractor.New())
 	wall.customers(mux, customerSvc)
 
 	// Sales Team Module: the roster spans every branch, so a branch bound

@@ -624,6 +624,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/staff/{id}/counter-pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a staff member's counter PIN
+         * @description Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits, never one repeated digit or a plain run like 1234. Hashed on the server with argon2id and a per PIN salt; the PIN is never logged and the answer says only counter_pin_set and locked. Setting a PIN clears the failures and the lock.
+         */
+        put: operations["adminSetStaffCounterPIN"];
+        post?: never;
+        /**
+         * Clear a staff member's counter PIN
+         * @description Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+         */
+        delete: operations["adminClearStaffCounterPIN"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/counter-pin/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unlock a staff member's counter PIN
+         * @description Admin or owner. Lifts the lock five wrong tries impose and clears the failures; the hash stands, so the manager's own PIN works again at once.
+         */
+        post: operations["adminUnlockStaffCounterPIN"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/staff/{id}/modules": {
         parameters: {
             query?: never;
@@ -1379,6 +1423,50 @@ export interface paths {
          * @description first_name and last_name are required. can_place_orders defaults to true; order_limit_cents is the largest order the contact may place (null: no limit of their own). Writes customer.updated (part contact).
          */
         post: operations["customerCreateContact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's alerts
+         * @description The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+         */
+        get: operations["customerListAlerts"];
+        put?: never;
+        /**
+         * Leave an alert on a customer
+         * @description kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+         */
+        post: operations["customerCreateAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{id}/alerts/{alertId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an alert
+         * @description An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+         */
+        post: operations["customerEndAlert"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6085,8 +6173,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the day's sales
-         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD that defaults to the branch's today, status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). The page is the whole day newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day is [] in the bytes.
+         * List the day's sales, or search them
+         * @description The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD read against the sale's business day in its branch's own zone, defaulting to the branch's today (never the server's clock), status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). q is the return counter's sale search (CP-06): a sale matches when its number (the receipt's barcode text), its invoice's number or its customer's name contains the text, case folded; a search names no day bound unless it also carries a date. The page is the whole day or the whole search newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day or a search nothing matches is [] in the bytes.
          */
         get: operations["posTransactionList"];
         put?: never;
@@ -6276,7 +6364,7 @@ export interface paths {
         put?: never;
         /**
          * Tender and complete the sale
-         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         * @description A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), account_hold (an account tender on an account the AR core holds: a standing credit hold record, or an override window on it that has passed or whose cap the sale is over), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
          */
         post: operations["posTransactionComplete"];
         delete?: never;
@@ -6549,6 +6637,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/step-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A manager approves at the counter with their own PIN
+         * @description The step up (CP-04): any person at the terminal asks, the manager is picked from the roster by staff number or id, and the PIN is the authority, so the caller's own role is never checked. The server verifies the PIN in constant time (five wrong tries in a row lock it until an admin unlocks it; the answer never says which part was wrong), checks the act's approving roles and the act's own person rules (the manager is not the sale's cashier, the drawer's cashier or closer), and mints one single use approval: an opaque token, stored only as its hash, bound to the act, the target and the manager, expiring a few minutes ahead. Never a machine key.
+         */
+        post: operations["posStepUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/step-up/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The managers the picker offers
+         * @description The roster the step up picker shows for one act: active staff with a counter PIN whose role the act admits. Names and staff numbers only, never a hint of the PIN beyond the fact one is set. Never a machine key.
+         */
+        get: operations["posStepUpManagers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/till/policy": {
         parameters: {
             query?: never;
@@ -6737,6 +6865,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/refund-intents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the refund claims waiting on a manager
+         * @description The list envelope over the counter's open refund claims (CP-06), oldest first: every PENDING claim (a terminal answer still owed, or a claim waiting on the resolve route) and every void's FAILED claim whose tender's posted payment still holds the declined credit the pay back route returns to the card (held_credit_cents carries it). A settled claim and a paid back credit leave the list. Only the finance and owner roles, the resolve and pay back routes' own guard; the sale join carries the branch wall, so the list never crosses the caller's branch. The page is the oldest 50 of the open set, the route's own cap: a claim past the fiftieth shows as the queue drains, so the list never claims to be the whole set. next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty list is [] in the bytes.
+         */
+        get: operations["posRefundIntentList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's dealer rules
+         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+         */
+        get: operations["posSettingsGet"];
+        /**
+         * Write the counter's dealer rules
+         * @description Writes both rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision). Admin and owner only, never a machine key; audited. rules is an object of named rules so later rules (the restocking fees) sit beside these.
+         */
+        put: operations["posSettingsPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/refund-intents/{id}/resolve": {
         parameters: {
             query?: never;
@@ -6886,7 +7058,7 @@ export interface paths {
         };
         /**
          * Can this sale go on account?
-         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
          */
         get: operations["posCustomerStanding"];
         put?: never;
@@ -6908,7 +7080,7 @@ export interface paths {
         put?: never;
         /**
          * A manager approves one sale
-         * @description One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold or credit_limit, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
+         * @description One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold, credit_limit or account_hold, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
          */
         post: operations["posOverrideCreate"];
         delete?: never;
@@ -6968,7 +7140,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange goods in one act
-         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
          */
         post: operations["posExchangeCreate"];
         delete?: never;
@@ -9026,7 +9198,7 @@ export interface paths {
         put?: never;
         /**
          * Create a tax exemption
-         * @description Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+         * @description Roles admin, owner, finance. customer_id, exempt_reason and certificate_number are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to the customer's primary branch's business day, expiry_date is a YYYY-MM-DD string on or after effective_date, and issuing_state is a two letter code when sent (any invalid field answers 400 naming the field). A customer outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxExemptionCreate"];
         delete?: never;
@@ -9049,6 +9221,26 @@ export interface paths {
         get: operations["taxExemptionList"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/exemptions/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a tax exemption
+         * @description Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, ended) but exempts no sale. An unknown id answers 404; a certificate that was already ended answers 409 already_ended. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+         */
+        post: operations["taxExemptionEnd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10180,7 +10372,7 @@ export interface components {
             api_key: string;
             revision?: number;
         };
-        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. */
+        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server. */
         StaffMember: {
             /** Format: uuid */
             id: string;
@@ -10195,6 +10387,17 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             modules: string[];
+            counter_pin_set: boolean;
+            locked: boolean;
+        };
+        /** @description The PIN the admin typed. It rides the request once and never logs. */
+        AdminCounterPINRequest: {
+            pin: string;
+        };
+        /** @description The two facts the staff screen shows of a counter PIN, and nothing else. */
+        CounterPINAnswer: {
+            counter_pin_set: boolean;
+            locked: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         StaffPage: {
@@ -10825,6 +11028,8 @@ export interface components {
             payment_terms: components["schemas"]["PaymentTermsRef"];
             /** @description Whether an order of this customer must carry a purchase order number. */
             po_required: boolean;
+            /** @description Whether every charge sale at the counter for this customer names a job. */
+            job_required: boolean;
             /** @description Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer. */
             named_buyer_required: boolean;
             /**
@@ -10884,6 +11089,7 @@ export interface components {
              */
             payment_terms_id?: string;
             po_required?: boolean;
+            job_required?: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -10897,7 +11103,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
+        /** @description The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused. */
         CustomerUpdateRequest: {
             account_number: string;
             name: string;
@@ -10930,6 +11136,7 @@ export interface components {
              */
             payment_terms_id: string;
             po_required: boolean;
+            job_required: boolean;
             /** @description Optional; left out keeps the value on a PUT (false on create). */
             named_buyer_required?: boolean;
             /**
@@ -11076,6 +11283,58 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        Alert: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The alert speaks in the counter's customer panel. */
+            show_at_counter: boolean;
+            /** @description The alert speaks on the order page. */
+            show_at_orders: boolean;
+            /** @description A warning only: the counter has to read it and say so before the sale is taken. */
+            acknowledge_required: boolean;
+            /** @description The signed-in user who left the alert. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The signed-in user who called the alert off; null while it is open. */
+            ended_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the alert was called off; null while it is open.
+             */
+            ended_at: string | null;
+            /**
+             * Format: int64
+             * @description Moves when the alert is ended.
+             */
+            revision: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        AlertPage: {
+            items: components["schemas"]["Alert"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description The body of an alert to leave. The author is the signed-in user, never the body. */
+        AlertRequest: {
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_counter?: boolean;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_orders?: boolean;
+            /** @description Defaults to false; only a warning may ask to be acknowledged. */
+            acknowledge_required?: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ContactPage: {
@@ -14559,6 +14818,40 @@ export interface components {
              * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
              */
             deposit_unapplied_cents: number;
+            /**
+             * Format: int64
+             * @description Everything taken on the order (deposits), applied and unapplied both.
+             */
+            deposit_total_cents: number;
+            /**
+             * Format: int64
+             * @description The order total less everything taken on it: what the customer still owes on the order.
+             */
+            balance_due_after_deposits_cents: number;
+            /** @description The posted payments taken against this order (deposits), oldest first, each with the invoices it settled. */
+            deposits: {
+                /** Format: uuid */
+                id: string;
+                /** @description PAY-000001, the payment's own number. */
+                number: string;
+                /** Format: date */
+                received_on: string;
+                /** @enum {string} */
+                method: "cash" | "check" | "ach" | "other" | "card";
+                /** Format: int64 */
+                amount_cents: number;
+                /** Format: int64 */
+                unapplied_cents: number;
+                reference: string | null;
+                applications: {
+                    /** Format: uuid */
+                    invoice_id: string;
+                    /** Format: int64 */
+                    amount_cents: number;
+                    /** Format: date */
+                    applied_on: string;
+                }[];
+            }[];
             /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
             ship_to: {
                 /** Format: uuid */
@@ -14957,6 +15250,11 @@ export interface components {
             order_id?: string;
             /** Format: uuid */
             job_id?: string;
+            /**
+             * Format: uuid
+             * @description The open counter till session a cash or check counter deposit rides.
+             */
+            till_session_id?: string;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {
@@ -16088,6 +16386,8 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken. */
+            acknowledged_alert_ids?: string[];
         };
         PosTenderRequest: {
             method: components["schemas"]["PosTenderMethod"];
@@ -16125,6 +16425,46 @@ export interface components {
             reconciliation_reference?: string;
             /** @description Why the record was made */
             reason: string;
+        };
+        /** @description One open refund claim in the manager's list (CP-06). */
+        PosRefundIntentSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** @description The claim's sale, POS-000001. */
+            sale_number: string;
+            /** Format: uuid */
+            tender_id: string;
+            /** @enum {string} */
+            tender_method: "cash" | "check" | "card" | "account" | "store_credit";
+            /**
+             * Format: int64
+             * @description The claim's amount.
+             */
+            amount_cents: number;
+            /** @enum {string} */
+            act: "void" | "return" | "payback";
+            /**
+             * @description PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns.
+             * @enum {string}
+             */
+            state: "PENDING" | "FAILED";
+            /**
+             * Format: int64
+             * @description What the tender's posted payment still holds unapplied; the credit a pay back returns.
+             */
+            held_credit_cents: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PosRefundIntentPage: {
+            items: components["schemas"]["PosRefundIntentSummary"][];
+            /** @description Null: the page is the whole open set. */
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
         PosRefundIntentResolved: {
             /** Format: uuid */
@@ -16236,10 +16576,10 @@ export interface components {
             /** @enum {string} */
             verdict: "allowed" | "blocked";
             /**
-             * @description Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override.
+             * @description Empty when plainly allowed; the blocker code the completion refuses with when blocked (account_hold: the AR core's standing hold record); manager_override when allowed by a live override.
              * @enum {string}
              */
-            reason: "" | "credit_hold" | "credit_limit" | "cash_only_terms" | "manager_override";
+            reason: "" | "credit_hold" | "credit_limit" | "cash_only_terms" | "account_hold" | "manager_override";
             /** @description The verdict in plain words, with the amount. */
             message: string;
             /**
@@ -16292,6 +16632,17 @@ export interface components {
             /** @description The payment shapes the server takes from this customer now, in the order the counter shows them. */
             payment_options: components["schemas"]["PosTenderMethod"][];
             on_account: components["schemas"]["PosOnAccountVerdict"];
+            /** @description The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken. */
+            alerts: components["schemas"]["PosCounterAlert"][];
+        };
+        PosCounterAlert: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The counter has to read this warning and say so before the sale is taken. */
+            acknowledge_required: boolean;
         };
         PosOverrideRequest: {
             /** @enum {string} */
@@ -16302,6 +16653,8 @@ export interface components {
              * @description The most the manager approves: the account portion, or the largest check.
              */
             cap_cents: number;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one override: the manager it names is the approver, recorded by name. Absent on the signed in manager's own path. */
+            approval_token?: string;
         };
         PosOverride: {
             /** Format: uuid */
@@ -16372,6 +16725,8 @@ export interface components {
             /** @description Tender for the difference only. Not store_credit (the returned credit is applied itself). */
             tenders?: components["schemas"]["PosTenderRequest"][];
             picked_up_by?: string | null;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
+            acknowledged_alert_ids?: string[];
         };
         PosExchangeFigures: {
             /**
@@ -16517,6 +16872,12 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             item_count: number;
+            /** @description The account the sale names; null on a walk-in. */
+            customer_name: string | null;
+            /** @description The invoice's number; null until the sale completes. */
+            invoice_number: string | null;
+            /** @description The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp. */
+            business_day: string;
         };
         /** @description The full sale: the head with its lines and tenders. */
         PosTransaction: {
@@ -16587,6 +16948,17 @@ export interface components {
              * @description The ship to a delivered sale carries.
              */
             ship_to_id: string | null;
+            /** @description Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it. */
+            returned_quantities?: {
+                [key: string]: string;
+            };
+            /** @description Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day. */
+            tax_exemption?: {
+                /** @description The certificate's number as the counter shows it. */
+                certificate_number?: string;
+                /** @description The certificate's last day, YYYY-MM-DD; absent when it does not expire. */
+                expiry_day?: string;
+            } | null;
             lines: components["schemas"]["PosLineItem"][];
             tenders: components["schemas"]["PosTender"][];
         };
@@ -16602,6 +16974,8 @@ export interface components {
             name: string;
             /** @description The account asks for a purchase order on a charge sale (409 po_required at completion without one). */
             po_required: boolean;
+            /** @description The account asks for a job on a charge sale (409 job_required at completion without one). */
+            job_required: boolean;
             /**
              * Format: int64
              * @description Null: no limit. 0: no credit.
@@ -16873,8 +17247,10 @@ export interface components {
             reason_code?: components["schemas"]["PosTillReasonCode"] | null;
             /** @description Required, not blank, when the reason_code is other. */
             note?: string | null;
-            /** @description A pickup's second person, required there and absent for any other kind. */
+            /** @description A pickup's second person, required there and absent for any other kind. With an approval_token the manager is named by their approval, not typed. */
             taken_by?: string | null;
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one pickup: the manager it names is the taker. Only a pickup carries one. */
+            approval_token?: string;
         };
         /** @enum {string} */
         PosTillMovementKind: "safe_drop" | "pickup" | "paid_in" | "paid_out";
@@ -16910,7 +17286,52 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        PosStepUpRequest: {
+            /** @enum {string} */
+            act: "override" | "pickup" | "signoff";
+            /**
+             * @description The override's kind; required when the act is an override, absent otherwise. The approval binds it.
+             * @enum {string}
+             */
+            kind?: "account" | "check" | "refund_method";
+            /** @description The manager's staff number or staff id. */
+            manager: string;
+            /** @description The manager's counter PIN. Verified in constant time, never logged. */
+            pin: string;
+            /**
+             * Format: uuid
+             * @description The act's target: the sale (an override) or the till session (a pickup, a sign off).
+             */
+            target_id: string;
+            /**
+             * Format: int64
+             * @description The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it.
+             */
+            amount_cents?: number;
+        } & (unknown & unknown & unknown);
+        PosStepUpApproval: {
+            /** @description The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash. */
+            token: string;
+            /** @description The manager's name, for the screen to say who approved. */
+            manager_name: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PosStepUpManager: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            staff_no: string;
+            role: string;
+        };
+        PosStepUpManagerPage: {
+            items: components["schemas"]["PosStepUpManager"][];
+            next_cursor: string | null;
+            limit: number;
+        };
         PosTillSignoffRequest: {
+            /** @description A manager's step up approval (POST /pos/step-up), spent by this one sign off: the manager it names is the signer. Absent, the signed in caller needs the finance or owner role. */
+            approval_token?: string;
             /** @description Why the variance is accepted; not blank. */
             reason: string;
         };
@@ -16949,6 +17370,55 @@ export interface components {
              * @description Null clears the branch's override.
              */
             variance_threshold_cents: number | null;
+        };
+        PosSettings: {
+            /**
+             * Format: int64
+             * @description The settings resource's revision; a write names it (If-Match and/or the body's revision).
+             */
+            revision: number;
+            rules: {
+                /**
+                 * Format: int64
+                 * @description The database wide check limit; null is no limit. A customer's own limit wins over it.
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /**
+                     * @description Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale.
+                     * @enum {string}
+                     */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description The figure an over_amount rule names, read against the sale's checks in total; null on the other two.
+                     */
+                    over_cents: number | null;
+                };
+            };
+        };
+        PosSettingsRequest: {
+            rules: {
+                /**
+                 * Format: int64
+                 * @description Null clears the limit (no limit).
+                 */
+                check_limit_cents: number | null;
+                check_id_required: {
+                    /** @enum {string} */
+                    mode: "never" | "every_check" | "over_amount";
+                    /**
+                     * Format: int64
+                     * @description Read only when mode is over_amount; dropped otherwise.
+                     */
+                    over_cents?: number | null;
+                };
+            };
+            /**
+             * Format: int64
+             * @description The revision this write rides; If-Match serves the same role.
+             */
+            revision?: number;
         };
         PosEndOfDayCloseRequest: {
             /** Format: uuid */
@@ -17128,6 +17598,10 @@ export interface components {
                 [key: string]: number;
             };
             expected_by_method: {
+                [key: string]: number;
+            };
+            /** @description The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. Always present on a live read; a Z report frozen before the figure existed carries none in its stored payload. */
+            refunds_by_method: {
                 [key: string]: number;
             };
             /** @description The signed variance cents per lowercase method; present once the drawer is counted. */
@@ -19351,13 +19825,23 @@ export interface components {
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description The certificate's standing on the customer's branch's business day, said by the server (the same window rule the counter and the orders read), so no screen computes a day of its own.
+             * @enum {string}
+             */
+            status?: "active" | "expired" | "future" | "ended";
         };
         TaxExemptionCreateRequest: {
             /** Format: uuid */
             customer_id: string;
             exempt_reason: string;
-            certificate_number?: string;
+            certificate_number: string;
             issuing_state?: string;
+            /**
+             * Format: date
+             * @description The certificate's first day, YYYY-MM-DD; defaults to today.
+             */
+            effective_date?: string;
             /**
              * Format: date
              * @description YYYY-MM-DD.
@@ -21543,6 +22027,98 @@ export interface operations {
             500: components["responses"]["WireInternalError"];
         };
     };
+    adminSetStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCounterPINRequest"];
+            };
+        };
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminClearStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminUnlockStaffCounterPIN: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The two PIN facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterPINAnswer"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     adminGrantModule: {
         parameters: {
             query?: never;
@@ -23312,6 +23888,127 @@ export interface operations {
             409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerListAlerts: {
+        parameters: {
+            query?: {
+                state?: "open" | "ended" | "all";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerCreateAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertRequest"];
+            };
+        };
+        responses: {
+            /** @description The created alert. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerEndAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                alertId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ended alert. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -32661,6 +33358,7 @@ export interface operations {
                 register_id?: string;
                 date?: string;
                 status?: "open" | "held" | "completed" | "voided";
+                q?: string;
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -33547,6 +34245,72 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posStepUp: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description The approval the one act spends, naming the manager. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpApproval"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posStepUpManagers: {
+        parameters: {
+            query: {
+                /** @description The act the approval is for. */
+                act: "override" | "pickup" | "signoff";
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The managers, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosStepUpManagerPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTillPolicyGet: {
         parameters: {
             query: {
@@ -33906,6 +34670,100 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRefundIntentList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open claims. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRefundIntentPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules and their revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posSettingsPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The rules now in force, with the revision the write made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -38679,6 +39537,31 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    taxExemptionEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The certificate is ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     taxExemptionDelete: {
         parameters: {
             query?: never;
@@ -38701,6 +39584,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };

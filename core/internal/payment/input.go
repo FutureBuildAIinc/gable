@@ -24,16 +24,17 @@ type ApplicationRequest struct {
 // CreateRequest is the body of POST /api/v1/payments. A payment with no
 // applications is unapplied cash held in 2200.
 type CreateRequest struct {
-	CustomerID   *string              `json:"customer_id"`
-	BranchID     *string              `json:"branch_id"`
-	AmountCents  json.RawMessage      `json:"amount_cents"`
-	Method       *string              `json:"method"`
-	Reference    *string              `json:"reference"`
-	Notes        *string              `json:"notes"`
-	ReceivedOn   *string              `json:"received_on"`
-	OrderID      *string              `json:"order_id"`
-	JobID        *string              `json:"job_id"`
-	Applications []ApplicationRequest `json:"applications"`
+	CustomerID    *string              `json:"customer_id"`
+	BranchID      *string              `json:"branch_id"`
+	AmountCents   json.RawMessage      `json:"amount_cents"`
+	Method        *string              `json:"method"`
+	Reference     *string              `json:"reference"`
+	Notes         *string              `json:"notes"`
+	ReceivedOn    *string              `json:"received_on"`
+	OrderID       *string              `json:"order_id"`
+	JobID         *string              `json:"job_id"`
+	TillSessionID *string              `json:"till_session_id"`
+	Applications  []ApplicationRequest `json:"applications"`
 }
 
 // CardRequest is the body of POST /api/v1/payments/card: the same fields, a
@@ -51,17 +52,18 @@ type CardRequest struct {
 
 // Input is a validated payment ready for the service.
 type Input struct {
-	CustomerID   uuid.UUID
-	BranchID     *uuid.UUID
-	AmountCents  int64
-	Method       PaymentMethod
-	TokenID      string
-	Reference    string
-	Notes        string
-	ReceivedOn   *time.Time
-	OrderID      *uuid.UUID
-	JobID        *uuid.UUID
-	Applications []account.ApplyLine
+	CustomerID    uuid.UUID
+	BranchID      *uuid.UUID
+	AmountCents   int64
+	Method        PaymentMethod
+	TokenID       string
+	Reference     string
+	Notes         string
+	ReceivedOn    *time.Time
+	OrderID       *uuid.UUID
+	JobID         *uuid.UUID
+	TillSessionID *uuid.UUID
+	Applications  []account.ApplyLine
 }
 
 func trim(s *string) string {
@@ -141,6 +143,14 @@ func (req *CreateRequest) Parse() (*Input, error) {
 		in.Method = m
 	} else {
 		v.Check(false, "method", "must be one of: "+strings.Join(recordableMethods, ", "))
+	}
+	if req.TillSessionID != nil {
+		if id, ok := v.UUID("till_session_id", req.TillSessionID, false); ok {
+			in.TillSessionID = &id
+		}
+	}
+	if in.TillSessionID != nil && in.Method != "" {
+		v.Check(in.Method == PaymentMethodCash || in.Method == PaymentMethodCheck, "method", "a till session takes cash or check")
 	}
 	in.Reference, in.Notes = trim(req.Reference), trim(req.Notes)
 	v.Check(len(in.Reference) <= 128, "reference", "must be at most 128 characters")

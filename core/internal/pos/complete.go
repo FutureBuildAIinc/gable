@@ -85,7 +85,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 	if s.tax == nil || !s.tax.ProviderConfigured() {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, customerID)
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 // tax provider call happen before the transaction opens; their results are
 // written inside it.
 func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
-	tenders []TenderIn, pickedUpBy, actor string) (*Sale, error) {
+	tenders []TenderIn, pickedUpBy, actor string, acknowledged []uuid.UUID) (*Sale, error) {
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
@@ -166,7 +166,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	}
 	estimate := priced
 	if estimate == nil {
-		exempt, err := s.repo.CustomerExempt(ctx, realCustomerID)
+		exempt, err := s.exemptOn(ctx, pre.BranchID, realCustomerID)
 		if err != nil {
 			return nil, err
 		}
@@ -215,10 +215,24 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("po_required",
 				"the customer requires a purchase order number: name it on the sale before charging it to the account")
 		}
+		// The job the same account rule asks for, with its own words when
+		// the requirement cannot be met at the counter at all.
+		if err := jobRequiredRefusal(facts, pre.JobID); err != nil {
+			return nil, err
+		}
 		if err := s.checkBuyer(ctx, realCustomerID, facts, pre.BuyerContactID, accountPortion); err != nil {
 			return nil, err
 		}
 		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, sums.storeCredit, false, actor); err != nil {
+			return nil, err
+		}
+	}
+	// The customer's counter alerts that ask to be acknowledged: the clerk
+	// has to read them and say so before the sale is taken. The check runs
+	// before any card is charged, and the transaction repeats it under the
+	// customer's lock.
+	if pre.CustomerID != nil {
+		if err := s.checkAlertAcknowledged(ctx, realCustomerID, acknowledged); err != nil {
 			return nil, err
 		}
 	}
@@ -239,6 +253,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 	}
 	if err := s.checkTenderLimits(ctx, saleID, realCustomerID, tenders, false, actor); err != nil {
+		return nil, err
+	}
+	// The ID rule reads the same settings the limit does, before any card is
+	// charged: a check that needs the ID is refused before money moves.
+	if err := s.checkTenderIDRule(ctx, realCustomerID, tenders); err != nil {
 		return nil, err
 	}
 	// Card charges: outside the transaction, with the sale's own currency
@@ -301,7 +320,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -325,7 +344,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 // come with it.
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
-	charges []*chargeResult, priced *providerTax, ex *exchangeLeg) (*Sale, error) {
+	charges []*chargeResult, priced *providerTax, ex *exchangeLeg, acknowledged []uuid.UUID) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -477,6 +496,17 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
 		}
 
+		// Section 11 step 1a: the customer's credit and alert serialization lock,
+		// taken right after the sale row for every sale naming a customer (whether
+		// paid on account or by cash, check, card or store credit), before the
+		// account exposure read, the counter alerts read, the open credit memos
+		// (step 3) and the inventory rows (step 6).
+		if sale.CustomerID != nil {
+			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
+				return err
+			}
+		}
+
 		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
 		// customer's credit advisory lock (section 11, step 1a, taken right
 		// after the sale row): without it two concurrent ACCOUNT sales each
@@ -490,9 +520,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return conflict("walk_in_account",
 					"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
 			}
-			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
-				return err
-			}
 			facts, err := s.repo.CustomerFacts(ctx, customerID)
 			if err != nil {
 				return err
@@ -500,6 +527,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
 				return conflict("po_required",
 					"the customer requires a purchase order number: name it on the sale before charging it to the account")
+			}
+			if err := jobRequiredRefusal(facts, sale.JobID); err != nil {
+				return err
 			}
 			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
 				return err
@@ -509,10 +539,29 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 		}
 
+		// The counter alerts of the named customer, read under the
+		// transaction's own locks: a warning that asks to be acknowledged
+		// must be named in the completion, or the sale is refused here. The
+		// check outside the transaction ran before any card was charged; this
+		// one is the authority.
+		var counterAlerts []CounterAlert
+		if sale.CustomerID != nil {
+			counterAlerts, err = s.repo.CounterAlerts(ctx, customerID)
+			if err != nil {
+				return err
+			}
+			if err := alertAcknowledged(counterAlerts, acknowledged); err != nil {
+				return err
+			}
+		}
+
 		// The checks held to the customer's check limit, and the customer's
 		// open credit memos locked in id order (section 11, step 3) when the
 		// sale pays with store credit: both before the stock moves.
 		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+			return err
+		}
+		if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
 			return err
 		}
 		var storeMemos []openMemo
@@ -812,6 +861,17 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				}}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
+			// The acknowledgements the clerk gave at the counter, on the sale:
+			// one row per alert, naming the alert and the cashier who read it.
+			for _, id := range acknowledgedAlerts(counterAlerts, acknowledged) {
+				if err := s.auditLog.Log(ctx, audit.Entry{
+					Action: "pos.alert.acknowledged", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
+					Changes: map[string]any{
+						"alert_id": id, "customer_id": sale.CustomerID, "acknowledged_by": actor,
+					}}); err != nil {
+					return fmt.Errorf("failed to write the audit row: %w", err)
+				}
+			}
 		}
 
 		// The events, last (ADR 0005 section 11 step 10): the invoice's,
@@ -1098,4 +1158,49 @@ type exchangeLeg struct {
 	creditCents  int64
 	appliedCents int64
 	totalCents   int64
+}
+
+// checkAlertAcknowledged refuses a sale whose customer has a counter warning
+// that asks to be acknowledged and the clerk did not acknowledge it. The
+// walk-in customer has no alerts: the counter reads them off the named
+// account.
+func (s *Service) checkAlertAcknowledged(ctx context.Context, customerID uuid.UUID, acknowledged []uuid.UUID) error {
+	alerts, err := s.repo.CounterAlerts(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	return alertAcknowledged(alerts, acknowledged)
+}
+
+// alertAcknowledged is the rule itself: every counter warning that asks to
+// be acknowledged has to be named in the completion, or the sale is refused.
+func alertAcknowledged(alerts []CounterAlert, acknowledged []uuid.UUID) error {
+	seen := make(map[uuid.UUID]bool, len(acknowledged))
+	for _, id := range acknowledged {
+		seen[id] = true
+	}
+	for _, a := range alerts {
+		if !a.AcknowledgeRequired || seen[a.ID] {
+			continue
+		}
+		return conflict("alert_unacknowledged",
+			"the customer has a warning the counter must acknowledge before this sale is taken: "+a.Text)
+	}
+	return nil
+}
+
+// acknowledgedAlerts names the customer's open counter alerts the clerk
+// acknowledged: the rows the sale records.
+func acknowledgedAlerts(alerts []CounterAlert, acknowledged []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(acknowledged))
+	for _, id := range acknowledged {
+		seen[id] = true
+	}
+	out := []uuid.UUID{}
+	for _, a := range alerts {
+		if seen[a.ID] {
+			out = append(out, a.ID)
+		}
+	}
+	return out
 }

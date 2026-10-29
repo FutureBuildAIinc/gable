@@ -46,10 +46,13 @@ export interface PaymentApplicationRequest {
 
 export interface CreatePaymentRequest {
     customer_id: string;
+    branch_id?: string;
     amount_cents: number;
     method: PaymentMethod;
     reference?: string;
     notes?: string;
+    order_id?: string;
+    till_session_id?: string;
     applications?: PaymentApplicationRequest[];
 }
 

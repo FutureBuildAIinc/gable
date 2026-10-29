@@ -717,7 +717,7 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 // fallback to a rate.
 func (s *Service) applyTotalsAndTax(ctx context.Context, o *Order) error {
 	totals := salesdoc.SumTotals(plainLines(o.Lines))
-	exempt, err := s.repo.CustomerExempt(ctx, o.CustomerID)
+	exempt, err := s.exemptOn(ctx, o.BranchID, o.CustomerID)
 	if err != nil {
 		return err
 	}
@@ -745,7 +745,7 @@ func (s *Service) applyTotalsAndTax(ctx context.Context, o *Order) error {
 // runs as well inside a transaction as out.
 func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 	totals := salesdoc.SumTotals(plainLines(o.Lines))
-	exempt, err := s.repo.CustomerExempt(ctx, o.CustomerID)
+	exempt, err := s.exemptOn(ctx, o.BranchID, o.CustomerID)
 	if err != nil {
 		return err
 	}
@@ -779,6 +779,22 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 	o.TaxCents = salesdoc.TaxAt(totals.TaxableCents, scaled)
 	o.TotalCents = o.SubtotalCents + o.TaxCents
 	return nil
+}
+
+// exemptOn reads whether the customer's certificate exempts a sale on the
+// branch's business day, through tax.ExemptionCovering: the one window rule
+// (active, effective on or before the day, not yet expired) the order path
+// and the counter share (CP-10).
+func (s *Service) exemptOn(ctx context.Context, branchID, customerID uuid.UUID) (bool, error) {
+	day, err := s.repo.BranchLocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return false, err
+	}
+	standing, err := s.repo.CustomerExemption(ctx, customerID, day)
+	if err != nil {
+		return false, err
+	}
+	return standing != nil, nil
 }
 
 func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdoc.TaxInputs, *taxzone.Snapshot, error) {
@@ -1185,7 +1201,7 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to OrderStatus, 
 	var priced *providerTax
 	if to == StatusConfirmed && s.tax != nil && s.tax.Configured() {
 		if cur, err := s.repo.GetOrder(ctx, id); err == nil {
-			exempt, err := s.repo.CustomerExempt(ctx, cur.CustomerID)
+			exempt, err := s.exemptOn(ctx, cur.BranchID, cur.CustomerID)
 			if err != nil {
 				return nil, err
 			}
@@ -1641,7 +1657,7 @@ func (s *Service) refreshTax(ctx context.Context, o *Order, priced *providerTax)
 		return nil
 	}
 	totals := salesdoc.SumTotals(plainLines(o.Lines))
-	exempt, err := s.repo.CustomerExempt(ctx, o.CustomerID)
+	exempt, err := s.exemptOn(ctx, o.BranchID, o.CustomerID)
 	if err != nil {
 		return err
 	}
@@ -1845,7 +1861,7 @@ func (s *Service) PrepareQuoteTax(ctx context.Context, src *QuoteSource) (*Provi
 	if !facts.Exists {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, src.CustomerID)
+	exempt, err := s.exemptOn(ctx, src.BranchID, src.CustomerID)
 	if err != nil {
 		return nil, err
 	}

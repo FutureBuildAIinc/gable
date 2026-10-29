@@ -197,9 +197,13 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT p.method, COALESCE(SUM(ROUND(p.amount * 100)::bigint), 0)
 		FROM payments p
-		JOIN pos_tenders pt ON pt.payment_id = p.id
-		JOIN pos_transactions t ON t.id = pt.transaction_id
-		WHERE t.till_session_id = $1 AND t.status = 'COMPLETED' AND p.status = 'POSTED'
+		WHERE p.status = 'POSTED'
+			AND (p.till_session_id = $1
+				OR EXISTS (
+					SELECT 1 FROM pos_tenders pt
+					JOIN pos_transactions t ON t.id = pt.transaction_id
+					WHERE pt.payment_id = p.id AND t.till_session_id = $1 AND t.status = 'COMPLETED'
+				))
 		GROUP BY p.method`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's payments: %w", err)
@@ -303,19 +307,21 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 	return z, nil
 }
 
-func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
-	// The day's bounds are absolute instants in the date's own zone: a
-	// timestamptz never meets a date cast, whose midnight belongs to the
-	// database session's zone, not the caller's (the sale list's rule).
-	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	end := start.AddDate(0, 0, 1)
+// zReportZoneSQL is the zone of a Z report row's branch, UTC when it has none.
+const zReportZoneSQL = `COALESCE((SELECT l.timezone FROM locations l WHERE l.id = z.branch_id), 'UTC')`
+
+func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date string) ([]ZReport, error) {
+	// A report's business day is the day it was generated on in its branch's
+	// own zone (UTC when it has none), the rule the branch day uses: never a
+	// UTC day, and never the server's clock. No date is the branch's today.
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, till_session_id, register_id, branch_id, ROUND(over_short * 100)::bigint, payload, generated_at
-		FROM till_z_reports
+		FROM till_z_reports z
 		WHERE ($1 = '' OR register_id = $1)
-			AND (generated_at >= $2 AND generated_at < $3)
-			AND `+middleware.Wall("", 4, 5)+`
-		ORDER BY generated_at DESC`, registerID, start, end, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+			AND (generated_at AT TIME ZONE `+zReportZoneSQL+`)::date
+				= COALESCE(NULLIF($2::text, '')::date, (NOW() AT TIME ZONE `+zReportZoneSQL+`)::date)
+			AND `+middleware.Wall("", 3, 4)+`
+		ORDER BY generated_at DESC`, registerID, date, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
 	}

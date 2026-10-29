@@ -210,7 +210,7 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 		cur := f.readJSON(t, path)
 		body := map[string]any{"revision": cur["revision"]}
 		for _, k := range []string{"account_number", "name", "email", "phone", "address", "is_active",
-			"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
+			"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required", "job_required"} {
 			body[k] = cur[k]
 		}
 		for k, v := range change(cur) {

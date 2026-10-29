@@ -81,6 +81,29 @@ func (r *PostgresRepository) Buyers(ctx context.Context, customerID uuid.UUID) (
 	return out, rows.Err()
 }
 
+// CounterAlerts lists the customer's alerts that speak at the counter: the
+// ones still open that are marked for the counter, oldest first.
+func (r *PostgresRepository) CounterAlerts(ctx context.Context, customerID uuid.UUID) ([]CounterAlert, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, kind, text, acknowledge_required
+		FROM customer_alerts
+		WHERE customer_id = $1 AND ended_at IS NULL AND show_at_counter
+		ORDER BY created_at, id`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the counter alerts: %w", err)
+	}
+	defer rows.Close()
+	out := []CounterAlert{}
+	for rows.Next() {
+		var a CounterAlert
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Text, &a.AcknowledgeRequired); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // BuyerOf reads one roster buyer of the customer: false when the contact is
 // not the customer's, is inactive, or is not flagged as a buyer.
 func (r *PostgresRepository) BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error) {

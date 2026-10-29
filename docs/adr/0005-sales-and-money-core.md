@@ -17,6 +17,12 @@ module recipe, the `httpx` helpers it names (`Extend`, `CheckLineSign`,
 `testutil.RequireDBMaxConns`, and the quote convert route whose refusal of
 pairs other than 1 and 1 section 5.8 lifts.
 
+ADR 0011 (the offline counter, row CP-13) supersedes in part, for the
+counter only, the rule that money never queues offline: section 3's one
+exception for the counter's offline sync and the offline sync lines of
+section 14.2 C2-5 are replaced by ADR 0011's offline posting, and section 11
+is amended below to name the lock kinds and locks that record takes.
+
 ADR 0006 (units and pricing, item C3-0) supersedes five pieces of this
 record from the moment its item C3-2B lands: the units row of section 1, the
 `uom` rule of section 2.2, the unit of section 5.4's allocation invariant
@@ -1284,6 +1290,13 @@ The order is by kind, whatever document the path names:
    anything else; no other act locks a request row (`/allocate` never
    touches the queue, and delivery completion only inserts);
 
+0a. the register's device row (`pos_register_devices`, ADR 0011 section
+   6.1) `FOR UPDATE`, taken first by an offline sync and by the resolution of
+   an offline exception, so two syncs of one register serialize;
+
+0b. the offline exception row (`pos_offline_exceptions`) `FOR UPDATE`,
+   taken only by a resolution of that exception, after 0a;
+
 1. the order row or the counter sale row the act touches (an invoice void
    locks its order here, before the invoice). The order row lock is `FOR NO
    KEY UPDATE`: it serializes every act on the order, and it stays
@@ -1291,14 +1304,29 @@ The order is by kind, whatever document the path names:
    row, so the allocation subscriber's request insert (5.4) never waits
    behind a confirm;
 
-1a. the customer's credit serialization, taken by the acts that read a
-   customer's credit exposure (the confirm, the hold release and the
-   fulfilment) right after the order row: a transaction scoped advisory lock
-   keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
-   id>`). Without it two concurrent confirms of one customer's orders each read
-   an exposure that does not yet count the other (a draft is not counted) and
-   both pass the check. It is not a row lock, so it adds no edge to the order
-   below: the acts that take it hold their own order row and take inventory
+1b. the counter's till session row (`LockTillSession`, `FOR SHARE`), which
+   a counter completion takes right after the sale row and an offline
+   exception write takes after 0a; and the branch day advisory lock
+   (`LockBranchDay`, keyed on `till-day:<branch id>`), which a till open, a
+   day close and an offline late post take at this place (ADR 0011 section
+   3.2);
+
+1a. the customer's credit and counter-alert serialization, taken by the acts
+   that read a customer's credit exposure or counter warnings (the confirm,
+   the hold release, the fulfilment, the counter sale completion for a named
+   customer, and the customer alert writes) right after the order or sale
+   row, and by the AR core's credit hold acts (place, override, release and
+   the sweep's placement and lift, in customer id order), which take it
+   before any `credit_holds` row and before the customer row at step 7 so a
+   hold cannot commit inside the window a counter charge sale's completion
+   leaves between its fact read and its commit: a transaction scoped advisory
+   lock keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
+   id>`). Without it two concurrent confirms of one customer's orders each
+   read an exposure that does not yet count the other (a draft is not
+   counted) and both pass the check, or an alert added while a counter sale
+   completes misses the completion's warning check. It is not a row lock, so
+   it adds no edge to the order below: the acts that take it hold their own
+   order or sale row and take inventory
    (step 6) after it, and the back order worker, which does not read credit,
    never takes it; the customer row (step 7) is left to the AR core as before,
    because locking it here would put a step 7 lock before step 6;
