@@ -456,12 +456,12 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	tenders, pickedUpBy, revision, err := req.parse()
+	tenders, pickedUpBy, revision, acknowledged, err := req.parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r))
+	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r), acknowledged)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

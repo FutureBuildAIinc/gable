@@ -92,6 +92,7 @@ const allowed: CounterStanding = {
     buyers: [{ id: 'b1', name: 'Ada Buyer', cap_cents: 5000 }, { id: 'b2', name: 'Bo Buyer', cap_cents: null }],
     check_limit_cents: 20000, payment_options: ['cash', 'check', 'card', 'account'],
     on_account: { verdict: 'allowed', reason: '', message: '', over_cents: null, ways_forward: [] },
+    alerts: [],
 };
 const blocked: CounterStanding = {
     ...allowed,

@@ -256,6 +256,9 @@ type Repository interface {
 	bumpPosSettingsRevision(ctx context.Context, to int64) error
 	Buyers(ctx context.Context, customerID uuid.UUID) ([]Buyer, error)
 	BuyerOf(ctx context.Context, customerID, contactID uuid.UUID) (*Buyer, bool, error)
+	// CounterAlerts are the customer's alerts that speak at the counter: the
+	// open ones marked for it.
+	CounterAlerts(ctx context.Context, customerID uuid.UUID) ([]CounterAlert, error)
 	SetSaleBuyer(ctx context.Context, saleID uuid.UUID, contactID *uuid.UUID) error
 	InsertSignature(ctx context.Context, sig *storedSignature) error
 	GetSignature(ctx context.Context, saleID uuid.UUID) (*storedSignature, bool, error)

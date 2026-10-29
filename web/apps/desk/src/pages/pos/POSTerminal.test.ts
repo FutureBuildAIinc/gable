@@ -150,7 +150,7 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'pos-change').textContent).toContain('$13.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }], []);
   });
 
   it('takes a split between two tenders as the added tender plus the entry', async () => {
@@ -167,7 +167,7 @@ describe('the counter as the Panels layout', () => {
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'cash', amount_cents: 5000 },
       { method: 'card', amount_cents: 3650 },
-    ]);
+    ], []);
   });
 
   it('charges the on account tender for the whole total once a customer with credit is named', async () => {
@@ -183,7 +183,7 @@ describe('the counter as the Panels layout', () => {
     await el.updateComplete;
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
   });
 
   it('keeps Pay off while the sale has no lines or the tenders fall short', async () => {
@@ -211,12 +211,12 @@ describe('the counter as the Panels layout', () => {
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }], []);
     await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledTimes(2);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }], []);
   });
 
   describe('the account refusal guards', () => {
@@ -322,7 +322,7 @@ describe('the counter as the Panels layout', () => {
       inner(el)._poText = 'PO-7';
       await el.updateComplete;
       await pay(el);
-      expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+      expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
     });
     it('rechecks at Pay an account tender already added to the list, after the PO is cleared', async () => {
       const el = await withCustomer(needsPO, 'PO-7');
@@ -1924,7 +1924,7 @@ describe('no tender until the cashier chooses one', () => {
     q(el, 'pos-pay').click();
     await settle();
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }], []);
     el.remove();
   });
 
@@ -2182,7 +2182,7 @@ describe('the counter hotkeys and their pinned legend', () => {
     const ev = await key(el, 'F12');
     expect(ev.defaultPrevented).toBe(true);
     await settle();
-    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }], []);
     el.remove();
   });
 
@@ -2436,7 +2436,7 @@ describe('a quantity change under tenders already added', () => {
     await settle();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 4, [
       { method: 'cash', amount_cents: 4000 }, { method: 'cash', amount_cents: 4650 },
-    ]);
+    ], []);
     el.remove();
   });
 
@@ -2542,7 +2542,7 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     await settle();
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 6000 },
-    ]);
+    ], []);
     el.remove();
   });
 
@@ -2621,7 +2621,7 @@ describe('PR 150 round 4: one rule for splits', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 5000 },
-    ]);
+    ], []);
     el.remove();
   });
 });
@@ -3022,7 +3022,7 @@ describe('the dealer check ID rule at the counter', () => {
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3,
-      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }]);
+      [{ method: 'check', amount_cents: 8650, id_checked: true, id_type: 'drivers_license' }], []);
     el.remove();
   });
 
@@ -3054,7 +3054,7 @@ describe('the dealer check ID rule at the counter', () => {
     expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
       { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
       { method: 'check', amount_cents: 4325, id_checked: true, id_type: 'drivers_license' },
-    ]);
+    ], []);
     el.remove();
   });
 

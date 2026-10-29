@@ -21,10 +21,11 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import type { Payment } from '../../types/payment.ts';
 import { paymentService } from '../../services/paymentService.ts';
-import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin, FileCheck } from 'lucide';
+import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin, Bell, FileCheck } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
+import './AlertList.ts';
 import './ShipToList.ts';
 import './CustomerForm.ts';
 import './ActivityFeed.ts';
@@ -54,7 +55,7 @@ export class GableAccountDetail extends LitElement {
     @state() private voidReason = '';
     @state() private paymentBusy = false;
     @state() private loading = true;
-    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'crm' = 'ledger';
+    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
     @state() private salesTeam: SalesPerson[] = [];
     @state() private showSpDropdown = false;
@@ -199,7 +200,7 @@ export class GableAccountDetail extends LitElement {
 
     /** A tab switch; the payments tab reads the unapplied cash and the open
      * invoices once it is first shown, not on every account load. */
-    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'crm') {
+    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm') {
         this.activeTab = tab;
         if (tab === 'payments' && !this.paymentsLoaded && this.customer && !this.ledgerNote) {
             this.paymentsLoaded = true;
@@ -301,7 +302,7 @@ export class GableAccountDetail extends LitElement {
         this.showSpDropdown = !this.showSpDropdown;
     }
 
-    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
+    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm', label: string, iconData: typeof Activity) {
         const active = this.activeTab === tabId;
         return html`
             <button
@@ -642,6 +643,7 @@ export class GableAccountDetail extends LitElement {
                         ${this.renderTab('shipto', 'Ship-to Addresses', MapPin)}
                         ${this.renderTab('exemption', 'Tax Exemption', FileCheck)}
                         ${this.renderTab('contacts', 'Contacts', Users)}
+                        ${this.renderTab('alerts', 'Alerts', Bell)}
                         ${this.renderTab('crm', 'CRM Activity', MessageSquare)}
                     </div>
 
@@ -774,6 +776,12 @@ export class GableAccountDetail extends LitElement {
                         ${this.activeTab === 'contacts' ? html`
                             <div class="mt-4">
                                 <gable-contact-list customerId=${customer.id}></gable-contact-list>
+                            </div>
+                        ` : nothing}
+
+                        ${this.activeTab === 'alerts' ? html`
+                            <div class="mt-4">
+                                <gable-alert-list customerId=${customer.id}></gable-alert-list>
                             </div>
                         ` : nothing}
 

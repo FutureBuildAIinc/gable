@@ -12,10 +12,12 @@ import '../../components/orders/DepositModal.ts';
 import { paymentService } from '../../services/paymentService.ts';
 import type { OrderDeposit } from '../../types/order.ts';
 import { OrderService } from '../../services/OrderService.ts';
+import { CustomerService } from '../../services/CustomerService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import { type Order, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
+import type { Alert } from '../../types/customer.ts';
 import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen, Wallet } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
@@ -35,6 +37,8 @@ export class GableOrderDetail extends LitElement {
     @state() private pickedUpBy = '';
     @state() private fulfilOpen = false;
     @state() private pickupError = '';
+    /** The customer's alerts that speak at the order desk, read only here. */
+    @state() private alerts: Alert[] = [];
     @state() private depositOpen = false;
 
     connectedCallback() {
@@ -53,6 +57,7 @@ export class GableOrderDetail extends LitElement {
         try {
             const data = await OrderService.getOrder(orderId);
             this.order = data;
+            void this.loadAlerts(data.customer_id);
             this.loadInvoiceNumbers(data.id, data.invoice_ids);
             if (data.salesperson_id) {
                 try {
@@ -245,6 +250,25 @@ export class GableOrderDetail extends LitElement {
         if (color === 'warning') bg = 'bg-amber-500/20 text-amber-400 border-amber-500/50';
         if (color === 'error') bg = 'bg-red-500/20 text-red-400 border-red-500/50';
         return bg;
+    }
+
+    /**
+     * The customer's alerts that speak at the order desk: the order page only
+     * reads them. The office leaves and ends them on the account page.
+     */
+    private async loadAlerts(customerId: string | null) {
+        if (!customerId) {
+            this.alerts = [];
+            return;
+        }
+        try {
+            const page = await CustomerService.listAlerts(customerId, { state: 'open', limit: 200 });
+            this.alerts = page.items.filter((a) => a.show_at_orders);
+        } catch {
+            // The alerts are an addition to the order page: a failed read
+            // leaves the page as it was.
+            this.alerts = [];
+        }
     }
 
     render() {
@@ -483,6 +507,21 @@ export class GableOrderDetail extends LitElement {
                                 ` : nothing}
                             </div>
                         </div>
+
+                        <!-- Customer Alerts: read only here, left and ended on the account page -->
+                        ${this.alerts.length > 0 ? html`
+                            <div class="bg-slate-steel rounded-lg border border-amber-500/20 p-6" data-testid="order-alerts">
+                                <h3 class="font-semibold text-white mb-4">Alerts</h3>
+                                <ul class="space-y-2 text-sm">
+                                    ${this.alerts.map((a) => html`
+                                        <li class="rounded border border-white/10 bg-slate-steel/40 px-3 py-2" data-testid="order-alert">
+                                            <span class="font-semibold ${a.kind === 'warning' ? 'text-amber-400' : 'text-blue-400'}">${a.kind === 'warning' ? 'Warning:' : 'Note:'}</span>
+                                            <span class="text-white">${a.text}</span>
+                                        </li>
+                                    `)}
+                                </ul>
+                            </div>
+                        ` : nothing}
 
                         <!-- Salesperson Card -->
                         <div class="bg-slate-steel rounded-lg border border-white/10 p-6">

@@ -1429,6 +1429,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's alerts
+         * @description The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+         */
+        get: operations["customerListAlerts"];
+        put?: never;
+        /**
+         * Leave an alert on a customer
+         * @description kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+         */
+        post: operations["customerCreateAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{id}/alerts/{alertId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an alert
+         * @description An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+         */
+        post: operations["customerEndAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts/{id}": {
         parameters: {
             query?: never;
@@ -7014,7 +7058,7 @@ export interface paths {
         };
         /**
          * Can this sale go on account?
-         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+         * @description The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
          */
         get: operations["posCustomerStanding"];
         put?: never;
@@ -7096,7 +7140,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange goods in one act
-         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+         * @description The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
          */
         post: operations["posExchangeCreate"];
         delete?: never;
@@ -11171,6 +11215,58 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        Alert: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The alert speaks in the counter's customer panel. */
+            show_at_counter: boolean;
+            /** @description The alert speaks on the order page. */
+            show_at_orders: boolean;
+            /** @description A warning only: the counter has to read it and say so before the sale is taken. */
+            acknowledge_required: boolean;
+            /** @description The signed-in user who left the alert. */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The signed-in user who called the alert off; null while it is open. */
+            ended_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the alert was called off; null while it is open.
+             */
+            ended_at: string | null;
+            /**
+             * Format: int64
+             * @description Moves when the alert is ended.
+             */
+            revision: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        AlertPage: {
+            items: components["schemas"]["Alert"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description The body of an alert to leave. The author is the signed-in user, never the body. */
+        AlertRequest: {
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_counter?: boolean;
+            /** @description Defaults to false: the alert speaks only where it is told to. */
+            show_at_orders?: boolean;
+            /** @description Defaults to false; only a warning may ask to be acknowledged. */
+            acknowledge_required?: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ContactPage: {
@@ -16212,6 +16308,8 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken. */
+            acknowledged_alert_ids?: string[];
         };
         PosTenderRequest: {
             method: components["schemas"]["PosTenderMethod"];
@@ -16456,6 +16554,17 @@ export interface components {
             /** @description The payment shapes the server takes from this customer now, in the order the counter shows them. */
             payment_options: components["schemas"]["PosTenderMethod"][];
             on_account: components["schemas"]["PosOnAccountVerdict"];
+            /** @description The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken. */
+            alerts: components["schemas"]["PosCounterAlert"][];
+        };
+        PosCounterAlert: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "note" | "warning";
+            text: string;
+            /** @description The counter has to read this warning and say so before the sale is taken. */
+            acknowledge_required: boolean;
         };
         PosOverrideRequest: {
             /** @enum {string} */
@@ -16538,6 +16647,8 @@ export interface components {
             /** @description Tender for the difference only. Not store_credit (the returned credit is applied itself). */
             tenders?: components["schemas"]["PosTenderRequest"][];
             picked_up_by?: string | null;
+            /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
+            acknowledged_alert_ids?: string[];
         };
         PosExchangeFigures: {
             /**
@@ -23597,6 +23708,127 @@ export interface operations {
             409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerListAlerts: {
+        parameters: {
+            query?: {
+                state?: "open" | "ended" | "all";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerCreateAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertRequest"];
+            };
+        };
+        responses: {
+            /** @description The created alert. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    customerEndAlert: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+                alertId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ended alert. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alert"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

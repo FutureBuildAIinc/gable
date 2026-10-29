@@ -26,6 +26,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
+	"github.com/gablelbm/gable/internal/customer/customeractor"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -34,6 +35,7 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -60,7 +62,8 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 
 	svc := customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(customeraudit.New(audit.NewLogger(db))).
 		WithBranchGuard(customerguard.New(middleware.NewBranchGuard(db))).
-		WithSharedGuard(customerguard.NewShared(middleware.NewKeyBranchWall(db, nil)))
+		WithSharedGuard(customerguard.NewShared(middleware.NewKeyBranchWall(db, nil))).
+		WithActorResolver(customeractor.New())
 	mux := http.NewServeMux()
 	customer.NewHandler(svc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +77,8 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		ctx := branchctx.With(r.Context(), bc)
 		if role := r.Header.Get("X-Test-Role"); role != "" {
 			ctx = context.WithValue(ctx, middleware.UserContextKey, &middleware.UserClaims{
-				Role: role, Roles: []string{role},
+				RegisteredClaims: jwt.RegisteredClaims{Subject: r.Header.Get("X-Test-Sub")},
+				Role:             role, Roles: []string{role},
 			})
 		}
 		if keyID := r.Header.Get("X-Test-Key"); keyID != "" {

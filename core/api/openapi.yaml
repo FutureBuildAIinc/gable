@@ -3534,6 +3534,152 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts:
+    get:
+      operationId: customerListAlerts
+      tags: [customer]
+      summary: List a customer's alerts
+      description: >-
+        The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, ended, all]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: customerCreateAlert
+      tags: [customer]
+      summary: Leave an alert on a customer
+      description: >-
+        kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertRequest"
+      responses:
+        "201":
+          description: The created alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts/{alertId}/end:
+    post:
+      operationId: customerEndAlert
+      tags: [customer]
+      summary: End an alert
+      description: >-
+        An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The ended alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/contacts/{id}:
     get:
       operationId: contactGet
@@ -15664,7 +15810,7 @@ paths:
       tags: [pos]
       summary: Can this sale go on account?
       description: >-
-        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
       parameters:
         - name: id
           in: path
@@ -15804,7 +15950,7 @@ paths:
       tags: [pos]
       summary: Exchange goods in one act
       description: >-
-        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -23735,6 +23881,62 @@ components:
         updated_at:
           type: string
           format: date-time
+    Alert:
+      type: object
+      required: [id, customer_id, kind, text, show_at_counter, show_at_orders, acknowledge_required, created_by, created_at, ended_by, ended_at, revision]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string, maxLength: 500}
+        show_at_counter: {type: boolean, description: "The alert speaks in the counter's customer panel."}
+        show_at_orders: {type: boolean, description: "The alert speaks on the order page."}
+        acknowledge_required: {type: boolean, description: "A warning only: the counter has to read it and say so before the sale is taken."}
+        created_by: {type: string, description: "The signed-in user who left the alert."}
+        created_at: {type: string, format: date-time}
+        ended_by: {type: [string, "null"], description: "The signed-in user who called the alert off; null while it is open."}
+        ended_at: {type: [string, "null"], format: date-time, description: "When the alert was called off; null while it is open."}
+        revision: {type: integer, format: int64, minimum: 1, description: "Moves when the alert is ended."}
+    AlertPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alert"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    AlertRequest:
+      type: object
+      required: [kind, text]
+      additionalProperties: false
+      description: >-
+        The body of an alert to leave. The author is the signed-in user, never the body.
+      properties:
+        kind:
+          type: string
+          enum: [note, warning]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        show_at_counter:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        show_at_orders:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        acknowledge_required:
+          type: boolean
+          description: "Defaults to false; only a warning may ask to be acknowledged."
     ContactPage:
       type: object
       required: [items, next_cursor, limit]
@@ -32516,6 +32718,11 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken.
+          items: {type: string, format: uuid}
     PosTenderRequest:
       type: object
       required: [method, amount_cents]
@@ -32658,7 +32865,7 @@ components:
         cap_cents: {type: [integer, "null"], format: int64, description: "The most this buyer may put on the account in one sale; null for no cap of the buyer's own."}
     PosAccountStanding:
       type: object
-      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account]
+      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account, alerts]
       properties:
         customer_id: {type: string, format: uuid}
         name: {type: string}
@@ -32679,6 +32886,19 @@ components:
           description: "The payment shapes the server takes from this customer now, in the order the counter shows them."
           items: {$ref: "#/components/schemas/PosTenderMethod"}
         on_account: {$ref: "#/components/schemas/PosOnAccountVerdict"}
+        alerts:
+          type: array
+          description: >-
+            The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken.
+          items: {$ref: "#/components/schemas/PosCounterAlert"}
+    PosCounterAlert:
+      type: object
+      required: [id, kind, text, acknowledge_required]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string}
+        acknowledge_required: {type: boolean, description: "The counter has to read this warning and say so before the sale is taken."}
     PosOverrideRequest:
       type: object
       additionalProperties: false
@@ -32756,6 +32976,11 @@ components:
           description: "Tender for the difference only. Not store_credit (the returned credit is applied itself)."
           items: {$ref: "#/components/schemas/PosTenderRequest"}
         picked_up_by: {type: [string, "null"], maxLength: 200}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
+          items: {type: string, format: uuid}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]
