@@ -83,6 +83,7 @@ const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`)
 
 type Internals = {
     _beginReturn: (sale?: Sale) => void;
+    _suspectAvoidance: boolean;
 };
 const inner = (el: POSTerminal) => el as unknown as Internals;
 
@@ -217,8 +218,29 @@ describe('the exchange and the large cash rule of the branch country', () => {
         el.remove();
     });
 
-    it('asks nothing of an exchange under the threshold', async () => {
-        svc.previewExchange.mockResolvedValue(figures({
+    it("does not carry the manager's mark past the exchange it was taken for", async () => {
+        svc.previewExchange.mockResolvedValue(figures());
+        const el = await mountTerminal();
+        await openExchange(el);
+
+        const mark = q(el, 'exchange-avoidance') as HTMLInputElement;
+        mark.checked = true;
+        mark.dispatchEvent(new Event('change'));
+        await el.updateComplete;
+        expect(inner(el)._suspectAvoidance).toBe(true);
+
+        // the clerk cancels the exchange: the mark belonged to it
+        const row = q(el, 'return-exchange-toggle').parentElement as HTMLElement;
+        const cancel = Array.from(row.querySelectorAll('button'))
+            .find((b) => b.textContent?.trim() === 'Cancel') as HTMLElement;
+        cancel.click();
+        await el.updateComplete;
+
+        expect(inner(el)._suspectAvoidance).toBe(false);
+        el.remove();
+    });
+
+    it('asks nothing of an exchange under the threshold', async () => {        svc.previewExchange.mockResolvedValue(figures({
             large_cash: { ...ASKS, asks_details: false, fields: [] },
         }));
         svc.createExchange.mockResolvedValue({
