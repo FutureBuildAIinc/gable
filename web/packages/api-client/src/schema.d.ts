@@ -20194,8 +20194,6 @@ export interface components {
             stock_quantity: components["schemas"]["Quantity"] | null;
             /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
             tally: components["schemas"]["Tally"] | null;
-            /** @description The paint line's tint record (row CP-16); null on every other line. */
-            tint?: components["schemas"]["LineTint"] | null;
             sku: string;
             description: string;
             /** @description What a portal user wrote when asking for the line to be priced; an edit that keeps the line id keeps it. */
@@ -20294,8 +20292,6 @@ export interface components {
             tally?: components["schemas"]["TallyRequest"];
         };
         QuoteTransitionRequest: {
-            /** @description The paint line's tint record (row CP-16); null on every other line. */
-            tint?: components["schemas"]["LineTint"] | null;
             to: components["schemas"]["QuoteStatus"];
             /** Format: int64 */
             revision?: number;

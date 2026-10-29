@@ -898,13 +898,6 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Tally"
             - type: "null"
-        tint:
-          description: >-
-            The paint line's tint record (row CP-16); null on every other
-            line.
-          oneOf:
-            - $ref: "#/components/schemas/LineTint"
-            - type: "null"
         sku:
           type: string
         description:
@@ -1108,13 +1101,6 @@ components:
       type: object
       required: [to]
       properties:
-        tint:
-          description: >-
-            The paint line's tint record (row CP-16); null on every other
-            line.
-          oneOf:
-            - $ref: "#/components/schemas/LineTint"
-            - type: "null"
         to:
           $ref: "#/components/schemas/QuoteStatus"
         revision:

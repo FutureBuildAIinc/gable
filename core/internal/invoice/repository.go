@@ -912,13 +912,6 @@ func insertInvoiceLineTint(ctx context.Context, exec database.Executor, lineID u
 	return nil
 }
 
-func tintCentsArg(c *httpx.Cents) any {
-	if c == nil {
-		return nil
-	}
-	return int64(*c)
-}
-
 // taxZoneSourceArg carries the zone's provenance, or NULL when none answered.
 func taxZoneSourceArg(src *string) any {
 	if src == nil || *src == "" {

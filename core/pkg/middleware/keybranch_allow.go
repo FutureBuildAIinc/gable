@@ -509,7 +509,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/tint/colorants":                                  {KeyBranchClassRefused, "the tint catalogue is dealer wide; the reads stay stated limits"},
 	"POST /api/v1/tint/colors":                                     {KeyBranchClassRefused, "the tint catalogue is dealer wide; the reads stay stated limits"},
 	"POST /api/v1/tint/formulas":                                   {KeyBranchClassRefused, "the tint catalogue is dealer wide; the reads stay stated limits"},
-	"POST /api/v1/tint/formulas/{id}/rescale":                      {KeyBranchClassRefused, "the rescale writes nothing; it stays a stated limit read"},
+	"POST /api/v1/tint/formulas/{id}/rescale":                      {KeyBranchClassRefused, "the tint catalogue is dealer wide; a branch bound key does not run the rescale"},
 	"POST /api/v1/tint/saved-colors":                               {KeyBranchClassConfined, "CustomerBodyBranch; TestKeyBranchPin_CustomerConfinedWrites"},
 	"POST /api/v1/tint/systems":                                    {KeyBranchClassRefused, "the tint catalogue is dealer wide; the reads stay stated limits"},
 	"POST /api/v1/units":                                           {KeyBranchClassRefused, "the unit catalogue is dealer wide; the reads stay stated limits"},
