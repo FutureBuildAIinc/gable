@@ -282,6 +282,11 @@ type Repository interface {
 	deleteSetting(ctx context.Context, key string) error
 	// writeRestockingFees rewrites every reason's fee rows in one act (CP-06).
 	writeRestockingFees(ctx context.Context, fees map[string]int) error
+	// writeTintCharge writes the dealer's tint charge rule rows in one act
+	// (CP-16): the flat figure and the tier list.
+	writeTintCharge(ctx context.Context, rule tint.ChargeRule) error
+	// writeTintedNoReturn writes the dealer's tinted no return policy (CP-16).
+	writeTintedNoReturn(ctx context.Context, on bool) error
 	readPosSettingsRevision(ctx context.Context) (int64, error)
 	lockPosSettingsRevision(ctx context.Context) (int64, error)
 	bumpPosSettingsRevision(ctx context.Context, to int64) error

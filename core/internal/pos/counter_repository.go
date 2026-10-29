@@ -455,7 +455,7 @@ func (r *PostgresRepository) TintBaseTier(ctx context.Context, formulaID *uuid.U
 func (r *PostgresRepository) TintedNoReturn(ctx context.Context) (bool, error) {
 	var value *string
 	err := r.ex(ctx).QueryRow(ctx,
-		`SELECT value FROM system_settings WHERE key = 'pos.tinted_no_return'`).Scan(&value)
+		`SELECT value FROM system_settings WHERE key = $1`, settingTintedNoReturn).Scan(&value)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

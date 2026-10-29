@@ -12,6 +12,7 @@ package pos_test
 // is unchanged.
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -552,5 +553,85 @@ func TestTheTintChargeFollowsTheColorantAmountAndTheBaseTier(t *testing.T) {
 	mustExec(t, f.db, `UPDATE paint_bases SET is_deepest = true WHERE id = $1`, baseID)
 	if got := chargeOf(1, 12); got != 9000 {
 		t.Errorf("the charge on a deep base's 1.375 oz tint = %d, want the deep tier's 9000", got)
+	}
+}
+
+// RULE: the dealer writes the tint charge and the tinted no return policy on
+// the counter settings resource: an owner or admin writes them as one act on
+// the revision, audited, and the counter reads them back.
+func TestTheTintChargeAndTheNoReturnPolicyAreWritten(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM admin_revisions WHERE resource = 'pos.settings'`)
+	})
+	get := f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if get.status != http.StatusOK {
+		t.Fatalf("the counter reads the settings = %d: %s", get.status, get.raw)
+	}
+	rev0 := rev(t, get)
+	body := map[string]any{"revision": rev0, "rules": map[string]any{
+		"check_limit_cents": nil,
+		"check_id_required": map[string]any{"mode": "never"},
+		"restocking_fees":   allReasonFees(0, 0, 0),
+		"tint_charge": map[string]any{"flat_cents": 250, "tiers": []map[string]any{
+			{"base_tier": "", "min_colorant_oz": "2.0000", "charge_cents": 4000}}},
+		"tinted_no_return": true}}
+	// a cashier reads but never writes
+	if r := f.do("PUT", "/api/v1/pos/settings", body,
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusForbidden {
+		t.Errorf("a cashier writing the tint rules = %d, want 403: %s", r.status, r.raw)
+	}
+	// the owner writes them
+	ownerSub := mustUUID(t)
+	put := f.do("PUT", "/api/v1/pos/settings", body,
+		"X-Test-Role", "owner", "X-Test-Sub", ownerSub, "If-Match", fmt.Sprintf(`"%d"`, rev0))
+	if put.status != http.StatusOK {
+		t.Fatalf("the owner writes the tint rules = %d: %s", put.status, put.raw)
+	}
+	rules, _ := put.body["rules"].(map[string]any)
+	charge, _ := rules["tint_charge"].(map[string]any)
+	if charge == nil {
+		t.Fatalf("the settings carry no tint_charge: %s", put.raw)
+	}
+	if got, _ := numOf(charge["flat_cents"]); got != 250 {
+		t.Errorf("the tint charge's flat figure = %v, want 250", charge["flat_cents"])
+	}
+	tiers, _ := charge["tiers"].([]any)
+	if len(tiers) != 1 {
+		t.Fatalf("the tint charge's tiers = %v, want the one tier the owner wrote", charge["tiers"])
+	}
+	if got, _ := numOf(tiers[0].(map[string]any)["charge_cents"]); got != 4000 {
+		t.Errorf("the tier's charge = %v, want 4000", tiers[0])
+	}
+	if policy, _ := rules["tinted_no_return"].(bool); !policy {
+		t.Errorf("the tinted no return policy = %v, want true", rules["tinted_no_return"])
+	}
+	// the rows hold the rule, and the counter reads it back
+	if got := f.scalar(`SELECT value FROM system_settings WHERE key = 'pos.tint_charge_cents'`); got != "250" {
+		t.Errorf("the tint charge row = %v, want 250", got)
+	}
+	if got := f.scalar(`SELECT value FROM system_settings WHERE key = 'pos.tinted_no_return'`); got != "true" {
+		t.Errorf("the tinted no return row = %v, want true", got)
+	}
+	back := f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	backRules, _ := back.body["rules"].(map[string]any)
+	backCharge, _ := backRules["tint_charge"].(map[string]any)
+	if backCharge == nil {
+		t.Fatalf("the counter reads no tint charge back: %s", back.raw)
+	}
+	if got, _ := numOf(backCharge["flat_cents"]); got != 250 {
+		t.Errorf("the counter reads the flat figure %v, want 250", backCharge["flat_cents"])
+	}
+	if policy, _ := backRules["tinted_no_return"].(bool); !policy {
+		t.Errorf("the counter reads the policy %v, want true", backRules["tinted_no_return"])
+	}
+	// the audit row carries what the write made
+	if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.settings.saved'
+		AND user_id::text = $1
+		AND changes->>'tint_charge_cents' = '250'
+		AND changes->>'tinted_no_return' = 'true'`, ownerSub); n != 1 {
+		t.Errorf("the tint rules' audit rows = %d, want 1", n)
 	}
 }

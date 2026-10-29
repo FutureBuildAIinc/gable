@@ -34919,7 +34919,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults, tint_charge, tinted_no_return]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -34938,6 +34938,11 @@ components:
               description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law."
     PosSettingsRequest:
       type: object
       required: [rules]
@@ -34958,6 +34963,11 @@ components:
               description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
               required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
               additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            tint_charge:
+              $ref: '#/components/schemas/TintChargeRule'
+            tinted_no_return:
+              type: boolean
+              description: "The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law)."
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object

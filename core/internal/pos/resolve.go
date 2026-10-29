@@ -553,6 +553,12 @@ func (s *Service) completeVoidFromResolution(ctx context.Context, sale *Sale, te
 		if !l.IsStocked() || l.Quantity == nil {
 			continue
 		}
+		// A tinted can never goes back into saleable stock (row CP-16), the
+		// same rule the return path holds: a can the store mixed for a
+		// customer cannot be sold again as the plain base.
+		if l.Tint != nil {
+			continue
+		}
 		if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, *l.Quantity); err != nil {
 			return nil, err
 		}

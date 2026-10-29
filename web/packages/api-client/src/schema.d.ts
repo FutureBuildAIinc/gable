@@ -18171,6 +18171,9 @@ export interface components {
                 restocking_fee_defaults: {
                     [key: string]: number;
                 };
+                tint_charge: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy: a tinted can is not taken back. Off unless the dealer says so, because the rule is a dealer policy and not a law. */
+                tinted_no_return: boolean;
             };
         };
         PosSettingsRequest: {
@@ -18193,6 +18196,9 @@ export interface components {
                 restocking_fees: {
                     [key: string]: number;
                 };
+                tint_charge?: components["schemas"]["TintChargeRule"];
+                /** @description The dealer's tinted no return policy. Absent is off (the rule is a dealer policy and not a law). */
+                tinted_no_return?: boolean;
             };
             /**
              * Format: int64
