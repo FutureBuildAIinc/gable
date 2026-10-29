@@ -56,6 +56,11 @@ type runFakeTerminal struct {
 	voidAnswer func(body map[string]any) map[string]any
 	// reporting holds the transactions the lookup answers, by order id.
 	reporting map[string]map[string]any
+	// deferredReport hides the reporting row until this many polls of the
+	// order have been served (0: always visible): a charge that reaches the
+	// report only after the dispatch, so the pre dispatch lookup must not
+	// find it and the poll's own lookup must.
+	deferredReport int
 	// lookupCalls counts the reporting lookups served.
 	lookupCalls int
 	// pollsByOrder counts the polls served per order id.
@@ -86,6 +91,24 @@ func (f *runFakeTerminal) voidPosts_() []map[string]any {
 	out := make([]map[string]any, len(f.voidPosts))
 	copy(out, f.voidPosts)
 	return out
+}
+
+func (f *runFakeTerminal) lookupCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lookupCalls
+}
+
+// failedStepOf scripts one uncertain end: the first poll answers pending,
+// every later poll the named end status with no result object (a gateway
+// fault is not a decline; no verdict reached us).
+func failedStepOf(status string) func(order string, poll int) (int, map[string]any) {
+	return func(_ string, poll int) (int, map[string]any) {
+		if poll < 1 {
+			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+		}
+		return 200, map[string]any{"status": status, "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+	}
 }
 
 // chargeResult builds the documented result object of a charge-card status.
@@ -157,6 +180,9 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.lookupCalls++
 		row := f.reporting[order]
+		if f.deferredReport != 0 && f.pollsByOrder[order] < f.deferredReport {
+			row = nil
+		}
 		f.mu.Unlock()
 		items := []map[string]any{}
 		if row != nil {
@@ -391,6 +417,74 @@ func TestRunTerminalExpiryResolvedByTransactionLookup(t *testing.T) {
 	}
 	if got.AnswerLast4 != "4242" {
 		t.Fatalf("last four %s, want the masked card number's 4242", got.AnswerLast4)
+	}
+}
+
+// TestRunTerminalFailedInteractionConsultsTheTransactionLookup: a failed or
+// cancelled interaction, and a succeeded one that carries no result object,
+// are the shapes where a charge may have moved without a verdict (a gateway
+// fault is not a decline). The poll consults the transaction lookup before it
+// lands a decline: a charge the report shows is authorized by its own trans
+// id, and only a leg the report cannot find is declined.
+func TestRunTerminalFailedInteractionConsultsTheTransactionLookup(t *testing.T) {
+	cases := []struct {
+		name string
+		step func(order string, poll int) (int, map[string]any)
+	}{
+		{"failed interaction", failedStepOf("failed")},
+		{"cancelled interaction", failedStepOf("cancelled")},
+		{"succeeded with no result object", failedStepOf("succeeded")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger, sale := newTerminalFixture(t)
+			fs := newRunFake(t)
+			// the charge reaches the report only after the dispatch: the
+			// pre dispatch lookup must not see it, the poll's own lookup must
+			fs.fake.pollStep = tc.step
+			fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
+				"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-LATE", "result": "A",
+				"auth_code": "OK77", "card_number": "XXXXXXXXXXXX1881", "amount": 2500.0, "resp_text": "APPROVED"}
+			fs.fake.deferredReport = 1
+			term := newRunDriver(t, fs, ledger)
+			in := claimRunLeg(t, ledger, sale, 2500)
+			if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+				IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+				DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+				t.Fatalf("dispatch: %v", err)
+			}
+			got := waitForIntentState(t, ledger, in.ID, payment.TerminalAuthorized, payment.TerminalDeclined)
+			if got.State != payment.TerminalAuthorized {
+				t.Fatalf("the charge the report shows must authorize the leg, it is %s", got.State)
+			}
+			if got.AnswerProviderRef != "TRX-LATE" {
+				t.Fatalf("answer ref %s, want the report's trans id TRX-LATE", got.AnswerProviderRef)
+			}
+		})
+	}
+}
+
+// TestRunTerminalUncertainInteractionTheReportCannotFindDeclines: the same
+// uncertain shapes with no charge in the report decline, and the sweep's
+// manager item path stays the fallback for a leg that stays unknown.
+func TestRunTerminalUncertainInteractionTheReportCannotFindDeclines(t *testing.T) {
+	ledger, sale := newTerminalFixture(t)
+	fs := newRunFake(t)
+	fs.fake.pollStep = failedStepOf("failed")
+	term := newRunDriver(t, fs, ledger)
+	in := claimRunLeg(t, ledger, sale, 2500)
+	if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
+		IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
+		DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	before := fs.fake.lookupCount()
+	got := waitForIntentState(t, ledger, in.ID, payment.TerminalDeclined)
+	if got.AnswerVerdict != "declined" {
+		t.Fatalf("verdict %s, want declined", got.AnswerVerdict)
+	}
+	if fs.fake.lookupCount() == before {
+		t.Fatal("the poll never consulted the transaction lookup before declining")
 	}
 }
 

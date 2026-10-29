@@ -277,7 +277,19 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 		case err == nil && status == http.StatusOK:
 			var st runChargeCardStatus
 			if jerr := json.Unmarshal(raw, &st); jerr == nil {
-				if answer, done := answerOfInteraction(d, interaction, &st); done {
+				if answer, done, uncertain := answerOfInteraction(d, interaction, &st); done {
+					// An uncertain end (no verdict the interaction can speak
+					// for) consults the transaction lookup before it declines:
+					// a charge the report shows is authorized by its own trans
+					// id, never booked declined with the money moved.
+					if uncertain {
+						if found := t.lookupByOrder(pctx, d.IdempotencyKey); found != nil {
+							t.logger.Info("the Run interaction ended with no verdict and the transaction lookup found the charge",
+								"order_id", d.IdempotencyKey, "trans_id", found.TransID)
+							t.deliver(d, answerOfTransaction(d, found))
+							return
+						}
+					}
 					t.deliver(d, answer)
 					return
 				}
@@ -315,12 +327,15 @@ func (t *RunTerminal) poll(ctx context.Context, cfg GatewayConfig, d TerminalDis
 // takes, with done=false while it stays pending. A succeeded interaction is
 // the workflow's end, not the card's: result A authorized, C declined, B
 // declined too (no money moved; the cashier starts a new leg). A failed or
-// cancelled interaction ran no charge: declined.
-func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCardStatus) (TerminalAnswer, bool) {
-	answer := TerminalAnswer{IntentID: d.IntentID, ProviderRef: interaction, Verdict: "declined"}
+// cancelled interaction, or a succeeded one that carries no result object,
+// ran no charge the answer can speak for: uncertain=true, and the caller
+// consults the transaction lookup before it lands that decline, because a
+// gateway fault is not a decline and the charge may have moved.
+func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCardStatus) (answer TerminalAnswer, done, uncertain bool) {
+	answer = TerminalAnswer{IntentID: d.IntentID, ProviderRef: interaction, Verdict: "declined"}
 	switch st.Status {
 	case "pending":
-		return answer, false
+		return answer, false, false
 	case "succeeded":
 		if st.Result != nil {
 			answer.Brand = st.Result.CardType
@@ -329,16 +344,16 @@ func answerOfInteraction(d TerminalDispatch, interaction string, st *runChargeCa
 				answer.ProviderRef = st.Result.TransID
 			}
 			if st.Result.Result != "A" {
-				return answer, true
+				return answer, true, false
 			}
 			answer.Verdict = "authorized"
-			return answer, true
+			return answer, true, false
 		}
-		return answer, true
+		return answer, true, true
 	case "failed", "cancelled":
-		return answer, true
+		return answer, true, true
 	}
-	return answer, false
+	return answer, false, false
 }
 
 // answerOfTransaction maps one reporting transaction row to the answer the
