@@ -11,6 +11,7 @@ package pos_test
 // refund, whatever the setting allows.
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -18,6 +19,18 @@ import (
 
 	"github.com/gablelbm/gable/internal/testutil"
 )
+
+// numOf reads a decoded JSON number (the fixture decodes with UseNumber).
+func numOf(v any) (int64, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	case float64:
+		return int64(n), true
+	}
+	return 0, false
+}
 
 // feeSettingsRows cleans this test file's settings rows and their anchor.
 func feeSettingsRows(t *testing.T, f *fixture) {
@@ -75,12 +88,14 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 		t.Errorf("the fee map names %d codes, want the closed list of 7: %v", got, feesOf(get.body))
 	}
 	for code, v := range feesOf(get.body) {
-		if n, ok := v.(float64); !ok || n != 0 {
+		if n, ok := numOf(v); !ok || n != 0 {
 			t.Errorf("code %s = %v before anything is set, want 0", code, v)
 		}
 	}
 	// the suggested figures: the customer's own faults carry one, the dealer's carry none
-	if defaultsOf(get.body)["changed_mind"].(float64) <= 0 || defaultsOf(get.body)["defective"].(float64) != 0 {
+	cm, _ := numOf(defaultsOf(get.body)["changed_mind"])
+	df, _ := numOf(defaultsOf(get.body)["defective"])
+	if cm <= 0 || df != 0 {
 		t.Errorf("the suggested fees = %v, want a figure on changed_mind and none on defective", defaultsOf(get.body))
 	}
 	rev0 := rev(t, get)
@@ -112,8 +127,9 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 
 	// the write: owner and admin both, one revision each
 	want := allReasonFees(1500, 1500, 1000)
+	ownerSub := mustUUID(t)
 	put := f.do("PUT", "/api/v1/pos/settings", settingsBody(want, rev0),
-		"X-Test-Role", "owner", "X-Test-Sub", mustUUID(t), "If-Match", fmt.Sprintf(`"%d"`, rev0))
+		"X-Test-Role", "owner", "X-Test-Sub", ownerSub, "If-Match", fmt.Sprintf(`"%d"`, rev0))
 	if put.status != http.StatusOK {
 		t.Fatalf("the owner writes the fees = %d: %s", put.status, put.raw)
 	}
@@ -121,7 +137,7 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 		t.Errorf("revision after the write = %d, want %d", rev(t, put), rev0+1)
 	}
 	for code, v := range feesOf(put.body) {
-		if int64(v.(float64)) != want[code] {
+		if n, _ := numOf(v); n != want[code] {
 			t.Errorf("code %s = %v, want %d", code, v, want[code])
 		}
 	}
@@ -130,10 +146,10 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 	if reasons.status != http.StatusOK {
 		t.Fatalf("return-reasons = %d: %s", reasons.status, reasons.raw)
 	}
-	reasonFees := map[string]float64{}
+	reasonFees := map[string]int64{}
 	for _, x := range reasons.body["items"].([]any) {
 		rr := x.(map[string]any)
-		reasonFees[rr["code"].(string)] = rr["restocking_fee_bps"].(float64)
+		reasonFees[rr["code"].(string)], _ = numOf(rr["restocking_fee_bps"])
 	}
 	for code, v := range want {
 		if int64(reasonFees[code]) != v {
@@ -144,10 +160,12 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 	if n := countOf(t, f.db, `SELECT count(*) FROM system_settings WHERE key LIKE 'pos.restocking_fee_bps.%'`); n != 3 {
 		t.Errorf("fee setting rows = %d, want 3 (only the figures over zero)", n)
 	}
-	// the audit row carries the fees the write made
+	// the audit row carries the fees the write made (scoped to this test's
+	// actor; the table keeps earlier runs' rows)
 	if n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.settings.saved'
+		AND user_id::text = $1
 		AND changes->'restocking_fees'->>'changed_mind' = '1500'
-		AND changes->'restocking_fees'->>'defective' = '0'`); n != 1 {
+		AND changes->'restocking_fees'->>'defective' = '0'`, ownerSub); n != 1 {
 		t.Errorf("the fee write's audit rows = %d, want 1", n)
 	}
 	// clearing a figure deletes its row
@@ -160,7 +178,7 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 	if n := countOf(t, f.db, `SELECT count(*) FROM system_settings WHERE key LIKE 'pos.restocking_fee_bps.%'`); n != 2 {
 		t.Errorf("fee setting rows after the clear = %d, want 2", n)
 	}
-	if int64(feesOf(put.body)["changed_mind"].(float64)) != 0 {
+	if cleared, _ := numOf(feesOf(put.body)["changed_mind"]); cleared != 0 {
 		t.Errorf("changed_mind after the clear = %v, want 0", feesOf(put.body)["changed_mind"])
 	}
 }

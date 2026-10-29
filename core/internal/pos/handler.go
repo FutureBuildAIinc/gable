@@ -182,6 +182,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
+	mux.HandleFunc("POST /api/v1/pos/returns/preview", guard(h.PreviewReturn))
 	mux.HandleFunc("GET /api/v1/pos/return-reasons", guard(h.ListReturnReasons))
 	// The counter's dealer settings (CP-04): the read is the counter's own
 	// (the terminal asks for the ID before Pay), the write the admin and
@@ -930,6 +931,32 @@ func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/pos/returns/"+ret.ID.String())
 	writeJSON(w, http.StatusCreated, ret)
+}
+
+// PreviewReturn is POST /pos/returns/preview: a read-only calculation of the
+// same request's figures (the restocking fee and the money back), so the
+// counter states them before the return is taken; nothing is written.
+func (h *Handler) PreviewReturn(w http.ResponseWriter, r *http.Request) {
+	cashierID, ok := h.cashierOf(w, r)
+	if !ok {
+		return
+	}
+	var req returnRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	in, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	fig, err := h.service.PreviewReturn(r.Context(), cashierID, in)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, fig)
 }
 
 // GetReturn is GET /pos/returns/{id}.

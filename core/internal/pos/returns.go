@@ -625,6 +625,63 @@ func (s *Service) resolveReturnMoney(ctx context.Context, st *returnState) error
 	return nil
 }
 
+// ReturnFigures are the money of a return before it is taken: the figures
+// the credit memo will state (its subtotal net of the fee, the tax, the
+// total, all negative as a credit), the fee itself, and the money that goes
+// back (positive), with each line's fee beside its refund.
+type ReturnFigures struct {
+	SubtotalCents      httpx.Cents `json:"subtotal_cents"`
+	TaxCents           httpx.Cents `json:"tax_cents"`
+	RestockingFeeCents httpx.Cents `json:"restocking_fee_cents"`
+	TotalCents         httpx.Cents `json:"total_cents"`
+	// RefundCents is the money back, positive: the total's other sign.
+	RefundCents httpx.Cents        `json:"refund_cents"`
+	Lines       []ReturnFigureLine `json:"lines"`
+}
+
+// ReturnFigureLine is one line of the figures: the sale line a linked return
+// names (null on a free line), its reason, its refund (negative, the memo
+// line's shape) and the fee withheld from it.
+type ReturnFigureLine struct {
+	LineID              *uuid.UUID   `json:"line_id"`
+	ReasonCode          string       `json:"reason_code"`
+	LineTotalCents      httpx.Cents  `json:"line_total_cents"`
+	RestockingFeeCents  httpx.Cents  `json:"restocking_fee_cents"`
+}
+
+// PreviewReturn prices a return without taking it: the same read only
+// pricing and guards ReturnSale runs (priceReturn), nothing written, so the
+// counter states the restocking fee and the money back before the act. The
+// figures are the ones the return on the same lines will carry.
+func (s *Service) PreviewReturn(ctx context.Context, cashierID uuid.UUID, in *ReturnIn) (*ReturnFigures, error) {
+	if s.ar == nil || s.inventory == nil {
+		return nil, errNotConfigured
+	}
+	st, err := s.priceReturn(ctx, in, true)
+	if err != nil {
+		return nil, err
+	}
+	st.cashierID = cashierID
+	out := &ReturnFigures{
+		SubtotalCents:      httpx.Cents(-(st.subtotal - st.feeCents)),
+		TaxCents:           httpx.Cents(-st.taxCents),
+		RestockingFeeCents: httpx.Cents(st.feeCents),
+		TotalCents:         httpx.Cents(st.total),
+		RefundCents:        httpx.Cents(-st.total),
+		Lines:              make([]ReturnFigureLine, 0, len(st.priced)),
+	}
+	for i := range st.priced {
+		p := &st.priced[i]
+		var id *uuid.UUID
+		if p.saleLine != nil {
+			id = &p.saleLine.ID
+		}
+		out.Lines = append(out.Lines, ReturnFigureLine{LineID: id, ReasonCode: reasonOf(p.in.ReasonCode),
+			LineTotalCents: httpx.Cents(-p.lineTotal), RestockingFeeCents: httpx.Cents(p.feeCents)})
+	}
+	return out, nil
+}
+
 // ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
 // credit memo created and posted in ONE act with its restock lines,
 // refunded in cash or card or left as account credit. The card refund goes

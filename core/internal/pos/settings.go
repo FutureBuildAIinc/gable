@@ -12,10 +12,12 @@ package pos
 // written, the anchor bumped, the audit row beside them.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -59,6 +61,22 @@ type PosRules struct {
 	// CheckLimitCents is the database wide check limit; null is no limit.
 	CheckLimitCents *httpx.Cents `json:"check_limit_cents"`
 	CheckIDRequired CheckIDRule  `json:"check_id_required"`
+	// RestockingFees is the fee each return reason withholds, in basis
+	// points: the whole closed list, a reason never set carrying none.
+	RestockingFees map[string]int `json:"restocking_fees"`
+	// RestockingFeeDefaults is the suggested figure for each reason, read
+	// only: what the settings screen offers a dealer who has set nothing.
+	RestockingFeeDefaults map[string]int `json:"restocking_fee_defaults"`
+}
+
+// effectiveRestockingFees states the closed list's fees in force: a reason's
+// row when it has one, zero otherwise.
+func effectiveRestockingFees(rows map[string]int) map[string]int {
+	out := make(map[string]int, len(returnReasons))
+	for _, r := range returnReasons {
+		out[r.Code] = rows[r.Code]
+	}
+	return out
 }
 
 // PosSettings is the counter settings resource: its rules and the revision a
@@ -101,6 +119,25 @@ func (r *PostgresRepository) writeSetting(ctx context.Context, key, value string
 func (r *PostgresRepository) deleteSetting(ctx context.Context, key string) error {
 	if _, err := r.ex(ctx).Exec(ctx, `DELETE FROM system_settings WHERE key = $1`, key); err != nil {
 		return errSettingWrite(err)
+	}
+	return nil
+}
+
+// writeRestockingFees writes every reason's fee as one act: the prefix's rows
+// go first (a reason now at zero keeps no stale row), then a row for each
+// figure over zero, in the closed list's order.
+func (r *PostgresRepository) writeRestockingFees(ctx context.Context, fees map[string]int) error {
+	if _, err := r.ex(ctx).Exec(ctx, `DELETE FROM system_settings WHERE key LIKE $1`,
+		settingRestockingFeePrefix+"%"); err != nil {
+		return errSettingWrite(err)
+	}
+	for _, code := range returnReasonCodes() {
+		if fees[code] <= 0 {
+			continue
+		}
+		if err := r.writeSetting(ctx, settingRestockingFeePrefix+code, strconv.Itoa(fees[code])); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -225,7 +262,8 @@ func idRuleOf(over *int64) CheckIDRule {
 	}
 }
 
-// PosSettings reads the counter settings: the two rules and their revision.
+// PosSettings reads the counter settings: the rules (check limit, check ID,
+// restocking fees) and their revision.
 func (s *Service) PosSettings(ctx context.Context) (*PosSettings, error) {
 	limit, err := s.repo.DefaultCheckLimitCents(ctx)
 	if err != nil {
@@ -235,11 +273,17 @@ func (s *Service) PosSettings(ctx context.Context) (*PosSettings, error) {
 	if err != nil {
 		return nil, err
 	}
+	feeRows, err := s.repo.RestockingFeeBps(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rev, err := s.repo.readPosSettingsRevision(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule)}}
+	out := &PosSettings{Revision: rev, Rules: PosRules{CheckIDRequired: idRuleOf(idRule),
+		RestockingFees:          effectiveRestockingFees(feeRows),
+		RestockingFeeDefaults: maps.Clone(defaultRestockingFeeBps)}}
 	if limit != nil {
 		c := httpx.Cents(*limit)
 		out.Rules.CheckLimitCents = &c
@@ -300,13 +344,19 @@ func (s *Service) SavePosSettings(ctx context.Context, in *SavePosSettingsInput)
 				return err
 			}
 		}
+		// the restocking fees: the whole closed list in one write, a row only
+		// for a figure over zero (none set meaning no fee)
+		if err := s.repo.writeRestockingFees(ctx, in.Rules.RestockingFees); err != nil {
+			return err
+		}
 		next := rev + 1
 		if err := s.repo.bumpPosSettingsRevision(ctx, next); err != nil {
 			return err
 		}
 		if s.auditLog != nil {
 			changes := map[string]any{"resource": posSettingsResource, "revision": next,
-				"check_limit_cents": in.Rules.CheckLimitCents, "check_id_required": in.Rules.CheckIDRequired.Mode}
+				"check_limit_cents": in.Rules.CheckLimitCents, "check_id_required": in.Rules.CheckIDRequired.Mode,
+				"restocking_fees": in.Rules.RestockingFees}
 			if in.Rules.CheckIDRequired.OverCents != nil {
 				changes["check_id_over_cents"] = int64(*in.Rules.CheckIDRequired.OverCents)
 			}
@@ -332,8 +382,44 @@ type posSettingsRequest struct {
 			Mode      string          `json:"mode"`
 			OverCents json.RawMessage `json:"over_cents"`
 		} `json:"check_id_required"`
+		RestockingFees json.RawMessage `json:"restocking_fees"`
 	} `json:"rules"`
 	Revision json.RawMessage `json:"revision"`
+}
+
+// parseRestockingFees reads rules.restocking_fees into the whole closed list:
+// every reason named, no other key, each figure a whole number of basis
+// points from 0 to 10000 (10000 is the line's whole refund: the fee may never
+// pass the line).
+func parseRestockingFees(v *httpx.Validator, raw json.RawMessage) map[string]int {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		v.Check(false, "rules.restocking_fees", "name every reason's fee, 0 for none")
+		return nil
+	}
+	var rows map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		v.Check(false, "rules.restocking_fees", "must be an object of reason code to basis points")
+		return nil
+	}
+	fees := map[string]int{}
+	for _, code := range returnReasonCodes() {
+		val, ok := rows[code]
+		if !ok || len(bytes.TrimSpace(val)) == 0 || bytes.Equal(bytes.TrimSpace(val), []byte("null")) {
+			v.Check(false, "rules.restocking_fees."+code, "name every reason's fee, 0 for none")
+			continue
+		}
+		if n, ok := v.Int("rules.restocking_fees."+code, val, true); ok {
+			v.Check(n >= 0 && n <= 10000, "rules.restocking_fees."+code,
+				"must be basis points from 0 to 10000: the fee never takes more than the line's whole refund")
+			fees[code] = int(n)
+		}
+	}
+	for code := range rows {
+		if !isReturnReason(code) {
+			v.Check(false, "rules.restocking_fees."+code, "is not a return reason")
+		}
+	}
+	return fees
 }
 
 func (r *posSettingsRequest) parse() (*SavePosSettingsInput, error) {
@@ -346,6 +432,7 @@ func (r *posSettingsRequest) parse() (*SavePosSettingsInput, error) {
 			out.Rules.CheckLimitCents = &c
 		}
 	}
+	out.Rules.RestockingFees = parseRestockingFees(v, r.Rules.RestockingFees)
 	v.Enum("rules.check_id_required.mode", r.Rules.CheckIDRequired.Mode,
 		IDRuleNever, IDRuleEveryCheck, IDRuleOverAmount)
 	out.Rules.CheckIDRequired.Mode = r.Rules.CheckIDRequired.Mode

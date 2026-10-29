@@ -1687,6 +1687,47 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/returns/preview:
+    post:
+      operationId: posReturnPreview
+      tags: [pos]
+      summary: State what a return comes to
+      description: >-
+        The same request as the return, answered with the figures only: the
+        credit the memo will state (its subtotal net of the restocking fee,
+        the tax and the total, negative as a credit), the restocking fee
+        itself, the money that goes back (positive) and each line's fee beside
+        its refund, so the counter states the fee before the return is taken.
+        Computed from the same read-only pricing the return guards with;
+        nothing is written, no row locks, no sequences.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosReturnRequest"
+      responses:
+        "200":
+          description: The figures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosReturnFigures"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns/{id}:
     get:
       operationId: posReturnGet
@@ -1762,12 +1803,15 @@ paths:
       summary: The counter's dealer rules
       description: >-
         The dealer's counter rules: the database wide check limit
-        (system_settings pos.check_limit_cents; null is no limit) and the check
+        (system_settings pos.check_limit_cents; null is no limit), the check
         ID rule (pos.check_id_required_over_cents: never, every check, or
         checks over a figure read on the sale's checks in total, so a split
         check cannot pass under it; the ID's number is never taken, on this
-        contract or at the counter). The counter reads it to ask for the ID before Pay;
-        the write is the admin and owner roles' own route.
+        contract or at the counter), and the restocking fee each return reason
+        withholds (pos.restocking_fee_bps.<code>, basis points; nothing set is
+        no fee) beside the suggested figures the settings screen offers. The
+        counter reads it to ask for the ID before Pay; the write is the admin
+        and owner roles' own route.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       responses:
@@ -1790,10 +1834,11 @@ paths:
       tags: [pos]
       summary: Write the counter's dealer rules
       description: >-
-        Writes both rules as one act on the caller's revision (If-Match and/or
-        the body's revision; a stale revision is 409 stale_revision). Admin and
-        owner only, never a machine key; audited. rules is an object of named
-        rules so later rules (the restocking fees) sit beside these.
+        Writes the rules as one act on the caller's revision (If-Match and/or
+        the body's revision; a stale revision is 409 stale_revision): the check
+        limit, the check ID rule and every reason's restocking fee (the whole
+        closed list; a figure of 0 clears the reason's row). Admin and owner
+        only, never a machine key; audited with the fees it wrote.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -2756,6 +2801,27 @@ components:
             acknowledged must be named here, or the exchange is refused with 409
             alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
+    PosReturnFigures:
+      type: object
+      required: [subtotal_cents, tax_cents, restocking_fee_cents, total_cents, refund_cents, lines]
+      properties:
+        subtotal_cents: {type: integer, format: int64, description: "The credit memo's subtotal net of the fee, negative as the memo states it."}
+        tax_cents: {type: integer, format: int64, description: "The tax refunded, negative; the fee is not taxed."}
+        restocking_fee_cents: {type: integer, format: int64, description: "The restocking fee withheld, positive, half even to the cent on each line's own refund and never more than it."}
+        total_cents: {type: integer, format: int64, description: "The memo's total, negative (a credit)."}
+        refund_cents: {type: integer, format: int64, description: "The money that goes back, positive: the total's other sign."}
+        lines:
+          type: array
+          description: "The request's lines in order, each with the fee its reason withholds."
+          items: {$ref: "#/components/schemas/PosReturnFigureLine"}
+    PosReturnFigureLine:
+      type: object
+      required: [line_id, reason_code, line_total_cents, restocking_fee_cents]
+      properties:
+        line_id: {type: [string, "null"], format: uuid, description: "The sale line a linked return names; null on a free line."}
+        reason_code: {type: string, description: "The line's reason from the closed list; other when the request named none."}
+        line_total_cents: {type: integer, format: int64, description: "The line's refund, negative (the memo line's shape)."}
+        restocking_fee_cents: {type: integer, format: int64}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]
@@ -3242,7 +3308,7 @@ components:
         revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
         rules:
           type: object
-          required: [check_limit_cents, check_id_required]
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
             check_id_required:
@@ -3251,13 +3317,23 @@ components:
               properties:
                 mode: {type: string, enum: [never, every_check, over_amount], description: "Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale."}
                 over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "The figure an over_amount rule names, read against the sale's checks in total; null on the other two."}
+            restocking_fees:
+              type: object
+              description: "The fee each return reason withholds, in basis points: the whole closed list (defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other), a reason never set carrying none. The return takes it half even to the cent from each line's own refund, never more than the line."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            restocking_fee_defaults:
+              type: object
+              description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
     PosSettingsRequest:
       type: object
       required: [rules]
       properties:
         rules:
           type: object
-          required: [check_limit_cents, check_id_required]
+          required: [check_limit_cents, check_id_required, restocking_fees]
           properties:
             check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the limit (no limit)."}
             check_id_required:
@@ -3266,6 +3342,11 @@ components:
               properties:
                 mode: {type: string, enum: [never, every_check, over_amount]}
                 over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Read only when mode is over_amount; dropped otherwise."}
+            restocking_fees:
+              type: object
+              description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
         revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
