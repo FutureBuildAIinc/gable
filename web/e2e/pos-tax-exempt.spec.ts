@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { answerAppDialog } from './app-controls';
+import { stockedProduct } from './pos-stock';
 import path from 'path';
 import fs from 'fs';
 
@@ -23,24 +24,6 @@ async function signIn(page: Page, name: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await catalog;
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
-}
-
-/** A product with stock at the counter's branch (the seeded Kelowna yard). */
-async function stockedProduct(request: APIRequestContext): Promise<{ sku: string }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string }[];
-  };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= 50) return p;
-  }
-  throw new Error('no stocked product for the counter run');
 }
 
 async function makeAccount(request: APIRequestContext, tag: string, extra: Record<string, unknown>) {
