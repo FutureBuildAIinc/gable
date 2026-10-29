@@ -262,13 +262,13 @@ func Load() (*Config, error) {
 		DraftFeedMaxStreamsPerPrincipal: getEnvInt("DRAFT_FEED_MAX_STREAMS_PER_PRINCIPAL", 8),
 		DraftFeedMaxStreams:             getEnvInt("DRAFT_FEED_MAX_STREAMS", 500),
 
-	RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
-	POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
-	POSTerminal:          getEnv("POS_TERMINAL", ""),
+		RateLimitPerMinute:   getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
+		POSTerminalSimulator: getEnv("POS_TERMINAL_SIMULATOR", ""),
+		POSTerminal:          getEnv("POS_TERMINAL", ""),
 
-	RunReportingBaseURL:      getEnv("RUN_REPORTING_BASE_URL", ""),
-	RunReportingClientID:     getEnv("RUN_REPORTING_CLIENT_ID", ""),
-	RunReportingClientSecret: getEnv("RUN_REPORTING_CLIENT_SECRET", ""),
+		RunReportingBaseURL:      getEnv("RUN_REPORTING_BASE_URL", ""),
+		RunReportingClientID:     getEnv("RUN_REPORTING_CLIENT_ID", ""),
+		RunReportingClientSecret: getEnv("RUN_REPORTING_CLIENT_SECRET", ""),
 
 		// Database Pool
 		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),
