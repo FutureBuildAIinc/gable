@@ -1107,7 +1107,6 @@ export class POSTerminal extends LitElement {
     if (t.id_checked) return `ID checked: ${ID_TYPES.find((o) => o.value === t.id_type)?.label ?? ''}`;
     const planTenders = [...this._pendingTenders, ...(entry !== null && this._tenderedSoFar < saleTotal ? [entry] : [])];
     return this._idHoldWords(planTenders) !== null ? 'ID not checked yet' : '';
->>>>>>> origin/refactor/v1
   }
 
   /** The same facts the controls disable on, so a dimmed key means a disabled control. */
