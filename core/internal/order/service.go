@@ -813,7 +813,13 @@ func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdo
 		if snap.Country != nil {
 			country = *snap.Country
 		}
-		zone, err = s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, s.now())
+		// The zone's effective window is read on the branch's own business
+		// day, never the server's clock (the exemption reads the same day).
+		day, err := s.repo.BranchLocalDate(ctx, o.BranchID, s.now())
+		if err != nil {
+			return in, nil, err
+		}
+		zone, err = s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
 		if err != nil {
 			return in, nil, err
 		}

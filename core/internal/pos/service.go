@@ -309,7 +309,13 @@ func (s *Service) zoneFor(ctx context.Context, sale *Sale) (*taxzone.Snapshot, e
 	if snap.Country != nil {
 		country = *snap.Country
 	}
-	return s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, s.now())
+	// The zone's effective window is read on the branch's own business day,
+	// never the server's clock (the exemption reads the same day).
+	day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
 }
 
 // ResolveSaleTax builds the counter sale's tax inputs (CP-10): the
