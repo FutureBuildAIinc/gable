@@ -198,8 +198,31 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		if err := s.repo.SetSaleBuyer(ctx, saleID, in.BuyerContactID); err != nil {
 			return err
 		}
-		if in.DeliveryType != "" || in.ShipToID != nil {
-			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, in.DeliveryType); err != nil {
+		// The delivery answer follows the customer now standing on the sale:
+		// a detach clears it, a plain re attach resets to a pickup, and a
+		// request naming the customer's ship to sets the delivery it names
+		// (a ship to with no delivery type is a delivery: it names where the
+		// goods go). The departed customer's ship to never stays the sale's
+		// place of receipt.
+		switch {
+		case in.CustomerID == nil:
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
+				return err
+			}
+		case in.ShipToID != nil:
+			dt := in.DeliveryType
+			if dt == "" {
+				dt = "delivery"
+			}
+			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, dt); err != nil {
+				return err
+			}
+		case in.DeliveryType != "":
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, in.DeliveryType); err != nil {
+				return err
+			}
+		default:
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
 				return err
 			}
 		}

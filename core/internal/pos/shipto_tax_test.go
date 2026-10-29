@@ -213,6 +213,61 @@ func TestShipToNamedOnTheCustomerAttach(t *testing.T) {
 	}
 }
 
+
+// RULE (CP-10, the GLM read's P2-2): the delivery answer follows the customer
+// now standing on the sale. A detach clears it, and a plain re attach resets
+// to a pickup: the departed customer's ship to must not stay the sale's
+// place of receipt.
+func TestDetachClearsTheDepartedCustomersShipTo(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	zoneFor(t, f, "98150", zonePart(taxzone.PartState, "0.050000"))
+
+	shipTo := uuid.New()
+	mustExec(t, f.db, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, city, region, postal_code, country, is_default, is_active)
+		VALUES ($1, $2, 'SITE', 'The site', '1 Golden Way', 'Tarnwick', 'WA', '98150', 'US', TRUE, TRUE)`,
+		shipTo, f.customerID)
+
+	f.ensureTill()
+	saleID := f.startSale(nil)
+	attach := func(body map[string]any) resp {
+		return f.do("PUT", "/api/v1/pos/transactions/"+saleID+"/customer", body, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	}
+	r := attach(map[string]any{
+		"customer_id": f.customerID.String(), "ship_to_id": shipTo.String(), "delivery_type": "delivery",
+	})
+	if r.status != http.StatusOK {
+		t.Fatalf("attach with ship to = %d: %s", r.status, r.raw)
+	}
+	if str(t, r.body, "delivery_type") != "delivery" || str(t, r.body, "ship_to_id") != shipTo.String() {
+		t.Fatalf("delivery_type = %q ship_to_id = %q", r.body["delivery_type"], r.body["ship_to_id"])
+	}
+
+	// The detach: the walk-in sale is a pickup with no ship to.
+	r = attach(map[string]any{"customer_id": nil})
+	if r.status != http.StatusOK {
+		t.Fatalf("detach = %d: %s", r.status, r.raw)
+	}
+	if str(t, r.body, "delivery_type") != "pickup" || r.body["ship_to_id"] != nil {
+		t.Errorf("after the detach delivery_type = %q ship_to_id = %v, want pickup and null", r.body["delivery_type"], r.body["ship_to_id"])
+	}
+
+	// A delivered attach again, then a plain re attach naming the account
+	// alone: the sale resets to a pickup, the earlier ship to gone.
+	if r := attach(map[string]any{
+		"customer_id": f.customerID.String(), "ship_to_id": shipTo.String(), "delivery_type": "delivery",
+	}); r.status != http.StatusOK {
+		t.Fatalf("re attach with ship to = %d: %s", r.status, r.raw)
+	}
+	r = attach(map[string]any{"customer_id": f.customerID.String()})
+	if r.status != http.StatusOK {
+		t.Fatalf("plain re attach = %d: %s", r.status, r.raw)
+	}
+	if str(t, r.body, "delivery_type") != "pickup" || r.body["ship_to_id"] != nil {
+		t.Errorf("after a plain re attach delivery_type = %q ship_to_id = %v, want pickup and null", r.body["delivery_type"], r.body["ship_to_id"])
+	}
+}
+
 func strContains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle || strIndexOf(haystack, needle) >= 0)
 }
