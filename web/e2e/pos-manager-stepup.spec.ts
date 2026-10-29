@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { answerAppDialog, fillAppDialogPrompt, pickOptionByValue } from './app-controls';
+import { stockedProduct } from './pos-stock';
 
 /**
  * The manager step up at the terminal (CP-04, with CP-08's pickup and sign
@@ -32,22 +33,6 @@ async function createManager(request: APIRequestContext, withPin = true): Promis
     expect(pin.status(), await pin.text()).toBe(200);
   }
   return { staffNo, name };
-}
-
-/** The product the counter sells, with stock at the branch. */
-async function stockedProduct(request: APIRequestContext): Promise<{ sku: string }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string }[] };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= 50) return p;
-  }
-  throw new Error('no stocked product for the counter run');
 }
 
 async function signIn(page: Page, name: string) {
