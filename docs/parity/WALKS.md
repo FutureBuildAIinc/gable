@@ -581,6 +581,38 @@ figures in full.
    closes of the day list, the one just made first among them, each with its balanced or over and short words. Open
    one: the Z REPORT sheet reads the frozen close, the count against the expected, read only, and prints the same
    way. At Lake Country Outpost the list holds only that register's reports.
+### The yard sale: the counter on a handheld (CP-12)
+
+Proves: CP-12 (mobile sales in the yard, on a tablet or handheld). The counter is the yard sale: the same `/pos` screen
+made touch first and framed by the field shell, not a second sale screen.
+
+Note on who is signed in: the cashier persona is Jordan Pike (cashier, `KEL-MAIN`). The browser runs narrow: set the
+window to a phone width (390) or a tablet width (820). The walk needs the field shell's dev sign in (dev mode on the
+local stack) and the browser's own dev tools to narrow the viewport.
+
+1. **The way in (Jordan Pike).** Open the field shell (`/field/`) and sign in as Cashier. The bottom tab bar offers one
+   tab, Sale; the Yard and Driver tabs are not the cashier's. Press Sale: the counter opens inside the shell's frame,
+   on `KEL-MAIN`'s register, with the shell's top bar (the yard picker, the account chip) and no second header of its
+   own.
+2. **The screen fits a phone.** At 390 the document never scrolls sideways: the header is one row (the sale's number,
+   the yard and register on one truncated line; the till state as a chip; the till's money controls behind the Till
+   button; no keyboard legend). The working order is the thumb's: the Items card first, then the ticket, then payment,
+   with a pinned pay bar at the bottom carrying the total and Pay.
+3. **A cash sale in the yard (Jordan Pike).** Open Till with a float if none is open (the Till button holds Open Till
+   when there is none). Find `2x4x8 SPF Premium` by typing `LUM-248-PREM` in the search and pressing Enter. Choose
+   Cash, press Pay on the pinned bar: the sale completes, the receipt prints (Print receipt, then the button reads
+   Reprint), and `GET /api/v1/pos/transactions?register_id=REG-01` lists it completed.
+4. **The scanner.** Press Scan on the Items card: the barcode scanner opens. The camera is the webview's own
+   permission (the OS asks once); on a desktop browser allow the camera and scan `LUM-248-PREM`: the line lands. The
+   camera inside a Tauri webview is proved by hand on the target device, once, and noted here.
+5. **A tablet at 820.** Widen to 820: the same screen becomes two columns (the Items card on the left, the panels on
+   the right), the pinned bar is gone and the Pay button is in the order summary card. The same sale completes.
+6. **Money never queues at the yard.** Cut the connection (dev tools, offline): the shell's banner says the truth, and
+   Pay is refused in the same words ("You are offline; the shell and its apps need the connection, and money never
+   queues."). No sale is created: the transaction list is unchanged. Offline selling stays the work shell's alone.
+7. **Who may sell.** The cashier opens the handheld (the Field profile lists the cashier next to warehouse and driver);
+   the warehouse hand does not sell: signing in as Warehouse offers the Yard tab only, and the server's counter wall
+   (admin, owner, cashier) is unchanged.
 
 ### CP-06: return any past sale, the restock choice per line, and the refund claims queue
 

@@ -161,8 +161,20 @@ mod tests {
             "geolocation",
             "core:default",
         ] {
-            assert!(!CAPABILITY.contains(banned), "{banned} must not be granted");
+            assert!(!perms.contains(&banned), "{banned} must not be granted");
         }
+    }
+
+    #[test]
+    fn the_camera_usage_description_is_prepared_for_when_the_profile_is_packaged() {
+        // The scanner asks for the camera through the webview's own web API
+        // (getUserMedia); no Tauri grant is involved. This test checks only
+        // that the usage description is prepared in the source file: the
+        // profile is not packaged yet (bundle.active false in tauri.conf.json),
+        // so nothing merges the plist into an app today, and the hand proof on
+        // a device is the only proof until the packaging lands.
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("NSCameraUsageDescription"));
     }
 
     #[test]
