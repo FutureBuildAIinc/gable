@@ -243,7 +243,7 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		if priceUOM == "" {
 			priceUOM = uom
 		}
-		r.Lines = append(r.Lines, document.ThermalLine{
+		tl := document.ThermalLine{
 			SKU:         sku,
 			Description: l.Description,
 			Quantity:    *l.Quantity,
@@ -251,7 +251,15 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			UnitPrice:   *l.UnitPrice,
 			PriceUOM:    priceUOM,
 			LineTotal:   *l.LineTotal,
-		})
+		}
+		// The weighed line's marking (CP-19): the ticket on the paper, MAN
+		// WT when the weight was typed.
+		if l.ScaleTicketNumber != nil {
+			tl.ScaleTicket = *l.ScaleTicketNumber
+			tl.WeightGrossLb, tl.WeightTareLb, tl.WeightNetLb = l.WeightGrossLb, l.WeightTareLb, l.WeightNetLb
+			tl.ManualWeight = l.WeightSource != nil && *l.WeightSource == "manual"
+		}
+		r.Lines = append(r.Lines, tl)
 	}
 	changeLeft := sale.ChangeCents
 	var accountCents int64

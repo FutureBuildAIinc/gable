@@ -48,6 +48,8 @@ const PRODUCT: Product = {
   image_url: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
+  density_lb_per_cy: null,
+  density_volume_state: null,
 }
 
 let fetchMock: ReturnType<typeof vi.fn>

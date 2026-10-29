@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
@@ -55,6 +56,9 @@ func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string
 	return nil
 }
 func (m *mockProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.Geometry, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockProductRepo) UpdateDensity(_ context.Context, _ uuid.UUID, _ *httpx.Quantity, _ *string, _ int64) (int64, error) {
 	return 0, nil
 }
 func (m *mockProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {

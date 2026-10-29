@@ -495,6 +495,9 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	mig105Apply(t, conn, "../../migrations/140_cash_rounding.sql")
 	// and the zone columns 141 added to the sale (the sale read names them)
 	mig105Apply(t, conn, "../../migrations/141_tax_zone_tables.sql")
+	// and the weight block the counter line carries from 144 (the line
+	// projection reads it)
+	mig105Apply(t, conn, "../../migrations/144_scale_tickets.sql")
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {

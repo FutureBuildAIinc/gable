@@ -194,6 +194,7 @@
             "is_special_order": false,
             "line_total_cents": 950,
             "line_type": "product",
+            "manual_weight_reason": null,
             "override_reason": null,
             "parent_line_id": null,
             "position": 0,
@@ -210,6 +211,9 @@
             "quantity_fulfilled": "0",
             "quote_line_id": null,
             "revenue_account_code": null,
+            "scale_device_id": null,
+            "scale_ticket_id": null,
+            "scale_ticket_number": null,
             "sku": "LUM-248-PREM",
             "special_order_unit_cost_ten_thousandths": null,
             "stock_quantity": "2",
@@ -219,7 +223,14 @@
             "unit_price_ten_thousandths": 47500,
             "uom": "PCS",
             "uom_qty": "1",
-            "vendor_id": null
+            "vendor_id": null,
+            "weight_captured_at": null,
+            "weight_captured_by": null,
+            "weight_gross_lb": null,
+            "weight_net_basis": null,
+            "weight_net_lb": null,
+            "weight_source": null,
+            "weight_tare_lb": null
           }
         ],
         "margin_percent": "26.3157",

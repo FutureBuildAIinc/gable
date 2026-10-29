@@ -74,6 +74,11 @@ services:
       # key can then be stored); set it in the shell to 64 hex characters,
       # the same value each run, never in a file. See docs/modules/tech-admin.md.
       PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:-}
+      # The counter's scale link (CP-19): on this local stack the simulated
+      # SMA scale answers, so the weigh in and weigh out walk runs with no
+      # hardware. Unset it to run without a scale (the manual weight entry
+      # with its reason remains). Never set it on a reachable host.
+      POS_SCALE_SIMULATOR: ${POS_SCALE_SIMULATOR:-1}
     depends_on:
       migrate:
         condition: service_completed_successfully
