@@ -77,6 +77,7 @@ const (
 	PartShipTo           = "ship_to"
 	PartContact          = "contact"
 	PartEscalationPolicy = "escalation_policy"
+	PartAlert            = "alert"
 )
 
 type Service struct {
@@ -86,6 +87,7 @@ type Service struct {
 	audit    AuditLogger   // optional; nil writes no audit rows (unit tests)
 	branches BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
 	shared   SharedGuard   // optional; nil leaves a shared customer's fields unrestricted (unit tests)
+	actor    ActorResolver // optional; nil writes "unknown" for the rows that keep an author
 	now      func() time.Time
 }
 
@@ -110,6 +112,13 @@ func (s *Service) WithAudit(a AuditLogger) *Service {
 // WithBranchGuard makes Create refuse a primary_branch_id the caller may not target.
 func (s *Service) WithBranchGuard(g BranchGuard) *Service {
 	s.branches = g
+	return s
+}
+
+// WithActorResolver wires the naming of the acting principal for the rows
+// that keep one: the alert's author and the one who ended it.
+func (s *Service) WithActorResolver(a ActorResolver) *Service {
+	s.actor = a
 	return s
 }
 
@@ -149,7 +158,7 @@ func needRevision(p Precondition) error {
 
 // notFound maps the repository's sentinels to the wire's 404.
 func notFound(err error) error {
-	for _, s := range []error{ErrNotFound, ErrShipToNotFound, ErrContactNotFound, ErrTermsNotFound} {
+	for _, s := range []error{ErrNotFound, ErrShipToNotFound, ErrContactNotFound, ErrTermsNotFound, ErrAlertNotFound} {
 		if errors.Is(err, s) {
 			return httpx.NotFound(s.Error())
 		}
@@ -293,7 +302,7 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Customer, error) {
 			ID: uuid.New(), AccountNumber: d.AccountNumber, Name: d.Name,
 			Email: d.Email, Phone: d.Phone, Address: d.Address,
 			IsActive: d.IsActive, PriceProfileID: d.PriceProfileID, SalespersonID: d.SalespersonID,
-			CreditLimitCents: d.CreditLimitCents, Currency: d.Currency, POrequired: d.POrequired,
+			CreditLimitCents: d.CreditLimitCents, Currency: d.Currency, POrequired: d.POrequired, JobRequired: d.JobRequired,
 			CheckLimitCents: d.CheckLimitCents,
 			Revision:        1, CreatedAt: now, UpdatedAt: now,
 		}
@@ -371,7 +380,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		if d.PriceProfileID != nil {
 			next.PriceProfileID = d.PriceProfileID
 		}
-		next.CreditLimitCents, next.Currency, next.POrequired = d.CreditLimitCents, d.Currency, d.POrequired
+		next.CreditLimitCents, next.Currency, next.POrequired, next.JobRequired = d.CreditLimitCents, d.Currency, d.POrequired, d.JobRequired
 		// the counter's account controls keep their value when left out
 		if d.NamedBuyerRequired != nil {
 			next.NamedBuyerRequired = *d.NamedBuyerRequired
@@ -497,6 +506,7 @@ func diffCustomer(a, b *Customer) []string {
 	add(!eqStr(a.Currency, b.Currency), "currency")
 	add(a.PaymentTermsID != b.PaymentTermsID, "payment_terms_id")
 	add(a.POrequired != b.POrequired, "po_required")
+	add(a.JobRequired != b.JobRequired, "job_required")
 	add(a.NamedBuyerRequired != b.NamedBuyerRequired, "named_buyer_required")
 	add((a.CheckLimitCents == nil) != (b.CheckLimitCents == nil) ||
 		(a.CheckLimitCents != nil && *a.CheckLimitCents != *b.CheckLimitCents), "check_limit_cents")
@@ -651,6 +661,8 @@ func (s *Service) auditControls(ctx context.Context, cur, next *Customer, change
 			changes[field] = map[string]any{"from": cur.PaymentTermsID, "to": next.PaymentTermsID}
 		case "po_required":
 			changes[field] = map[string]any{"from": cur.POrequired, "to": next.POrequired}
+		case "job_required":
+			changes[field] = map[string]any{"from": cur.JobRequired, "to": next.JobRequired}
 		case "named_buyer_required":
 			changes[field] = map[string]any{"from": cur.NamedBuyerRequired, "to": next.NamedBuyerRequired}
 		case "check_limit_cents":
@@ -710,6 +722,8 @@ func headerValue(c *Customer, field string) any {
 		return c.PaymentTermsID
 	case "po_required":
 		return c.POrequired
+	case "job_required":
+		return c.JobRequired
 	case "named_buyer_required":
 		return c.NamedBuyerRequired
 	case "check_limit_cents":

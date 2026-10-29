@@ -144,6 +144,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": null,
@@ -153,6 +154,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 1,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 0,
         "tax_cents": 0,
@@ -184,6 +186,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-10>",
         "invoice_id": null,
@@ -193,6 +196,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 1,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 0,
         "tax_cents": 0,
@@ -224,6 +228,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-11>",
         "invoice_id": null,
@@ -233,6 +238,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 1,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 0,
         "tax_cents": 0,
@@ -315,7 +321,7 @@
         },
         {
           "description": "2x4x8 SPF Premium",
-          "in_stock": "415",
+          "in_stock": "315",
           "product_id": "<id-4>",
           "sku": "LUM-248-PREM",
           "unit_price_cents": 550,
@@ -477,6 +483,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": null,
@@ -522,12 +529,16 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 2,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -556,6 +567,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": null,
@@ -636,12 +648,16 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 3,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 8788,
-        "tax_cents": 1055,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 9843
+        "total_cents": 8788
       }
     }
   },
@@ -749,6 +765,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": null,
@@ -794,12 +811,16 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 4,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -894,6 +915,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": null,
@@ -939,12 +961,16 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 4,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 1568,
-        "tax_cents": 188,
+        "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [],
         "till_session_id": "<id-3>",
-        "total_cents": 1756
+        "total_cents": 1568
       }
     }
   },
@@ -1009,13 +1035,16 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-42>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000001",
             "register_id": "REG-01",
@@ -1025,29 +1054,35 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-9>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 1,
             "number": "POS-000002",
             "register_id": "REG-01",
             "revision": 4,
             "status": "open",
-            "total_cents": 1756
+            "total_cents": 1568
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-10>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000003",
             "register_id": "REG-01",
@@ -1057,13 +1092,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-11>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000004",
             "register_id": "REG-01",
@@ -1142,6 +1180,188 @@
         "meta": {
           "request_id": "<id-44>"
         }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_number",
+    "sort_envelope_items": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=POS-"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "customer_name": null,
+            "id": "<id-11>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000004",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "customer_name": null,
+            "id": "<id-10>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000003",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-9>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "open",
+            "total_cents": 1568
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_customer",
+    "sort_envelope_items": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=Golden"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-9>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "open",
+            "total_cents": 1568
+          },
+          {
+            "branch_id": "<id-1>",
+            "business_day": "<day+0>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "invoice_number": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.search_no_match",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?q=zz-no-such-sale"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.refund_intents.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/refund-intents"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
       }
     }
   },
@@ -1386,6 +1606,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": "<id-52>",
@@ -1431,9 +1652,13 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 5,
+        "ship_to_id": null,
         "status": "completed",
         "subtotal_cents": 1568,
         "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [
           {
             "amount_cents": 1568,
@@ -1538,6 +1763,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-10>",
         "invoice_id": null,
@@ -1583,6 +1809,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 2,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 3610,
         "tax_cents": 433,
@@ -1695,6 +1922,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-11>",
         "invoice_id": null,
@@ -1740,6 +1968,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 2,
+        "ship_to_id": null,
         "status": "open",
         "subtotal_cents": 523,
         "tax_cents": 63,
@@ -1784,6 +2013,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-11>",
         "invoice_id": "<id-62>",
@@ -1829,6 +2059,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 3,
+        "ship_to_id": null,
         "status": "completed",
         "subtotal_cents": 523,
         "tax_cents": 63,
@@ -1894,6 +2125,7 @@
         "currency": "USD",
         "customer_id": null,
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-11>",
         "invoice_id": "<id-62>",
@@ -1939,6 +2171,7 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 4,
+        "ship_to_id": null,
         "status": "voided",
         "subtotal_cents": 523,
         "tax_cents": 63,
@@ -1998,6 +2231,7 @@
         "currency": "USD",
         "customer_id": "<id-8>",
         "customer_po": null,
+        "delivery_type": "pickup",
         "exchange_return_id": null,
         "id": "<id-9>",
         "invoice_id": "<id-52>",
@@ -2043,9 +2277,13 @@
         "print_count": 0,
         "register_id": "REG-01",
         "revision": 5,
+        "ship_to_id": null,
         "status": "completed",
         "subtotal_cents": 1568,
         "tax_cents": 0,
+        "tax_exemption": {
+          "certificate_number": "GOLD-CERT-1"
+        },
         "tenders": [
           {
             "amount_cents": 1568,
@@ -2083,13 +2321,16 @@
         "items": [
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-9>",
             "invoice_id": "<id-52>",
+            "invoice_number": "IN-000054",
             "item_count": 1,
             "number": "POS-000002",
             "register_id": "REG-01",
@@ -2099,13 +2340,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": "<ts+0d>",
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-11>",
             "invoice_id": "<id-62>",
+            "invoice_number": "IN-000055",
             "item_count": 1,
             "number": "POS-000004",
             "register_id": "REG-01",
@@ -2115,13 +2359,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-8>",
+            "customer_name": "Golden Harness Co",
             "id": "<id-42>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 0,
             "number": "POS-000001",
             "register_id": "REG-01",
@@ -2131,13 +2378,16 @@
           },
           {
             "branch_id": "<id-1>",
+            "business_day": "<day+0>",
             "cashier_id": "<id-2>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
+            "customer_name": null,
             "id": "<id-10>",
             "invoice_id": null,
+            "invoice_number": null,
             "item_count": 1,
             "number": "POS-000003",
             "register_id": "REG-01",

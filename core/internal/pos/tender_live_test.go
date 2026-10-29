@@ -76,8 +76,8 @@ func TestAnExemptCustomerPaysExactly(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
 		f.service = f.service.WithGateway(&fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}})
 	})
-	mustExec(t, f.db, `INSERT INTO tax_exemptions (customer_id, exempt_reason, certificate_number)
-		VALUES ($1, 'RESALE', 'CERT-1')`, f.customerID)
+	mustExec(t, f.db, `INSERT INTO tax_exemptions (customer_id, exempt_reason, certificate_number, effective_date)
+		VALUES ($1, 'RESALE', 'CERT-1', CURRENT_DATE - 1)`, f.customerID)
 	t.Cleanup(func() {
 		mustExec(t, f.db, `DELETE FROM tax_exemptions WHERE customer_id = $1`, f.customerID)
 	})

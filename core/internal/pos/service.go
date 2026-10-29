@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -282,19 +283,106 @@ func eventJSON(v map[string]any) []byte {
 	return raw
 }
 
-// estimateTax is the cart's live estimate at the branch rate; the money
+// estimateTax is the cart's live estimate through the one resolver; the money
 // moment resolves its own tax through the provider or the resolver
 // (ADR 0005 section 3: the estimate is not the bill).
 func (s *Service) estimateTax(ctx context.Context, sale *Sale, taxableCents httpx.Cents) int64 {
-	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
-	if err != nil || !ok {
+	// the estimate runs the same resolver the completion runs (CP-10): an
+	// exempt customer, a delivered sale's ship-to zone, then the branch rate
+	customerID := sale.CustomerID
+	if customerID == nil {
+		if id, _, err := s.repo.WalkInCustomer(ctx); err == nil {
+			customerID = &id
+		}
+	}
+	if customerID == nil {
 		return 0
 	}
-	scaled, _, err := salesdoc.ParseTaxRate(rate)
+	resolved, err := s.ResolveSaleTax(ctx, sale, *customerID)
+	if err != nil || resolved.Rate == nil {
+		return 0
+	}
+	scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
 	if err != nil {
 		return 0
 	}
 	return int64(salesdoc.TaxAt(taxableCents, scaled))
+}
+
+// zoneFor resolves a delivered sale's ship to to the zone that covers it
+// (CP-10), nil when the sale is a pickup or names no ship to or no zone
+// covers the place of receipt.
+func (s *Service) zoneFor(ctx context.Context, sale *Sale) (*taxzone.Snapshot, error) {
+	if (sale.DeliveryType != "delivery" && sale.DeliveryType != "DELIVERY") || sale.ShipToID == nil {
+		return nil, nil
+	}
+	snap, _, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+	if err != nil {
+		return nil, err
+	}
+	country := ""
+	if snap.Country != nil {
+		country = *snap.Country
+	}
+	// The zone's effective window is read on the branch's own business day,
+	// never the server's clock (the exemption reads the same day).
+	day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
+}
+
+// ResolveSaleTax builds the counter sale's tax inputs (CP-10): the
+// exemption, the ship to a delivered sale names with its zone and its typed
+// rate, and the branch rate, and runs the one resolver Gable has. The
+// exemption reads through exemptOn, the one window rule on the branch's
+// business day the running totals, the completion, the returns and the
+// exchanges all read, and it still outranks the ship to's zone.
+func (s *Service) ResolveSaleTax(ctx context.Context, sale *Sale, customerID uuid.UUID) (salesdoc.ResolvedTax, error) {
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	inputs := salesdoc.TaxInputs{Exempt: exempt, Delivery: sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY"}
+	if inputs.Delivery && sale.ShipToID != nil {
+		_, typedRate, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		inputs.ShipToRate = typedRate
+		zone, err := s.zoneFor(ctx, sale)
+		if err != nil {
+			return salesdoc.ResolvedTax{}, err
+		}
+		if zone != nil {
+			inputs.ZoneRate = &zone.CombinedRate
+		}
+	}
+	rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
+	if err != nil {
+		return salesdoc.ResolvedTax{}, err
+	}
+	if ok {
+		inputs.BranchRate = &rate
+	}
+	return salesdoc.ResolveTax(inputs)
+}
+
+// exemptOn reads whether the customer's certificate exempts a sale on the
+// branch's business day, through tax.ExemptionCovering: the one window rule
+// (active, effective on or before the day, not yet expired) the running
+// totals, the completion, the returns and the exchanges all read.
+func (s *Service) exemptOn(ctx context.Context, branchID, customerID uuid.UUID) (bool, error) {
+	day, err := s.repo.BranchLocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return false, err
+	}
+	standing, err := s.repo.CustomerExemption(ctx, customerID, day)
+	if err != nil {
+		return false, err
+	}
+	return standing != nil, nil
 }
 
 func (s *Service) recordEvent(ctx context.Context, ev outbox.Event) error {
@@ -342,9 +430,26 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 		currency = facts.Currency
 	}
 	var out *Sale
+	// The ship to a delivered sale names must be the customer's own (CP-10):
+	// the read is unwalled, the customer was walled above.
+	if in.ShipToID != nil {
+		ok, err := s.repo.ShipToBelongsTo(ctx, *in.ShipToID, *in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, httpx.BadRequest("the ship to is not the customer's",
+				httpx.FieldError{Field: "ship_to_id", Message: "no such ship to for this customer"})
+		}
+	}
+	deliveryType := in.DeliveryType
+	if deliveryType == "" {
+		deliveryType = "pickup"
+	}
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
 			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
+			DeliveryType: deliveryType, ShipToID: in.ShipToID,
 			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
 		session, err := s.openDrawer(ctx, in.RegisterID)
 		if err != nil {
@@ -921,13 +1026,18 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 		Description: l.Description,
 		Quantity:    qty,
 		UOM:         derefString(l.UOM),
-		PriceUOM:    derefString(l.PriceUOM),
 	}
-	if l.UOMQty != nil {
-		pl.UOMQty = *l.UOMQty
+	if l.ProductID == nil || l.PriceSource == salesdoc.PriceSourceOverride || l.PriceSource == salesdoc.PriceSourceManual || l.LineType == salesdoc.LineCharge {
+		pl.PriceUOM = derefString(l.PriceUOM)
+		if l.UOMQty != nil {
+			pl.UOMQty = *l.UOMQty
+		}
+		if l.PriceUOMQty != nil {
+			pl.PriceUOMQty = *l.PriceUOMQty
+		}
 	}
-	if l.PriceUOMQty != nil {
-		pl.PriceUOMQty = *l.PriceUOMQty
+	if l.Tally != nil && len(l.Tally.Rows) > 0 && l.Quantity != nil && qty == *l.Quantity {
+		pl.TallyRows = l.Tally.Rows
 	}
 	if l.ChargeCode != nil {
 		pl.ChargeCode = *l.ChargeCode
@@ -989,7 +1099,12 @@ func (s *Service) RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) (*Sa
 	return out, nil
 }
 
-// GetSale reads a sale with its lines and tenders.
+// GetSale reads a sale with its lines and tenders, and, for a named
+// customer, the exemption standing: the certificate that exempts the sale on
+// the branch's business day, so the counter can say why there is no tax
+// (CP-10). Nil when no certificate covers the day. A completed sale reads
+// the day it was completed on and only when its posted tax was zero, so a
+// taxed sale read later never shows a certificate added after it.
 func (s *Service) GetSale(ctx context.Context, saleID uuid.UUID) (*Sale, error) {
 	sale, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
@@ -1001,17 +1116,44 @@ func (s *Service) GetSale(ctx context.Context, saleID uuid.UUID) (*Sale, error) 
 	if sale.Tenders, err = s.repo.GetTenders(ctx, saleID); err != nil {
 		return nil, err
 	}
+	if sale.CustomerID != nil && (sale.Status == StatusOpen || sale.Status == StatusHeld || (sale.Status == StatusCompleted && sale.TaxCents == 0)) {
+		at := s.now()
+		if sale.CompletedAt != nil {
+			at = sale.CompletedAt.Time
+		}
+		day, err := s.repo.BranchLocalDate(ctx, sale.BranchID, at)
+		if err != nil {
+			return nil, err
+		}
+		if sale.TaxExemption, err = s.repo.CustomerExemption(ctx, *sale.CustomerID, day); err != nil {
+			return nil, err
+		}
+	}
 	return sale, nil
 }
 
 // recalcTotals recomputes the cart's subtotal and the live tax estimate.
+// The estimate honours the attached customer's exemption (CP-10): when a
+// certificate covers the branch's business day the tax is zero, so the tax
+// the screen shows equals what completion posts. The standing itself is read
+// by GetSale, so the counter can name the certificate.
 func (s *Service) recalcTotals(ctx context.Context, sale *Sale) error {
 	lines, err := s.repo.GetLines(ctx, sale.ID)
 	if err != nil {
 		return err
 	}
 	totals := salesdoc.SumTotals(lines)
-	return s.repo.UpdateSaleTotals(ctx, sale.ID, int64(totals.SubtotalCents), int64(s.estimateTax(ctx, sale, totals.TaxableCents)), int64(totals.SubtotalCents)+int64(s.estimateTax(ctx, sale, totals.TaxableCents)))
+	tax := s.estimateTax(ctx, sale, totals.TaxableCents)
+	if sale.CustomerID != nil {
+		exempt, err := s.exemptOn(ctx, sale.BranchID, *sale.CustomerID)
+		if err != nil {
+			return err
+		}
+		if exempt {
+			tax = 0
+		}
+	}
+	return s.repo.UpdateSaleTotals(ctx, sale.ID, int64(totals.SubtotalCents), tax, int64(totals.SubtotalCents)+tax)
 }
 
 func invalid(field, message string) *httpx.Error {

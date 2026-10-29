@@ -29,8 +29,8 @@
         },
         "media": [],
         "product": {
-          "allocated": "14",
-          "available": "414",
+          "allocated": "114",
+          "available": "314",
           "average_unit_cost_ten_thousandths": 35000,
           "base_price_ten_thousandths": 55000,
           "board_length_ft": null,

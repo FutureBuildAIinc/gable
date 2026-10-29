@@ -224,10 +224,12 @@ func roleClaims(next http.Handler) http.Handler {
 		if role := r.Header.Get("X-Test-Role"); role != "" {
 			claims := &middleware.UserClaims{Role: role, Roles: []string{role}}
 			claims.Subject = r.Header.Get("X-Test-Sub")
+			claims.Email = r.Header.Get("X-Test-Email")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		} else if roles := r.Header.Get("X-Test-Roles"); roles != "" {
 			claims := &middleware.UserClaims{Roles: strings.Split(roles, ",")}
 			claims.Subject = r.Header.Get("X-Test-Sub")
+			claims.Email = r.Header.Get("X-Test-Email")
 			r = r.WithContext(context.WithValue(r.Context(), middleware.UserContextKey, claims))
 		}
 		next.ServeHTTP(w, r)

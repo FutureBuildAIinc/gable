@@ -52,6 +52,25 @@ export interface OrderSummary {
     updated_at: string;
 
     invoice_ids: string[];
+    deposit_unapplied_cents: number;
+}
+
+export interface OrderDepositApplication {
+    invoice_id: string;
+    amount_cents: number;
+    applied_on: string;
+}
+
+/** A payment taken against the order (CP-07): what it settled and what it still holds. */
+export interface OrderDeposit {
+    id: string;
+    number: string;
+    received_on: string;
+    method: 'cash' | 'check' | 'ach' | 'other' | 'card';
+    amount_cents: number;
+    unapplied_cents: number;
+    reference: string | null;
+    applications: OrderDepositApplication[];
 }
 
 export interface OrderLine {
@@ -112,6 +131,9 @@ export interface Order extends OrderSummary {
         delivery_instructions: string | null;
     } | null;
     lines: OrderLine[];
+    deposit_total_cents: number;
+    balance_due_after_deposits_cents: number;
+    deposits: OrderDeposit[];
 }
 
 export interface OrderPage {

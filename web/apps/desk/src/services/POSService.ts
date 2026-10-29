@@ -17,6 +17,7 @@ import type {
     TillSession,
     TillReport,
     TillMovement,
+    ZReport,
     MovementRequest,
     BranchDay,
     DepositCandidate,
@@ -34,6 +35,13 @@ import type {
     TerminalIntent,
     TerminalLostItem,
     TerminalSweepResult,
+    RefundIntent,
+    RefundIntentResolved,
+    RefundIntentPaidBack,
+    PosRules,
+    PosSettings,
+    StepUpManager,
+    StepUpApproval,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -147,6 +155,7 @@ export interface ExchangeIn {
     returned_lines: ReturnLineIn[];
     sale_lines: Array<{ product_id: string; quantity: string }>;
     tenders?: TenderIn[];
+    acknowledged_alert_ids?: string[];
 }
 
 export const posService = {
@@ -235,14 +244,22 @@ export const posService = {
         return response.json();
     },
 
-    /** The money moment: the tenders in cents on the sale's revision, with the payer capture and the manager's avoidance mark when the counter holds them (CP-17a). */
+    /**
+     * The money moment: the tenders in cents on the sale's revision. The
+     * acknowledged alerts are the customer's counter alerts the clerk read and
+     * said so about; a warning that asks to be acknowledged and is not named
+     * here is refused with 409 alert_unacknowledged. The payer capture and
+     * the manager's avoidance mark ride along when the counter holds them
+     * (CP-17a).
+     */
     async completeSale(
         saleId: string,
         revision: number,
         tenders: TenderIn[],
+        acknowledgedAlertIds: string[] = [],
         extras?: { payer?: PayerCaptureIn; suspected_avoidance?: boolean },
     ): Promise<Sale> {
-        const body: Record<string, unknown> = { tenders };
+        const body: Record<string, unknown> = { tenders, acknowledged_alert_ids: acknowledgedAlertIds };
         if (extras?.payer) body.payer = extras.payer;
         if (extras?.suspected_avoidance !== undefined) body.suspected_avoidance = extras.suspected_avoidance;
         const response = await expectOk(
@@ -298,6 +315,18 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions?${params.toString()}`),
             'Failed to list the day\u2019s sales',
+        );
+        return response.json();
+    },
+
+    /** Search completed sales by sale number, invoice number, customer name, or date. */
+    async searchSales(q: string, date?: string): Promise<SalePage> {
+        const params = new URLSearchParams();
+        if (q) params.append('q', q);
+        if (date) params.append('date', date);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions?${params.toString()}`),
+            'Failed to search the sales',
         );
         return response.json();
     },
@@ -366,15 +395,76 @@ export const posService = {
         return response.json();
     },
 
+    /**
+     * The dealer's counter rules (GET /api/v1/pos/settings): the database
+     * wide check limit and the check ID rule. The counter reads it to ask
+     * for the ID before Pay.
+     */
+    async settings(): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`),
+            'Failed to read the counter rules',
+        );
+        return response.json();
+    },
+
+    /** Writes the counter rules as one act on the revision (an owner or admin). */
+    async saveSettings(rules: PosRules, revision: number): Promise<PosSettings> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/settings`, {
+                method: 'PUT',
+                headers: { ...JSON_HEADERS, 'If-Match': ifMatch(revision) },
+                body: JSON.stringify({ rules, revision }),
+            }),
+            'Failed to save the counter rules',
+        );
+        return response.json();
+    },
+
     /** A manager approves one sale (kind account or check), with a reason and a cap in cents. */
-    async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number): Promise<CounterOverride> {
+    async approveOverride(saleId: string, kind: 'account' | 'check', reason: string, capCents: number,
+        approvalToken?: string): Promise<CounterOverride> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/overrides`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ kind, reason, cap_cents: capCents }),
+                body: JSON.stringify({ kind, reason, cap_cents: capCents, ...(approvalToken ? { approval_token: approvalToken } : {}) }),
             }),
             'Failed to record the approval',
+        );
+        return response.json();
+    },
+
+    // --- The manager step up (CP-04) ---
+
+    /** The managers the picker offers for one act: active, a PIN set, a role the act admits. */
+    async stepUpManagers(act: 'override' | 'pickup' | 'signoff'): Promise<StepUpManager[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/step-up/managers?act=${act}`),
+            'Failed to load the managers',
+        );
+        const page = (await response.json()) as { items?: StepUpManager[] };
+        return Array.isArray(page.items) ? page.items : [];
+    },
+
+    /**
+     * A manager approves at the counter with their own PIN; one act spends
+     * the answer. An override names the kind and the cap the manager
+     * approves, a pickup its amount.
+     */
+    async stepUp(act: 'override' | 'pickup' | 'signoff', manager: string, pin: string, targetId: string,
+        amountCents?: number, kind?: 'account' | 'check' | 'refund_method'): Promise<StepUpApproval> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/step-up`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({
+                    act, manager, pin, target_id: targetId,
+                    ...(amountCents !== undefined ? { amount_cents: amountCents } : {}),
+                    ...(kind !== undefined ? { kind } : {}),
+                }),
+            }),
+            'Failed to ask the manager',
         );
         return response.json();
     },
@@ -382,7 +472,15 @@ export const posService = {
     /** Names the sale's customer (before the first line), purchase order, job and buyer. */
     async attachCustomer(
         saleId: string,
-        input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null; buyer_contact_id?: string | null },
+        input: {
+            customer_id: string | null;
+            customer_po?: string | null;
+            job_id?: string | null;
+            buyer_contact_id?: string | null;
+            /** The ship to a delivered sale carries (CP-10); needs customer_id and delivery_type 'delivery'. */
+            ship_to_id?: string | null;
+            delivery_type?: 'pickup' | 'delivery';
+        },
     ): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/customer`, {
@@ -497,6 +595,27 @@ export const posService = {
         return response.json();
     },
 
+    /** The register's stored Z reports of a business date (today when none is sent). */
+    async zReports(registerID: string, date?: string): Promise<ZReport[]> {
+        const params = new URLSearchParams({ register_id: registerID });
+        if (date) params.set('date', date);
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/zreports?${params.toString()}`),
+            'Failed to load the Z reports',
+        );
+        const list = (await response.json()) as ZReport[];
+        return Array.isArray(list) ? list : [];
+    },
+
+    /** One session's frozen Z report. */
+    async zReport(sessionID: string): Promise<ZReport> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/zreport`),
+            'Failed to load the Z report',
+        );
+        return response.json();
+    },
+
     /* ---- The card terminal's intents (CP-05) ---- */
 
     /** One card leg's own record: the desk's waiting state reads it while the terminal has the card. */
@@ -553,6 +672,47 @@ export const posService = {
         return response.json();
     },
 
+    // --- Refund intents (CP-06) ---
+
+    /** The manager's queue of open refund claims: voids, returns and paybacks waiting on the terminal or on finance. */
+    async listRefundIntents(): Promise<RefundIntent[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents`),
+            'Failed to read the refund intents',
+        );
+        const body = await response.json() as { items?: RefundIntent[] };
+        return body.items ?? [];
+    },
+
+    /** Pays a failed void's held credit back to its card. */
+    async paybackRefundIntent(id: string, reason: string): Promise<RefundIntentPaidBack> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents/${id}/payback`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ reason }),
+            }),
+            'Failed to pay back the refund intent',
+        );
+        return response.json();
+    },
+
+    /** Resolves a pending refund claim by recording the terminal's actual outcome. */
+    async resolveRefundIntent(
+        id: string,
+        input: { outcome: 'refund' | 'no_refund'; refund_tx_id?: string; reconciliation_reference?: string; reason: string },
+    ): Promise<RefundIntentResolved> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/refund-intents/${id}/resolve`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to resolve the refund intent',
+        );
+        return response.json();
+    },
+
     // --- Till movements, variance sign off and the branch day (CP-08, CP-09) ---
 
     /** A safe drop, pickup, paid in or paid out against the open drawer. */
@@ -578,12 +738,12 @@ export const posService = {
         return Array.isArray(page.items) ? page.items : [];
     },
 
-    async signOffTill(sessionID: string, reason: string): Promise<TillReport> {
+    async signOffTill(sessionID: string, reason: string, approvalToken?: string): Promise<TillReport> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/signoff`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ reason }),
+                body: JSON.stringify({ reason, ...(approvalToken ? { approval_token: approvalToken } : {}) }),
             }),
             'Failed to sign off the till',
         );

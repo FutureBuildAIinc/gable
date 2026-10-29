@@ -472,6 +472,97 @@ paths:
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "428": { $ref: "#/components/responses/WirePreconditionRequired" }
         "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/admin/staff/{id}/counter-pin:
+    put:
+      operationId: adminSetStaffCounterPIN
+      tags: [admin]
+      summary: Set a staff member's counter PIN
+      description: >-
+        Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits,
+        never one repeated digit or a plain run like 1234. Hashed on the
+        server with argon2id and a per PIN salt; the PIN is never logged and
+        the answer says only counter_pin_set and locked. Setting a PIN
+        clears the failures and the lock.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCounterPINRequest"
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+    delete:
+      operationId: adminClearStaffCounterPIN
+      tags: [admin]
+      summary: Clear a staff member's counter PIN
+      description: Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/admin/staff/{id}/counter-pin/unlock:
+    post:
+      operationId: adminUnlockStaffCounterPIN
+      tags: [admin]
+      summary: Unlock a staff member's counter PIN
+      description: >-
+        Admin or owner. Lifts the lock five wrong tries impose and clears
+        the failures; the hash stands, so the manager's own PIN works again
+        at once.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/staff/{id}/modules:
     post:
       operationId: adminGrantModule
@@ -916,12 +1007,14 @@ components:
           type: integer
     StaffMember:
       type: object
-      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules]
+      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules, counter_pin_set, locked]
       description: >-
         Go type staff.Staff. A member of the dealer roster, the identity
         AI_LM authenticates against; role is a free text label, and modules
         is the raw grant set, never null and not filtered by the global
-        enable flag.
+        enable flag. counter_pin_set and locked are the two facts the staff
+        screen shows of the manager's counter PIN; the hash never leaves
+        the server.
       properties:
         id:
           type: string
@@ -948,6 +1041,26 @@ components:
           type: array
           items:
             type: string
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
+    AdminCounterPINRequest:
+      type: object
+      required: [pin]
+      description: The PIN the admin typed. It rides the request once and never logs.
+      properties:
+        pin:
+          type: string
+    CounterPINAnswer:
+      type: object
+      required: [counter_pin_set, locked]
+      description: The two facts the staff screen shows of a counter PIN, and nothing else.
+      properties:
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
     StaffPage:
       type: object
       required: [items, next_cursor, limit]

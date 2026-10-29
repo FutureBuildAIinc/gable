@@ -113,6 +113,13 @@ type OrderSummary struct {
 	TaxSource      salesdoc.TaxSource `json:"tax_source"`
 	TotalCents     httpx.Cents        `json:"total_cents"`
 
+	// The zone that answered a delivered sale's tax, and the rate parts
+	// frozen at the sale (CP-10): never on the wire, the invoice carries
+	// them to the reader.
+	TaxZoneID     *uuid.UUID `json:"-"`
+	TaxRateParts  []byte     `json:"-"`
+	TaxZoneSource *string    `json:"-"`
+
 	// The margin fields of today, kept: costs read from the products at
 	// read time, all cents, the percentage a decimal string.
 	TotalCostCents       httpx.Cents `json:"total_cost_cents"`
@@ -135,12 +142,44 @@ type OrderSummary struct {
 }
 
 // Order is the full document: the summary, the ship-to captured at confirm,
-// and the lines.
+// the lines, and the deposits taken against it.
 type Order struct {
 	OrderSummary
 
 	ShipTo *ShipToSnapshot `json:"ship_to"`
 	Lines  []OrderLine     `json:"lines"`
+
+	// Deposits are the posted payments taken against this order (CP-07):
+	// each with the invoices it settled and what it still holds unapplied.
+	Deposits []OrderDeposit `json:"deposits"`
+	// DepositTotalCents is everything taken on the order, applied and
+	// unapplied both.
+	DepositTotalCents httpx.Cents `json:"deposit_total_cents"`
+	// BalanceDueAfterDepositsCents is the order's total less everything
+	// taken on it: what the customer still owes on the order.
+	BalanceDueAfterDepositsCents httpx.Cents `json:"balance_due_after_deposits_cents"`
+}
+
+// OrderDepositApplication is one invoice a deposit settled, on the order's
+// own answer.
+type OrderDepositApplication struct {
+	InvoiceID   uuid.UUID    `json:"invoice_id"`
+	AmountCents httpx.Cents  `json:"amount_cents"`
+	AppliedOn   string       `json:"applied_on"`
+}
+
+// OrderDeposit is a payment taken against the order, on the order's own
+// answer: its head, what it still holds unapplied and the invoices it
+// settled.
+type OrderDeposit struct {
+	ID             uuid.UUID                 `json:"id"`
+	Number         string                    `json:"number"`
+	ReceivedOn     string                    `json:"received_on"`
+	Method         string                    `json:"method"`
+	AmountCents    httpx.Cents               `json:"amount_cents"`
+	UnappliedCents httpx.Cents               `json:"unapplied_cents"`
+	Reference      *string                   `json:"reference"`
+	Applications   []OrderDepositApplication `json:"applications"`
 }
 
 // OrderLine is the shared sales line shape (salesdoc.Line, ADR 0005 2.2)

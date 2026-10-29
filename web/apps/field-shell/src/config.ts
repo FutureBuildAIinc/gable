@@ -14,9 +14,11 @@ export const SIGN_OUT_WAIT_MS = 4000;
 /**
  * The field apps the shell can frame, for the field roles (warehouse and
  * driver in Gable's own role words, as tauri/core/src/profiles.rs maps them,
- * plus owner and admin). Both are route trees of the desk bundle today (/yard
- * and /driver), framed on the shell's own origin with the single header
- * protocol.
+ * plus owner, admin and the cashier the yard sale rules in). The yard and
+ * driver apps are route trees of the desk bundle today (/yard and /driver),
+ * framed on the shell's own origin with the single header protocol; the Sale
+ * app is the desk's own counter (/pos), the same screen as the counter's,
+ * made touch first.
  */
 export const FIELD_APPS = [
   {
@@ -29,7 +31,16 @@ export const FIELD_APPS = [
       { id: 'pick', label: 'Pick queue', path: '/yard' },
       { id: 'inventory', label: 'Inventory', path: '/yard/inventory' },
       { id: 'receiving', label: 'Receiving', path: '/yard/receiving' },
+      { id: 'sale', label: 'Sale', path: '/pos' },
     ],
+  },
+  {
+    id: 'sale',
+    name: 'Sale',
+    path: '/pos',
+    icon: 'receipt',
+    roles: ['owner', 'admin', 'cashier'],
+    places: [],
   },
   {
     id: 'driver',

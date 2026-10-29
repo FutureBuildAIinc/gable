@@ -24,9 +24,11 @@ func isAbsentRaw(raw json.RawMessage) bool {
 
 // startSaleRequest is POST /pos/transactions.
 type startSaleRequest struct {
-	RegisterID *string `json:"register_id"`
-	CashierID  *string `json:"cashier_id"`
-	CustomerID *string `json:"customer_id"`
+	RegisterID   *string `json:"register_id"`
+	CashierID    *string `json:"cashier_id"`
+	CustomerID   *string `json:"customer_id"`
+	ShipToID     *string `json:"ship_to_id"`
+	DeliveryType *string `json:"delivery_type"`
 }
 
 func (r *startSaleRequest) parse() (*StartSale, error) {
@@ -44,6 +46,27 @@ func (r *startSaleRequest) parse() (*StartSale, error) {
 	if id, ok := v.UUID("customer_id", r.CustomerID, false); ok {
 		out.CustomerID = &id
 	}
+	// A delivered counter sale names the ship to the goods are taken to
+	// (CP-10); a pickup, the default, takes the branch rate.
+	if id, ok := v.UUID("ship_to_id", r.ShipToID, false); ok {
+		out.ShipToID = &id
+	}
+	if r.DeliveryType != nil && *r.DeliveryType != "" {
+		switch *r.DeliveryType {
+		case "pickup":
+			out.DeliveryType = "pickup"
+		case "delivery":
+			out.DeliveryType = "delivery"
+		default:
+			v.Check(false, "delivery_type", "must be pickup or delivery")
+		}
+	}
+	if out.ShipToID != nil {
+		v.Check(out.CustomerID != nil, "ship_to_id",
+			"a ship to needs the customer named: the walk-in customer carries none")
+		v.Check(out.DeliveryType == "delivery", "ship_to_id",
+			"a ship to is named on a delivery: send delivery_type delivery")
+	}
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
@@ -52,9 +75,11 @@ func (r *startSaleRequest) parse() (*StartSale, error) {
 
 // StartSale is a parsed counter sale create.
 type StartSale struct {
-	RegisterID string
-	CashierID  uuid.UUID
-	CustomerID *uuid.UUID
+	RegisterID   string
+	CashierID    uuid.UUID
+	CustomerID   *uuid.UUID
+	ShipToID     *uuid.UUID
+	DeliveryType string // pickup or delivery, empty is pickup
 }
 
 // addLineRequest is POST /pos/transactions/{id}/items: one line in the shared
@@ -104,6 +129,10 @@ type attachCustomerRequest struct {
 	JobID      *string `json:"job_id"`
 	// BuyerContactID names the roster buyer an on account sale is for.
 	BuyerContactID *string `json:"buyer_contact_id"`
+	// ShipToID and DeliveryType name a delivered counter sale's ship to
+	// (CP-10), so its tax is sourced to the ship to's zone.
+	ShipToID     *string `json:"ship_to_id"`
+	DeliveryType *string `json:"delivery_type"`
 }
 
 func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
@@ -121,6 +150,23 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 	if r.CustomerPO != nil {
 		out.CustomerPO = strings.TrimSpace(*r.CustomerPO)
 	}
+	if id, ok := v.UUID("ship_to_id", r.ShipToID, false); ok {
+		out.ShipToID = &id
+	}
+	if r.DeliveryType != nil && *r.DeliveryType != "" {
+		switch *r.DeliveryType {
+		case "pickup":
+			out.DeliveryType = "pickup"
+		case "delivery":
+			out.DeliveryType = "delivery"
+		default:
+			v.Check(false, "delivery_type", "must be pickup or delivery")
+		}
+	}
+	if out.ShipToID != nil {
+		v.Check(out.DeliveryType == "delivery", "ship_to_id",
+			"a ship to is named on a delivery: send delivery_type delivery")
+	}
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
@@ -128,15 +174,20 @@ func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
 }
 
 // completeSaleRequest is POST /pos/transactions/{id}/complete: the tenders in
-// cents (IN-1.2), who collected the basket, and the large cash capture of
-// CP-17a (the payer's details when the payment takes the payer over the
-// threshold, and the manager's suspected avoidance mark).
+// cents (IN-1.2), who collected the basket, the counter alerts the clerk
+// acknowledged, and the large cash capture of CP-17a (the payer's details
+// when the payment takes the payer over the threshold, and the manager's
+// suspected avoidance mark).
 type completeSaleRequest struct {
-	Tenders            []tenderRequest `json:"tenders"`
-	PickedUpBy         *string         `json:"picked_up_by"`
-	Revision           json.RawMessage `json:"revision"`
-	Payer              *payerRequest   `json:"payer"`
-	SuspectedAvoidance *bool           `json:"suspected_avoidance"`
+	Tenders    []tenderRequest `json:"tenders"`
+	PickedUpBy *string         `json:"picked_up_by"`
+	Revision   json.RawMessage `json:"revision"`
+	// AcknowledgedAlertIDs names the customer's alerts the clerk read and
+	// acknowledged before taking the sale. A warning that asks to be
+	// acknowledged must be named here or the sale is refused.
+	AcknowledgedAlertIDs []string      `json:"acknowledged_alert_ids"`
+	Payer                *payerRequest `json:"payer"`
+	SuspectedAvoidance   *bool         `json:"suspected_avoidance"`
 }
 
 // payerRequest is the payer identity the counter captured for a large cash
@@ -258,7 +309,7 @@ func parseTenders(v *httpx.Validator, prefix string, tenders []tenderRequest) []
 	return out
 }
 
-func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, error) {
+func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, []uuid.UUID, error) {
 	v := &httpx.Validator{}
 	if len(r.Tenders) == 0 {
 		v.Check(false, "tenders", "name at least one tender")
@@ -278,10 +329,25 @@ func (r *completeSaleRequest) parse() ([]TenderIn, string, *int64, error) {
 			revision = &n
 		}
 	}
+	acknowledged := parseAcknowledgedAlertIDs(v, r.AcknowledgedAlertIDs)
 	if err := v.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, nil, err
 	}
-	return tenders, pickedUpBy, revision, nil
+	return tenders, pickedUpBy, revision, acknowledged, nil
+}
+
+func parseAcknowledgedAlertIDs(v *httpx.Validator, rawIDs []string) []uuid.UUID {
+	acknowledged := make([]uuid.UUID, 0, len(rawIDs))
+	for i, raw := range rawIDs {
+		field := fmt.Sprintf("acknowledged_alert_ids[%d]", i)
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			v.Check(false, field, "must be an alert id")
+			continue
+		}
+		acknowledged = append(acknowledged, id)
+	}
+	return acknowledged
 }
 
 // voidSaleRequest is POST /pos/transactions/{id}/void.
@@ -631,16 +697,19 @@ func (r *paybackIntentRequest) parse() (*PaybackIntentIn, error) {
 	return &out, nil
 }
 
-// movementRequest is POST /pos/till/{id}/movements.
+// movementRequest is POST /pos/till/{id}/movements. An approval_token, when
+// sent on a pickup, is a manager's step up approval whose manager is the
+// taker: taken_by is not typed by the caller on that path.
 type movementRequest struct {
-	Kind        *string         `json:"kind"`
-	AmountCents json.RawMessage `json:"amount_cents"`
-	ReasonCode  *string         `json:"reason_code"`
-	Note        *string         `json:"note"`
-	TakenBy     *string         `json:"taken_by"`
+	Kind          *string         `json:"kind"`
+	AmountCents   json.RawMessage `json:"amount_cents"`
+	ReasonCode    *string         `json:"reason_code"`
+	Note          *string         `json:"note"`
+	TakenBy       *string         `json:"taken_by"`
+	ApprovalToken *string         `json:"approval_token"`
 }
 
-func (r *movementRequest) parse() (MovementIn, error) {
+func (r *movementRequest) parse() (MovementIn, string, error) {
 	v := &httpx.Validator{}
 	var in MovementIn
 	kind := ""
@@ -678,20 +747,31 @@ func (r *movementRequest) parse() (MovementIn, error) {
 		v.Check(in.ReasonCode == "", "reason_code", "a drop or pickup carries no reason code")
 	}
 	v.Check(in.ReasonCode != "other" || in.Note != "", "note", "is required when the reason code is other")
+	token := ""
+	if r.ApprovalToken != nil {
+		token = strings.TrimSpace(*r.ApprovalToken)
+	}
 	if in.Kind == MovementPickup {
-		v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+		if token == "" {
+			v.Check(in.TakenBy != "", "taken_by", "is required: the person taking the cash")
+		} else {
+			v.Check(in.TakenBy == "", "taken_by", "the manager is named by their approval, not typed")
+		}
 	} else if kind != "" {
 		v.Check(in.TakenBy == "", "taken_by", "only a pickup names the person taking the cash")
+		v.Check(token == "", "approval_token", "only a pickup is approved by a step up")
 	}
 	if err := v.Err(); err != nil {
-		return MovementIn{}, err
+		return MovementIn{}, "", err
 	}
-	return in, nil
+	return in, token, nil
 }
 
-// signOffRequest is POST /pos/till/{id}/signoff.
+// signOffRequest is POST /pos/till/{id}/signoff. An approval_token, when
+// sent, is a manager's step up approval whose manager signs off.
 type signOffRequest struct {
-	Reason *string `json:"reason"`
+	Reason        *string `json:"reason"`
+	ApprovalToken *string `json:"approval_token"`
 }
 
 // variancePolicyRequest is PUT /pos/till/policy: the branch and its own

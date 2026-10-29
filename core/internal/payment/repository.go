@@ -211,6 +211,128 @@ func (r *Repository) InvoiceVisible(ctx context.Context, id uuid.UUID) (bool, er
 	return n > 0, err
 }
 
+// DepositFacts is the order's money standing, read on the deposit path.
+type DepositFacts struct {
+	BranchID       uuid.UUID
+	Status         string
+	TotalCents     int64
+	DepositedCents int64
+	BilledCents    int64
+}
+
+// Cancelled reports whether the order is off the books (the wire's voided).
+func (f DepositFacts) Cancelled() bool { return f.Status == "CANCELLED" }
+
+// FullyInvoiced reports whether the order's invoices have billed its whole
+// total, so nothing a deposit could hold against is left to bill.
+func (f DepositFacts) FullyInvoiced() bool { return f.BilledCents >= f.TotalCents }
+
+// OrderDepositFacts locks the order row and reads what a deposit's rules
+// need: the order's status and total, the money already taken on it and what
+// its invoices have billed. The lock is FOR NO KEY UPDATE, the order lock of
+// ADR 0005 section 11 step 1 (as order.LockOrder takes it): it serializes
+// every act on the order yet stays compatible with the FOR KEY SHARE a
+// foreign key insert takes on the row, so a deposit neither waits behind one
+// nor deadlocks a payment that names the same order. The sums run as their
+// own statement after the lock is held: under READ COMMITTED a locked row's
+// own columns are re-read on release but a subquery over other tables keeps
+// the statement's first snapshot, so one statement would let two racing
+// deposits both pass the balance rule. With the sums read after the lock,
+// the second transaction's fresh statement sees the first's committed
+// deposit.
+func (r *Repository) OrderDepositFacts(ctx context.Context, orderID uuid.UUID) (DepositFacts, error) {
+	var f DepositFacts
+	e := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT o.branch_id, o.status, ROUND(o.total_amount * 100)::bigint
+		FROM orders o WHERE o.id = $1 FOR NO KEY UPDATE`, orderID).Scan(&f.BranchID, &f.Status, &f.TotalCents)
+	if e != nil {
+		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
+	}
+	e = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT COALESCE((
+		           SELECT SUM(GREATEST(0, ROUND(p.amount * 100)::bigint - COALESCE((
+		               SELECT SUM(ROUND(a.amount * 100)::bigint)
+		               FROM ar_applications a
+		               WHERE a.payment_id = p.id AND a.act_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL
+		           ), 0)))
+		           FROM payments p
+		           WHERE p.order_id = $1 AND p.status = 'POSTED'
+		       ), 0),
+		       COALESCE((SELECT SUM(ROUND(i.total_amount * 100)::bigint) FROM invoices i
+		                 WHERE i.order_id = $1 AND i.status <> 'VOID'), 0)`, orderID).
+		Scan(&f.DepositedCents, &f.BilledCents)
+	if e != nil {
+		return f, fmt.Errorf("failed to read the order's deposit standing: %w", e)
+	}
+	return f, nil
+}
+
+// InvoicesBelongToOrder reports whether every invoice in apps has order_id = orderID.
+func (r *Repository) InvoicesBelongToOrder(ctx context.Context, orderID uuid.UUID, invoiceIDs []uuid.UUID) (bool, error) {
+	if len(invoiceIDs) == 0 {
+		return true, nil
+	}
+	var bad int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT count(*) FROM invoices WHERE id = ANY($1) AND (order_id IS NULL OR order_id <> $2)`,
+		invoiceIDs, orderID).Scan(&bad)
+	if err != nil {
+		return false, fmt.Errorf("failed to check the invoices' order: %w", err)
+	}
+	return bad == 0, nil
+}
+
+// TillSessionBranch reads a till session's branch behind the caller's branch wall.
+func (r *Repository) TillSessionBranch(ctx context.Context, sessionID uuid.UUID) (exists bool, branchID *uuid.UUID, err error) {
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT t.branch_id FROM till_sessions t
+		WHERE t.id = $3 AND `+wall("t", 1, 2),
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), sessionID).Scan(&branchID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read the till session: %w", err)
+	}
+	return true, branchID, nil
+}
+
+// LockTillSession locks the till session FOR SHARE inside the payment's
+// transaction so a till close cannot race past a counter deposit or void.
+// The branch wall applies, the way the pos package walls the same lock: a
+// session outside the caller's reach reads as a missing row, so a caller of
+// one branch never takes a lock on another branch's drawer.
+func (r *Repository) LockTillSession(ctx context.Context, sessionID uuid.UUID) (status string, err error) {
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT t.status FROM till_sessions t WHERE t.id = $3 AND `+wall("t", 1, 2)+` FOR SHARE`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), sessionID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", httpx.NotFound("till session not found")
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to lock the till session: %w", err)
+	}
+	return status, nil
+}
+
+// PaymentTillSessionID reads the till session a payment rode, when any. The
+// branch wall applies: a payment outside the caller's reach reads as a
+// missing payment, so the void of another branch's till riding payment is
+// refused before any till session row is read or locked.
+func (r *Repository) PaymentTillSessionID(ctx context.Context, paymentID uuid.UUID) (*uuid.UUID, error) {
+	var sessionID *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT p.till_session_id FROM payments p WHERE p.id = $3 AND `+wall("p", 1, 2),
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), paymentID).Scan(&sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errPaymentNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the payment's till session: %w", err)
+	}
+	return sessionID, nil
+}
+
 // OrderBelongsTo reports whether the order exists for the customer.
 func (r *Repository) OrderBelongsTo(ctx context.Context, orderID, customerID uuid.UUID) (exists, matches bool, err error) {
 	var owner uuid.UUID
