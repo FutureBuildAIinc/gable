@@ -299,6 +299,20 @@ export interface CounterReturn {
     lines: ReturnLine[];
 }
 
+/** What the large cash preview answered (CP-17a): the rule family, the counted cash and whether the payer's details are required. */
+export interface LargeCashPreview {
+    country: string;
+    rule_family: string;
+    counted_cents: number;
+    aggregate_cents: number;
+    threshold_cents: number;
+    comparator: string;
+    asks_details: boolean;
+    fields: string[];
+    note?: string;
+    dealer_threshold: boolean;
+}
+
 /** What an exchange comes to: the credit the return is worth, the replacement and the difference. */
 export interface ExchangeFigures {
     returned_cents: number;
@@ -306,6 +320,8 @@ export interface ExchangeFigures {
     replacement_cents: number;
     /** Replacement less return: positive is what the customer pays, negative what goes back. */
     difference_cents: number;
+    /** The branch country's large cash answer for this exchange (CP-17a): what the payer's capture needs. */
+    large_cash?: LargeCashPreview;
 }
 
 export interface Exchange extends ExchangeFigures {

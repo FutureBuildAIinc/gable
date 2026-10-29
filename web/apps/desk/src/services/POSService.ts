@@ -47,7 +47,9 @@ import type {
     PosSettings,
     StepUpManager,
     StepUpApproval,
+    LargeCashPreview,
 } from '../types/pos.ts';
+export type { LargeCashPreview };
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
 import { openAuthedPdf } from '../lib/authedPdf';
@@ -128,20 +130,6 @@ export interface PayerCaptureIn {
     third_party_payer: boolean;
 }
 
-/** What the large cash preview answered (CP-17a). */
-export interface LargeCashPreview {
-    country: string;
-    rule_family: string;
-    counted_cents: number;
-    aggregate_cents: number;
-    threshold_cents: number;
-    comparator: string;
-    asks_details: boolean;
-    fields: string[];
-    note?: string;
-    dealer_threshold: boolean;
-}
-
 /** One returned line of a return or an exchange. */
 export interface ReturnLineIn {
     line_id: string;
@@ -161,6 +149,12 @@ export interface ExchangeIn {
     sale_lines: Array<{ product_id: string; quantity: string }>;
     tenders?: TenderIn[];
     acknowledged_alert_ids?: string[];
+    /** The payer's details the counter captured for a large cash crossing (CP-17a). */
+    payer?: PayerCaptureIn;
+    /** The manager's suspected avoidance mark (CP-17a). */
+    suspected_avoidance?: boolean;
+    /** The preview only: the method the counter will tender for the difference. */
+    tender_method?: 'cash' | 'check' | 'card';
 }
 
 export const posService = {

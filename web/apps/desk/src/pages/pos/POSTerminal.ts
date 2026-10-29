@@ -111,6 +111,9 @@ export class POSTerminal extends LitElement {
   @state() private _payer: PayerCaptureIn | null = null;
   @state() private _payerAsk: { fields: string[]; dealerThreshold: boolean } | null = null;
   @state() private _payerRefused = false;
+  // The payer capture was asked for by the exchange, not by a sale: the
+  // capture that answers it rings the exchange (CP-17a).
+  @state() private _payerForExchange = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
 
@@ -1916,6 +1919,11 @@ export class POSTerminal extends LitElement {
     this._exchangeError = null;
     this._exchangeQuery = '';
     this._exchangeResults = [];
+    // the payer capture and the manager's mark belong to the exchange they
+    // were taken for
+    this._resetLargeCashCapture();
+    this._payerForExchange = false;
+    this._suspectAvoidance = false;
     this._showReturn = true;
     this._showReturnSearch = false;
     void this._loadReasons();
@@ -2061,6 +2069,10 @@ export class POSTerminal extends LitElement {
       ? [{ method: this._exchangeTender, amount_cents: f.difference_cents }] : undefined;
     const acknowledged = withTender && this._acknowledgedAlerts.length > 0
       ? this._acknowledgedAlerts : undefined;
+    // the payer's capture and the manager's avoidance mark ride the exchange
+    // that needs them, the way they ride a completion (CP-17a)
+    const payer = withTender ? this._payer ?? undefined : undefined;
+    const suspectedAvoidance = withTender && this._suspectAvoidance;
     return {
       register_id: this._registerId,
       original_sale_id: sale.id,
@@ -2069,8 +2081,13 @@ export class POSTerminal extends LitElement {
       reason: this._returnReason.trim() || undefined,
       returned_lines: returned,
       sale_lines: this._exchangeLines.map((l) => ({ product_id: l.product.product_id, quantity: l.qty })),
+      // the preview reads the tender method to say what the branch's large cash
+      // rule needs of this exchange before it is rung
+      tender_method: this._exchangeTender,
       ...(tenders ? { tenders } : {}),
       ...(acknowledged ? { acknowledged_alert_ids: acknowledged } : {}),
+      ...(payer ? { payer } : {}),
+      ...(suspectedAvoidance ? { suspected_avoidance: true } : {}),
     };
   }
 
@@ -2140,6 +2157,16 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    // The branch country's large cash rule (CP-17a): the server says what
+    // this exchange needs of the counter. A crossing asks for the payer's
+    // details before the exchange is rung; a captured payer rides it.
+    const largeCash = this._exchangeFigures.large_cash;
+    if (largeCash?.asks_details && this._payer === null) {
+      this._payerAsk = { fields: largeCash.fields, dealerThreshold: largeCash.dealer_threshold };
+      this._payerRefused = false;
+      this._payerForExchange = true;
+      return;
+    }
     if (!(await this._acknowledgeCounterWarnings(sale.customer_id))) return;
     const body = this._exchangeBody(true);
     if (body === null) {
@@ -2151,6 +2178,11 @@ export class POSTerminal extends LitElement {
       const done = await posService.createExchange(body);
       this._showReturn = false;
       this._exchangeOn = false;
+      // the payer capture and the avoidance mark went with the exchange that
+      // needed them
+      this._resetLargeCashCapture();
+      this._payerForExchange = false;
+      this._suspectAvoidance = false;
       const d = differenceOf(done);
       this._success = `Exchange ${done.return.number} complete - ${d.text}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 5000);
@@ -2160,6 +2192,22 @@ export class POSTerminal extends LitElement {
       this._sealed = null;
     } catch (err: unknown) {
       if (err instanceof ApiError && err.hasBlocker('alert_unacknowledged')) void this._syncStanding();
+      // A large cash crossing without the payer's details (CP-17a): the
+      // capture is asked again in the dialog, in words, and the exchange is
+      // not taken.
+      if (err instanceof ApiError && err.hasBlocker('payer_details_required')) {
+        this._error = null;
+        this._payerRefused = true;
+        this._payerForExchange = true;
+        if (this._payerAsk === null) {
+          const ask = this._exchangeFigures?.large_cash;
+          this._payerAsk = {
+            fields: ask?.fields ?? ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'],
+            dealerThreshold: ask?.dealer_threshold ?? false,
+          };
+        }
+        return;
+      }
       this._error = apiErrorMessage(err, 'Failed to take the exchange');
     } finally {
       this._loading = false;
@@ -2491,7 +2539,12 @@ export class POSTerminal extends LitElement {
                 @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as TenderMethod; }}
               ></gable-select>
             </div>
-          </div>` : nothing}
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:13px;color:rgb(var(--gb-till-muted))" data-testid="exchange-avoidance-label">
+            <input type="checkbox" data-testid="exchange-avoidance" .checked=${this._suspectAvoidance}
+              @change=${(e: Event) => { this._suspectAvoidance = (e.target as HTMLInputElement).checked; }} />
+            <span>The manager marked this payment as suspected avoidance. A marked payment is counted as cash whatever was sold.</span>
+          </label>` : nothing}
         ${kind === 'refund' ? html`
           <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
             <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Pay back</label>
@@ -3224,9 +3277,15 @@ export class POSTerminal extends LitElement {
               this._payer = e.detail;
               this._payerAsk = null;
               this._payerRefused = false;
+              if (this._payerForExchange) {
+                // the capture answers the exchange: ring it now
+                this._payerForExchange = false;
+                void this._confirmExchange();
+                return;
+              }
               void this._pay();
             }}
-            @payer-cancel=${() => { this._payerAsk = null; this._payerRefused = false; }}
+            @payer-cancel=${() => { this._payerAsk = null; this._payerRefused = false; this._payerForExchange = false; }}
           ></gable-payer-dialog>
         ` : nothing}
       </div>
