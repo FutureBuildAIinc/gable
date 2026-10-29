@@ -28,6 +28,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/scale"
@@ -56,6 +57,9 @@ type fixture struct {
 	yardID       uuid.UUID
 	events       *recordingWriter
 	priorEntries map[string]bool
+	// largeCash is the branch country's large cash rules (CP-17a), wired
+	// into the fixture's counter the way serve wires them.
+	largeCash *largecash.Service
 	// paymentGateway, when an opt sets it, wires the payment route's card
 	// refunds at a terminal too, the way serve wires Run Payments.
 	paymentGateway payment.PaymentGateway
@@ -87,6 +91,10 @@ type fixture struct {
 func withoutTill() func(*fixture) { return func(f *fixture) { f.noAutoTill = true } }
 
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+
+// lcTestVaultKey seals the payer's sensitive values in the counter's tests
+// (CP-17a): an obvious pattern, never a real key shape.
+const lcTestVaultKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // recordingWriter wraps the outbox writer, remembering what was written and
 // optionally failing one type (the transaction proofs). Contenders write
@@ -178,10 +186,15 @@ func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fi
 	invoices := invoice.NewService(invoice.NewRepository(db), glSvc, acct, db).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(outbox.NewWriter(db, "")).WithStock(stock)
 	f.events = &recordingWriter{inner: outbox.NewWriter(db, "")}
+	lcVault, verr := payment.NewVault(lcTestVaultKey)
+	if verr != nil {
+		t.Fatalf("large cash vault: %v", verr)
+	}
+	f.largeCash = largecash.NewService(db, lcVault, lcTestVaultKey)
 	f.service = pos.NewService(db, pos.NewRepository(db), logger).
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db).
-		WithBankLines(bankrecon.NewDepositLines(db))
+		WithBankLines(bankrecon.NewDepositLines(db)).WithLargeCash(f.largeCash)
 	// the counter guards the AR core's applications as serve wires it (C2-5):
 	// an invoice whose sale's void has standing claims takes no application,
 	// and a payment whose unapplied cash is a declined void tender's credit
@@ -210,6 +223,11 @@ func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fi
 	// route holds the claim's sale to the caller's grants, so the fixture
 	// proves the same hold serve proves
 	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(db)).RegisterRoutes(mux)
+	// the fixture mounts no branch middleware, so the preview's guard admits
+	// every sale; the wall itself is proved in serve (the large cash preview
+	// wall test)
+	largecash.NewHandler(f.largeCash).WithBranchGuard(admitEverySale{}).RegisterRoutes(mux, nil,
+		func(next http.Handler) http.Handler { return next })
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real
 	// walk-in payments against the sales, and a paymentGateway opt wires its
@@ -352,6 +370,9 @@ func (f *fixture) cleanup() {
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)
 	}
 
+	exec(`DELETE FROM large_cash_events`)
+	exec(`DELETE FROM large_cash_tenders`)
+	exec(`DELETE FROM large_cash_payers`)
 	exec(`DELETE FROM pos_sync_log`)
 	exec(`DELETE FROM till_variance_policy`)
 	exec(`DELETE FROM till_z_reports`)
@@ -826,3 +847,9 @@ func eventTypes(t *testing.T, db *database.DB, entityType, entityID string) []st
 	}
 	return out
 }
+
+// admitEverySale is a branch guard that holds nothing, for a fixture with no
+// branch middleware.
+type admitEverySale struct{}
+
+func (admitEverySale) CheckPayloadBranch(context.Context, uuid.UUID) error { return nil }

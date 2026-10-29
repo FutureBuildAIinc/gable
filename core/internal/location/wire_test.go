@@ -94,7 +94,7 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 
 func (f *fixture) createBranch(name string) resp {
 	return f.do("POST", "/api/v1/branches", map[string]any{
-		"code": name, "name": name, "type": "branch",
+		"code": name, "name": name, "type": "branch", "country_code": "US",
 	}, "Idempotency-Key", uuid.NewString())
 }
 

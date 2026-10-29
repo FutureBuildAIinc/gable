@@ -392,6 +392,10 @@ func (f *fakeCustomerRepo) GetCustomerByEmail(context.Context, string) (*custome
 	return nil, errors.New("not found")
 }
 
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type fakeProductRepo struct {
 	products map[uuid.UUID]*product.Product
 	gets     []uuid.UUID

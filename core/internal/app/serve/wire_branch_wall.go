@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
@@ -343,6 +344,13 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
 		w.scoped("finance", "owner"),
 		w.scoped(append(append([]string{}, roles...), "finance")...))
+}
+
+// largeCash mounts the large cash routes: the preview rides the counter's
+// roles and the branch middleware and holds the sale it names to the wall;
+// the dealer settings stay admin and owner.
+func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, roles ...string) {
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"), w.scoped(roles...))
 }
 
 // posReceipts mounts the counter's receipt pair (print and email of a sale's

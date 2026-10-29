@@ -544,6 +544,12 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		// the walls, so the foreign leg is held on the customer the batch
 		// names (round 10 P1-1) and the control on the pin's own customer and
 		// register is answered by the rule's 409.
+		// The large cash preview names the sale in its body, not its path; the
+		// module reads it under the wall, so a foreign sale is refused.
+		{method: "POST", path: "/api/v1/pos/large-cash/preview", twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true, controlUser: true,
+			body: func(txn uuid.UUID) string {
+				return fmt.Sprintf(`{"transaction_id":%q,"tenders":[{"method":"cash","amount_cents":500}]}`, txn.String())
+			}},
 		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true},
 		// The creates that take the branch they land on from the body.
 		{method: "POST", path: "/api/v1/customers", twin: f.branchB, own: f.branchA,

@@ -43,6 +43,7 @@ type Repository interface {
 	// UpdateDensity writes the weighed sale's density (CP-19).
 	UpdateDensity(ctx context.Context, id uuid.UUID, density *httpx.Quantity, state *string, revision int64) (int64, error)
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error)
+	UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error)
 
 	// The unit set store (ADR 0006 sections 3.1 to 3.3, item C3-2A-units).
 	GetUnitSetRows(ctx context.Context, productID uuid.UUID) ([]UnitSetRowView, error)
@@ -84,7 +85,7 @@ var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::t
 		       COALESCE(p.weight_lbs, 0)::text,
 		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
 		       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
-		       p.lead_time_days, p.revision, p.created_at, p.updated_at,
+		       p.lead_time_days, p.consumer_durable, p.revision, p.created_at, p.updated_at,
 		       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
 		       p.sale_uom, p.price_uom, p.purchase_uom,
 		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
@@ -134,7 +135,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&weight,
 		&p.LengthIn, &p.WidthIn, &p.HeightIn, &p.Stackable, &p.GeometrySource,
 		&reorderPoint, &reorderQty,
-		&p.LeadTimeDays, &p.Revision, &created, &updated,
+		&p.LeadTimeDays, &p.ConsumerDurable, &p.Revision, &created, &updated,
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
@@ -217,11 +218,11 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc,
 		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source,
 		                      reorder_point, reorder_qty,
-		                      board_thickness_in, board_width_in, board_length_ft, random_length,
+		                      board_thickness_in, board_width_in, board_length_ft, random_length, consumer_durable,
 		                      density_lb_per_cy, density_volume_state)
 		VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14::numeric, $15::numeric,
-			$16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000, $19,
-			$20::numeric / 10000, $21)
+			$16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000, $19, $20,
+			$21::numeric / 10000, $22)
 		RETURNING id, created_at, updated_at, revision, average_unit_cost::text, target_margin, commission_rate,
 		          sale_uom, price_uom, purchase_uom`
 
@@ -232,6 +233,7 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		p.WeightLbs, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource,
 		p.ReorderPointQ.DecimalString(), p.ReorderQtyQ.DecimalString(),
 		qtyArg(p.BoardThicknessIn), qtyArg(p.BoardWidthIn), qtyArg(p.BoardLengthFT), p.RandomLength,
+		p.ConsumerDurable,
 		qtyArg(p.DensityLbPerCY), p.DensityVolumeState,
 	).Scan(
 		&p.ID, &created, &updated, &p.Revision, &avgCost, &p.TargetMargin, &p.CommissionRate,
@@ -483,6 +485,12 @@ func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.U
 // different — and schedulable — claim.
 func (r *PostgresRepository) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error) {
 	return r.conditionalUpdate(ctx, id, revision, `lead_time_days = $3`, leadTimeDays)
+}
+
+// UpdateConsumerDurable writes the Form 8300 consumer durable flag
+// (CP-17a).
+func (r *PostgresRepository) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return r.conditionalUpdate(ctx, id, revision, `consumer_durable = $3`, consumerDurable)
 }
 
 // updateDimensionsQuery is the geometry write. It is a package-level constant

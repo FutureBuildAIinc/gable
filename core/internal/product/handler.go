@@ -42,6 +42,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/density", guard(h.HandleUpdateDensity))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/lead-time", guard(h.HandleUpdateLeadTime))
+	mux.HandleFunc("PATCH /api/v1/products/{id}/consumer-durable", guard(h.HandleUpdateConsumerDurable))
 	// Kit components (ADR 0005 2.6), on the contract from birth.
 	mux.HandleFunc("GET /api/v1/products/{id}/kit-components", guard(h.HandleGetKitComponents))
 	mux.HandleFunc("PUT /api/v1/products/{id}/kit-components", guard(h.HandlePutKitComponents))
@@ -345,6 +346,42 @@ func (h *Handler) HandleUpdateDensity(w http.ResponseWriter, r *http.Request) {
 
 // HandleUpdateLeadTime handles PATCH /products/{id}/lead-time, the dealer-side
 // write for the lead time the portal catalog publishes (migration 084).
+// HandleUpdateConsumerDurable handles PATCH /products/{id}/consumer-durable,
+// the Form 8300 designated reporting transaction flag (CP-17a).
+func (h *Handler) HandleUpdateConsumerDurable(w http.ResponseWriter, r *http.Request) {
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
+		return
+	}
+	flag, revision, err := parseConsumerDurable(r)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	p, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		writeProductError(w, r, mapRead(err))
+		return
+	}
+	if err := httpx.CheckRevision(p.Revision, r.Header.Get("If-Match"), revision); err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	if _, err := h.service.UpdateConsumerDurable(r.Context(), id, flag, p.Revision); err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	if updated, rerr := h.service.GetProduct(r.Context(), id); rerr == nil {
+		p = updated
+	} else {
+		p.ConsumerDurable = flag
+	}
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (h *Handler) HandleUpdateLeadTime(w http.ResponseWriter, r *http.Request) {
 	id, bad := pathID(r)
 	if bad != nil {

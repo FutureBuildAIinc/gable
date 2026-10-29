@@ -27,6 +27,10 @@ func (f *fakeVelocity) ListSalesVelocity(_ context.Context, _ int) ([]SalesVeloc
 // fakeProductRepo implements product.Repository in-memory so we can drive
 // RefreshReorderTargets without a pgx connection. Only the methods the
 // service path actually calls are non-trivial.
+func (f *fakeProductRepo) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	return revision + 1, nil
+}
+
 type fakeProductRepo struct {
 	products []product.Product
 	updates  map[uuid.UUID][2]float64 // id -> {reorder_point, reorder_qty}
