@@ -20,16 +20,17 @@ import (
 func TestFulfilmentInvoiceIsInTheSalesSummaryOfTheYardsDay(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
-	// The default branch, the yard the fixture's orders sit at, is on a zone
+	// The fixture's branch, the yard the fixture's orders sit at, is on a zone
 	// that is on an earlier day than UTC at every hour.
 	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
 	f := newFixture(t, db)
+	testutil.SetBranchDayZoneOn(t, db, f.branchID, testutil.AlwaysBehindUTC)
 	f.serveWith(f.withStock(), f.withMoney())
 	f.cleanMoney()
 	f.stock(f.productID, "10")
 	f.setCost(f.productID, "3.2500")
 
-	ctx := branchctx.WithSystem(context.Background())
+	ctx := branchctx.WithID(context.Background(), f.branchID)
 	svc := reporting.NewService(reporting.NewRepository(db))
 	before, err := svc.GetSalesSummary(ctx, "", "")
 	if err != nil {

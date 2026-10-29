@@ -42,6 +42,9 @@ type kindFixture struct {
 	customerID uuid.UUID
 	productID  uuid.UUID
 	sku        string
+	// branchID is the branch the fixture owns: a locations row of its own
+	// carrying its own tax rate, which the draft payload names.
+	branchID uuid.UUID
 }
 
 func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
@@ -49,25 +52,18 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &kindFixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), sku: "KIND-" + uuid.NewString()[:8]}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// The branch the fixture owns: a locations row of its own carrying the
+	// rate the order needs. The draft payload names it, so the draft and the
+	// order it promotes to stand on a branch no other package's fixture
+	// writes and no other package's fixture can move.
+	f.branchID = testutil.OwnBranch(t, db, "0.088750")
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
-		VALUES ($1, 'Order Kind Co', $2, `+branch+`)`, f.customerID, "OKIND-"+uuid.NewString()[:8]); err != nil {
+		VALUES ($1, 'Order Kind Co', $2, $3)`, f.customerID, "OKIND-"+uuid.NewString()[:8], f.branchID); err != nil {
 		t.Fatalf("seed customer: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
-	}
-	// The default branch's rate is shared state: read the prior value and
-	// restore it in cleanup, so this fixture's write does not leak a rate
-	// onto a neighbouring test in any package.
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
-		WHERE id = `+branch); err != nil {
-		t.Fatalf("seed branch rate: %v", err)
 	}
 
 	orderSvc := order.NewService(order.NewRepository(db)).
@@ -96,7 +92,6 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 
 	t.Cleanup(func() {
 		f.srv.Close()
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 		// Scoped to this fixture's own drafts (by the payload's customer),
 		// never by module: the drafts package's tests run in parallel and
 		// hold their own.
@@ -160,6 +155,7 @@ type kindResp struct {
 func (f *kindFixture) payload(qty string) map[string]any {
 	return map[string]any{
 		"customer_id":   f.customerID.String(),
+		"branch_id":     f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines":         []map[string]any{{"product_id": f.productID.String(), "quantity": qty}},
 	}

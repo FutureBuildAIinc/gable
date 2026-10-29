@@ -192,7 +192,7 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 	}
 	// the three walk-in payments landed as unapplied cash
 	if got := countOf(t, f.db, `SELECT count(*) FROM payments p
-		JOIN customers c ON c.id = p.customer_id WHERE c.account_number = 'WALK-IN' AND p.amount_unapplied = 1.00`); got != 3 {
+		JOIN customers c ON c.id = p.customer_id WHERE c.account_number = 'WALK-IN' AND p.branch_id = $1 AND p.amount_unapplied = 1.00`, f.branchID); got != 3 {
 		t.Errorf("%d unapplied walk-in payments of 1.00, want 3", got)
 	}
 	f.assertARInvariants(t)

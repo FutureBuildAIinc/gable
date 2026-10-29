@@ -198,8 +198,11 @@ func TestCP06_SearchDateBoundByBranchZone(t *testing.T) {
 	db := testutil.RequireDB(t)
 	// takes the branch day exclusively for the test: no other test reads the
 	// day while the zone is not the stored one
-	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
 	f := newFixture(t, db)
+	// the zone goes on the branch the fixture owns: the sale is read by its
+	// own branch's day, and the shared default branch's row is not this
+	// test's to write
+	testutil.SetBranchDayZoneOn(t, db, f.branchID, testutil.AlwaysBehindUTC)
 	saleID := f.startSale(&f.customerID)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
@@ -234,8 +237,11 @@ func TestCP06_SearchDateBoundByBranchZone(t *testing.T) {
 func TestCP06_PlainListUsesTheBranchDay(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
-	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
 	f := newFixture(t, db)
+	// the zone goes on the branch the fixture owns: the sale is read by its
+	// own branch's day, and the shared default branch's row is not this
+	// test's to write
+	testutil.SetBranchDayZoneOn(t, db, f.branchID, testutil.AlwaysBehindUTC)
 	saleID := f.startSale(&f.customerID)
 	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)

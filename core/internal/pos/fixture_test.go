@@ -79,12 +79,6 @@ type fixture struct {
 	// (CP-19).
 	scale         *scale.Simulator
 	scaleDeviceID uuid.UUID
-	// ownBranch, when the fixture owns its branch, is that branch: a private
-	// locations row of type BRANCH carrying its own tax rate and its own
-	// cash rounding rule, with its own yard, register, stock and customer.
-	// Nothing outside the test can move that branch's rate or rule, so a
-	// test that depends on them holds its own.
-	ownBranch bool
 }
 
 // withoutTill is the opt of a test that proves the open till rule itself.
@@ -129,41 +123,32 @@ func (w *recordingWriter) Write(ctx context.Context, ev outbox.Event) error {
 // 3.25 and priced 5.50 with 100 on hand (the branch rate is 8.875 percent),
 // a kit of two of them, and serves the pos routes. opts tune the service
 // before it is served.
+//
+// The counter stands on a branch of the fixture's own: a private locations
+// row of type BRANCH carrying its own tax rate and its own cash rounding
+// rule, its own yard, register, stock and customer, every one of them
+// removed when the test ends. No other package's fixture writes that
+// branch's row, so no other fixture can move the rate or the rule a test
+// here depends on, and the counter's own rows (its sales, its terminal
+// intents, its till movements) are named by ids only this fixture knows.
 func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
 	t.Helper()
-	return newCounterFixture(t, db, false, opts...)
+	return newCounterFixture(t, db, opts...)
 }
 
-// newOwnBranchFixture builds the same counter on a branch of the fixture's
-// own: a private locations row of type BRANCH carrying its own tax rate and
-// its own cash rounding rule, its own yard, register, stock and customer,
-// every one of them removed when the test ends. No other package's fixture
-// writes that branch's row, so no other fixture can move the rate or the
-// rule a test here depends on.
-func newOwnBranchFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
-	t.Helper()
-	return newCounterFixture(t, db, true, opts...)
-}
-
-// newCounterFixture builds the counter, either on the deployment's default
-// branch or on a branch the fixture owns.
-func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fixture)) *fixture {
+// newCounterFixture builds the counter on a branch the fixture owns.
+func newCounterFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), kitID: uuid.New(),
-		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New(),
-		ownBranch: own}
-	if own {
-		// the branch the fixture owns: its own rate and its own rounding
-		// rule, on its own row, where no other fixture can reach them
-		f.branchID = uuid.New()
-		mustExec(t, db, `INSERT INTO locations (id, type, code, name, timezone, default_tax_rate, cash_rounding_mode)
-			VALUES ($1, 'BRANCH', $2, 'Counter own branch', 'America/New_York', 0.088750, 'OFF')`,
-			f.branchID, "BR-"+f.branchID.String()[:8])
-	} else if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
-		t.Fatalf("default branch: %v", err)
-	}
+		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New()}
+	// the branch the fixture owns: its own rate and its own rounding rule,
+	// on its own row, where no other fixture can reach them
+	f.branchID = uuid.New()
+	mustExec(t, db, `INSERT INTO locations (id, type, code, name, timezone, default_tax_rate, cash_rounding_mode)
+		VALUES ($1, 'BRANCH', $2, 'Counter own branch', 'America/New_York', 0.088750, 'OFF')`,
+		f.branchID, "BR-"+f.branchID.String()[:8])
 	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, $3)`,
 		f.customerID, "WPOS-"+uuid.NewString()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 3.25)`,
@@ -172,7 +157,6 @@ func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fi
 		f.kitID, "KIT-"+uuid.NewString()[:8])
 	mustExec(t, db, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position) VALUES ($1, $2, 2, 0)`,
 		f.kitID, f.productID)
-	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = $1`, f.branchID)
 	f.yardID = uuid.New()
 	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
 		f.yardID, "PY-"+f.yardID.String()[:8], f.branchID)
@@ -279,20 +263,61 @@ func roleClaims(next http.Handler) http.Handler {
 }
 
 // cleanup removes everything the fixture produced, children first, in the
-// foreign key order the sweep proved: the walk-in customer's rows back the
-// fixture's sales, so they go too.
+// foreign key order the sweep proved.
+//
+// Every scope names the fixture's own rows: the branch it owns, the customer
+// it made, the register it opened. A delete that reached a whole table would
+// take another package's rows: the CI Backend job runs every package at the
+// same time against one test database, and the payment, serve and worker
+// packages write pos_transactions and terminal intents of their own.
 func (f *fixture) cleanup() {
 	ctx := context.Background()
 	exec := func(sql string, args ...any) {
 		if _, err := f.db.Pool.Exec(ctx, sql, args...); err != nil {
-			f.t.Logf("cleanup: %s: %v", strings.Join(strings.Fields(sql), " ")[:min(80, len(strings.Join(strings.Fields(sql), " ")))], err)
+			f.t.Logf("cleanup: %s: %v", strings.Join(strings.Fields(sql), " "), err)
 		}
 	}
 	walkIn := `(SELECT id FROM customers WHERE account_number = 'WALK-IN')`
-	sales := `(SELECT id FROM pos_transactions)`
-	invs := `(SELECT id FROM invoices WHERE customer_id IN ($1, ` + walkIn + `) OR id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL))`
-	cms := `(SELECT id FROM credit_memos WHERE customer_id IN ($1, ` + walkIn + `) OR id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL))`
-	pays := `(SELECT id FROM payments WHERE customer_id IN ($1, ` + walkIn + `))`
+	// The scopes. $1 is the branch the fixture owns, $2 the customer it
+	// made, $3 the register it opened. A statement takes only the
+	// parameters it uses: a parameter no statement mentions has no type for
+	// the server to deduce.
+	//
+	// The counter's own rows are found by the register as well as by the
+	// branch: a return the product writes names the sale it comes from and
+	// leaves the branch empty, and a test that moves a sale to another
+	// branch leaves the register as the only name the fixture still knows.
+	sales := `(SELECT id FROM pos_transactions WHERE branch_id = $1 OR customer_id = $2 OR register_id = $3)`
+	pays := `(SELECT id FROM payments WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT payment_id FROM pos_tenders WHERE transaction_id IN ` + sales + `))`
+	tenders := `(SELECT id FROM pos_tenders WHERE transaction_id IN ` + sales + ` OR payment_id IN ` + pays + `)`
+	returns := `(SELECT id FROM pos_returns WHERE branch_id = $1 OR register_id = $3 OR customer_id = $2
+		OR original_transaction_id IN ` + sales + `)`
+	invs := `(SELECT id FROM invoices WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT invoice_id FROM pos_transactions WHERE register_id = $3))`
+	cms := `(SELECT id FROM credit_memos WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT credit_memo_id FROM pos_returns WHERE register_id = $3))`
+	// the same scopes, spelled as text: the outbox and the audit log name
+	// their entity by a text id
+	salesTxt := `(SELECT id::text FROM pos_transactions WHERE branch_id = $1 OR customer_id = $2 OR register_id = $3)`
+	invsTxt := `(SELECT id::text FROM invoices WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT invoice_id FROM pos_transactions WHERE register_id = $3))`
+	cmsTxt := `(SELECT id::text FROM credit_memos WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT credit_memo_id FROM pos_returns WHERE register_id = $3))`
+	paysTxt := `(SELECT id::text FROM payments WHERE branch_id = $1 OR customer_id = $2
+		OR id IN (SELECT payment_id FROM pos_tenders WHERE transaction_id IN ` + sales + `))`
+	returnsTxt := `(SELECT id::text FROM pos_returns WHERE branch_id = $1 OR register_id = $3 OR customer_id = $2
+		OR original_transaction_id IN ` + sales + `)`
+	sessionsTxt := `(SELECT id::text FROM till_sessions WHERE register_id = $3)`
+	// the documents the fixture's acts wrote: what its ledger entries, its
+	// applications and its refunds name
+	docs := `((SELECT id FROM invoices WHERE branch_id = $1 OR customer_id = $2)
+		UNION (SELECT id FROM credit_memos WHERE branch_id = $1 OR customer_id = $2)
+		UNION (SELECT id FROM payments WHERE branch_id = $1 OR customer_id = $2)
+		UNION (SELECT id FROM pos_transactions WHERE branch_id = $1 OR customer_id = $2 OR register_id = $3)
+		UNION (SELECT id FROM pos_returns WHERE branch_id = $1 OR customer_id = $2 OR register_id = $3)
+		UNION (SELECT id FROM ar_applications WHERE invoice_id IN ` + invs + ` OR payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `)
+		UNION (SELECT id FROM payment_refunds WHERE payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `))`
 	// the ledger entries are captured before their source documents go, so
 	// the entry delete never misses one that named a payment or an
 	// application deleted below
@@ -307,16 +332,17 @@ func (f *fixture) cleanup() {
 		OR e.source_ref_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)
-		OR e.source_ref_id::text IN (SELECT id::text FROM till_movements)
-		OR e.source_ref_id::text IN (SELECT id::text FROM till_day_closes)
-		OR e.reverses_entry_id IN (SELECT gl_entry_id FROM till_day_closes WHERE gl_entry_id IS NOT NULL)
-		OR e.source_ref_id::text IN (SELECT id::text FROM till_sessions)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_movements WHERE branch_id = $1)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_day_closes WHERE branch_id = $1)
+		OR e.reverses_entry_id IN (SELECT gl_entry_id FROM till_day_closes WHERE branch_id = $1 AND gl_entry_id IS NOT NULL)
+		OR e.source_ref_id::text IN (SELECT id::text FROM till_sessions WHERE register_id = $3)
 		OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN
 			((SELECT id::text FROM invoices WHERE id IN `+invs+`)
 			UNION (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
 			UNION (SELECT id::text FROM payments WHERE id IN `+pays+`)
 			UNION (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
-			UNION (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)))`, f.customerID); err == nil {
+			UNION (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)))`,
+		f.branchID, f.customerID, f.register); err == nil {
 		for rows.Next() {
 			var id string
 			if rows.Scan(&id) == nil {
@@ -325,77 +351,131 @@ func (f *fixture) cleanup() {
 		}
 		rows.Close()
 	}
-	exec(`DELETE FROM events_outbox WHERE entity_id::text IN (SELECT id::text FROM invoices WHERE id IN `+invs+`)
-		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
-		OR entity_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
-		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
-		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
-		OR entity_id::text IN (SELECT id::text FROM till_day_closes) OR entity_id = $1`, f.customerID)
-	exec(`DELETE FROM audit_log WHERE entity_id::text IN (SELECT id::text FROM invoices WHERE id IN `+invs+`)
-		OR entity_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
-		OR entity_id::text IN (SELECT id::text FROM pos_transactions) OR entity_id::text IN (SELECT id::text FROM pos_returns)
-		OR entity_id::text IN (SELECT id::text FROM till_sessions) OR entity_id::text IN (SELECT id::text FROM till_movements)
-		OR entity_id::text IN (SELECT id::text FROM till_day_closes)`, f.customerID)
-	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
-	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
-	exec(`DELETE FROM customer_transactions WHERE customer_id IN ($1, `+walkIn+`)`, f.customerID)
-	exec(`DELETE FROM payment_terminal_lost_items`)
-	exec(`DELETE FROM payment_terminal_intents`)
-	exec(`DELETE FROM pos_refund_intents`)
-	exec(`DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns)`)
-	exec(`DELETE FROM pos_returns`)
-	exec(`DELETE FROM pos_tenders WHERE transaction_id IN ` + sales)
+	exec(`DELETE FROM events_outbox WHERE entity_id::text IN `+invsTxt+`
+		OR entity_id::text IN `+cmsTxt+`
+		OR entity_id::text IN `+paysTxt+`
+		OR entity_id::text IN `+salesTxt+`
+		OR entity_id::text IN `+returnsTxt+`
+		OR entity_id::text IN `+sessionsTxt+`
+		OR entity_id::text IN (SELECT id::text FROM till_movements WHERE branch_id = $1)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes WHERE branch_id = $1) OR entity_id = $4`,
+		f.branchID, f.customerID, f.register, f.customerID.String())
+	exec(`DELETE FROM audit_log WHERE entity_id::text IN `+invsTxt+`
+		OR entity_id::text IN `+cmsTxt+`
+		OR entity_id::text IN `+salesTxt+`
+		OR entity_id::text IN `+returnsTxt+`
+		OR entity_id::text IN `+sessionsTxt+`
+		OR entity_id::text IN (SELECT id::text FROM till_movements WHERE branch_id = $1)
+		OR entity_id::text IN (SELECT id::text FROM till_day_closes WHERE branch_id = $1)`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms,
+		f.branchID, f.customerID, f.register)
+	// the subledger: the fixture's own customer's rows, and the walk-in
+	// customer's rows that name one of the fixture's own documents (the walk
+	// in row itself is shared by every counter in the deployment, so its rows
+	// are named by the documents and not by the customer)
+	// The walk-in customer's balance follows its subledger: the rows the
+	// fixture's own documents made go, and the balance falls by exactly what
+	// they carried. The walk-in row is shared by every counter in the
+	// deployment, so the balance moves by the amount and is never reset.
+	exec(`UPDATE customers SET balance_due = balance_due - COALESCE((
+		SELECT SUM(amount)::numeric / 100 FROM customer_transactions
+		WHERE customer_id IN `+walkIn+` AND reference_id IN `+docs+`), 0)
+		WHERE id IN (SELECT id FROM customers WHERE account_number = 'WALK-IN')`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM customer_transactions WHERE customer_id = $2
+		OR (customer_id IN `+walkIn+` AND reference_id IN `+docs+`)`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM payment_terminal_lost_items WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM payment_terminal_intents WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM pos_account_overrides WHERE sale_id IN `+sales, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_signatures WHERE sale_id IN `+sales, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_refund_intents WHERE sale_id IN `+sales+` OR tender_id IN `+tenders,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_return_lines WHERE return_id IN `+returns, f.branchID, f.customerID, f.register)
 	// the scale ticket and its line hold each other's keys; the links go
-	// before either side (CP-19)
-	exec(`UPDATE scale_tickets SET sale_line_id = NULL WHERE sale_line_id IS NOT NULL`)
-	exec(`UPDATE pos_line_items SET scale_ticket_id = NULL WHERE scale_ticket_id IS NOT NULL`)
-	exec(`DELETE FROM pos_line_items WHERE transaction_id IN ` + sales)
-	exec(`DELETE FROM scale_tickets`)
-	exec(`DELETE FROM scale_devices`)
-	exec(`DELETE FROM pos_transactions`)
-	exec(`DELETE FROM payments WHERE id IN `+pays, f.customerID)
-	exec(`DELETE FROM credit_memo_lines WHERE credit_memo_id IN `+cms, f.customerID)
-	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.customerID)
-	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
-	exec(`DELETE FROM invoices WHERE id IN `+invs, f.customerID)
+	// before either side (CP-19). Only the fixture's own rows are unlinked.
+	exec(`UPDATE scale_tickets SET sale_line_id = NULL WHERE branch_id = $1 AND sale_line_id IS NOT NULL`, f.branchID)
+	exec(`UPDATE scale_tickets SET weigh_in_ticket_id = NULL WHERE branch_id = $1 AND weigh_in_ticket_id IS NOT NULL`, f.branchID)
+	exec(`UPDATE pos_line_items SET scale_ticket_id = NULL WHERE transaction_id IN `+sales+` AND scale_ticket_id IS NOT NULL`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_line_items WHERE transaction_id IN `+sales+`
+		OR invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id IN `+invs+`)`,
+		f.branchID, f.customerID, f.register)
+	// the return and the sale name each other; the link goes first
+	exec(`UPDATE pos_transactions SET exchange_return_id = NULL WHERE id IN `+sales, f.branchID, f.customerID, f.register)
+	exec(`UPDATE pos_returns SET exchange_sale_id = NULL WHERE id IN `+returns, f.branchID, f.customerID, f.register)
+	exec(`UPDATE pos_returns SET credit_memo_id = NULL WHERE id IN `+returns, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_returns WHERE id IN `+returns, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_tenders WHERE id IN `+tenders, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM pos_transactions WHERE id IN `+sales, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM tender_lines WHERE invoice_id IN `+invs+` OR payment_id IN `+pays, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM payments WHERE id IN `+pays, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM credit_memo_lines WHERE credit_memo_id IN `+cms, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM credit_memos WHERE id IN `+cms, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM line_tally_rows WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id IN `+invs+`)
+		OR credit_memo_line_id IN (SELECT id FROM credit_memo_lines WHERE credit_memo_id IN `+cms+`)
+		OR pos_line_item_id IN (SELECT id FROM pos_line_items WHERE transaction_id IN `+sales+`)`,
+		f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM invoices WHERE id IN `+invs, f.branchID, f.customerID, f.register)
+	exec(`DELETE FROM ar_finance_charge_items WHERE invoice_id IN `+invs+` OR journal_entry_id = ANY($4::uuid[])`,
+		f.branchID, f.customerID, f.register, entryIDs)
 	// the counter's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
-	exec(`DELETE FROM till_movements`)
-	exec(`DELETE FROM till_pickup_approvals`)
-	exec(`DELETE FROM till_day_closes`)
+	exec(`DELETE FROM till_movements WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM till_pickup_approvals WHERE till_session_id IN (SELECT id FROM till_sessions WHERE register_id = $3)`, f.register)
+	exec(`DELETE FROM till_day_closes WHERE branch_id = $1`, f.branchID)
 	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
-	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE gl_entry_id IS NOT NULL`)
+	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE register_id = $1 AND gl_entry_id IS NOT NULL`, f.register)
 	if len(entryIDs) > 0 {
 		exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id = ANY($1::uuid[])`, entryIDs)
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)
 	}
 
-	exec(`DELETE FROM large_cash_events`)
-	exec(`DELETE FROM large_cash_tenders`)
-	exec(`DELETE FROM large_cash_payers`)
-	exec(`DELETE FROM pos_sync_log`)
-	exec(`DELETE FROM till_variance_policy`)
-	exec(`DELETE FROM till_z_reports`)
-	exec(`DELETE FROM till_sessions`)
+	// the large cash rows of the branch the fixture owns (CP-17a), not the
+	// whole tables: the serve package's large cash tests write rows of
+	// their own against the same database
+	exec(`DELETE FROM large_cash_events WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM large_cash_tenders WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM large_cash_payers WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM pos_sync_log WHERE register_id = $1`, f.register)
+	exec(`DELETE FROM till_variance_policy WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM till_z_reports WHERE register_id = $1`, f.register)
+	exec(`DELETE FROM till_sessions WHERE register_id = $1`, f.register)
+	exec(`DELETE FROM email_deliveries WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM inventory WHERE location_id = $1`, f.yardID)
+	exec(`DELETE FROM scale_tickets WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM scale_devices WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM pos_registers WHERE id = $1`, f.register)
 	exec(`DELETE FROM locations WHERE id = $1`, f.yardID)
 	exec(`DELETE FROM product_kit_components WHERE kit_product_id = $1`, f.kitID)
 	exec(`DELETE FROM projects WHERE customer_id = $1`, f.customerID)
-	exec(`UPDATE customers SET balance_due = 0 WHERE id IN ($1, `+walkIn+`)`, f.customerID)
+	// the customer's own rows: the links, the limits, the alerts and the
+	// holds the counter wrote for it
+	exec(`DELETE FROM customer_alerts WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM credit_holds WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM credit_limit_changes WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM customer_branches WHERE customer_id = $1 OR branch_id = $2`, f.customerID, f.branchID)
+	exec(`DELETE FROM customer_contacts WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM customer_ship_tos WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM customer_users WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM tax_exemptions WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM pricing_rules WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM crm_activities WHERE customer_id = $1`, f.customerID)
+	exec(`UPDATE customers SET balance_due = 0 WHERE id = $1`, f.customerID)
 	exec(`DELETE FROM products WHERE id = $1 OR id = $2`, f.productID, f.kitID)
 	exec(`DELETE FROM customers WHERE id = $1`, f.customerID)
 	f.cleanupOwnBranch()
 }
 
-// cleanupOwnBranch removes the branch the fixture owned, children first: the
+// cleanupOwnBranch removes the branch the fixture owns, children first: the
 // ledger rows that name it, the links that point at it, and the row itself.
 // Every row it touches names this fixture's own branch, so another
 // package's rows are never reached.
 func (f *fixture) cleanupOwnBranch() {
-	if !f.ownBranch {
-		return
-	}
 	ctx := context.Background()
 	exec := func(sql string, args ...any) {
 		if _, err := f.db.Pool.Exec(ctx, sql, args...); err != nil {
@@ -697,35 +777,34 @@ func (f *fixture) legsFor(ids ...string) (entries int, legs map[string]leg) {
 }
 
 // accountBalance is an account's balance over the entries this fixture's
-// own documents sourced: its customers' (and the walk-in's) invoices, credit
-// memos, payments, applications and refunds, the counter's own acts and this
-// register's till sessions, and every reversal of one of those. A package
-// running beside this one against the same database never enters the count
-// (fourth review P2-5).
+// own documents sourced: the documents at the branch the fixture owns, the
+// counter's own acts and this register's till sessions, and every reversal of
+// one of those. A package running beside this one against the same database
+// never enters the count (fourth review P2-5, the shared database fixture
+// sweep).
 func (f *fixture) accountBalance(code string) int64 {
 	f.t.Helper()
-	walkIn := `(SELECT id FROM customers WHERE account_number = 'WALK-IN')`
-	invs := `(SELECT id FROM invoices WHERE customer_id IN ($2, ` + walkIn + `) OR id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL))`
-	cms := `(SELECT id FROM credit_memos WHERE customer_id IN ($2, ` + walkIn + `) OR id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL))`
-	pays := `(SELECT id FROM payments WHERE customer_id IN ($2, ` + walkIn + `))`
+	invs := `(SELECT id FROM invoices WHERE branch_id = $2 OR customer_id = $3)`
+	cms := `(SELECT id FROM credit_memos WHERE branch_id = $2 OR customer_id = $3)`
+	pays := `(SELECT id FROM payments WHERE branch_id = $2 OR customer_id = $3)`
 	docs := `((SELECT id::text FROM invoices WHERE id IN ` + invs + `)
 		UNION (SELECT id::text FROM credit_memos WHERE id IN ` + cms + `)
 		UNION (SELECT id::text FROM payments WHERE id IN ` + pays + `)
 		UNION (SELECT id::text FROM ar_applications WHERE invoice_id IN ` + invs + ` OR payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `)
 		UNION (SELECT id::text FROM payment_refunds WHERE payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `)
-		UNION (SELECT id::text FROM pos_transactions)
-		UNION (SELECT id::text FROM pos_returns)
-		UNION (SELECT id::text FROM till_sessions WHERE register_id = $3))`
+		UNION (SELECT id::text FROM pos_transactions WHERE branch_id = $2)
+		UNION (SELECT id::text FROM pos_returns WHERE branch_id = $2)
+		UNION (SELECT id::text FROM till_sessions WHERE register_id = $4))`
 	var n int64
 	if err := f.db.Pool.QueryRow(context.Background(), `
 		SELECT COALESCE(ROUND((SUM(l.debit) - SUM(l.credit)) * 100)::bigint, 0)
 		FROM gl_journal_lines l
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
-		WHERE a.code = $1 AND NOT (e.id::text = ANY($4::text[]))
+		WHERE a.code = $1 AND NOT (e.id::text = ANY($5::text[]))
 			AND (e.source_ref_id::text IN `+docs+`
 				OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN `+docs+`))`,
-		code, f.customerID, f.register, f.entryExclusions()).Scan(&n); err != nil {
+		code, f.branchID, f.customerID, f.register, f.entryExclusions()).Scan(&n); err != nil {
 		f.t.Fatal(err)
 	}
 	return n
@@ -734,20 +813,26 @@ func (f *fixture) accountBalance(code string) int64 {
 // The fixture's own document counts (fourth review P2-5): every count a
 // test asserts is scoped to what this fixture's acts wrote, so the pos
 // suite passes beside the other packages writing the same tables in one
-// database (the way CI runs it): the counter's invoices, the memos of its
-// customers and its returns, its register's returns, and its customers'
-// payment refunds.
+// database (the way CI runs it): the counter's invoices, its memos, its
+// register's returns, its payments and its refunds. The scope is the branch
+// the fixture owns, a row no other fixture knows, or the register it opened.
 
 func (f *fixture) counterInvoices(t *testing.T) int64 {
 	t.Helper()
-	return countOf(t, f.db, `SELECT count(*) FROM invoices WHERE id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL)`)
+	return countOf(t, f.db, `SELECT count(*) FROM invoices WHERE branch_id = $1 OR customer_id = $2`, f.branchID, f.customerID)
+}
+
+// counterSales counts the counter's own sales: the ones at the branch the
+// fixture owns. The payment, serve and worker packages write sales of their
+// own, on the deployment's default branch; they never enter this count.
+func (f *fixture) counterSales(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM pos_transactions WHERE branch_id = $1`, f.branchID)
 }
 
 func (f *fixture) counterMemos(t *testing.T) int64 {
 	t.Helper()
-	return countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id IN ($1,
-		(SELECT id FROM customers WHERE account_number = 'WALK-IN'))
-		OR id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL)`, f.customerID)
+	return countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE branch_id = $1 OR customer_id = $2`, f.branchID, f.customerID)
 }
 
 func (f *fixture) counterReturns(t *testing.T) int64 {
@@ -757,25 +842,24 @@ func (f *fixture) counterReturns(t *testing.T) int64 {
 
 func (f *fixture) counterPayments(t *testing.T) int64 {
 	t.Helper()
-	return countOf(t, f.db, `SELECT count(*) FROM payments WHERE customer_id IN ($1,
-		(SELECT id FROM customers WHERE account_number = 'WALK-IN'))`, f.customerID)
+	return countOf(t, f.db, `SELECT count(*) FROM payments WHERE branch_id = $1 OR customer_id = $2`, f.branchID, f.customerID)
 }
 
 func (f *fixture) counterEntries(t *testing.T) int64 {
 	t.Helper()
 	return countOf(t, f.db, `SELECT count(*) FROM gl_journal_entries e WHERE e.source_ref_id::text IN
-		((SELECT id::text FROM invoices WHERE id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL))
-		UNION (SELECT id::text FROM payments WHERE customer_id IN ($1, (SELECT id FROM customers WHERE account_number = 'WALK-IN')))
-		UNION (SELECT id::text FROM pos_transactions)
-		UNION (SELECT id::text FROM pos_returns)
-		UNION (SELECT id::text FROM till_sessions WHERE register_id = $2))`, f.customerID, f.register)
+		((SELECT id::text FROM invoices WHERE branch_id = $1)
+		UNION (SELECT id::text FROM payments WHERE branch_id = $1)
+		UNION (SELECT id::text FROM pos_transactions WHERE branch_id = $1)
+		UNION (SELECT id::text FROM pos_returns WHERE branch_id = $1)
+		UNION (SELECT id::text FROM till_sessions WHERE register_id = $2))`, f.branchID, f.register)
 }
 
 func (f *fixture) counterRefunds(t *testing.T) int64 {
 	t.Helper()
 	return countOf(t, f.db, `SELECT count(*) FROM payment_refunds WHERE payment_id IN
-		(SELECT id FROM payments WHERE customer_id IN ($1, (SELECT id FROM customers WHERE account_number = 'WALK-IN')))
-		OR credit_memo_id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL)`, f.customerID)
+		(SELECT id FROM payments WHERE branch_id = $1)
+		OR credit_memo_id IN (SELECT credit_memo_id FROM pos_returns WHERE branch_id = $1)`, f.branchID)
 }
 
 // entryExclusions lists the prior entry ids, with a sentinel that is never
@@ -814,7 +898,7 @@ func (f *fixture) scalar(sql string, args ...any) any {
 	f.t.Helper()
 	var v any
 	if err := f.db.Pool.QueryRow(context.Background(), sql, args...).Scan(&v); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("%s: %v", sql, err)
 	}
 	return v
 }

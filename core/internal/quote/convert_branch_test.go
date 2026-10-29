@@ -37,6 +37,9 @@ type convertWorld struct {
 	svc      *quote.Service
 	orderSvc *order.Service
 	other    uuid.UUID
+	// own is the branch the world owns: a locations row of its own
+	// carrying its own tax rate, which the quotes it converts name.
+	own uuid.UUID
 }
 
 const defaultBranchSQL = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
@@ -51,13 +54,11 @@ func newConvertWorld(t *testing.T, db *database.DB) *convertWorld {
 		w.other, "CB-"+w.other.String()[:8]); err != nil {
 		t.Fatalf("seed branch: %v", err)
 	}
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+defaultBranchSQL).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.10 WHERE id = `+defaultBranchSQL); err != nil {
-		t.Fatalf("seed default branch rate: %v", err)
-	}
+	// The branch the world owns: a locations row of its own carrying the
+	// rate the converted order needs. The quote names it, so the quote and
+	// the order it converts to stand on a branch no other package's fixture
+	// writes and no other package's fixture can move.
+	w.own = testutil.OwnBranch(t, db, "0.10")
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
@@ -65,7 +66,6 @@ func newConvertWorld(t *testing.T, db *database.DB) *convertWorld {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE customer_id = $1`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, w.other)
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+defaultBranchSQL, oldRate)
 	})
 	w.orderSvc = order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	w.svc = quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).
@@ -290,8 +290,8 @@ func TestConvert_FreightBecomesAFreightLine(t *testing.T) {
 	w := newConvertWorld(t, db)
 	ctx := branchctx.WithSystem(context.Background())
 	pid := w.f.productID
-	q, err := w.svc.Create(ctx, &quote.Draft{
-		CustomerID: w.f.customerID, DeliveryType: quote.DeliveryDelivery, Source: "manual", FreightCents: 12500,
+	q, err := w.svc.Create(branchctx.WithSystem(ctx), &quote.Draft{
+		CustomerID: w.f.customerID, DeliveryType: quote.DeliveryDelivery, Source: "manual", FreightCents: 12500, BranchID: &w.own,
 		Lines: []quote.DraftLine{{
 			ProductID: &pid, SKU: w.f.sku, Description: "2x4x8 SPF",
 			Quantity: 10 * 10000, UOM: "PCS", PriceUOM: "PCS", UOMQty: 10000, PriceUOMQty: 10000, UnitPrice: 55000,

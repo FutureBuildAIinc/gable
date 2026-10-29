@@ -225,6 +225,10 @@ func purgeFixtureRows(ctx context.Context, db *database.DB, customers, branches 
 		return `(SELECT id FROM ` + table + ` WHERE customer_id = ANY($1) OR branch_id = ANY($2))`
 	}
 	for _, stmt := range []string{
+		// the subledger rows of the fixture's own customers: they hold the
+		// customer rows in place, and a customer row left behind on the
+		// shared test database is a row another package's test counts
+		`DELETE FROM customer_transactions WHERE customer_id = ANY($1)`,
 		`DELETE FROM credit_limit_changes WHERE customer_id = ANY($1)`,
 		`DELETE FROM credit_holds WHERE customer_id = ANY($1)`,
 		`DELETE FROM ar_applications WHERE customer_id = ANY($1)`,

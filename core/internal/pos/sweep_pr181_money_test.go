@@ -34,7 +34,7 @@ func (f *fixture) postReturn(t *testing.T, saleID, method string, lines ...map[s
 func (f *fixture) walkInOpenCents(t *testing.T) int64 {
 	t.Helper()
 	return f.scalar(`SELECT ROUND(COALESCE(SUM(i.amount_open), 0) * 100)::bigint FROM invoices i
-		JOIN customers c ON c.id = i.customer_id WHERE c.account_number = 'WALK-IN'`).(int64)
+		JOIN customers c ON c.id = i.customer_id WHERE c.account_number = 'WALK-IN' AND i.branch_id = $1`, f.branchID).(int64)
 }
 
 // cashRefundedCents sums the cash the customer's credit memos paid out of

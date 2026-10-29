@@ -131,6 +131,15 @@ const fixtureEntries = `WITH RECURSIVE mine(id) AS (
 	SELECT e.id FROM gl_journal_entries e JOIN mine ON e.reverses_entry_id = mine.id
 ) SELECT id FROM mine`
 
+// entryCount counts the journal entries the fixture's own acts wrote: the
+// ones its vendor's bills and payments sourced, and their whole reversal
+// chain. A count over the whole table would take another package's entries,
+// which run beside this one against the same test database.
+func (f *fixture) entryCount() int64 {
+	f.t.Helper()
+	return f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
+}
+
 // cleanup removes everything the fixture's vendor produced, children first.
 func (f *fixture) cleanup() {
 	ctx := context.Background()

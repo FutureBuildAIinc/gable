@@ -15,6 +15,7 @@ import (
 // moving it changes what the counter records, so the change is audited with
 // the old and the new figures and who made it.
 func TestSaveSettingsWritesAnAuditRow(t *testing.T) {
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	svc := largecash.NewService(db, nil, "")

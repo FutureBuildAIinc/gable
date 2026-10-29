@@ -37,6 +37,10 @@ type poolWorld struct {
 	customerID uuid.UUID
 	products   []uuid.UUID
 	svc        func(tx order.TxRunner) *order.Service
+	// branchID is the branch the world owns: a locations row of its own
+	// carrying its own tax rate, so the orders it makes resolve their tax
+	// against a branch no other package's fixture can move.
+	branchID uuid.UUID
 }
 
 // newPoolWorld seeds a customer, n stocked products (1000 each at 3.00 cost)
@@ -47,23 +51,17 @@ func newPoolWorld(t *testing.T, n int) *poolWorld {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
 	w := &poolWorld{db: db, customerID: uuid.New()}
-	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	// the branch the world owns: its own rate, on its own row, where no
+	// other package's fixture can reach it
+	w.branchID = testutil.OwnBranch(t, db, "0.088750")
 	must := func(sql string, args ...any) {
 		if _, err := db.Pool.Exec(ctx, sql, args...); err != nil {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Pool Co', $2, `+branch+`)`, w.customerID, "POOL-"+uuid.NewString()[:8])
-	// The default branch's rate is shared state: read the prior value and
-	// restore it in cleanup, so this world's write does not leak a rate onto
-	// a neighbouring test in any package.
-	var oldRate *string
-	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
-		t.Fatalf("read default branch rate: %v", err)
-	}
-	must(`UPDATE locations SET default_tax_rate = 0.088750 WHERE id = ` + branch)
+	must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Pool Co', $2, $3)`, w.customerID, "POOL-"+uuid.NewString()[:8], w.branchID)
 	yard := uuid.New()
-	must(`INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`, yard, "PL-"+yard.String()[:8])
+	must(`INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`, yard, "PL-"+yard.String()[:8], w.branchID)
 	for i := 0; i < n; i++ {
 		p := uuid.New()
 		w.products = append(w.products, p)
@@ -71,7 +69,6 @@ func newPoolWorld(t *testing.T, n int) *poolWorld {
 		must(`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 1000, 0)`, p, yard)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT e.id FROM gl_journal_entries e JOIN invoices i ON e.source_ref_id = i.id WHERE i.customer_id = $1)`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1) OR entity_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, w.customerID)
@@ -103,7 +100,7 @@ func (w *poolWorld) draft(lines ...struct {
 	product uuid.UUID
 	qty     string
 }) *order.Draft {
-	d := &order.Draft{CustomerID: w.customerID, DeliveryType: order.DeliveryDelivery}
+	d := &order.Draft{BranchID: &w.branchID, CustomerID: w.customerID, DeliveryType: order.DeliveryDelivery}
 	for _, l := range lines {
 		pid := l.product
 		q, _ := httpx.ParseQuantity(l.qty)
@@ -286,10 +283,7 @@ func TestNewWritesAtPool4NeedNoSecondConnection(t *testing.T) {
 	if _, err := w.db.Pool.Exec(ctx, `UPDATE inventory SET quantity = quantity + 500 WHERE product_id = $1`, w.products[0]); err != nil {
 		t.Fatal(err)
 	}
-	branch := uuid.Nil
-	if err := w.db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
-		t.Fatal(err)
-	}
+	branch := w.branchID
 	if err := w.db.RunInTx(ctx, func(ctx context.Context) error {
 		_, err := order.NewRepository(w.db).QueueAllocationRequests(ctx, branch, w.products)
 		return err
