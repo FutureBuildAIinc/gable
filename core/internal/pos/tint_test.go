@@ -45,7 +45,7 @@ func seedTintCatalogue(t *testing.T, f *fixture) (baseID, colorantID, colorID, f
 func tintSettingsRows(t *testing.T, f *fixture) {
 	t.Helper()
 	t.Cleanup(func() {
-		mustExec(t, f.db, `DELETE FROM system_settings WHERE key IN ('pos.tint_charge_cents', 'pos.tinted_no_return')`)
+		mustExec(t, f.db, `DELETE FROM system_settings WHERE key IN ('pos.tint_charge_cents', 'pos.tint_charge_tiers', 'pos.tinted_no_return')`)
 	})
 }
 
@@ -510,5 +510,47 @@ func TestTintedLineKeepsItsTintWhenTheCustomerChanges(t *testing.T) {
 	}
 	if got := num(t, tint, "tint_charge_cents"); got != 250 {
 		t.Errorf("the tint charge = %d, want 250 (the charge rides the line)", got)
+	}
+}
+
+// RULE: the dealer's tint rule follows the tint, not only the container (row
+// CP-16): a tier covers the base tier it names and the colorant total it
+// names, and the flat figure covers the rest. The most specific tier wins,
+// so a deep base's tier beats a colorant tier.
+func TestTheTintChargeFollowsTheColorantAmountAndTheBaseTier(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	baseID, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "1000")
+	setPosSetting(t, f.db, "pos.tint_charge_tiers",
+		`[{"base_tier":"","min_colorant_oz":"2.0000","charge_cents":4000},{"base_tier":"deep","min_colorant_oz":"","charge_cents":9000}]`)
+
+	chargeOf := func(whole, coarse int) int64 {
+		t.Helper()
+		sale := f.startSale(nil)
+		line := tintLine("1", formulaID, "")
+		line["product_id"] = f.productID.String()
+		comp := line["tint"].(map[string]any)["components"].([]map[string]any)[0]
+		comp["amount"] = map[string]any{"whole_oz": whole, "increments_coarse": coarse,
+			"increments_fine": 0, "unit_denominator": 384}
+		added := f.addLine(sale, line)
+		if added.status != http.StatusOK {
+			t.Fatalf("add tinted line = %d: %s", added.status, added.raw)
+		}
+		return num(t, tintOf(t, added), "tint_charge_cents")
+	}
+	// 1 OZ + 12/32 is 1.375 oz: under the tier's floor, so the flat figure
+	if got := chargeOf(1, 12); got != 1000 {
+		t.Errorf("the charge on a 1.375 oz tint = %d, want the flat figure 1000", got)
+	}
+	// 3 oz is over the floor, so the tier
+	if got := chargeOf(3, 0); got != 4000 {
+		t.Errorf("the charge on a 3 oz tint = %d, want the tier's 4000", got)
+	}
+	// the base is the deepest of its system: the deep tier wins whatever the mix weighs
+	mustExec(t, f.db, `UPDATE paint_bases SET is_deepest = true WHERE id = $1`, baseID)
+	if got := chargeOf(1, 12); got != 9000 {
+		t.Errorf("the charge on a deep base's 1.375 oz tint = %d, want the deep tier's 9000", got)
 	}
 }

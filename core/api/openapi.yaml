@@ -21741,7 +21741,20 @@ paths:
       operationId: tintChargeGet
       tags: [tint]
       summary: The dealer's tint charge
-      description: The flat tint charge setting of the counter (pos.tint_charge_cents), 0 when none is set, the dominant retail model folding the tint into the shelf price.
+      description: "The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default."
+      parameters:
+        - name: colorant_units
+          in: query
+          description: The tint's colorant total in the system's whole dispense units.
+          schema: {type: integer, minimum: 0}
+        - name: unit_denominator
+          in: query
+          description: The dispense grid the tint's units are counted on (the colour system's unit denominator).
+          schema: {type: integer, minimum: 1}
+        - name: base_tier
+          in: query
+          description: "The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one."
+          schema: {type: string, enum: [flat, deep]}
       responses:
         '200':
           description: The charge in cents.
@@ -38845,6 +38858,23 @@ components:
       type: object
       properties:
         tint_charge_cents: {type: integer}
+    TintChargeTier:
+      type: object
+      description: "One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents."
+      required: [base_tier, min_colorant_oz, charge_cents]
+      properties:
+        base_tier: {type: string, enum: ['', flat, deep]}
+        min_colorant_oz: {type: string}
+        charge_cents: {type: integer, minimum: 0}
+    TintChargeRule:
+      type: object
+      description: "The dealer's tint charge rule: the flat figure per container and the tiers that may cover it."
+      required: [flat_cents, tiers]
+      properties:
+        flat_cents: {type: integer, minimum: 0}
+        tiers:
+          type: array
+          items: {$ref: '#/components/schemas/TintChargeTier'}
     LineTint:
       type: object
       description: A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed.

@@ -6,6 +6,7 @@ package tint
 import (
 	"context"
 	"errors"
+	"math/big"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -184,11 +185,18 @@ func (s *Service) DeleteSavedColor(ctx context.Context, id uuid.UUID) error {
 	return httpErr(err)
 }
 
-// Charge reads the dealer's tint charge setting as the counter shows it.
-func (s *Service) Charge(ctx context.Context) (*ChargeView, error) {
-	cents, err := s.repo.TintChargeCents(ctx)
+// Charge reads the dealer's tint charge rule as the counter shows it: the
+// charge for a tint with the given colorant total (in the system's own whole
+// units) and base tier. Without a tint's numbers the answer is the flat
+// figure, the dealer's default.
+func (s *Service) Charge(ctx context.Context, units *int64, denominator int, baseTier string) (*ChargeView, error) {
+	rule, err := s.repo.ChargeRule(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &ChargeView{TintChargeCents: cents}, nil
+	if units == nil || denominator <= 0 {
+		return &ChargeView{TintChargeCents: rule.FlatCents}, nil
+	}
+	total := new(big.Rat).SetFrac(big.NewInt(*units), big.NewInt(int64(denominator)))
+	return &ChargeView{TintChargeCents: rule.Charge(total, baseTier)}, nil
 }

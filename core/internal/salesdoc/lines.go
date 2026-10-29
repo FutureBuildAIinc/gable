@@ -8,6 +8,7 @@
 package salesdoc
 
 import (
+	"math/big"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -228,6 +229,22 @@ type TintComponent struct {
 	ColorantCode string      `json:"colorant_code"`
 	ColorantName string      `json:"colorant_name"`
 	Amount       tint.Amount `json:"amount"`
+}
+
+// TotalColorantOZ is a tint's colorant total in fluid ounces, exactly: every
+// component's amount read on its own dispense grid and summed without
+// rounding. It is the figure the dealer's charge rule reads, so it is never a
+// float and never rounded on the way.
+func TotalColorantOZ(components []TintComponent) *big.Rat {
+	total := new(big.Rat)
+	for _, c := range components {
+		if c.Amount.Denominator <= 0 {
+			continue
+		}
+		total.Add(total, new(big.Rat).SetFrac(
+			big.NewInt(c.Amount.FineUnits()), big.NewInt(int64(c.Amount.Denominator))))
+	}
+	return total
 }
 
 // IsStocked reports whether the line moves stock: a product line that names a

@@ -9770,7 +9770,7 @@ export interface paths {
         };
         /**
          * The dealer's tint charge
-         * @description The flat tint charge setting of the counter (pos.tint_charge_cents), 0 when none is set, the dominant retail model folding the tint into the shelf price.
+         * @description The dealer's tint charge rule (row CP-16) as the counter shows it: the charge for a tint with the colorant total and the base tier given. The rule follows the tint, not only the container: a tier covers the base tier it names and the colorant floor it names, and the flat figure covers the rest. A request with no numbers answers the flat figure, the dealer's default.
          */
         get: operations["tintChargeGet"];
         put?: never;
@@ -21008,6 +21008,18 @@ export interface components {
         };
         TintCharge: {
             tint_charge_cents?: number;
+        };
+        /** @description One tier of the dealer's tint charge rule: the base tier it covers (empty is any base), the lowest colorant total in fluid ounces it covers (empty is any total) and the charge in cents. */
+        TintChargeTier: {
+            /** @enum {string} */
+            base_tier: "" | "flat" | "deep";
+            min_colorant_oz: string;
+            charge_cents: number;
+        };
+        /** @description The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+        TintChargeRule: {
+            flat_cents: number;
+            tiers: components["schemas"]["TintChargeTier"][];
         };
         /** @description A paint line's tint record (row CP-16), the base, the colour and the formula frozen on the sale, the amounts as actually mixed. */
         LineTint: {
@@ -41595,7 +41607,14 @@ export interface operations {
     };
     tintChargeGet: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The tint's colorant total in the system's whole dispense units. */
+                colorant_units?: number;
+                /** @description The dispense grid the tint's units are counted on (the colour system's unit denominator). */
+                unit_denominator?: number;
+                /** @description The base tier the tint is mixed in: flat is the ordinary base of a system, deep is the deepest one. */
+                base_tier?: "flat" | "deep";
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -113,7 +113,13 @@ export const tintService = {
     rescale: (formulaId: string, targetVolumeOZ: number) =>
         post<TintRescale>(`/api/v1/tint/formulas/${formulaId}/rescale`, { target_volume_oz: targetVolumeOZ },
             'Failed to rescale the formula'),
-    charge: () => get<{ tint_charge_cents: number }>('/api/v1/tint/charge', 'Failed to read the tint charge'),
+    charge: (params: { colorant_units?: number; unit_denominator?: number; base_tier?: 'flat' | 'deep' } = {}) => {
+        const q = new URLSearchParams();
+        if (params.colorant_units !== undefined) q.set('colorant_units', String(params.colorant_units));
+        if (params.unit_denominator !== undefined) q.set('unit_denominator', String(params.unit_denominator));
+        if (params.base_tier) q.set('base_tier', params.base_tier);
+        return get<{ tint_charge_cents: number }>(`/api/v1/tint/charge${q.size ? `?${q}` : ''}`, 'Failed to read the tint charge');
+    },
     savedColors: (customerId?: string) => {
         const q = customerId ? `?customer_id=${customerId}` : '';
         return get<{ items: TintSavedColor[] }>(`/api/v1/tint/saved-colors${q}`, 'Failed to read the saved colours');

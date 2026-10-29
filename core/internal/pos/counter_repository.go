@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -417,27 +418,35 @@ func (r *PostgresRepository) LinkExchange(ctx context.Context, returnID, saleID 
 	return nil
 }
 
-// TintChargeCents reads the dealer's flat tint charge per container (row
-// CP-16): none set means no charge, the dominant retail model folding the
-// tint into the shelf price.
-func (r *PostgresRepository) TintChargeCents(ctx context.Context) (int64, error) {
-	var value *string
-	err := r.ex(ctx).QueryRow(ctx,
-		`SELECT value FROM system_settings WHERE key = 'pos.tint_charge_cents'`).Scan(&value)
+// TintChargeRule reads the dealer's tint charge rule (row CP-16): the flat
+// figure per container and the tiers that may cover it. None set means no
+// charge, the dominant retail model folding the tint into the shelf price.
+func (r *PostgresRepository) TintChargeRule(ctx context.Context) (tint.ChargeRule, error) {
+	return tint.ReadChargeRule(ctx, r.ex(ctx))
+}
+
+// TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
+// deepest base of a system, "flat" otherwise, and "" when the base cannot be
+// resolved (a hand written line with no formula). The server resolves it, so
+// the charge never follows a word the screen sent.
+func (r *PostgresRepository) TintBaseTier(ctx context.Context, formulaID *uuid.UUID) (string, error) {
+	if formulaID == nil {
+		return "", nil
+	}
+	var deep bool
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT b.is_deepest FROM paint_formulas f JOIN paint_bases b ON b.id = f.base_id
+		WHERE f.id = $1`, *formulaID).Scan(&deep)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
+		return "", nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("failed to read the tint charge setting: %w", err)
+		return "", fmt.Errorf("failed to read the tint base tier: %w", err)
 	}
-	if value == nil || strings.TrimSpace(*value) == "" {
-		return 0, nil
+	if deep {
+		return tint.BaseTierDeep, nil
 	}
-	n, perr := strconv.ParseInt(strings.TrimSpace(*value), 10, 64)
-	if perr != nil || n < 0 {
-		return 0, fmt.Errorf("the pos.tint_charge_cents setting is not a whole number of cents from 0 up")
-	}
-	return n, nil
+	return tint.BaseTierFlat, nil
 }
 
 // TintedNoReturn reads the tinted no return policy: off unless the setting

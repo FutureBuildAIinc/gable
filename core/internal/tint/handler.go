@@ -334,12 +334,46 @@ func (h *Handler) handleDeleteSavedColor(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleCharge answers the dealer's charge for a tint: the counter asks with
+// the tint's own numbers (the colorant total in the system's whole units and
+// the base's tier) and the server finds the charge in the dealer's rule. A
+// request with no numbers answers the flat figure, the dealer's default.
 func (h *Handler) handleCharge(w http.ResponseWriter, r *http.Request) {
-	if _, err := httpx.StrictQuery(r); err != nil {
+	if _, err := httpx.StrictQuery(r, "colorant_units", "unit_denominator", "base_tier"); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	out, err := h.service.Charge(r.Context())
+	v := &httpx.Validator{}
+	var units *int64
+	denominator := 0
+	baseTier := ""
+	if raw := r.URL.Query().Get("colorant_units"); raw != "" {
+		if n, ok := v.Int("colorant_units", json.RawMessage(raw), true); ok {
+			if n < 0 {
+				v.Check(false, "colorant_units", "must not be negative")
+			} else {
+				units = &n
+			}
+		}
+	}
+	if raw := r.URL.Query().Get("unit_denominator"); raw != "" {
+		if n, ok := v.Int("unit_denominator", json.RawMessage(raw), true); ok {
+			if n <= 0 {
+				v.Check(false, "unit_denominator", "must be a whole number of the system's dispense unit, 1 or more")
+			} else {
+				denominator = int(n)
+			}
+		}
+	}
+	if raw := r.URL.Query().Get("base_tier"); raw != "" {
+		v.Enum("base_tier", raw, BaseTierFlat, BaseTierDeep)
+		baseTier = raw
+	}
+	if err := v.Err(); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.service.Charge(r.Context(), units, denominator, baseTier)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

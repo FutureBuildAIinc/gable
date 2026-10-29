@@ -15,7 +15,7 @@ import {
     type TintRescaledComponent,
 } from '../../services/TintService';
 import type { Sale, TintAmount } from '../../types/pos';
-import { formatAmount, fineUnits, priceWithTintCharge, tintPayload } from './tint.ts';
+import { formatAmount, fineUnits, colorantUnits, priceWithTintCharge, tintPayload } from './tint.ts';
 
 const FIELD = 'width:100%;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:15px;outline:none';
 const LABEL = 'display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin:12px 0 6px';
@@ -68,15 +68,17 @@ export class TintLineDialog extends LitElement {
         super.connectedCallback();
         if (this.loaded) return;
         this.loaded = true;
+        await this.loadCatalogue();
+    }
+
+    private async loadCatalogue() {
         try {
-            const [systems, bases, charge] = await Promise.all([
+            const [systems, bases] = await Promise.all([
                 tintService.systems(),
                 tintService.bases({ product_id: this.productId }),
-                tintService.charge(),
             ]);
             this.systems = systems.items;
             this.bases = bases.items;
-            this.chargeCents = charge.tint_charge_cents ?? 0;
             if (this.bases.length > 0) await this.pickBase(this.bases[0].id);
             if (this.customerId) {
                 const saved = await tintService.savedColors(this.customerId);
@@ -84,6 +86,28 @@ export class TintLineDialog extends LitElement {
             }
         } catch (err: unknown) {
             this.failure = err instanceof Error ? err.message : 'Failed to read the tint catalogue';
+        }
+    }
+
+    /**
+     * Asks the server what the dealer's rule charges for this tint. The rule
+     * follows the tint, not only the container, so the charge is read with the
+     * tint's own numbers: the colorant total in the system's whole units and
+     * the base's tier. The server owns the rule, so the screen never computes
+     * the charge itself.
+     */
+    private async refreshCharge() {
+        const base = this.bases.find((b) => b.id === this.baseId);
+        const { units, denominator } = colorantUnits(this.components);
+        try {
+            const charge = await tintService.charge({
+                colorant_units: units,
+                unit_denominator: denominator,
+                base_tier: base?.is_deepest ? 'deep' : 'flat',
+            });
+            this.chargeCents = charge.tint_charge_cents ?? 0;
+        } catch (err: unknown) {
+            this.failure = err instanceof Error ? err.message : 'Failed to read the tint charge';
         }
     }
 
@@ -105,6 +129,7 @@ export class TintLineDialog extends LitElement {
         this.formulas = [];
         this.components = [];
         await this.searchColors('');
+        await this.refreshCharge();
     }
 
     private async searchColors(q: string) {
@@ -137,10 +162,11 @@ export class TintLineDialog extends LitElement {
         this.sizeCode = sizeCode;
         const exact = this.formulas.find((f) => f.container_size_code === sizeCode);
         const source = exact ?? this.formulas[0];
-        if (!source) { this.components = []; return; }
+        if (!source) { this.components = []; await this.refreshCharge(); return; }
         if (exact) {
             this.components = source.components.map((c) => ({ colorant_code: c.colorant_code, colorant_name: c.colorant_name, amount: { ...c.amount } }));
             this.rescaled = false;
+            await this.refreshCharge();
             return;
         }
         // a rescale: the counter sees the rounding flag and may override any amount
@@ -148,6 +174,7 @@ export class TintLineDialog extends LitElement {
         const res = await tintService.rescale(source.id, target?.oz ?? source.container_volume_oz);
         this.components = res.components.map((c: TintRescaledComponent) => ({ colorant_code: c.colorant_code, colorant_name: c.colorant_name, amount: { ...c.amount } }));
         this.rescaled = true;
+        await this.refreshCharge();
     }
 
     /** The size choices: every size the catalogue holds for the colour, plus the quart for a gallon only book. */
@@ -161,6 +188,8 @@ export class TintLineDialog extends LitElement {
 
     private setAmount(i: number, patch: Partial<TintAmount>) {
         this.components = this.components.map((c, j) => (j === i ? { ...c, amount: { ...c.amount, ...patch } } : c));
+        // the charge follows the mix: an amount the counter corrects moves it
+        void this.refreshCharge();
     }
 
     /** A saved colour fills the whole dialog: the base, the colour and its first formula. */

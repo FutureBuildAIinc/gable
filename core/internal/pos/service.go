@@ -673,21 +673,29 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 		}
 
 		// A paint line's tint (row CP-16): the line price is the base price
-		// plus the dealer's tint rule, a flat charge per container the
-		// dealer sets (0 when the tint is folded into the shelf price, the
-		// dominant retail model). The charge rides the tint record so the
-		// documents show it as its own amount.
+		// plus the dealer's tint rule. The rule follows the tint, not only
+		// the container: a tier covers the base tier it names and the
+		// colorant total it names, and the flat figure covers the rest (0
+		// when the tint is folded into the shelf price, the dominant retail
+		// model). The charge rides the tint record so the documents show it
+		// as its own amount.
 		//
-		// The dealer's setting is the only charge (money checklist item 6:
-		// the rule the screen shows is enforced on the server): what the
-		// request carried is overwritten here, so the charge frozen on the
-		// record is the charge the price carries, never the number the
-		// screen happened to send.
+		// The dealer's rule is the only charge (money checklist item 6: the
+		// rule the screen shows is enforced on the server): what the
+		// request carried is overwritten here, and the colorant total and
+		// the base tier are read from the server's own rows, so the charge
+		// frozen on the record is the charge the price carries, never the
+		// number the screen happened to send.
 		if pl.Tint != nil {
-			charge, err := s.repo.TintChargeCents(ctx)
+			rule, err := s.repo.TintChargeRule(ctx)
 			if err != nil {
 				return line, out, err
 			}
+			baseTier, err := s.repo.TintBaseTier(ctx, pl.Tint.FormulaID)
+			if err != nil {
+				return line, out, err
+			}
+			charge := rule.Charge(salesdoc.TotalColorantOZ(pl.Tint.Components), baseTier)
 			c := httpx.Cents(charge)
 			pl.Tint.TintChargeCents = &c
 			if charge > 0 && line.UnitPrice != nil {

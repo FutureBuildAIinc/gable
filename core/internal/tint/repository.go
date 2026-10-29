@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strconv"
-	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -104,10 +102,11 @@ type Repository interface {
 	ListSavedColors(ctx context.Context, customerID *uuid.UUID, jobNote string) ([]SavedColor, error)
 	CreateSavedColor(ctx context.Context, d *SavedColorDraft) (*SavedColor, error)
 	DeleteSavedColor(ctx context.Context, id uuid.UUID) error
-	// TintChargeCents reads the dealer's flat tint charge setting (0 when
-	// none is set: the dominant retail model folds the tint into the shelf
+	// ChargeRule reads the dealer's tint charge rule: the flat figure per
+	// container and the tiers that may cover it (none set meaning no
+	// charge, the dominant retail model folding the tint into the shelf
 	// price).
-	TintChargeCents(ctx context.Context) (int64, error)
+	ChargeRule(ctx context.Context) (ChargeRule, error)
 }
 
 type PostgresRepository struct{ db *database.DB }
@@ -489,24 +488,9 @@ func (r *PostgresRepository) DeleteSavedColor(ctx context.Context, id uuid.UUID)
 	return nil
 }
 
-func (r *PostgresRepository) TintChargeCents(ctx context.Context) (int64, error) {
-	var value *string
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT value FROM system_settings WHERE key = 'pos.tint_charge_cents'`).Scan(&value)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("failed to read the tint charge setting: %w", err)
-	}
-	if value == nil || strings.TrimSpace(*value) == "" {
-		return 0, nil
-	}
-	n, perr := strconv.ParseInt(strings.TrimSpace(*value), 10, 64)
-	if perr != nil || n < 0 {
-		return 0, fmt.Errorf("the pos.tint_charge_cents setting is not a whole number of cents from 0 up")
-	}
-	return n, nil
+// ChargeRule reads the dealer's tint charge rule from its settings rows.
+func (r *PostgresRepository) ChargeRule(ctx context.Context) (ChargeRule, error) {
+	return ReadChargeRule(ctx, r.db.GetExecutor(ctx))
 }
 
 // ChargeView is the dealer's tint charge as the counter reads it.

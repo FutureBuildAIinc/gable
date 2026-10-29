@@ -28,6 +28,21 @@ export function editableAmount(a: TintAmount): TintAmount {
     return { whole_oz: a.whole_oz, increments_coarse: a.increments_coarse, increments_fine: a.increments_fine, unit_denominator: a.unit_denominator };
 }
 
+/** The tint's colorant total in the system's whole dispense units, and the grid they are counted on. */
+export function colorantUnits(components: Array<{ amount: TintAmount }>): { units: number; denominator: number } {
+    const first = components[0];
+    if (!first) return { units: 0, denominator: 0 };
+    const denominator = first.amount.unit_denominator;
+    let units = 0;
+    for (const c of components) {
+        // a component on another grid is not added to this one: the sum of two
+        // grids is not a number, and the server reads the tint's own amounts
+        if (c.amount.unit_denominator !== denominator) continue;
+        units += fineUnits(c.amount);
+    }
+    return { units, denominator };
+}
+
 /** The unit price the line takes, in ten thousandths: the base price plus the flat tint charge (0 when none is set). */
 export function priceWithTintCharge(basePriceTenThousandths: number, tintChargeCents: number): number {
     return basePriceTenThousandths + tintChargeCents * 100;

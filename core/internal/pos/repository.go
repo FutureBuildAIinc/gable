@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/taxzone"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -296,9 +297,13 @@ type Repository interface {
 	UnbumpPrintCount(ctx context.Context, saleID uuid.UUID) error
 	ReceiptSaleByInvoice(ctx context.Context, invoiceID uuid.UUID) (*receiptSaleFacts, error)
 	RestockingFeeBps(ctx context.Context) (map[string]int, error)
-	// TintChargeCents reads the dealer's flat tint charge per container (row
-	// CP-16), 0 when none is set.
-	TintChargeCents(ctx context.Context) (int64, error)
+	// TintChargeRule reads the dealer's tint charge rule (row CP-16): the flat
+	// figure per container and the tiers that may cover it.
+	TintChargeRule(ctx context.Context) (tint.ChargeRule, error)
+	// TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
+	// deepest base of a system, "flat" otherwise, "" when it cannot be
+	// resolved.
+	TintBaseTier(ctx context.Context, formulaID *uuid.UUID) (string, error)
 	// TintedNoReturn reads the dealer's tinted no return policy (row CP-16):
 	// off by default, because the rule is a dealer policy and not a law.
 	TintedNoReturn(ctx context.Context) (bool, error)
