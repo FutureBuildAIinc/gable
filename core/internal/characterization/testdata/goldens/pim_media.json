@@ -38,6 +38,8 @@
           "board_width_in": null,
           "commission_rate": 0,
           "created_at": "<ts+0d>",
+          "density_lb_per_cy": null,
+          "density_volume_state": null,
           "description": "2x4x8 SPF Premium",
           "geometry_source": "parametric",
           "height_in": 1.5,

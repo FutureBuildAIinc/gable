@@ -40,6 +40,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/products/{id}", guard(h.HandleGetProduct))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
+	mux.HandleFunc("PATCH /api/v1/products/{id}/density", guard(h.HandleUpdateDensity))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/lead-time", guard(h.HandleUpdateLeadTime))
 	// Kit components (ADR 0005 2.6), on the contract from birth.
 	mux.HandleFunc("GET /api/v1/products/{id}/kit-components", guard(h.HandleGetKitComponents))
@@ -296,6 +297,45 @@ func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request)
 	} else {
 		p.LengthIn, p.WidthIn, p.HeightIn = g.LengthIn, g.WidthIn, g.HeightIn
 		p.Stackable, p.GeometrySource = g.Stackable, g.GeometrySource
+		p.Revision = newRevision
+	}
+	view := ViewOf(p)
+	httpx.WriteRevisionETag(w, view.Revision)
+	writeJSON(w, http.StatusOK, view)
+}
+
+// HandleUpdateDensity handles PATCH /products/{id}/density (CP-19): the
+// pounds per cubic yard with its volume state, a null pair clearing it, so
+// the counter's weighed lines can price by the yard.
+func (h *Handler) HandleUpdateDensity(w http.ResponseWriter, r *http.Request) {
+	id, bad := pathID(r)
+	if bad != nil {
+		writeProductError(w, r, bad)
+		return
+	}
+	density, state, revision, err := parseDensity(r)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	p, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		writeProductError(w, r, mapRead(err))
+		return
+	}
+	if err := httpx.CheckRevision(p.Revision, r.Header.Get("If-Match"), revision); err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	newRevision, err := h.service.UpdateDensity(r.Context(), id, density, state, p.Revision)
+	if err != nil {
+		writeProductError(w, r, err)
+		return
+	}
+	if updated, rerr := h.service.GetProduct(r.Context(), id); rerr == nil {
+		p = updated
+	} else {
+		p.DensityLbPerCY, p.DensityVolumeState = density, state
 		p.Revision = newRevision
 	}
 	view := ViewOf(p)

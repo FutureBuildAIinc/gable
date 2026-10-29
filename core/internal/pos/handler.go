@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/scale"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -25,6 +26,9 @@ import (
 type Handler struct {
 	service *Service
 	guard   BranchGuard // optional; see WithBranchGuard
+	// scaleSim, when set, is the simulated scale (CP-19): its control route
+	// mounts only with it.
+	scaleSim *scale.Simulator
 }
 
 // NewHandler creates the counter's handler.
@@ -179,6 +183,21 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/end-of-day/{id}/deposit-candidates", resolveMount(h.ListDepositCandidates))
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/deposit-match", resolveMount(h.MatchDeposit))
 	mux.HandleFunc("POST /api/v1/pos/end-of-day/{id}/reopen", resolveMount(h.ReopenBranchDay))
+
+	// The scale (CP-19): the reading, the weigh in and weigh out, the
+	// tickets with their void, the manual entry's closed reasons, and the
+	// manual weight on a line.
+	mux.HandleFunc("GET /api/v1/pos/scale", guard(h.GetScaleStatus))
+	mux.HandleFunc("POST /api/v1/pos/scale/weigh-in", guard(h.WeighIn))
+	mux.HandleFunc("POST /api/v1/pos/scale/weigh-out", guard(h.WeighOut))
+	mux.HandleFunc("GET /api/v1/pos/scale/tickets", guard(h.ListScaleTickets))
+	mux.HandleFunc("GET /api/v1/pos/scale/tickets/{id}", guard(h.GetScaleTicket))
+	mux.HandleFunc("POST /api/v1/pos/scale/tickets/{id}/void", guard(h.VoidScaleTicket))
+	mux.HandleFunc("GET /api/v1/pos/scale/manual-reasons", guard(h.ListManualWeightReasons))
+	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/items/{itemId}/weight", guard(h.EnterLineWeight))
+	if h.scaleSim != nil {
+		mux.HandleFunc("PUT /api/v1/pos/scale/simulator", guard(h.DriveScaleSimulator))
+	}
 
 	// Returns
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
