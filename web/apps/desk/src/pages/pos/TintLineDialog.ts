@@ -41,7 +41,10 @@ export class TintLineDialog extends LitElement {
     createRenderRoot() { return this; }
 
     @property({ attribute: 'sale-id' }) saleId = '';
+    @property({ attribute: 'line-id' }) lineId = '';
     @property({ attribute: 'product-id' }) productId = '';
+    @property() quantity = '1';
+    @property() uom = '';
     /** The line's own unit price in ten thousandths, before the tint charge. */
     @property({ type: Number, attribute: 'base-price' }) basePrice = 0;
     @property({ attribute: 'customer-id' }) customerId = '';
@@ -220,15 +223,24 @@ export class TintLineDialog extends LitElement {
         }
         try {
             this.busy = true;
-            const sale = await posService.addItemTint(this.saleId, this.productId, {
-                formula_id: this.formulas.find((f) => f.container_size_code === this.sizeCode)?.id ?? null,
-                color_code: color.manufacturer_code ?? '',
-                color_name: color.name,
-                base_code: this.bases.find((b) => b.id === this.baseId)?.code ?? '',
-                container_size_code: this.sizeCode,
-                rescaled: this.rescaled,
-                components: this.components.map((c) => ({ colorant_code: c.colorant_code, colorant_name: c.colorant_name, amount: c.amount })),
-            });
+            let sale = await posService.addItemTint(
+                this.saleId,
+                this.productId,
+                {
+                    formula_id: this.formulas.find((f) => f.container_size_code === this.sizeCode)?.id ?? null,
+                    color_code: color.manufacturer_code ?? '',
+                    color_name: color.name,
+                    base_code: this.bases.find((b) => b.id === this.baseId)?.code ?? '',
+                    container_size_code: this.sizeCode,
+                    rescaled: this.rescaled,
+                    components: this.components.map((c) => ({ colorant_code: c.colorant_code, colorant_name: c.colorant_name, amount: c.amount })),
+                },
+                this.quantity || '1',
+                this.uom || undefined,
+            );
+            if (this.lineId) {
+                sale = await posService.removeItem(this.saleId, this.lineId);
+            }
             // the save is offered on every tinted sale: it is what makes a repeat order the same formula
             if (this.customerId && this.saveName.trim()) {
                 try {

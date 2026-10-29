@@ -13,7 +13,7 @@ const tint = vi.hoisted(() => ({
     savedColors: vi.fn(),
     saveColor: vi.fn(),
 }));
-const pos = vi.hoisted(() => ({ addItemTint: vi.fn() }));
+const pos = vi.hoisted(() => ({ addItemTint: vi.fn(), removeItem: vi.fn() }));
 
 vi.mock('../../services/TintService', async (orig) => {
     const real = await orig<typeof import('../../services/TintService')>();
@@ -60,6 +60,7 @@ beforeEach(() => {
     tint.savedColors.mockReset().mockResolvedValue({ items: [] });
     tint.saveColor.mockReset().mockResolvedValue({});
     pos.addItemTint.mockReset();
+    pos.removeItem.mockReset();
 });
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -99,17 +100,25 @@ describe('gable-tint-line-dialog', () => {
         expect(el.querySelector('[data-testid="tint-components"]')?.textContent).toContain('1 OZ + 12/32');
     });
 
-    it('sends the tint with the line on Add', async () => {
-        pos.addItemTint.mockResolvedValue({ id: 'sale' });
-        await open();
+    it('sends the tint with the line on Add and replaces the scanned plain base line', async () => {
+        pos.addItemTint.mockResolvedValue({ id: 'sale', lines: [{ id: 'plain-1' }, { id: 'tinted-1' }] });
+        pos.removeItem.mockResolvedValue({ id: 'sale', lines: [{ id: 'tinted-1' }] });
+        el = await mount<TintLineDialog>('gable-tint-line-dialog', {
+            saleId: 'sale', lineId: 'plain-1', productId: 'p1', quantity: '2', uom: 'GAL', basePrice: 55000, customerId: '',
+        });
+        await tick(el);
         (q(el, '[data-testid="tint-color-option"]') as HTMLElement).click();
         await tick(el);
+        let addedSale: unknown = null;
+        el.addEventListener('tint-added', ((e: CustomEvent) => { addedSale = e.detail; }) as EventListener);
         (q(el, '[data-testid="tint-add"]') as HTMLElement).click();
         await tick(el);
         expect(pos.addItemTint).toHaveBeenCalledWith('sale', 'p1', expect.objectContaining({
             color_code: 'HC-188', color_name: 'Essex Green', base_code: 'DEEP', container_size_code: 'GAL',
             components: [expect.objectContaining({ colorant_code: 'B1' })],
-        }));
+        }), '2', 'GAL');
+        expect(pos.removeItem).toHaveBeenCalledWith('sale', 'plain-1');
+        expect(addedSale).toEqual({ id: 'sale', lines: [{ id: 'tinted-1' }] });
     });
 
     it('a saved colour fills the whole dialog', async () => {

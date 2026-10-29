@@ -2451,7 +2451,9 @@ export class POSTerminal extends LitElement {
     const line = this._tintLine;
     if (!line || !this._sale) return nothing;
     return this._overlay(html`
-      <gable-tint-line-dialog sale-id=${this._sale.id} product-id=${line.product_id ?? ''}
+      <gable-tint-line-dialog sale-id=${this._sale.id} line-id=${line.id} product-id=${line.product_id ?? ''}
+        .quantity=${line.quantity ?? '1'}
+        .uom=${line.uom ?? ''}
         .basePrice=${line.unit_price_ten_thousandths ?? 0}
         .customerId=${this._customer?.id ?? ''}
         @tint-cancel=${() => { this._tintLine = null; }}
