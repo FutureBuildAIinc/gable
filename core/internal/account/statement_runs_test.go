@@ -23,6 +23,7 @@ import (
 func statementWorld(t *testing.T) *arWorld {
 	t.Helper()
 	w := newARWorld(t)
+	testutil.LockOutboxTables(t)
 	w.svc.WithOutbox(outbox.NewWriter(w.db, "test"))
 	// Opening: posted before the period starts, 15 days past due at day zero.
 	w.invoice(50_000, daysFromNow(-45))
@@ -35,7 +36,6 @@ func statementWorld(t *testing.T) *arWorld {
 
 // TestStatementRunRecordsTheFigures walks one run end to end.
 func TestStatementRunRecordsTheFigures(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	start, end := daysFromNow(-30), daysFromNow(0)
 
@@ -145,7 +145,6 @@ func TestStatementRunIsAnArtefact(t *testing.T) {
 // run covers the whole book's balances; and a period that ends past today is
 // refused.
 func TestStatementRunScopeAndQueueing(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	w := statementWorld(t)
 	// A customer with no balance at all.
 	quiet := uuid.New()

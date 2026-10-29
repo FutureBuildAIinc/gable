@@ -426,10 +426,10 @@ func (f *fixture) cleanup() {
 	// the counter's own acts posted (movements, variances) are named
 	// by their rows: release them before the entries go
 	exec(`DELETE FROM till_movements WHERE branch_id = $1`, f.branchID)
-	exec(`DELETE FROM till_pickup_approvals WHERE till_session_id IN (SELECT id FROM till_sessions WHERE register_id = $3)`, f.register)
+	exec(`DELETE FROM till_pickup_approvals WHERE till_session_id IN (SELECT id FROM till_sessions WHERE register_id = $1 OR branch_id = $2)`, f.register, f.branchID)
 	exec(`DELETE FROM till_day_closes WHERE branch_id = $1`, f.branchID)
 	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id = ANY($1::uuid[])`, entryIDs)
-	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE register_id = $1 AND gl_entry_id IS NOT NULL`, f.register)
+	exec(`UPDATE till_sessions SET gl_entry_id = NULL WHERE (register_id = $1 OR branch_id = $2) AND gl_entry_id IS NOT NULL`, f.register, f.branchID)
 	if len(entryIDs) > 0 {
 		exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id = ANY($1::uuid[])`, entryIDs)
 		exec(`DELETE FROM gl_journal_entries WHERE id = ANY($1::uuid[])`, entryIDs)
@@ -443,13 +443,13 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM large_cash_payers WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM pos_sync_log WHERE register_id = $1`, f.register)
 	exec(`DELETE FROM till_variance_policy WHERE branch_id = $1`, f.branchID)
-	exec(`DELETE FROM till_z_reports WHERE register_id = $1`, f.register)
-	exec(`DELETE FROM till_sessions WHERE register_id = $1`, f.register)
+	exec(`DELETE FROM till_z_reports WHERE register_id = $1 OR branch_id = $2`, f.register, f.branchID)
+	exec(`DELETE FROM till_sessions WHERE register_id = $1 OR branch_id = $2`, f.register, f.branchID)
 	exec(`DELETE FROM email_deliveries WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM inventory WHERE location_id = $1`, f.yardID)
 	exec(`DELETE FROM scale_tickets WHERE branch_id = $1`, f.branchID)
 	exec(`DELETE FROM scale_devices WHERE branch_id = $1`, f.branchID)
-	exec(`DELETE FROM pos_registers WHERE id = $1`, f.register)
+	exec(`DELETE FROM pos_registers WHERE id = $1 OR branch_id = $2`, f.register, f.branchID)
 	exec(`DELETE FROM locations WHERE id = $1`, f.yardID)
 	exec(`DELETE FROM product_kit_components WHERE kit_product_id = $1`, f.kitID)
 	exec(`DELETE FROM projects WHERE customer_id = $1`, f.customerID)
@@ -784,7 +784,7 @@ func (f *fixture) legsFor(ids ...string) (entries int, legs map[string]leg) {
 // sweep).
 func (f *fixture) accountBalance(code string) int64 {
 	f.t.Helper()
-	invs := `(SELECT id FROM invoices WHERE branch_id = $2 OR customer_id = $3)`
+	invs := `(SELECT id FROM invoices WHERE customer_id = $3 OR id IN (SELECT invoice_id FROM pos_transactions WHERE branch_id = $2 OR register_id = $4))`
 	cms := `(SELECT id FROM credit_memos WHERE branch_id = $2 OR customer_id = $3)`
 	pays := `(SELECT id FROM payments WHERE branch_id = $2 OR customer_id = $3)`
 	docs := `((SELECT id::text FROM invoices WHERE id IN ` + invs + `)

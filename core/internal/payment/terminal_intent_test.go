@@ -128,7 +128,7 @@ func claimIntent(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, lease 
 func TestClaimedNeverDispatchedSweepCloses(t *testing.T) {
 	l, sale := newTerminalFixture(t)
 	in := claimIntent(t, l, sale, -time.Minute)
-	ctx := branchctx.WithID(context.Background(), in.BranchID)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	res, err := l.Sweep(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -164,7 +164,7 @@ func TestClaimedNeverDispatchedSweepCloses(t *testing.T) {
 func TestDispatchedNeverAnsweredSweepQueues(t *testing.T) {
 	l, sale := newTerminalFixture(t)
 	in := claimIntent(t, l, sale, time.Minute)
-	ctx := branchctx.WithID(context.Background(), in.BranchID)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	ok, err := l.MarkDispatched(ctx, in.ID, "devref-1", time.Now().Add(-time.Minute))
 	if err != nil || !ok {
 		t.Fatalf("dispatch move: ok=%t err=%v", ok, err)
@@ -278,7 +278,7 @@ func TestConflictingAnswerBecomesManagerItem(t *testing.T) {
 func TestLateAnswerAfterSweepBecomesManagerItem(t *testing.T) {
 	l, sale := newTerminalFixture(t)
 	in := claimIntent(t, l, sale, time.Minute)
-	ctx := branchctx.WithID(context.Background(), in.BranchID)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	if _, err := l.MarkDispatched(ctx, in.ID, "devref-4", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 	installM29DeleteGuard(t, baseDB)
 	branch := testutil.OwnBranch(t, baseDB, "0.088750")
 	db := testutil.RequireDBMaxConns(t, 4)
-	ctx := branchctx.WithID(context.Background(), branch)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &branch})
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
 		(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
@@ -419,7 +419,7 @@ func TestAnswerRacingSweepOneFinalState(t *testing.T) {
 func TestResolveRacingLateAnswerEndsInOne(t *testing.T) {
 	l, sale := newTerminalFixtureConns(t, 4)
 	in := claimIntent(t, l, sale, time.Minute)
-	ctx := branchctx.WithID(context.Background(), in.BranchID)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &in.BranchID})
 	if _, err := l.MarkDispatched(ctx, in.ID, "devref-res", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}

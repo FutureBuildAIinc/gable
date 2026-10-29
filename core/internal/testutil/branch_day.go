@@ -60,9 +60,10 @@ var zoneHeld atomic.Bool
 // before the fixture is dated, as LockOutboxTables is called.
 func LockBranchDay(t *testing.T) {
 	t.Helper()
-	if zoneHeld.Load() {
+	if !zoneHeld.CompareAndSwap(false, true) {
 		return
 	}
+	t.Cleanup(func() { zoneHeld.Store(false) })
 	lockKeyMode(t, branchDayLockKey, "branch day", true)
 }
 
@@ -106,9 +107,7 @@ func SetBranchDayZone(t *testing.T, db *database.DB, zone string) {
 }
 
 // SetBranchDayZoneOn gives the branch the test owns the IANA zone for the
-// test and puts the old one back at its end. It holds the branch day
-// exclusively, so no day-dated test in any package runs while the zone is not
-// the stored one.
+// test and puts the old one back at its end.
 //
 // A test whose fixture stands on a branch of its own dates its documents by
 // that branch's zone: the shared default branch's zone is not the branch the
@@ -116,9 +115,6 @@ func SetBranchDayZone(t *testing.T, db *database.DB, zone string) {
 // package's fixture reads.
 func SetBranchDayZoneOn(t *testing.T, db *database.DB, branchID uuid.UUID, zone string) {
 	t.Helper()
-	lockKeyMode(t, branchDayLockKey, "branch day", false)
-	zoneHeld.Store(true)
-	t.Cleanup(func() { zoneHeld.Store(false) })
 	ctx := context.Background()
 	var old string
 	if err := db.Pool.QueryRow(ctx, `SELECT timezone FROM locations WHERE id = $1`, branchID).Scan(&old); err != nil {

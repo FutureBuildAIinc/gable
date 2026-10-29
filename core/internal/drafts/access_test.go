@@ -265,7 +265,6 @@ func (f *accessFixture) doKeyStreamHead(rawKey, path string) resp {
 func (f *accessFixture) payload() map[string]any {
 	return map[string]any{
 		"customer_id":   f.customerID.String(),
-		"branch_id":     f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "sku": f.sku, "description": "2x4x8 SPF",
@@ -278,7 +277,6 @@ func (f *accessFixture) payload() map[string]any {
 func (f *accessFixture) orderPayload() map[string]any {
 	return map[string]any{
 		"customer_id":   f.customerID.String(),
-		"branch_id":     f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines":         []map[string]any{{"product_id": f.productID.String(), "quantity": "10"}},
 	}

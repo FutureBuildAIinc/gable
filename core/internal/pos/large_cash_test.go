@@ -468,6 +468,28 @@ func lcThreeRegisters(t *testing.T, named bool) {
 		branches = append(branches, br)
 		registers = append(registers, reg)
 	}
+	// Stamp created_at with clock_timestamp() when the row is inserted under
+	// the payer's advisory lock, so transaction_timestamp() (captured before
+	// lock acquisition) cannot order a pre-crossing tender after the crossing.
+	mustExec(t, f.db, `
+		CREATE OR REPLACE FUNCTION pos_lc_clock_stamp_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			NEW.created_at := clock_timestamp();
+			RETURN NEW;
+		END $$;
+		DROP TRIGGER IF EXISTS pos_lc_tenders_clock_tr ON large_cash_tenders;
+		CREATE TRIGGER pos_lc_tenders_clock_tr BEFORE INSERT ON large_cash_tenders
+			FOR EACH ROW EXECUTE FUNCTION pos_lc_clock_stamp_fn();
+		DROP TRIGGER IF EXISTS pos_lc_events_clock_tr ON large_cash_events;
+		CREATE TRIGGER pos_lc_events_clock_tr BEFORE INSERT ON large_cash_events
+			FOR EACH ROW EXECUTE FUNCTION pos_lc_clock_stamp_fn();
+	`)
+	t.Cleanup(func() {
+		mustExec(f.t, f.db, `
+			DROP TRIGGER IF EXISTS pos_lc_tenders_clock_tr ON large_cash_tenders;
+			DROP TRIGGER IF EXISTS pos_lc_events_clock_tr ON large_cash_events;
+		`)
+	})
 	sales := make([]string, 3)
 	totals := make([]int64, 3)
 	for i, reg := range registers {

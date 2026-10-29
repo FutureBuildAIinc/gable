@@ -178,7 +178,7 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 		}
 		for i := 0; i < 3; i++ {
 			r := f.do("POST", "/api/v1/payments", map[string]any{
-				"customer_id": walkIn, "method": "cash", "amount_cents": 100,
+				"customer_id": walkIn, "branch_id": f.branchID.String(), "method": "cash", "amount_cents": 100,
 				"received_on": "2020-01-01",
 			}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 			paymentStatuses[i] = r.status
@@ -205,7 +205,7 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 	var numbers []int
 	rows, err := f.db.Pool.Query(context.Background(), `
 		SELECT substring(i.number FROM 4)::bigint FROM invoices i
-			WHERE i.id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL) ORDER BY 1`)
+			WHERE i.id IN (SELECT invoice_id FROM pos_transactions WHERE branch_id = $1 AND invoice_id IS NOT NULL) ORDER BY 1`, f.branchID)
 	if err != nil {
 		t.Fatal(err)
 	}

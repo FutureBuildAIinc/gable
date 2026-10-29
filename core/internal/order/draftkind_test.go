@@ -26,6 +26,7 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -85,7 +86,12 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 	handler := drafts.NewHandler(svc).WithFeedHandler(drafts.NewFeedHandler(svc, draftsRepo, hub, drafts.DefaultFeedSettings(), nil))
 
 	mux := http.NewServeMux()
-	branchMw := middleware.NewBranchMiddleware(db).Handler
+	branchMw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := branchctx.With(r.Context(), &branchctx.Context{BranchID: &f.branchID, IsAdmin: true})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 	order.RegisterDraftRoutes(mux, handler, orderKind, branchMw)
 	order.NewHandler(orderSvc).RegisterRoutes(mux, branchMw)
 	f.srv = httptest.NewServer(actor.Middleware(middleware.Idempotency(db)(mux)))
@@ -155,10 +161,13 @@ type kindResp struct {
 func (f *kindFixture) payload(qty string) map[string]any {
 	return map[string]any{
 		"customer_id":   f.customerID.String(),
-		"branch_id":     f.branchID.String(),
 		"delivery_type": "pickup",
 		"lines":         []map[string]any{{"product_id": f.productID.String(), "quantity": qty}},
 	}
+}
+
+func (f *kindFixture) editPayload(qty string) map[string]any {
+	return f.payload(qty)
 }
 
 // TestOrderKind_CreateDraftPromotesToDraftOrder pins the create path: the
@@ -228,7 +237,7 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 
 	// The edit draft on it, at the order's current revision.
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("20"), "subject_id": orderID, "subject_revision": 1})
+		"payload": f.editPayload("20"), "subject_id": orderID, "subject_revision": 1})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft = %d: %s", r.status, r.raw)
 	}
@@ -251,12 +260,12 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 	// A subject that moved after the draft was built on it: the promotion
 	// is stale on the subject (subject_stale), not on the draft.
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("30"), "subject_id": orderID, "subject_revision": kindRev(t, got.body)})
+		"payload": f.editPayload("30"), "subject_id": orderID, "subject_revision": kindRev(t, got.body)})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft at the current revision = %d: %s", r.status, r.raw)
 	}
 	moved := kindStr(t, r.body, "id")
-	putBody := f.payload("25")
+	putBody := f.editPayload("25")
 	putBody["revision"] = kindRev(t, got.body)
 	if rr := f.do("PUT", "/api/v1/orders/"+orderID, putBody); rr.status != http.StatusOK {
 		t.Fatalf("move the subject = %d: %s", rr.status, rr.raw)
@@ -273,7 +282,7 @@ func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
 		t.Fatalf("confirm the order = %d: %s", r.status, r.raw)
 	}
 	r = f.do("POST", "/api/v1/drafts/orders", map[string]any{
-		"payload": f.payload("30"), "subject_id": orderID})
+		"payload": f.editPayload("30"), "subject_id": orderID})
 	if r.status != http.StatusCreated {
 		t.Fatalf("create edit draft on the confirmed order = %d: %s", r.status, r.raw)
 	}

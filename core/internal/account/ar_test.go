@@ -48,6 +48,7 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	testutil.LockBranchDay(t)
 	loadBranchZone(db)
 	w := &arWorld{t: t, db: db, customerID: uuid.New()}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())

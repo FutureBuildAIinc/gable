@@ -22,7 +22,6 @@ func TestFulfilmentInvoiceIsInTheSalesSummaryOfTheYardsDay(t *testing.T) {
 	db := testutil.RequireDB(t)
 	// The fixture's branch, the yard the fixture's orders sit at, is on a zone
 	// that is on an earlier day than UTC at every hour.
-	testutil.SetBranchDayZone(t, db, testutil.AlwaysBehindUTC)
 	f := newFixture(t, db)
 	testutil.SetBranchDayZoneOn(t, db, f.branchID, testutil.AlwaysBehindUTC)
 	f.serveWith(f.withStock(), f.withMoney())
@@ -30,7 +29,7 @@ func TestFulfilmentInvoiceIsInTheSalesSummaryOfTheYardsDay(t *testing.T) {
 	f.stock(f.productID, "10")
 	f.setCost(f.productID, "3.2500")
 
-	ctx := branchctx.WithID(context.Background(), f.branchID)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{BranchID: &f.branchID})
 	svc := reporting.NewService(reporting.NewRepository(db))
 	before, err := svc.GetSalesSummary(ctx, "", "")
 	if err != nil {
@@ -48,7 +47,8 @@ func TestFulfilmentInvoiceIsInTheSalesSummaryOfTheYardsDay(t *testing.T) {
 	// The invoice's own date is the yard's day, not the server's.
 	var date, day string
 	if err := db.Pool.QueryRow(context.Background(),
-		`SELECT invoice_date::text, `+testutil.BranchDaySQL+`::text FROM invoices WHERE id = $1`, invoiceIDOf(t, r)).Scan(&date, &day); err != nil {
+		`SELECT invoice_date::text, (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l WHERE l.id = $2), 'UTC'))::date::text FROM invoices WHERE id = $1`,
+		invoiceIDOf(t, r), f.branchID).Scan(&date, &day); err != nil {
 		t.Fatal(err)
 	}
 	if date != day {
