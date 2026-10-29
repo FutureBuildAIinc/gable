@@ -9,6 +9,10 @@ import fs from 'fs';
 const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 
+// The weigh in and out walk polls the simulator's settling reading: on a
+// loaded machine the stable wait and the UI steps outrun the default timeout.
+test.setTimeout(90_000);
+
 async function signIn(page: Page, name: string) {
   await page.goto('/');
   await page.getByLabel('Display name').fill(name);
@@ -105,7 +109,6 @@ test('weigh in and out sets the line quantity and tags the sale', async ({ page,
   const ticketText = await page.getByTestId('scale-ticket').first().textContent() ?? '';
   const ticketNumber = ticketText.match(/WT-\d+/)?.[0] ?? '';
   expect(ticketNumber).toMatch(/WT-\d+/);
-
   await setSimulator(request, '44400');
   await page.waitForTimeout(2500);
   await addOne(page, sku);
@@ -124,8 +127,25 @@ test('weigh in and out sets the line quantity and tags the sale', async ({ page,
 
   const qtyInput = page.locator('[data-testid="pos-line-quantity"] input').first();
   await expect(qtyInput).toHaveValue('6.2');
+  // The badge names the ticket the line carries, which is the weigh out
+  // ticket (the weigh in keeps its own number): read the line's ticket from
+  // the API and hold the badge to it.
   const badge = page.getByTestId('pos-line-weight-badge').first();
-  await expect(badge).toContainText(ticketNumber);
+  await expect(badge).toContainText(/WT-\d+/);
+  const badgeTicket = (await badge.textContent())?.match(/WT-\d+/)?.[0] ?? '';
+  const sales = (await (
+    await request.get('/api/v1/pos/transactions?register_id=REG-01')
+  ).json()) as { items: { id: string }[] };
+  const saleId = sales.items[0]?.id ?? '';
+  const sale = (await (await request.get(`/api/v1/pos/transactions/${saleId}`)).json()) as {
+    lines: { scale_ticket_number: string | null }[];
+  };
+  const lineTicket = sale.lines.find((l) => l.scale_ticket_number)?.scale_ticket_number ?? '';
+  expect(badgeTicket, 'the badge names the ticket the line carries').toBe(lineTicket);
+
+  // The scale panel is a dialog over the counter: close it before the pay
+  // steps, or its overlay intercepts the payment panel's clicks.
+  await page.getByTestId('scale-close').click();
 
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-scale-weighed.png'), fullPage: true });
 
@@ -138,7 +158,7 @@ test('weigh in and out sets the line quantity and tags the sale', async ({ page,
 
   const card = page.getByTestId('pos-complete');
   await expect(card).toContainText('Sale complete', { timeout: 15000 });
-  await expect(badge).toContainText(ticketNumber);
+  await expect(badge).toContainText(badgeTicket);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-scale-completed.png'), fullPage: true });
 });
 

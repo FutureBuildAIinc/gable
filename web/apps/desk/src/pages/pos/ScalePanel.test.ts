@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Sale, ScaleTicket } from '../../types/pos';
+import type { Sale, ScaleStatus, ScaleTicket } from '../../types/pos';
 import { mount, flush, chooseOption } from '../../test/dom';
 
 const svc = vi.hoisted(() => ({
@@ -127,7 +127,7 @@ const configuredStatus = () => ({
 
 async function mountPanel(
   s: Sale = sale(),
-  opts: { status?: ReturnType<typeof configuredStatus>; tickets?: ScaleTicket[] } = {},
+  opts: { status?: ScaleStatus; tickets?: ScaleTicket[] } = {},
 ) {
   svc.getScaleStatus.mockResolvedValue(opts.status ?? configuredStatus());
   svc.listScaleTickets.mockResolvedValue(opts.tickets ?? []);
