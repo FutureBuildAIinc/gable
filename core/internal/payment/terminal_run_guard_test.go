@@ -17,7 +17,9 @@ package payment_test
 // Every read of an intent in this file goes through the suite's own
 // waitForIntentState: a row that another suite's terminal table cleanup
 // deleted answers false and the scenario runs again, the way the rest of the
-// run suite does, instead of failing on a row that is not there.
+// run suite does, instead of failing on a row that is not there. Every claim
+// and dispatch move goes through the suite's own claimRunLegIntent, for the
+// same reason.
 
 import (
 	"context"
@@ -294,13 +296,22 @@ func TestRunTerminalConcurrentDispatchesOfOneLegMakeOneCharge(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
-	for i := 0; i < 5; i++ {
-		concurrentDispatchOnce(t, db, ctx, branch, i)
+	// The shared test database runs other packages' suites in parallel, and
+	// the counter suite's fixture cleanup empties the terminal tables whole,
+	// without the advisory lock; nothing the code under test deletes an
+	// intent, so a vanished row is that outside interference and the
+	// iteration runs again rather than reading a foreign state.
+	for i := 0; i < 20; i++ {
+		if !concurrentDispatchOnce(t, db, ctx, branch, i) {
+			i--
+		}
 	}
 }
 
-// concurrentDispatchOnce runs one iteration of the concurrent dispatch.
-func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) {
+// concurrentDispatchOnce runs one iteration of the concurrent dispatch and
+// answers false when an outside suite deleted the leg mid flight (the
+// iteration does not count).
+func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) bool {
 	t.Helper()
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
@@ -325,11 +336,8 @@ func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 2500,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(time.Minute)}
-	if err := ledger.Claim(ctx, in); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
-		t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+	if !claimRunLegIntent(t, ledger, in) {
+		return false
 	}
 	d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 		RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
@@ -372,6 +380,7 @@ func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, 
 	if answered != 1 {
 		t.Fatalf("iteration %d: %d dispatches were answered, want 1", i, answered)
 	}
+	return true
 }
 
 // TestRunTerminalARetriedReversalRefundsOnce: a retried reversal is the
@@ -386,11 +395,8 @@ func TestRunTerminalARetriedReversalRefundsOnce(t *testing.T) {
 			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 1200,
 			Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(),
 			LeaseUntil: time.Now().Add(time.Minute)}
-		if err := ledger.Claim(context.Background(), in); err != nil {
-			t.Fatalf("claim: %v", err)
-		}
-		if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-			t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+		if !claimRunLegIntent(t, ledger, in) {
+			return false
 		}
 		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey,
@@ -424,13 +430,22 @@ func TestRunTerminalConcurrentReversalsOfOneLegRefundOnce(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
-	for i := 0; i < 5; i++ {
-		concurrentReversalOnce(t, db, ctx, branch, i)
+	// The shared test database runs other packages' suites in parallel, and
+	// the counter suite's fixture cleanup empties the terminal tables whole,
+	// without the advisory lock; nothing the code under test deletes an
+	// intent, so a vanished row is that outside interference and the
+	// iteration runs again rather than reading a foreign state.
+	for i := 0; i < 20; i++ {
+		if !concurrentReversalOnce(t, db, ctx, branch, i) {
+			i--
+		}
 	}
 }
 
-// concurrentReversalOnce runs one iteration of the concurrent reversal.
-func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) {
+// concurrentReversalOnce runs one iteration of the concurrent reversal and
+// answers false when an outside suite deleted the leg mid flight (the
+// iteration does not count).
+func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) bool {
 	t.Helper()
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
@@ -452,11 +467,8 @@ func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 1200,
 		Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(),
 		LeaseUntil: time.Now().Add(time.Minute)}
-	if err := ledger.Claim(ctx, in); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
-		t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+	if !claimRunLegIntent(t, ledger, in) {
+		return false
 	}
 	d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 		RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey,
@@ -500,6 +512,7 @@ func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, 
 	if answered != 1 {
 		t.Fatalf("iteration %d: %d reversals were answered, want 1", i, answered)
 	}
+	return true
 }
 
 // TestRunTerminalInteractionWindowFitsInsideTheIntentLease: the poller has
