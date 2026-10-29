@@ -205,6 +205,7 @@ type createLocationRequest struct {
 	Phone               *string  `json:"phone"`
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	CashRoundingMode    *string  `json:"cash_rounding_mode"`
 	Timezone            *string  `json:"timezone"`
 	Active              *bool    `json:"active"`
 }
@@ -226,6 +227,7 @@ func (req createLocationRequest) resolve(v *httpx.Validator, forceType LocationT
 		Phone:               req.Phone,
 		TaxJurisdictionCode: req.TaxJurisdictionCode,
 		DefaultTaxRate:      req.DefaultTaxRate,
+		CashRoundingMode:    cashRoundingMode(v, req.CashRoundingMode),
 		Timezone:            req.Timezone,
 		Active:              req.Active == nil || *req.Active,
 	}
@@ -263,9 +265,29 @@ type locationUpdateRequest struct {
 	Phone               *string  `json:"phone"`
 	TaxJurisdictionCode *string  `json:"tax_jurisdiction_code"`
 	DefaultTaxRate      *float64 `json:"default_tax_rate"`
+	CashRoundingMode    *string  `json:"cash_rounding_mode"`
 	Timezone            *string  `json:"timezone"`
 	Active              *bool    `json:"active"`
 	Revision            *int64   `json:"revision"`
+}
+
+// cashRoundingMode answers the cash rounding rule a new branch starts with
+// (CP-18): off, until a branch says otherwise. A rule the column cannot hold
+// is refused by name.
+func cashRoundingMode(v *httpx.Validator, mode *string) string {
+	if mode == nil || *mode == "" {
+		return CashRoundingOff
+	}
+	if !validCashRoundingMode(*mode) {
+		v.Check(false, "cash_rounding_mode", "must be one of: OFF, NEAREST_5_CENTS")
+		return CashRoundingOff
+	}
+	return *mode
+}
+
+// validCashRoundingMode answers whether a rule is one the column holds.
+func validCashRoundingMode(mode string) bool {
+	return mode == CashRoundingOff || mode == CashRoundingNearest5
 }
 
 func writeLocJSON(w http.ResponseWriter, status int, body any) {
@@ -518,6 +540,14 @@ func (h *Handler) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	loc.Path, loc.Code, loc.Description = req.Path, req.Code, req.Description
 	loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone = req.Name, req.Address, req.City, req.State, req.Zip, req.Phone
 	loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.Timezone = req.TaxJurisdictionCode, req.DefaultTaxRate, req.Timezone
+	if req.CashRoundingMode != nil && *req.CashRoundingMode != "" {
+		if !validCashRoundingMode(*req.CashRoundingMode) {
+			httpx.WriteError(w, r, httpx.BadRequest("the cash rounding rule is not one a branch can hold",
+				httpx.FieldError{Field: "cash_rounding_mode", Message: "must be one of: OFF, NEAREST_5_CENTS"}))
+			return
+		}
+		loc.CashRoundingMode = *req.CashRoundingMode
+	}
 	if req.Active != nil {
 		loc.Active = *req.Active // omitted keeps the stored value
 	}
@@ -772,12 +802,13 @@ func (h *Handler) ListMyBranches(w http.ResponseWriter, r *http.Request) {
 		out := make([]BranchSummary, 0, len(all))
 		for _, b := range all {
 			out = append(out, BranchSummary{
-				ID:       b.ID,
-				Code:     b.Code,
-				Name:     deref(b.Name),
-				Active:   b.Active,
-				IsHome:   false,
-				Timezone: deref(b.Timezone),
+				ID:               b.ID,
+				Code:             b.Code,
+				Name:             deref(b.Name),
+				Active:           b.Active,
+				IsHome:           false,
+				Timezone:         deref(b.Timezone),
+				CashRoundingMode: b.CashRoundingMode,
 			})
 		}
 		writeJSON(w, http.StatusOK, out)

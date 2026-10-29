@@ -52,6 +52,8 @@ describe('an account kept at another yard', () => {
     expect(text(el)).toContain('$120.00')
     const note = el.querySelector('[data-testid="ledger-yard-note"]')
     expect(note?.textContent).toContain("This account's ledger is kept at West Kelowna Satellite. Switch the yard to see it.")
+    const editBtn = Array.from(el.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Edit Profile') as HTMLButtonElement | undefined
+    expect(editBtn?.disabled).toBe(true)
     expect(text(el)).not.toContain('Account not found')
     expect(toast).not.toHaveBeenCalled()
   })

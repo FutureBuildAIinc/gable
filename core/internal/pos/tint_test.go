@@ -40,6 +40,15 @@ func seedTintCatalogue(t *testing.T, f *fixture) (baseID, colorantID, colorID, f
 	return
 }
 
+// tintSettingsRows clears the tint settings a test writes, so one test's
+// charge never rides into the next one's price.
+func tintSettingsRows(t *testing.T, f *fixture) {
+	t.Helper()
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM system_settings WHERE key IN ('pos.tint_charge_cents', 'pos.tinted_no_return')`)
+	})
+}
+
 // tintLine is one tinted product line of the fixture's product.
 func tintLine(qty string, formulaID, colorID string) map[string]any {
 	return map[string]any{
@@ -71,6 +80,7 @@ func tintOf(t *testing.T, r resp) map[string]any {
 func TestTintedLineRecordsBaseColourAndFormula(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
 	_, _, _, formulaID := seedTintCatalogue(t, f)
 	sale := f.startSale(nil)
 	line := tintLine("1", formulaID, "")
@@ -100,8 +110,10 @@ func TestTintedLineRecordsBaseColourAndFormula(t *testing.T) {
 		num(t, amount, "unit_denominator") != 384 {
 		t.Errorf("the frozen amount = %v, want 1 OZ + 12/32 in a 1/384 grid", amount)
 	}
-	if tint["tint_charge_cents"] != nil {
-		t.Errorf("with no charge set the tint carries no charge: %v", tint["tint_charge_cents"])
+	// with no charge set the frozen record says the charge was zero, which
+	// is what the price carries
+	if got := num(t, tint, "tint_charge_cents"); got != 0 {
+		t.Errorf("the frozen tint charge = %d, want 0", got)
 	}
 }
 
@@ -133,6 +145,7 @@ func TestLineWithoutTintIsUnchanged(t *testing.T) {
 func TestTintChargePricesBasePlusCharge(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
 	_, _, _, formulaID := seedTintCatalogue(t, f)
 	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
 	sale := f.startSale(nil)
@@ -162,6 +175,51 @@ func TestTintChargePricesBasePlusCharge(t *testing.T) {
 	l2 := added2.body["lines"].([]any)[0].(map[string]any)
 	if got := num(t, l2, "unit_price_ten_thousandths"); got != 55000 {
 		t.Errorf("unit price with the charge off = %d, want the base 55000", got)
+	}
+}
+
+// RULE: the dealer's tint charge is the only charge. A request that carries
+// its own number is priced with the setting, and the frozen record states the
+// charge the price carries (money checklist item 6: the rule is enforced on
+// the server, never in the screen).
+func TestTheDealersChargeWinsOverTheRequestsNumber(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
+	sale := f.startSale(nil)
+	line := tintLine("1", formulaID, "")
+	line["product_id"] = f.productID.String()
+	line["tint"].(map[string]any)["tint_charge_cents"] = 1
+	added := f.addLine(sale, line)
+	if added.status != http.StatusOK {
+		t.Fatalf("add tinted line = %d: %s", added.status, added.raw)
+	}
+	l := added.body["lines"].([]any)[0].(map[string]any)
+	if got := num(t, l, "unit_price_ten_thousandths"); got != 80000 {
+		t.Errorf("unit price = %d, want the base 55000 plus the dealer's 250 cent charge (80000), not the request's 1 cent", got)
+	}
+	if got := num(t, tintOf(t, added), "tint_charge_cents"); got != 250 {
+		t.Errorf("the frozen tint charge = %d, want the dealer's 250", got)
+	}
+	// a dealer with no charge set: a request that carries one is priced at
+	// the base alone, and the record says the charge was zero
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "0")
+	sale2 := f.startSale(nil)
+	line2 := tintLine("1", formulaID, "")
+	line2["product_id"] = f.productID.String()
+	line2["tint"].(map[string]any)["tint_charge_cents"] = 5000
+	added2 := f.addLine(sale2, line2)
+	if added2.status != http.StatusOK {
+		t.Fatalf("add = %d: %s", added2.status, added2.raw)
+	}
+	l2 := added2.body["lines"].([]any)[0].(map[string]any)
+	if got := num(t, l2, "unit_price_ten_thousandths"); got != 55000 {
+		t.Errorf("unit price = %d, want the base 55000 with no charge set", got)
+	}
+	if got := num(t, tintOf(t, added2), "tint_charge_cents"); got != 0 {
+		t.Errorf("the frozen tint charge = %d, want 0, not the request's 5000", got)
 	}
 }
 
@@ -209,13 +267,71 @@ func completeTintedSale(t *testing.T, f *fixture, formulaID string) (string, str
 	return sale, lineID
 }
 
-// returnOf posts one return of the line at a reason.
+// returnOf posts one return of the line at a reason. A tinted line never
+// goes back into stock, so the request asks for none.
 func returnOf(f *fixture, sale, lineID, reason string) resp {
 	return f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "refund_method": "cash", "reason": reason,
 		"original_sale_id": sale,
-		"lines":            []map[string]any{{"line_id": lineID, "quantity": "1", "reason_code": reason}},
+		"lines":            []map[string]any{{"line_id": lineID, "quantity": "1", "restock": false, "reason_code": reason}},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+}
+
+// returnOfRestocking posts one return of the line at a reason, asking for the
+// goods back into stock.
+func returnOfRestocking(f *fixture, sale, lineID, reason string) resp {
+	return f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "refund_method": "cash", "reason": reason,
+		"original_sale_id": sale,
+		"lines":            []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true, "reason_code": reason}},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+}
+
+// RULE: a tinted can the store does take back does not go back into saleable
+// stock: it is re-tinted and put on the marked down rack. The server refuses
+// the restock, so the rule does not live only in the screen.
+func TestTintedReturnNeverGoesBackIntoStock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	sale, lineID := completeTintedSale(t, f, formulaID)
+
+	r := returnOfRestocking(f, sale, lineID, "mis_tint")
+	if r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "restock") {
+		t.Errorf("a restocking mis tint return of a tinted line = %d, want the restock refusal: %s", r.status, r.raw)
+	}
+	// the stock never moved: the can is not on the shelf
+	onHand := f.scalar(`SELECT ROUND(COALESCE(SUM(quantity), 0) * 10000)::bigint FROM inventory WHERE product_id = $1`,
+		f.productID).(int64)
+	if onHand <= 0 {
+		t.Errorf("the tinted can is on the shelf: %v on hand", onHand)
+	}
+}
+
+// RULE: a mis tint return of a tinted line is accepted and the can does not
+// go back into stock: the return names it as not restocked.
+func TestMisTintReturnOfATintedLineLeavesTheStockAlone(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	sale, lineID := completeTintedSale(t, f, formulaID)
+	before := f.scalar(`SELECT ROUND(COALESCE(SUM(quantity), 0) * 10000)::bigint FROM inventory WHERE product_id = $1`,
+		f.productID).(int64)
+	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "refund_method": "cash", "reason": "mis tint",
+		"original_sale_id": sale,
+		"lines":            []map[string]any{{"line_id": lineID, "quantity": "1", "restock": false, "reason_code": "mis_tint"}},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+	if r.status != http.StatusCreated {
+		t.Fatalf("a mis tint return that is not restocked = %d: %s", r.status, r.raw)
+	}
+	after := f.scalar(`SELECT ROUND(COALESCE(SUM(quantity), 0) * 10000)::bigint FROM inventory WHERE product_id = $1`,
+		f.productID).(int64)
+	if after != before {
+		t.Errorf("the stock moved on a tinted return: %v before, %v after", before, after)
+	}
 }
 
 // RULE: a return of a tinted line is refused with the policy on, allowed
@@ -224,6 +340,7 @@ func returnOf(f *fixture, sale, lineID, reason string) resp {
 func TestTintedReturnRules(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
 	_, _, _, formulaID := seedTintCatalogue(t, f)
 	sale, lineID := completeTintedSale(t, f, formulaID)
 
@@ -262,13 +379,14 @@ func TestTintedReturnRules(t *testing.T) {
 func TestTintedOverReturnCapStillBites(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
 	_, _, _, formulaID := seedTintCatalogue(t, f)
 	sale, lineID := completeTintedSale(t, f, formulaID)
 	setPosSetting(t, f.db, "pos.tinted_no_return", "true")
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "refund_method": "cash", "reason": "mis tint",
 		"original_sale_id": sale,
-		"lines":            []map[string]any{{"line_id": lineID, "quantity": "5", "reason_code": "mis_tint"}},
+		"lines":            []map[string]any{{"line_id": lineID, "quantity": "5", "restock": false, "reason_code": "mis_tint"}},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
 	if r.status != http.StatusConflict || !strings.Contains(string(r.raw), "exceeds_sold") {
 		t.Errorf("an over return of a tinted line = %d, want the exceeds_sold conflict: %s", r.status, r.raw)
@@ -308,5 +426,74 @@ func TestTintedLineAddsUnderContention(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("tint rows = %d, want 3 (one whole frozen record per line)", n)
+	}
+}
+
+// RULE: a quantity change on a tinted line keeps the tint and its charge: the
+// formula the customer bought and the dealer's tint charge belong to the line,
+// not to the request that first made it. The line reprices; the tint does not
+// go away.
+func TestTintedLineKeepsItsTintAndChargeOnAQuantityChange(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
+	sale := f.startSale(nil)
+	line := tintLine("1", formulaID, "")
+	line["product_id"] = f.productID.String()
+	added := f.addLine(sale, line)
+	if added.status != http.StatusOK {
+		t.Fatalf("add tinted line = %d: %s", added.status, added.raw)
+	}
+	lineID := lineIDs(t, added)[0]
+
+	patched := f.patchQty(sale, lineID, "2", rev(t, added))
+	if patched.status != http.StatusOK {
+		t.Fatalf("quantity change = %d: %s", patched.status, patched.raw)
+	}
+	tint := tintOf(t, patched)
+	if tint == nil {
+		t.Fatalf("the quantity change dropped the tint: %s", patched.raw)
+	}
+	if tint["color_name"] != "Essex Green" {
+		t.Errorf("the tint record = %v", tint)
+	}
+	if got := num(t, tint, "tint_charge_cents"); got != 250 {
+		t.Errorf("the tint charge = %d, want 250 (the charge rides the line)", got)
+	}
+	comps, _ := tint["components"].([]any)
+	if len(comps) != 1 {
+		t.Fatalf("the components = %d, want 1 (the formula rides the line)", len(comps))
+	}
+}
+
+// RULE: a customer attached to a sale reprices its lines; a tinted line keeps
+// its tint and its charge through that reprice, because the formula the
+// customer bought is not the customer's to change.
+func TestTintedLineKeepsItsTintWhenTheCustomerChanges(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
+	sale := f.startSale(nil)
+	line := tintLine("1", formulaID, "")
+	line["product_id"] = f.productID.String()
+	added := f.addLine(sale, line)
+	if added.status != http.StatusOK {
+		t.Fatalf("add tinted line = %d: %s", added.status, added.raw)
+	}
+
+	attached := f.attach(sale, map[string]any{"customer_id": f.customerID.String()})
+	if attached.status != http.StatusOK {
+		t.Fatalf("attach the customer = %d: %s", attached.status, attached.raw)
+	}
+	tint := tintOf(t, attached)
+	if tint == nil {
+		t.Fatalf("the customer change dropped the tint: %s", attached.raw)
+	}
+	if got := num(t, tint, "tint_charge_cents"); got != 250 {
+		t.Errorf("the tint charge = %d, want 250 (the charge rides the line)", got)
 	}
 }

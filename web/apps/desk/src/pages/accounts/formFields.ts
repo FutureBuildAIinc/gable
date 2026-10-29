@@ -53,13 +53,13 @@ export function textInput(
 
 export function checkbox(id: string, label: string, checked: boolean, onChange: (v: boolean) => void): TemplateResult {
     return html`
-        <label for=${id} class="flex items-center gap-2 text-sm text-zinc-300">
+        <label for=${id} class="flex min-h-9 items-center gap-2 text-sm text-zinc-300">
             <input
                 id=${id}
                 type="checkbox"
                 .checked=${checked}
                 @change=${(e: Event) => onChange((e.target as HTMLInputElement).checked)}
-                class="h-4 w-4 rounded border-white/20 bg-slate-steel/50"
+                class="h-4 w-4 rounded border-white/20 bg-slate-steel/50 accent-gable-green"
             />
             ${label}
         </label>

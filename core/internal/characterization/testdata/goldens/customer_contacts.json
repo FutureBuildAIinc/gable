@@ -32,6 +32,7 @@
         "email": "contacts@example.com",
         "id": "<id-2>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {
@@ -1072,6 +1073,7 @@
         "email": "contacts@example.com",
         "id": "<id-2>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {
@@ -1121,6 +1123,7 @@
         "email": "contacts@example.com",
         "id": "<id-2>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {

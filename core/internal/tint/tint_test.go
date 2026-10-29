@@ -27,7 +27,7 @@ func seed(t *testing.T) (*Service, seeded) {
 	t.Helper()
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
-	svc := NewService(repo)
+	svc := NewService(repo).WithTxRunner(db)
 	ctx := t.Context()
 	sys, err := svc.CreateSystem(ctx, &SystemDraft{Code: "GEN" + testCode(t), Name: "Generic",
 		Manufacturer: "Generic Paints", UnitDenominator: 384, UnitLabel: "shot"})
@@ -96,6 +96,35 @@ func TestFormulaRefusesAComponentOfAnotherDenominator(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("a component in a 1/48 grid was stored on a 1/384 system")
+	}
+}
+
+// RULE: a formula and its colorant amounts are one fact. A formula whose
+// amounts cannot all be written leaves no formula row behind: a half written
+// formula (a row with no amounts) would be sold at the counter.
+func TestAFailedFormulaLeavesNoFormulaRow(t *testing.T) {
+	svc, s := seed(t)
+	ctx := t.Context()
+	db := testutil.RequireDB(t)
+	// the same colorant twice: the table's own unique index refuses the
+	// second amount, after the formula row is already written
+	_, err := svc.CreateFormula(ctx, &FormulaDraft{
+		ColorID: s.color.ID, BaseID: s.base.ID, ContainerSizeCode: "GAL", ContainerVolumeOZ: 128,
+		Components: []StoredComponent{
+			{ColorantID: s.colorant.ID, Amount: Amount{WholeOZ: 1, Denominator: 384}},
+			{ColorantID: s.colorant.ID, Amount: Amount{WholeOZ: 2, Denominator: 384}},
+		},
+	})
+	if err == nil {
+		t.Fatal("the same colorant twice in one formula was stored")
+	}
+	var n int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM paint_formulas WHERE color_id = $1`, s.color.ID).Scan(&n); err != nil {
+		t.Fatalf("count the formulas: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("%d formula rows survived a failed write, want 0", n)
 	}
 }
 

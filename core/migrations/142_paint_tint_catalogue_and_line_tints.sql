@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS paint_line_tints (
     base_code            TEXT NOT NULL DEFAULT '' CHECK (char_length(base_code) <= 32),
     container_size_code  TEXT NOT NULL CHECK (char_length(container_size_code) BETWEEN 1 AND 16),
     rescaled             BOOLEAN NOT NULL DEFAULT FALSE,
-    tint_charge_cents    NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (tint_charge_cents >= 0),
+    tint_charge_cents    BIGINT NOT NULL DEFAULT 0 CHECK (tint_charge_cents >= 0),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT paint_line_tints_one_line CHECK (
         (CASE WHEN counter_line_id IS NULL THEN 0 ELSE 1 END

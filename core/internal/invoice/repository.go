@@ -374,7 +374,7 @@ func (r *PostgresRepository) attachLineTints(ctx context.Context, lines []*sales
 	}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx,
 		`SELECT `+lineColumn+`, id, formula_id, color_code, color_name, base_code,
-			container_size_code, rescaled, ROUND(tint_charge_cents * 100)::bigint
+			container_size_code, rescaled, tint_charge_cents
 		 FROM paint_line_tints WHERE `+lineColumn+` = ANY($1)`, ids)
 	if err != nil {
 		return fmt.Errorf("failed to read the lines' tints: %w", err)
@@ -391,10 +391,11 @@ func (r *PostgresRepository) attachLineTints(ctx context.Context, lines []*sales
 			&t.ContainerSizeCode, &t.Rescaled, &charge); err != nil {
 			return fmt.Errorf("failed to scan a line tint: %w", err)
 		}
-		if charge > 0 {
-			c := httpx.Cents(charge)
-			t.TintChargeCents = &c
-		}
+		// The charge is the one the invoice line was sold under, zero
+		// included: the frozen record states the charge, it does not leave it
+		// out.
+		c := httpx.Cents(charge)
+		t.TintChargeCents = &c
 		byTint[tintID] = t
 		lineOf[tintID] = lineID
 		tintIDs = append(tintIDs, tintID)
@@ -741,16 +742,21 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
 			payment_terms_id, due_date, discount_due_date, discount_percent,
 			branch_id, currency, delivery_type, picked_up_by, delivery_id,
-			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at)
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
+			invoice_date, origin, paid_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, CASE WHEN $8::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
 			$5::numeric / 100, $6::numeric, $7::numeric / 100, $8::numeric / 100,
 			$9, $10::date, $11::date, $12::numeric / 10000,
 			$13, $14, $15, $16, $17,
-			$18, $19, $20, $21, $22, $23::date, 'ORDER', CASE WHEN $8::bigint = 0 THEN NOW() END, NOW(), NOW())`,
+			$18, $19, $20, $21, $22,
+			$23, $24, $25,
+			$26::date, 'ORDER', CASE WHEN $8::bigint = 0 THEN NOW() END, NOW(), NOW())`,
 		in.ID, in.Number, in.OrderID, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
 		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
 		in.BranchID, in.Currency, in.DeliveryType, in.PickedUpBy, in.DeliveryID,
-		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource, in.InvoiceDate)
+		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource,
+		in.TaxZoneID, in.TaxRateParts, taxZoneSourceArg(in.TaxZoneSource), in.InvoiceDate)
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}
@@ -812,17 +818,23 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
 			payment_terms_id, due_date, discount_due_date, discount_percent,
 			branch_id, currency, delivery_type, picked_up_by, delivery_id,
-			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at,
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
+			invoice_date, origin, paid_at, created_at, updated_at,
 			customer_po)
 		VALUES ($1, $2, NULL, $3, CASE WHEN $7::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
 			$4::numeric / 100, $5::numeric, $6::numeric / 100, $7::numeric / 100,
 			$8, $9::date, $10::date, $11::numeric / 10000,
-			$12, $13, 'PICKUP', $14, NULL,
-			NULL, NULL, $18::uuid, $15, $16, $17::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW(),
-			$19)`,
+			$12, $13, $14, $15, NULL,
+			$16, $17, $22::uuid, $18, $19,
+			$23, $24, $25,
+			$20::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW(),
+			$21)`,
 		in.ID, in.Number, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
 		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
-		in.BranchID, in.Currency, in.PickedUpBy, in.TaxExempt, in.TaxSource, in.InvoiceDate, in.ProjectID, in.CustomerPO)
+		in.BranchID, in.Currency, in.DeliveryType, in.PickedUpBy,
+		in.ShipToID, in.ShipToSnapshot, in.TaxExempt, in.TaxSource, in.InvoiceDate, in.CustomerPO, in.ProjectID,
+		in.TaxZoneID, in.TaxRateParts, taxZoneSourceArg(in.TaxZoneSource))
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}
@@ -881,7 +893,7 @@ func insertInvoiceLineTint(ctx context.Context, exec database.Executor, lineID u
 	if err := exec.QueryRow(ctx, `
 		INSERT INTO paint_line_tints (invoice_line_id, formula_id, color_code, color_name, base_code,
 			container_size_code, rescaled, tint_charge_cents)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric / 100)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
 		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
 		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
@@ -905,6 +917,14 @@ func tintCentsArg(c *httpx.Cents) any {
 		return nil
 	}
 	return int64(*c)
+}
+
+// taxZoneSourceArg carries the zone's provenance, or NULL when none answered.
+func taxZoneSourceArg(src *string) any {
+	if src == nil || *src == "" {
+		return nil
+	}
+	return *src
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import '../../components/ui/gable-select';
 import { posService } from '../../services/POSService';
 import {
     tintService,
@@ -230,10 +231,10 @@ export class TintLineDialog extends LitElement {
             <p style="margin:0 0 14px;font-size:13px;color:rgb(var(--gb-till-muted))">Pick the base, the colour and the size. The formula shows below and every amount can be corrected at the counter.</p>
 
             <label style=${LABEL} for="tint-base">Base paint</label>
-            <select id="tint-base" data-testid="tint-base" style=${FIELD} .value=${this.baseId}
+            <gable-select id="tint-base" data-testid="tint-base" label="Base paint" .value=${this.baseId}
+                .options=${this.bases.map((b) => ({ value: b.id, label: `${b.code} ${b.name}` }))}
                 @change=${(e: Event) => this.pickBase((e.target as HTMLSelectElement).value)}>
-                ${this.bases.map((b) => html`<option value=${b.id}>${b.code} ${b.name}</option>`)}
-            </select>
+            </gable-select>
 
             <label style=${LABEL} for="tint-color-search">Colour</label>
             <input id="tint-color-search" type="text" data-testid="tint-color-search" style=${FIELD} placeholder="Search a colour by name or code"
@@ -251,10 +252,10 @@ export class TintLineDialog extends LitElement {
 
             ${this.formulas.length > 0 || this.sizeCode ? html`
                 <label style=${LABEL} for="tint-size">Container size</label>
-                <select id="tint-size" data-testid="tint-size" style=${FIELD} .value=${this.sizeCode}
+                <gable-select id="tint-size" data-testid="tint-size" label="Container size" .value=${this.sizeCode}
+                    .options=${this.sizeVolumes().map((s) => ({ value: s.code, label: s.code }))}
                     @change=${(e: Event) => this.pickSize((e.target as HTMLSelectElement).value)}>
-                    ${this.sizeVolumes().map((s) => html`<option value=${s.code}>${s.code}</option>`)}
-                </select>
+                </gable-select>
             ` : nothing}
 
             ${this.components.length > 0 ? html`

@@ -482,12 +482,24 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 		ALTER TABLE gl_journal_lines ADD COLUMN branch_id UUID REFERENCES locations(id);`); err != nil {
 		t.Fatalf("add the ledger branch columns: %v", err)
 	}
+	// and the credit holds 124 added (the counter's account facts read the
+	// customer's standing hold record beside the credit limit)
+	mig105Apply(t, conn, "../../migrations/124_ar_credit_holds_worklist_statements.sql")
 	// and the counter's account sale columns of migration 126
 	mig105Apply(t, conn, "../../migrations/126_counter_buyers_returns_and_receipts.sql")
 	// and the till columns and tables 127 added (the session reads name them)
 	mig105Apply(t, conn, "../../migrations/127_till_movements_and_eod.sql")
+	// and the customer job requirement the account facts read (136)
+	mig105Apply(t, conn, "../../migrations/136_customer_job_required.sql")
+	// and the branch's cash rounding column and accounts of migration 140
+	mig105Apply(t, conn, "../../migrations/140_cash_rounding.sql")
+	// and the zone columns 141 added to the sale (the sale read names them)
+	mig105Apply(t, conn, "../../migrations/141_tax_zone_tables.sql")
 	// and the tint tables 142 added (the sale line read names them)
 	mig105Apply(t, conn, "../../migrations/142_paint_tint_catalogue_and_line_tints.sql")
+	// and the weight block the counter line carries from 144 (the line
+	// projection reads it)
+	mig105Apply(t, conn, "../../migrations/144_scale_tickets.sql")
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {

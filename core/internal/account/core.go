@@ -155,6 +155,20 @@ func mapPosting(err error) error {
 	return err
 }
 
+// lockCreditOrder takes the customer's credit serialization lock (section 11,
+// step 1a: a transaction scoped advisory lock over order-credit:<customer
+// id>). The credit hold acts take it before the customer's row, so a hold
+// cannot commit inside the window a counter charge sale's completion leaves
+// between its fact read and its commit: the two serialize, whichever wins,
+// and a hold that lands first refuses the charge.
+func (s *Service) lockCreditOrder(ctx context.Context, id uuid.UUID) error {
+	if _, err := s.ex(ctx).Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, id.String()); err != nil {
+		return fmt.Errorf("failed to take the customer's credit lock: %w", err)
+	}
+	return nil
+}
+
 // lockCustomer takes the customer's row FOR UPDATE (section 11, step 7) and
 // answers the balance in cents.
 func (s *Service) lockCustomer(ctx context.Context, id uuid.UUID) (int64, error) {

@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -83,7 +85,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 	if s.tax == nil || !s.tax.ProviderConfigured() {
 		return nil, nil
 	}
-	exempt, err := s.repo.CustomerExempt(ctx, customerID)
+	exempt, err := s.exemptOn(ctx, sale.BranchID, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +110,7 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 // tax provider call happen before the transaction opens; their results are
 // written inside it.
 func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
-	tenders []TenderIn, pickedUpBy, actor string) (*Sale, error) {
+	tenders []TenderIn, pickedUpBy, actor string, acknowledged []uuid.UUID) (*Sale, error) {
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
@@ -164,7 +166,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	}
 	estimate := priced
 	if estimate == nil {
-		exempt, err := s.repo.CustomerExempt(ctx, realCustomerID)
+		exempt, err := s.exemptOn(ctx, pre.BranchID, realCustomerID)
 		if err != nil {
 			return nil, err
 		}
@@ -185,6 +187,23 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	totals := salesdoc.SumTotals(preLines)
 	total := int64(totals.SubtotalCents) + int64(estimate.taxCents)
 	change := totalTendered - total
+	preRoundingMode, err := s.repo.BranchCashRoundingMode(ctx, pre.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	if preRoundingMode == RoundingNearest5Cents && cashTendered > 0 {
+		cashLegExact := cashTendered - change
+		if cashLegExact > 0 {
+			cashLegRounded, preDiff := RoundCash(cashLegExact)
+			if preDiff != 0 {
+				change = cashTendered - cashLegRounded
+				if change < 0 {
+					return nil, conflict("insufficient_tender",
+						fmt.Sprintf("the cash due is %d cents once the branch rounds it to the nearest five cents, and the tenders carry %d", cashLegRounded, cashTendered))
+				}
+			}
+		}
+	}
 	if change < 0 {
 		return nil, conflict("insufficient_tender",
 			fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total, totalTendered))
@@ -213,10 +232,24 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("po_required",
 				"the customer requires a purchase order number: name it on the sale before charging it to the account")
 		}
+		// The job the same account rule asks for, with its own words when
+		// the requirement cannot be met at the counter at all.
+		if err := jobRequiredRefusal(facts, pre.JobID); err != nil {
+			return nil, err
+		}
 		if err := s.checkBuyer(ctx, realCustomerID, facts, pre.BuyerContactID, accountPortion); err != nil {
 			return nil, err
 		}
 		if err := s.checkOnAccount(ctx, saleID, realCustomerID, facts, accountPortion, sums.storeCredit, false, actor); err != nil {
+			return nil, err
+		}
+	}
+	// The customer's counter alerts that ask to be acknowledged: the clerk
+	// has to read them and say so before the sale is taken. The check runs
+	// before any card is charged, and the transaction repeats it under the
+	// customer's lock.
+	if pre.CustomerID != nil {
+		if err := s.checkAlertAcknowledged(ctx, realCustomerID, acknowledged); err != nil {
 			return nil, err
 		}
 	}
@@ -237,6 +270,11 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 	}
 	if err := s.checkTenderLimits(ctx, saleID, realCustomerID, tenders, false, actor); err != nil {
+		return nil, err
+	}
+	// The ID rule reads the same settings the limit does, before any card is
+	// charged: a check that needs the ID is refused before money moves.
+	if err := s.checkTenderIDRule(ctx, realCustomerID, tenders); err != nil {
 		return nil, err
 	}
 	// Card charges: outside the transaction, with the sale's own currency
@@ -299,7 +337,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -323,7 +361,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 // come with it.
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
-	charges []*chargeResult, priced *providerTax, ex *exchangeLeg) (*Sale, error) {
+	charges []*chargeResult, priced *providerTax, ex *exchangeLeg, acknowledged []uuid.UUID) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -385,12 +423,15 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		totals := salesdoc.SumTotals(lines)
 
 		// Tax: the provider's answer (verified against what is billed now)
-		// or the rate resolver. A pickup sale takes the branch rate
-		// (ADR 0005 section 5.5).
+		// or the same resolver the order runs (CP-10): an exempt customer
+		// pays nothing, a delivered sale takes its ship-to's zone rate, a
+		// pickup takes the branch rate (ADR 0005 section 5.5).
 		var taxCents int64
 		var taxRate *string
 		taxExempt := false
 		taxSource := ""
+		var zone *taxzone.Snapshot
+		var shipToRaw []byte
 		if priced != nil {
 			if linesFingerprint(lines) != priced.fingerprint {
 				return conflict("tax_quote_stale",
@@ -399,31 +440,44 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			taxCents = int64(priced.taxCents)
 			taxSource = string(salesdoc.TaxSourceProvider)
 		} else {
-			exempt, err := s.repo.CustomerExempt(ctx, customerID)
+			// the ship to is frozen onto the sale inside the same
+			// transaction, the record a delivered sale owes the audit
+			if sale.DeliveryType == "delivery" || sale.DeliveryType == "DELIVERY" {
+				if sale.ShipToID != nil {
+					snap, _, err := s.repo.ShipTo(ctx, *sale.ShipToID)
+					if err != nil {
+						return err
+					}
+					if raw, merr := json.Marshal(snap); merr == nil {
+						shipToRaw = raw
+						if err := s.repo.SaveSaleShipTo(ctx, saleID, raw); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			zone, err = s.zoneFor(ctx, sale)
 			if err != nil {
 				return err
 			}
-			rate, ok, err := s.repo.BranchTaxRate(ctx, &sale.BranchID)
+			resolved, err := s.ResolveSaleTax(ctx, sale, customerID)
 			if err != nil {
+				if errors.Is(err, salesdoc.ErrTaxRateNotConfigured) {
+					return conflict("tax_rate_not_configured",
+						"set the branch's default tax rate before completing a sale")
+				}
 				return err
 			}
-			switch {
-			case exempt:
-				taxSource = string(salesdoc.TaxSourceExempt)
-				zero := "0"
-				taxRate = &zero
-			case ok:
-				scaled, _, err := salesdoc.ParseTaxRate(rate)
+			if resolved.Rate != nil {
+				scaled, _, err := salesdoc.ParseTaxRate(*resolved.Rate)
 				if err != nil {
 					return err
 				}
 				taxCents = int64(salesdoc.TaxAt(totals.TaxableCents, scaled))
-				taxRate = &rate
-				taxSource = string(salesdoc.TaxSourceBranchRate)
-			default:
-				return conflict("tax_rate_not_configured",
-					"set the branch's default tax rate before completing a sale")
+				taxRate = resolved.Rate
 			}
+			taxSource = string(resolved.Source)
+			taxExempt = resolved.Source == salesdoc.TaxSourceExempt
 		}
 		total := int64(totals.SubtotalCents) + taxCents
 		// The tender check against the LIVE total (the tax is known now, the
@@ -444,6 +498,52 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		tendered := totalTendered + credit
 		change := tendered - total
+		// Cash rounding without pennies (CP-18): the branch's own rule rounds
+		// the cash leg only, after the tax is computed and before the payment
+		// legs are written. The invoice keeps the exact total and the tax the
+		// engine computed; the drawer holds the rounded cash, the change falls
+		// out of the rounded figure, and the difference between the two is the
+		// branch's rounding income or its loss.
+		roundingMode, err := s.repo.BranchCashRoundingMode(ctx, sale.BranchID)
+		if err != nil {
+			return err
+		}
+		// The cash that settles the sale, to the cent: the cash tendered less
+		// the change. It is the leg the rule moves; the card, the cheque, the
+		// account and the store credit settle to the exact cent.
+		cashLegExact := cashTendered - change
+		cashLegRounded, roundingDiff := cashLegExact, int64(0)
+		roundingCarrier := -1
+		if roundingMode == RoundingNearest5Cents && cashLegExact > 0 {
+			cashLegRounded, roundingDiff = RoundCash(cashLegExact)
+			if roundingDiff != 0 {
+				// The change falls out of the rounded figure, so the cash leg
+				// pays what the drawer keeps. The payment that carries the
+				// difference is the leg's largest one: it can stand the
+				// difference on its own, and the other cash payments keep
+				// their whole amount.
+				roundedChange := cashTendered - cashLegRounded
+				legPayments := cashLegPayments(tenders, roundedChange)
+				for i := range legPayments {
+					if legPayments[i] > 0 && (roundingCarrier < 0 || legPayments[i] > legPayments[roundingCarrier]) {
+						roundingCarrier = i
+					}
+				}
+				if roundingCarrier < 0 || legPayments[roundingCarrier] < roundingDiff {
+					// No leg can stand the difference: the money is taken
+					// exactly rather than half rounded.
+					cashLegRounded, roundingDiff = cashLegExact, 0
+					roundingCarrier = -1
+				}
+			}
+		}
+		if roundingDiff != 0 {
+			change = cashTendered - cashLegRounded
+			if change < 0 {
+				return conflict("insufficient_tender",
+					fmt.Sprintf("the cash due is %d cents once the branch rounds it to the nearest five cents, and the tenders carry %d", cashLegRounded, cashTendered))
+			}
+		}
 		if change < 0 {
 			return conflict("insufficient_tender",
 				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total-credit, totalTendered))
@@ -453,10 +553,23 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
 		// The legs the sale keeps, change taken out of the cash, sum exactly to
-		// the total; the two checks above make it so and this holds it.
-		if tendered-change != total {
+		// the total; the two checks above make it so and this holds it. A
+		// rounded sale keeps the rounded cash, so the legs sum to the total
+		// plus the rounding difference.
+		if tendered-change != total+roundingDiff {
 			return conflict("legs_do_not_sum",
 				fmt.Sprintf("the tender legs keep %d cents and the sale totals %d", tendered-change, total))
+		}
+
+		// Section 11 step 1a: the customer's credit and alert serialization lock,
+		// taken right after the sale row for every sale naming a customer (whether
+		// paid on account or by cash, check, card or store credit), before the
+		// account exposure read, the counter alerts read, the open credit memos
+		// (step 3) and the inventory rows (step 6).
+		if sale.CustomerID != nil {
+			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
+				return err
+			}
 		}
 
 		// The check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under the
@@ -472,9 +585,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return conflict("walk_in_account",
 					"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
 			}
-			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
-				return err
-			}
 			facts, err := s.repo.CustomerFacts(ctx, customerID)
 			if err != nil {
 				return err
@@ -482,6 +592,9 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
 				return conflict("po_required",
 					"the customer requires a purchase order number: name it on the sale before charging it to the account")
+			}
+			if err := jobRequiredRefusal(facts, sale.JobID); err != nil {
+				return err
 			}
 			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
 				return err
@@ -491,10 +604,29 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 		}
 
+		// The counter alerts of the named customer, read under the
+		// transaction's own locks: a warning that asks to be acknowledged
+		// must be named in the completion, or the sale is refused here. The
+		// check outside the transaction ran before any card was charged; this
+		// one is the authority.
+		var counterAlerts []CounterAlert
+		if sale.CustomerID != nil {
+			counterAlerts, err = s.repo.CounterAlerts(ctx, customerID)
+			if err != nil {
+				return err
+			}
+			if err := alertAcknowledged(counterAlerts, acknowledged); err != nil {
+				return err
+			}
+		}
+
 		// The checks held to the customer's check limit, and the customer's
 		// open credit memos locked in id order (section 11, step 3) when the
 		// sale pays with store credit: both before the stock moves.
 		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+			return err
+		}
+		if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
 			return err
 		}
 		var storeMemos []openMemo
@@ -554,10 +686,22 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		}
 		inv := &invoice.CounterInvoice{
 			BranchID: sale.BranchID, CustomerID: customerID, Currency: sale.Currency,
+			DeliveryType: sale.DeliveryType, ShipToID: sale.ShipToID, ShipToSnapshot: shipToRaw,
 			PickedUpBy: pickedBy, InvoiceDate: date, Actor: actor,
 			SubtotalCents: int64(totals.SubtotalCents), TaxCents: taxCents, TotalCents: total,
 			TaxRate: taxRate, TaxExempt: taxExempt, TaxSource: taxSource,
 			CustomerPO: sale.CustomerPO, JobID: sale.JobID,
+		}
+		// the zone that answered a delivered sale is frozen onto the invoice
+		// (CP-10), beside the rate it explains
+		if zone != nil && taxSource == string(salesdoc.TaxSourceZoneRate) {
+			id := zone.ZoneID
+			inv.TaxZoneID = &id
+			if raw, merr := json.Marshal(zone); merr == nil {
+				inv.TaxRateParts = raw
+			}
+			src := zone.DataSource
+			inv.TaxZoneSource = &src
 		}
 		refs, err := s.costRefs(ctx, lines)
 		if err != nil {
@@ -702,10 +846,15 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				continue
 			}
 			amount := int64(t.AmountCents)
-			if t.Method == TenderCash && cashChangeLeft > 0 {
-				give := min64(amount, cashChangeLeft)
-				amount -= give
-				cashChangeLeft -= give
+			if t.Method == TenderCash {
+				// The change comes out of the cash, in the order the tenders
+				// were taken: what the drawer keeps is what the tender
+				// carries less the change given from it.
+				if cashChangeLeft > 0 {
+					give := min64(amount, cashChangeLeft)
+					amount -= give
+					cashChangeLeft -= give
+				}
 			}
 			if amount <= 0 {
 				// the whole tender walked out as change: no payment, but
@@ -726,11 +875,28 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				card = &account.CardFacts{GatewayTxID: charges[i].GatewayTxID, GatewayStatus: "SETTLED",
 					Last4: charges[i].Last4, Brand: charges[i].Brand, AuthCode: charges[i].AuthCode}
 			}
+			// The cash leg settles the exact cash the sale needs: the rounded
+			// cash less the signed difference the drawer keeps as the branch's
+			// rounding income or loss. Every other cash payment keeps its
+			// whole amount, and the carrier takes the difference on its entry.
+			applied := amount
+			roundingOnPayment := int64(0)
+			if t.Method == TenderCash && i == roundingCarrier && roundingDiff != 0 {
+				roundingOnPayment = roundingDiff
+				applied = amount - roundingDiff
+			}
+			if applied < 0 {
+				applied = 0
+			}
+			applications := []account.ApplyLine{}
+			if applied > 0 {
+				applications = append(applications, account.ApplyLine{InvoiceID: inv.ID, AmountCents: applied})
+			}
 			payID, fx, err := s.ar.RecordPayment(ctx, account.RecordPaymentIn{
 				CustomerID: customerID, BranchID: sale.BranchID, Currency: sale.Currency,
 				Method: string(t.Method), AmountCents: amount, Reference: t.Reference, ReceivedOn: date,
-				Actor: actor, Card: card,
-				Applications: []account.ApplyLine{{InvoiceID: inv.ID, AmountCents: amount}},
+				Actor: actor, Card: card, RoundingCents: roundingOnPayment,
+				Applications: applications,
 			})
 			if err != nil {
 				return err
@@ -782,6 +948,17 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 					"register_id": sale.RegisterID, "customer_id": sale.CustomerID, "tenders": len(tenders),
 				}}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+			// The acknowledgements the clerk gave at the counter, on the sale:
+			// one row per alert, naming the alert and the cashier who read it.
+			for _, id := range acknowledgedAlerts(counterAlerts, acknowledged) {
+				if err := s.auditLog.Log(ctx, audit.Entry{
+					Action: "pos.alert.acknowledged", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
+					Changes: map[string]any{
+						"alert_id": id, "customer_id": sale.CustomerID, "acknowledged_by": actor,
+					}}); err != nil {
+					return fmt.Errorf("failed to write the audit row: %w", err)
+				}
 			}
 		}
 
@@ -953,6 +1130,27 @@ func (s tenderSums) legsRefusal() error {
 	return nil
 }
 
+// cashLegPayments splits the cash tenders into the payments they become: the
+// change comes out of the cash, in the order the tenders were taken, and what
+// is left is what the drawer keeps.
+func cashLegPayments(tenders []TenderIn, change int64) []int64 {
+	payments := make([]int64, len(tenders))
+	left := change
+	for i := range tenders {
+		if tenders[i].Method != TenderCash {
+			continue
+		}
+		amount := int64(tenders[i].AmountCents)
+		if left > 0 {
+			give := min64(amount, left)
+			amount -= give
+			left -= give
+		}
+		payments[i] = amount
+	}
+	return payments
+}
+
 // withID copies the "ID checked" facts of a tender request onto the stored
 // tender: the kind of ID looked at, never its number.
 func withID(t *Tender, in *TenderIn) {
@@ -1069,4 +1267,49 @@ type exchangeLeg struct {
 	creditCents  int64
 	appliedCents int64
 	totalCents   int64
+}
+
+// checkAlertAcknowledged refuses a sale whose customer has a counter warning
+// that asks to be acknowledged and the clerk did not acknowledge it. The
+// walk-in customer has no alerts: the counter reads them off the named
+// account.
+func (s *Service) checkAlertAcknowledged(ctx context.Context, customerID uuid.UUID, acknowledged []uuid.UUID) error {
+	alerts, err := s.repo.CounterAlerts(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	return alertAcknowledged(alerts, acknowledged)
+}
+
+// alertAcknowledged is the rule itself: every counter warning that asks to
+// be acknowledged has to be named in the completion, or the sale is refused.
+func alertAcknowledged(alerts []CounterAlert, acknowledged []uuid.UUID) error {
+	seen := make(map[uuid.UUID]bool, len(acknowledged))
+	for _, id := range acknowledged {
+		seen[id] = true
+	}
+	for _, a := range alerts {
+		if !a.AcknowledgeRequired || seen[a.ID] {
+			continue
+		}
+		return conflict("alert_unacknowledged",
+			"the customer has a warning the counter must acknowledge before this sale is taken: "+a.Text)
+	}
+	return nil
+}
+
+// acknowledgedAlerts names the customer's open counter alerts the clerk
+// acknowledged: the rows the sale records.
+func acknowledgedAlerts(alerts []CounterAlert, acknowledged []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(acknowledged))
+	for _, id := range acknowledged {
+		seen[id] = true
+	}
+	out := []uuid.UUID{}
+	for _, a := range alerts {
+		if seen[a.ID] {
+			out = append(out, a.ID)
+		}
+	}
+	return out
 }

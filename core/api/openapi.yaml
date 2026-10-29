@@ -1534,6 +1534,91 @@ paths:
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "428": {$ref: "#/components/responses/WirePreconditionRequired"}
         "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/admin/staff/{id}/counter-pin:
+    put:
+      operationId: adminSetStaffCounterPIN
+      tags: [admin]
+      summary: Set a staff member's counter PIN
+      description: >-
+        Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits, never one repeated digit or a plain run like 1234. Hashed on the server with argon2id and a per PIN salt; the PIN is never logged and the answer says only counter_pin_set and locked. Setting a PIN clears the failures and the lock.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCounterPINRequest"
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+    delete:
+      operationId: adminClearStaffCounterPIN
+      tags: [admin]
+      summary: Clear a staff member's counter PIN
+      description: Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/admin/staff/{id}/counter-pin/unlock:
+    post:
+      operationId: adminUnlockStaffCounterPIN
+      tags: [admin]
+      summary: Unlock a staff member's counter PIN
+      description: >-
+        Admin or owner. Lifts the lock five wrong tries impose and clears the failures; the hash stands, so the manager's own PIN works again at once.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
   /api/v1/admin/staff/{id}/modules:
     post:
       operationId: adminGrantModule
@@ -3448,6 +3533,152 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts:
+    get:
+      operationId: customerListAlerts
+      tags: [customer]
+      summary: List a customer's alerts
+      description: >-
+        The cursor list envelope, newest first. state holds the alerts still on the customer (open, the default), the ones that have been ended (ended), or both (all). An unknown customer is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, ended, all]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+    post:
+      operationId: customerCreateAlert
+      tags: [customer]
+      summary: Leave an alert on a customer
+      description: >-
+        kind is note (read it and carry on) or warning (it may stop the sale). text is the alert, at most 500 characters. show_at_counter puts it in the counter's customer panel, show_at_orders puts it on the order page. acknowledge_required asks the counter to read a warning and say so before the sale is taken; only a warning may ask, and a note that asks is a 400 validation_failed naming acknowledge_required. The author is the signed-in user, never the body. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertRequest"
+      responses:
+        "201":
+          description: The created alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/customers/{id}/alerts/{alertId}/end:
+    post:
+      operationId: customerEndAlert
+      tags: [customer]
+      summary: End an alert
+      description: >-
+        An alert is ended, not deleted: the row stays for the audit trail and says who called it off. On the alert's revision, sent as If-Match, so an end of an alert that has already been ended is refused as stale. Writes customer.updated (part alert).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The ended alert.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/contacts/{id}:
@@ -13920,9 +14151,9 @@ paths:
     get:
       operationId: posTransactionList
       tags: [pos]
-      summary: List the day's sales
+      summary: List the day's sales, or search them
       description: >-
-        The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD that defaults to the branch's today, status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). The page is the whole day newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day is [] in the bytes.
+        The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD read against the sale's business day in its branch's own zone, defaulting to the branch's today (never the server's clock), status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). q is the return counter's sale search (CP-06): a sale matches when its number (the receipt's barcode text), its invoice's number or its customer's name contains the text, case folded; a search names no day bound unless it also carries a date. The page is the whole day or the whole search newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day or a search nothing matches is [] in the bytes.
       parameters:
         - name: register_id
           in: query
@@ -13936,6 +14167,10 @@ paths:
           in: query
           required: false
           schema: {type: string, enum: [open, held, completed, voided]}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, description: "The search text: sale number, invoice number or customer name."}
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/Include"
@@ -14289,13 +14524,62 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/items/{itemId}/weight:
+    post:
+      operationId: posTransactionEnterLineWeight
+      tags: [pos]
+      summary: Enter a weight by hand on a line (CP-19)
+      description: >-
+        The manual weight entry: a typed gross in pounds, an optional tare, and the reason from the closed list GET /api/v1/pos/scale/manual-reasons answers (other needs the note). The entry takes a consecutive ticket number like a scale reading, the line is repriced at the net in its sale unit (the density bridge for a volume unit, 409 density_required when the product has none), and the documents print MAN WT. Handbook 44: when the branch's scale answers and does not read zero the entry is refused (409 scale_not_zero); a scale that cannot be read is the reason scale_offline attests. The body carries the sale's revision (or If-Match); a stale one is 409 stale_revision and none is 428. A counted or otherwise unweighable unit is 409 weight_unit_mismatch, an already weighed line is 409 line_already_weighed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosManualWeightRequest"
+      responses:
+        "200":
+          description: The whole sale with the weighed line.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/complete:
     post:
       operationId: posTransactionComplete
       tags: [pos]
       summary: Tender and complete the sale
       description: >-
-        A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+        A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), account_hold (an account tender on an account the AR core holds: a standing credit hold record, or an override window on it that has passed or whose cap the sale is over), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -14820,6 +15104,72 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/step-up:
+    post:
+      operationId: posStepUp
+      tags: [pos]
+      summary: A manager approves at the counter with their own PIN
+      description: >-
+        The step up (CP-04): any person at the terminal asks, the manager is picked from the roster by staff number or id, and the PIN is the authority, so the caller's own role is never checked. The server verifies the PIN in constant time (five wrong tries in a row lock it until an admin unlocks it; the answer never says which part was wrong), checks the act's approving roles and the act's own person rules (the manager is not the sale's cashier, the drawer's cashier or closer), and mints one single use approval: an opaque token, stored only as its hash, bound to the act, the target and the manager, expiring a few minutes ahead. Never a machine key.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosStepUpRequest"
+      responses:
+        "201":
+          description: The approval the one act spends, naming the manager.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosStepUpApproval"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/step-up/managers:
+    get:
+      operationId: posStepUpManagers
+      tags: [pos]
+      summary: The managers the picker offers
+      description: >-
+        The roster the step up picker shows for one act: active staff with a counter PIN whose role the act admits. Names and staff numbers only, never a hint of the PIN beyond the fact one is set. Never a machine key.
+      parameters:
+        - name: act
+          in: query
+          required: true
+          description: The act the approval is for.
+          schema: {type: string, enum: [override, pickup, signoff]}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The managers, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosStepUpManagerPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/policy:
     get:
       operationId: posTillPolicyGet
@@ -15095,6 +15445,289 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale:
+    get:
+      operationId: posScaleStatus
+      tags: [pos]
+      summary: The branch scale's current reading (CP-19)
+      description: >-
+        Whether the register's branch has a scale wired, the device (with its certificate of conformance number), and the current indication: the weight in pounds, the unit the indicator reported, the mode, the motion flag and at_zero for the manual entry's Handbook 44 check. The reading shown here is never sold; only the ticket flow's stable read becomes money. A counter with no scale answers configured false, and the manual entry with its reason is the path.
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The scale status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleStatus"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/weigh-in:
+    post:
+      operationId: posScaleWeighIn
+      tags: [pos]
+      summary: Weigh the empty truck in (CP-19)
+      description: >-
+        Captures the stable gross reading against the vehicle's identification and opens the ticket the weigh out closes. A reading in motion, over capacity, in a zero error, or with no weight is refused (409 scale_reading_refused): the driver never hands the number over. A counter with no scale wired is 503 scale_not_configured.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleWeighInRequest"
+      responses:
+        "201":
+          description: The open weigh in ticket.
+          headers:
+            Location:
+              description: The ticket's path.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/scale/weigh-out:
+    post:
+      operationId: posScaleWeighOut
+      tags: [pos]
+      summary: Weigh the loaded truck out onto a sale line (CP-19)
+      description: >-
+        Captures the stable gross out, nets it against the weigh in's gross (double_draft: Gable's computation of two gross readings, never a scale tare operation), completes the weigh in ticket, writes the weigh out ticket and puts the weight with its consecutive ticket number on the sale line, repriced at the net in the line's sale unit (the product's density bridges a volume unit, 409 density_required without one). The weigh in is named by ticket or by vehicle (409 no_open_weigh_in when the truck never weighed in). A loaded weight at or under the weigh in's is 409 net_not_positive; the same refusals as the weigh in guard the reading. The body carries the sale's revision (or If-Match). The weigh runs as one transaction, so a retry or a race completes once.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleWeighOutRequest"
+      responses:
+        "200":
+          description: The sale with the weighed line, and the weigh out ticket.
+          headers:
+            ETag:
+              description: The sale's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleWeighOutResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/pos/scale/tickets:
+    get:
+      operationId: posScaleTicketList
+      tags: [pos]
+      summary: The branch's weight tickets (CP-19)
+      description: >-
+        The register's branch's tickets in ticket number order, filtered by status (open, completed, void) and vehicle. A ticket is never deleted; a void keeps its row and its number.
+      parameters:
+        - name: register_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, completed, void]}
+        - name: vehicle_ref
+          in: query
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The tickets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicketList"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/tickets/{id}:
+    get:
+      operationId: posScaleTicketGet
+      tags: [pos]
+      summary: One weight ticket (CP-19)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ticket.
+          headers:
+            ETag:
+              description: The ticket's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/tickets/{id}/void:
+    post:
+      operationId: posScaleTicketVoid
+      tags: [pos]
+      summary: Void a weight ticket (CP-19)
+      description: >-
+        Marks the ticket void with its reason, keeping the row and the consecutive number (the sequence is never reused and a void is never a delete). A ticket that prices a sale line cannot be voided (409 ticket_on_line); the line goes first. The body carries the ticket's revision (or If-Match): a stale one is 409 stale_revision and none is 428.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleTicketVoidRequest"
+      responses:
+        "200":
+          description: The voided ticket.
+          headers:
+            ETag:
+              description: The ticket's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleTicket"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/manual-reasons:
+    get:
+      operationId: posScaleManualReasons
+      tags: [pos]
+      summary: The closed list of manual weight reasons (CP-19)
+      description: >-
+        The reasons a typed weight names; the reason is what makes the entry auditable, so it is never free text. A reason with needs_note requires the note.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The reasons.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosScaleManualReasonList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/scale/simulator:
+    put:
+      operationId: posScaleSimulatorDrive
+      tags: [pos]
+      summary: Drive the simulated scale (CP-19; demo stacks only)
+      description: >-
+        Mounted only when the counter was wired with the simulated scale (POS_SCALE_SIMULATOR, a demo configuration, never production). Puts a load on the deck in pounds or kilograms, pins the motion flag, or forces an indicator status, so the end to end walk drives the scale with no hardware.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosScaleSimulatorRequest"
+      responses:
+        "200":
+          description: The simulator took the state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns:
     post:
       operationId: posReturnCreate
@@ -15167,6 +15800,41 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/returns/preview:
+    post:
+      operationId: posReturnPreview
+      tags: [pos]
+      summary: State what a return comes to
+      description: >-
+        The same request as the return, answered with the figures only: the credit the memo will state (its subtotal net of the restocking fee, the tax and the total, negative as a credit), the restocking fee itself, the money that goes back (positive) and each line's fee beside its refund, so the counter states the fee before the return is taken. Computed from the same read-only pricing the return guards with; nothing is written, no row locks, no sequences.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosReturnRequest"
+      responses:
+        "200":
+          description: The figures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosReturnFigures"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns/{id}:
     get:
       operationId: posReturnGet
@@ -15194,6 +15862,87 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "404":
           $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/refund-intents:
+    get:
+      operationId: posRefundIntentList
+      tags: [pos]
+      summary: List the refund claims waiting on a manager
+      description: >-
+        The list envelope over the counter's open refund claims (CP-06), oldest first: every PENDING claim (a terminal answer still owed, or a claim waiting on the resolve route) and every void's FAILED claim whose tender's posted payment still holds the declined credit the pay back route returns to the card (held_credit_cents carries it). A settled claim and a paid back credit leave the list. Only the finance and owner roles, the resolve and pay back routes' own guard; the sale join carries the branch wall, so the list never crosses the caller's branch. The page is the oldest 50 of the open set, the route's own cap: a claim past the fiftieth shows as the queue drains, so the list never claims to be the whole set. next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty list is [] in the bytes.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The open claims.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRefundIntentPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/settings:
+    get:
+      operationId: posSettingsGet
+      tags: [pos]
+      summary: The counter's dealer rules
+      description: >-
+        The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit), the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter), and the restocking fee each return reason withholds (pos.restocking_fee_bps.<code>, basis points; nothing set is no fee) beside the suggested figures the settings screen offers. The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The rules and their revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posSettingsPut
+      tags: [pos]
+      summary: Write the counter's dealer rules
+      description: >-
+        Writes the rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision): the check limit, the check ID rule and every reason's restocking fee (the whole closed list; a figure of 0 clears the reason's row). Admin and owner only, never a machine key; audited with the fees it wrote.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosSettingsRequest"
+      responses:
+        "200":
+          description: The rules now in force, with the revision the write made.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/refund-intents/{id}/resolve:
@@ -15429,7 +16178,7 @@ paths:
       tags: [pos]
       summary: Can this sale go on account?
       description: >-
-        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The alerts are the customer's own alerts that speak at the counter: a note to read, or a warning that asks to be acknowledged before the sale is taken, which the completion refuses without the acknowledgement. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
       parameters:
         - name: id
           in: path
@@ -15467,7 +16216,7 @@ paths:
       tags: [pos]
       summary: A manager approves one sale
       description: >-
-        One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold or credit_limit, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
+        One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold, credit_limit or account_hold, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
       parameters:
         - name: id
           in: path
@@ -15569,7 +16318,7 @@ paths:
       tags: [pos]
       summary: Exchange goods in one act
       description: >-
-        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
+        The returned lines and the replacement sale lines in one transaction, in section 11's lock order (the original sale row, the customer's credit, the inventory rows in product order, then the AR core): one credit memo and one sale that point at each other. The memo's credit (net of any restocking fee) is a leg of the replacement sale up to its total, so tender is taken only for the difference; when the return is worth more the surplus goes back in cash out of the open drawer or stays as store credit on a named account (refund_method cash or account). The restocked stock returns at the register's yard. A return worth the same takes no tender (409 no_tender_due if one is offered). When a tax provider is configured, the replacement lines are priced and quoted with the provider before the transaction opens. Refused with 409 and a blocker: insufficient_tender, exchange_card_refund (a card refund of the surplus is a card return through POST /pos/returns, today's refund path), exchange_card_token, tax_quote_stale, tax_rate_not_configured, exceeds_sold, insufficient_stock, no_open_session, walk_in_account, no_tender_due, alert_unacknowledged. Nothing is written when any refusal answers. The cashier is the JWT's subject; a machine key is refused 403.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -18009,6 +18758,60 @@ paths:
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/density:
+    patch:
+      operationId: productUpdateDensity
+      tags: [product]
+      summary: Set or clear the weighed sale's density (CP-19)
+      description: >-
+        The pounds per cubic yard with the volume state the figure was measured at (loose or compacted): the counter's only bridge between a scale weight and a price by the cubic yard. Both fields together, or a null pair to clear; one without the other is a 400. The body's revision or If-Match carries the precondition.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductDensityUpdate'
+      responses:
+        '200':
+          description: The product with the persisted density, the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/lead-time:
     patch:
       operationId: productUpdateLeadTime
@@ -20280,7 +21083,7 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+        Roles admin, owner, finance. customer_id, exempt_reason and certificate_number are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to the customer's primary branch's business day, expiry_date is a YYYY-MM-DD string on or after effective_date, and issuing_state is a two letter code when sent (any invalid field answers 400 naming the field). A customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20331,6 +21134,28 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/exemptions/{id}/end:
+    post:
+      operationId: taxExemptionEnd
+      tags: [tax]
+      summary: End a tax exemption
+      description: >-
+        Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, ended) but exempts no sale. An unknown id answers 404; a certificate that was already ended answers 409 already_ended. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The certificate is ended.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/exemptions/{id}:
     delete:
       operationId: taxExemptionDelete
@@ -20352,6 +21177,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/preview:
     post:
@@ -20379,6 +21205,136 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones:
+    get:
+      operationId: taxZoneList
+      tags: [tax]
+      summary: List tax zones
+      description: >-
+        Roles admin, owner, finance. Every zone, newest first, each with its rate parts and its boundaries. The country and jurisdiction_type filters are optional; country matches the two letter code and jurisdiction_type must be STA, CTY, CIT, STJ or PROV (400 otherwise).
+      parameters:
+        - name: country
+          in: query
+          schema: {type: string}
+        - name: jurisdiction_type
+          in: query
+          schema: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+      responses:
+        "200":
+          description: The zones.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      operationId: taxZoneCreate
+      tags: [tax]
+      summary: Create a tax zone
+      description: >-
+        Roles admin, owner, finance. country (two letters), jurisdiction_code, jurisdiction_type (STA, CTY, CIT, STJ, PROV) and effective_from are required, with at least one rate part and, for a postal zone, at least one boundary. zone_kind defaults POSTAL; a PROVINCE zone needs province_code. sourcing defaults DESTINATION. Rates are decimal fractions between 0 and 1, such as 0.06.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxZoneCreateRequest"
+      responses:
+        "201":
+          description: The created zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequestEither"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/IdempotencyConflict"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones/{id}:
+    get:
+      operationId: taxZoneGet
+      tags: [tax]
+      summary: Read a tax zone
+      description: Roles admin, owner, finance. The zone with its rate parts and its boundaries.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      operationId: taxZoneDelete
+      tags: [tax]
+      summary: Delete a tax zone no document used
+      description: >-
+        Roles admin, owner, finance. A zone that an order or an invoice was taxed under answers 409: it is closed, never deleted, because the sale that used it must stay explainable from the records.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "204":
+          description: The zone is gone.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/zones/{id}/close:
+    post:
+      operationId: taxZoneClose
+      tags: [tax]
+      summary: Close a tax zone
+      description: >-
+        Roles admin, owner, finance. Ends the zone's effective window on the named date, so sales before it keep the rate they were charged. A replacement rate is a new zone (or new rate parts from a later effective date), never an overwrite.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxZoneCloseRequest"
+      responses:
+        "200":
+          description: The closed zone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxZone"
+        "400": {$ref: "#/components/responses/BadRequestEither"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -22506,9 +23462,9 @@ components:
           type: integer
     StaffMember:
       type: object
-      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules]
+      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules, counter_pin_set, locked]
       description: >-
-        Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag.
+        Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server.
       properties:
         id:
           type: string
@@ -22535,6 +23491,26 @@ components:
           type: array
           items:
             type: string
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
+    AdminCounterPINRequest:
+      type: object
+      required: [pin]
+      description: The PIN the admin typed. It rides the request once and never logs.
+      properties:
+        pin:
+          type: string
+    CounterPINAnswer:
+      type: object
+      required: [counter_pin_set, locked]
+      description: The two facts the staff screen shows of a counter PIN, and nothing else.
+      properties:
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
     StaffPage:
       type: object
       required: [items, next_cursor, limit]
@@ -23461,7 +24437,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, job_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -23521,6 +24497,9 @@ components:
         po_required:
           type: boolean
           description: "Whether an order of this customer must carry a purchase order number."
+        job_required:
+          type: boolean
+          description: "Whether every charge sale at the counter for this customer names a job."
         named_buyer_required:
           type: boolean
           description: "Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer."
@@ -23597,6 +24576,8 @@ components:
           description: Active payment terms; the default NET30 when left out on create.
         po_required:
           type: boolean
+        job_required:
+          type: boolean
         named_buyer_required:
           type: boolean
           description: Optional; left out keeps the value on a PUT (false on create).
@@ -23611,9 +24592,9 @@ components:
           description: PUT only, beside If-Match; a revision on create is a 400.
     CustomerUpdateRequest:
       type: object
-      required: [account_number, name, payment_terms_id, po_required]
+      required: [account_number, name, payment_terms_id, po_required, job_required]
       description: >-
-        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
+        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
       properties:
         account_number:
           type: string
@@ -23650,6 +24631,8 @@ components:
           format: uuid
           description: Active payment terms, or terms the customer already holds.
         po_required:
+          type: boolean
+        job_required:
           type: boolean
         named_buyer_required:
           type: boolean
@@ -23867,6 +24850,62 @@ components:
         updated_at:
           type: string
           format: date-time
+    Alert:
+      type: object
+      required: [id, customer_id, kind, text, show_at_counter, show_at_orders, acknowledge_required, created_by, created_at, ended_by, ended_at, revision]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string, maxLength: 500}
+        show_at_counter: {type: boolean, description: "The alert speaks in the counter's customer panel."}
+        show_at_orders: {type: boolean, description: "The alert speaks on the order page."}
+        acknowledge_required: {type: boolean, description: "A warning only: the counter has to read it and say so before the sale is taken."}
+        created_by: {type: string, description: "The signed-in user who left the alert."}
+        created_at: {type: string, format: date-time}
+        ended_by: {type: [string, "null"], description: "The signed-in user who called the alert off; null while it is open."}
+        ended_at: {type: [string, "null"], format: date-time, description: "When the alert was called off; null while it is open."}
+        revision: {type: integer, format: int64, minimum: 1, description: "Moves when the alert is ended."}
+    AlertPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alert"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque; pass it back verbatim as cursor. Null on the last page.
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    AlertRequest:
+      type: object
+      required: [kind, text]
+      additionalProperties: false
+      description: >-
+        The body of an alert to leave. The author is the signed-in user, never the body.
+      properties:
+        kind:
+          type: string
+          enum: [note, warning]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        show_at_counter:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        show_at_orders:
+          type: boolean
+          description: "Defaults to false: the alert speaks only where it is told to."
+        acknowledge_required:
+          type: boolean
+          description: "Defaults to false; only a warning may ask to be acknowledged."
     ContactPage:
       type: object
       required: [items, next_cursor, limit]
@@ -28118,6 +29157,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - order_line_id
         - unit_cost_ten_thousandths
@@ -28278,6 +29328,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -28656,6 +29763,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - invoice_line_id
         - restock
@@ -28817,6 +29935,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -29060,7 +30235,7 @@ components:
       type: object
       description: >-
         A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12).
-      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active, branch_id, revision, created_at, updated_at]
+      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -29092,6 +30267,8 @@ components:
           type: [string, "null"]
         default_tax_rate:
           type: [number, "null"]
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
         active:
@@ -29149,6 +30326,8 @@ components:
           type: [string, "null"]
         default_tax_rate:
           type: [number, "null"]
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
         active:
@@ -29188,6 +30367,8 @@ components:
           type: string
         default_tax_rate:
           type: number
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: string
         active:
@@ -29210,6 +30391,13 @@ components:
           type: boolean
         timezone:
           type: string
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
+    CashRoundingMode:
+      type: string
+      description: >-
+        The branch's own cash rounding rule (CP-18): the rule off, or the nearest five cents. The Government of Canada elected symmetric rounding to the nearest five cents for cash, and the rounding touches the cash leg only.
+      enum: [OFF, NEAREST_5_CENTS]
     BranchSummaryList:
       type: array
       items:
@@ -29571,6 +30759,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
       properties:
         id:
@@ -29728,6 +30927,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -29768,6 +31024,17 @@ components:
         - is_special_order
         - vendor_id
         - special_order_unit_cost_ten_thousandths
+        - weight_source
+        - weight_gross_lb
+        - weight_tare_lb
+        - weight_net_lb
+        - weight_net_basis
+        - scale_device_id
+        - scale_ticket_id
+        - scale_ticket_number
+        - manual_weight_reason
+        - weight_captured_by
+        - weight_captured_at
         - created_at
         - quote_line_id
         - quantity_allocated
@@ -29929,6 +31196,63 @@ components:
             - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+            - type: string
+              enum: [scale, manual]
+            - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+            - string
+            - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+            - string
+            - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+            - string
+            - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+            - type: string
+              enum: [single_draft, double_draft]
+            - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+            - string
+            - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+            - string
+            - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+            - string
+            - 'null'
+        weight_captured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -30163,6 +31487,9 @@ components:
         - updated_at
         - invoice_ids
         - deposit_unapplied_cents
+        - deposit_total_cents
+        - balance_due_after_deposits_cents
+        - deposits
         - ship_to
         - lines
       properties:
@@ -30305,6 +31632,37 @@ components:
           type: integer
           format: int64
           description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
+        deposit_total_cents:
+          type: integer
+          format: int64
+          description: 'Everything taken on the order (deposits), applied and unapplied both.'
+        balance_due_after_deposits_cents:
+          type: integer
+          format: int64
+          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+        deposits:
+          type: array
+          description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
+          items:
+            type: object
+            required: [id, number, received_on, method, amount_cents, unapplied_cents, reference, applications]
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string, description: "PAY-000001, the payment's own number."}
+              received_on: {type: string, format: date}
+              method: {type: string, enum: [cash, check, ach, other, card]}
+              amount_cents: {type: integer, format: int64}
+              unapplied_cents: {type: integer, format: int64}
+              reference: {type: [string, "null"]}
+              applications:
+                type: array
+                items:
+                  type: object
+                  required: [invoice_id, amount_cents, applied_on]
+                  properties:
+                    invoice_id: {type: string, format: uuid}
+                    amount_cents: {type: integer, format: int64}
+                    applied_on: {type: string, format: date}
         ship_to:
           type:
             - object
@@ -30812,6 +32170,7 @@ components:
         received_on: {type: string, format: date, description: "Defaults to the branch's business date."}
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
@@ -32615,6 +33974,8 @@ components:
         register_id: {type: string, description: "Defaults REG-01."}
         cashier_id: {type: [string, "null"], format: uuid, description: "Defaults the JWT's subject."}
         customer_id: {type: [string, "null"], format: uuid, description: "Absent means the walk-in customer."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries. Needs the customer named and delivery_type delivery; 400 otherwise, and 400 when the ship to is another customer's."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "pickup is the default; a delivery is sourced to the ship to's zone for tax."}
     PosAddLineRequest:
       type: object
       required: [line]
@@ -32637,6 +33998,11 @@ components:
             $ref: "#/components/schemas/PosTenderRequest"
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken.
+          items: {type: string, format: uuid}
     PosTenderRequest:
       type: object
       required: [method, amount_cents]
@@ -32668,6 +34034,32 @@ components:
           type: string
           description: "Required when the outcome is no_refund: the reference finance filed for the reconciliation."
         reason: {type: string, description: Why the record was made, 1 to 500 characters.: ''}
+    PosRefundIntentSummary:
+      type: object
+      description: One open refund claim in the manager's list (CP-06).
+      required: [id, sale_id, sale_number, tender_id, tender_method, amount_cents, act, state, held_credit_cents, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string, description: "The claim's sale, POS-000001."}
+        tender_id: {type: string, format: uuid}
+        tender_method: {type: string, enum: [cash, check, card, account, store_credit]}
+        amount_cents: {type: integer, format: int64, description: "The claim's amount."}
+        act: {type: string, enum: [void, return, payback]}
+        state: {type: string, enum: [PENDING, FAILED], description: "PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns."}
+        held_credit_cents: {type: integer, format: int64, description: "What the tender's posted payment still holds unapplied; the credit a pay back returns."}
+        created_at: {type: string, format: date-time}
+    PosRefundIntentPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosRefundIntentSummary"
+        next_cursor: {type: [string, "null"], description: "Null: the page is the whole open set."}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
     PosRefundIntentResolved:
       type: object
       required: [id, sale_id, tender_id, act, state, outcome]
@@ -32738,7 +34130,7 @@ components:
       required: [verdict, reason, message, over_cents, ways_forward]
       properties:
         verdict: {type: string, enum: [allowed, blocked]}
-        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override."}
+        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, account_hold, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked (account_hold: the AR core's standing hold record); manager_override when allowed by a live override."}
         message: {type: string, description: "The verdict in plain words, with the amount."}
         over_cents: {type: [integer, "null"], format: int64, description: "How far past the limit the sale puts the account (credit_limit only)."}
         ways_forward:
@@ -32753,7 +34145,7 @@ components:
         cap_cents: {type: [integer, "null"], format: int64, description: "The most this buyer may put on the account in one sale; null for no cap of the buyer's own."}
     PosAccountStanding:
       type: object
-      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account]
+      required: [customer_id, name, currency, credit_limit_cents, open_receivable_cents, open_credit_memo_cents, available_credit_cents, on_hold, terms_kind, named_buyer_required, buyers, check_limit_cents, payment_options, on_account, alerts]
       properties:
         customer_id: {type: string, format: uuid}
         name: {type: string}
@@ -32774,6 +34166,19 @@ components:
           description: "The payment shapes the server takes from this customer now, in the order the counter shows them."
           items: {$ref: "#/components/schemas/PosTenderMethod"}
         on_account: {$ref: "#/components/schemas/PosOnAccountVerdict"}
+        alerts:
+          type: array
+          description: >-
+            The customer's alerts that speak at the counter, oldest first: a note to read, or a warning that asks to be acknowledged before the sale is taken.
+          items: {$ref: "#/components/schemas/PosCounterAlert"}
+    PosCounterAlert:
+      type: object
+      required: [id, kind, text, acknowledge_required]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [note, warning]}
+        text: {type: string}
+        acknowledge_required: {type: boolean, description: "The counter has to read this warning and say so before the sale is taken."}
     PosOverrideRequest:
       type: object
       additionalProperties: false
@@ -32782,6 +34187,7 @@ components:
         kind: {type: string, enum: [account, check]}
         reason: {type: string, maxLength: 500}
         cap_cents: {type: integer, format: int64, minimum: 1, description: "The most the manager approves: the account portion, or the largest check."}
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one override: the manager it names is the approver, recorded by name. Absent on the signed in manager's own path."}
     PosOverride:
       type: object
       required: [id, sale_id, kind, approved_by, reason, cap_cents, created_at, consumed_at]
@@ -32850,6 +34256,32 @@ components:
           description: "Tender for the difference only. Not store_credit (the returned credit is applied itself)."
           items: {$ref: "#/components/schemas/PosTenderRequest"}
         picked_up_by: {type: [string, "null"], maxLength: 200}
+        acknowledged_alert_ids:
+          type: array
+          description: >-
+            The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
+          items: {type: string, format: uuid}
+    PosReturnFigures:
+      type: object
+      required: [subtotal_cents, tax_cents, restocking_fee_cents, total_cents, refund_cents, lines]
+      properties:
+        subtotal_cents: {type: integer, format: int64, description: "The credit memo's subtotal net of the fee, negative as the memo states it."}
+        tax_cents: {type: integer, format: int64, description: "The tax refunded, negative; the fee is not taxed."}
+        restocking_fee_cents: {type: integer, format: int64, description: "The restocking fee withheld, positive, half even to the cent on each line's own refund and never more than it."}
+        total_cents: {type: integer, format: int64, description: "The memo's total, negative (a credit)."}
+        refund_cents: {type: integer, format: int64, description: "The money that goes back, positive: the total's other sign."}
+        lines:
+          type: array
+          description: "The request's lines in order, each with the fee its reason withholds."
+          items: {$ref: "#/components/schemas/PosReturnFigureLine"}
+    PosReturnFigureLine:
+      type: object
+      required: [line_id, reason_code, line_total_cents, restocking_fee_cents]
+      properties:
+        line_id: {type: [string, "null"], format: uuid, description: "The sale line a linked return names; null on a free line."}
+        reason_code: {type: string, description: "The line's reason from the closed list; other when the request named none."}
+        line_total_cents: {type: integer, format: int64, description: "The line's refund, negative (the memo line's shape)."}
+        restocking_fee_cents: {type: integer, format: int64}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]
@@ -32933,7 +34365,7 @@ components:
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count, customer_name, invoice_number, business_day]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -32949,10 +34381,13 @@ components:
         completed_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
         item_count: {type: integer}
+        customer_name: {type: [string, "null"], description: "The account the sale names; null on a walk-in."}
+        invoice_number: {type: [string, "null"], description: "The invoice's number; null until the sale completes."}
+        business_day: {type: string, description: "The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp."}
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, buyer_contact_id, print_count, exchange_return_id, delivery_type, ship_to_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -32976,6 +34411,18 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "The sale's own delivery answer: a delivery is taxed at the ship to's zone rate, a pickup at the branch rate."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to a delivered sale carries."}
+        returned_quantities:
+          type: object
+          description: "Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it."
+          additionalProperties: {type: string, description: "A decimal string with at most 4 fraction digits."}
+        tax_exemption:
+          type: [object, "null"]
+          description: "Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day."
+          properties:
+            certificate_number: {type: string, description: "The certificate's number as the counter shows it."}
+            expiry_day: {type: string, description: "The certificate's last day, YYYY-MM-DD; absent when it does not expire."}
         lines:
           type: array
           items:
@@ -32992,12 +34439,13 @@ components:
         name: {type: string}
     PosCounterCustomer:
       type: object
-      required: [id, account_number, name, po_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
+      required: [id, account_number, name, po_required, job_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
       properties:
         id: {type: string, format: uuid}
         account_number: {type: string}
         name: {type: string}
         po_required: {type: boolean, description: "The account asks for a purchase order on a charge sale (409 po_required at completion without one)."}
+        job_required: {type: boolean, description: "The account asks for a job on a charge sale (409 job_required at completion without one)."}
         credit_limit_cents: {type: [integer, "null"], format: int64, description: "Null: no limit. 0: no credit."}
         open_receivable_cents: {type: integer, format: int64, description: "What the credit check reads: open invoices less open credit memos and unapplied cash."}
         available_credit_cents: {type: [integer, "null"], format: int64, description: "The limit less the open receivable; negative when over; null with no limit."}
@@ -33014,6 +34462,8 @@ components:
         customer_po: {type: [string, "null"], maxLength: 100}
         job_id: {type: [string, "null"], format: uuid}
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named."}
+        ship_to_id: {type: [string, "null"], format: uuid, description: "The ship to the goods are delivered to: the sale's tax comes from that zone (CP-10). Needs the customer named and delivery_type delivery; the ship to must be the customer's own."}
+        delivery_type: {type: string, enum: [pickup, delivery], description: "Pickup, the default, taxes at the branch rate; a delivery at the ship to's zone."}
     PosTransactionPage:
       type: object
       required: [items, next_cursor, limit]
@@ -33029,7 +34479,7 @@ components:
       type: object
       description: >-
         A sale line in the shared shape of ADR 0005 section 2.2: product, kit (with its component lines), charge and text lines, the priced fields null on a text line, the extension rounded once.
-      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, tally, tint, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, price_basis, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, weight_source, weight_gross_lb, weight_tare_lb, weight_net_lb, weight_net_basis, scale_device_id, scale_ticket_id, scale_ticket_number, manual_weight_reason, weight_captured_by, weight_captured_at, created_at]
       properties:
         id: {type: string, format: uuid}
         position: {type: integer}
@@ -33068,7 +34518,149 @@ components:
             - $ref: "#/components/schemas/LineTint"
             - type: "null"
           description: The paint line's tint record (row CP-16), null on every other line.
+        weight_source: {oneOf: [{type: string, enum: [scale, manual]}, {type: "null"}], description: "Where the line's weight came from; null on a line that was not weighed (CP-19)."}
+        weight_gross_lb: {type: [string, "null"], description: "The gross reading in pounds, a decimal string."}
+        weight_tare_lb: {type: [string, "null"], description: "The tare used: the weigh in's gross on a double draft ticket."}
+        weight_net_lb: {type: [string, "null"], description: "The net the quantity was priced from."}
+        weight_net_basis: {oneOf: [{type: string, enum: [single_draft, double_draft]}, {type: "null"}], description: "Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation."}
+        scale_device_id: {type: [string, "null"], format: uuid, description: "The certified scale that produced the reading; null on a manual weight."}
+        scale_ticket_id: {type: [string, "null"], format: uuid}
+        scale_ticket_number: {type: [string, "null"], description: "The ticket's consecutive number (WT-000001)."}
+        manual_weight_reason: {type: [string, "null"], description: "The closed-list reason a typed weight carries; the documents print MAN WT."}
+        weight_captured_by: {type: [string, "null"]}
+        weight_captured_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+    PosScaleTicket:
+      type: object
+      description: >-
+        One weight ticket (CP-19): the consecutive never reused number, the device that produced the reading, the gross, tare and net, the vehicle, the source and the net basis, and the void state that replaces a delete.
+      required: [id, ticket_number, revision, branch_id, scale_device_id, vehicle_ref, direction, status, gross_lb, tare_lb, net_lb, reading_unit, source, manual_reason, manual_note, net_basis, weigh_in_ticket_id, sale_line_id, captured_by, captured_at, void_reason, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        ticket_number: {type: string, description: "WT-000001, consecutive and never reused; a void keeps it."}
+        revision: {type: integer, format: int64}
+        branch_id: {type: string, format: uuid}
+        scale_device_id: {type: [string, "null"], format: uuid, description: "The certified scale that produced the reading; null on a manual weight."}
+        vehicle_ref: {type: [string, "null"], description: "The truck's plate or number."}
+        direction: {type: string, enum: [weigh_in, weigh_out, single]}
+        status: {type: string, enum: [open, completed, void]}
+        gross_lb: {type: [string, "null"], description: "A decimal string of pounds."}
+        tare_lb: {type: [string, "null"], description: "The weigh in's gross on a double draft ticket."}
+        net_lb: {type: [string, "null"]}
+        reading_unit: {type: string, enum: [lb, kg], description: "The unit the indicator reported; the weights are pounds."}
+        source: {type: string, enum: [scale, manual]}
+        manual_reason: {type: [string, "null"], description: "The closed-list reason; set on every manual weight."}
+        manual_note: {type: [string, "null"]}
+        net_basis: {oneOf: [{type: string, enum: [single_draft, double_draft]}, {type: "null"}]}
+        weigh_in_ticket_id: {type: [string, "null"], format: uuid}
+        sale_line_id: {type: [string, "null"], format: uuid}
+        captured_by: {type: string}
+        captured_at: {type: string, format: date-time}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    PosScaleDevice:
+      type: object
+      required: [id, branch_id, name, protocol, endpoint, certificate_no, location_note]
+      properties:
+        id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        name: {type: string}
+        protocol: {type: string, description: "SMA: the Scale Manufacturers Association standard."}
+        endpoint: {type: string}
+        certificate_no: {type: [string, "null"], description: "The certificate of conformance number the ticket can prove."}
+        location_note: {type: [string, "null"]}
+    PosScaleReading:
+      type: object
+      required: [weight_lb, unit, mode, motion, at_zero]
+      properties:
+        weight_lb: {type: [string, "null"], description: "A decimal string of pounds; null when the indicator sent no weight."}
+        unit: {type: string, enum: [lb, kg]}
+        mode: {type: string, enum: [gross, tare, net]}
+        motion: {type: boolean}
+        at_zero: {type: boolean, description: "The manual entry's Handbook 44 check reads this."}
+    PosScaleStatus:
+      type: object
+      required: [configured, device, reading]
+      properties:
+        configured: {type: boolean}
+        device:
+          oneOf: [{$ref: "#/components/schemas/PosScaleDevice"}, {type: "null"}]
+        reading:
+          oneOf: [{$ref: "#/components/schemas/PosScaleReading"}, {type: "null"}]
+        detail: {type: string, description: "Why the scale cannot be read, when it cannot."}
+    PosScaleWeighInRequest:
+      type: object
+      additionalProperties: false
+      required: [register_id, vehicle_ref]
+      properties:
+        register_id: {type: string}
+        vehicle_ref: {type: string, description: "The truck's plate or number; the ticket carries it."}
+    PosScaleWeighOutRequest:
+      type: object
+      additionalProperties: false
+      required: [sale_id, line_id]
+      properties:
+        sale_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        weigh_in_ticket_id: {type: [string, "null"], format: uuid, description: "The weigh in to net against; else the vehicle's latest open one."}
+        vehicle_ref: {type: string}
+        revision: {type: [integer, "null"], format: int64, description: "The sale's revision; the If-Match header carries it instead."}
+    PosScaleWeighOutResponse:
+      type: object
+      required: [sale, ticket]
+      properties:
+        sale:
+          $ref: "#/components/schemas/PosTransaction"
+        ticket:
+          $ref: "#/components/schemas/PosScaleTicket"
+    PosManualWeightRequest:
+      type: object
+      additionalProperties: false
+      required: [weight_lb, reason]
+      properties:
+        weight_lb: {type: string, description: "The gross weight in pounds, a decimal string."}
+        tare_lb: {type: [string, "null"], description: "The tare in pounds when the entry carries one."}
+        reason: {type: string, description: "One of the closed list GET /api/v1/pos/scale/manual-reasons answers."}
+        note: {type: string, description: "Required when the reason is other."}
+        revision: {type: [integer, "null"], format: int64, description: "The sale's revision; the If-Match header carries it instead."}
+    PosScaleTicketVoidRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, description: "A void says why."}
+        revision: {type: [integer, "null"], format: int64, description: "The ticket's revision; the If-Match header carries it instead."}
+    PosScaleTicketList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosScaleTicket"
+    PosScaleManualReason:
+      type: object
+      required: [code, label, needs_note]
+      properties:
+        code: {type: string, enum: [scale_offline, scale_error, preweighed, other]}
+        label: {type: string}
+        needs_note: {type: boolean}
+    PosScaleManualReasonList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosScaleManualReason"
+    PosScaleSimulatorRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        weight_lb: {type: [string, "null"], description: "The load on the deck, a decimal string of the unit named."}
+        unit: {type: string, enum: [lb, kg]}
+        motion: {type: [boolean, "null"], description: "Pin the motion flag."}
+        status: {type: string, enum: [none, over_capacity, under_capacity, zero_error, initial_zero_error, tare_error], description: "Force an indicator status; absent leaves it."}
     PosTender:
       type: object
       description: >-
@@ -33182,7 +34774,8 @@ components:
             - $ref: "#/components/schemas/PosTillReasonCode"
             - type: "null"
         note: {type: [string, "null"], description: "Required, not blank, when the reason_code is other."}
-        taken_by: {type: [string, "null"], description: "A pickup's second person, required there and absent for any other kind."}
+        taken_by: {type: [string, "null"], description: "A pickup's second person, required there and absent for any other kind. With an approval_token the manager is named by their approval, not typed."}
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one pickup: the manager it names is the taker. Only a pickup carries one."}
     PosTillMovementKind:
       type: string
       enum: [safe_drop, pickup, paid_in, paid_out]
@@ -33226,10 +34819,63 @@ components:
           items: {$ref: "#/components/schemas/PosTillSession"}
         next_cursor: {type: [string, "null"]}
         limit: {type: integer}
+    PosStepUpRequest:
+      type: object
+      additionalProperties: false
+      required: [act, manager, pin, target_id]
+      properties:
+        act: {type: string, enum: [override, pickup, signoff]}
+        kind: {type: string, enum: [account, check, refund_method], description: "The override's kind; required when the act is an override, absent otherwise. The approval binds it."}
+        manager: {type: string, description: "The manager's staff number or staff id."}
+        pin: {type: string, description: "The manager's counter PIN. Verified in constant time, never logged."}
+        target_id: {type: string, format: uuid, description: "The act's target: the sale (an override) or the till session (a pickup, a sign off)."}
+        amount_cents: {type: integer, format: int64, minimum: 1, description: "The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it."}
+      allOf:
+        - if:
+            properties: {act: {const: override}}
+          then:
+            required: [kind, amount_cents]
+        - if:
+            properties: {act: {const: pickup}}
+          then:
+            required: [amount_cents]
+            not: {required: [kind]}
+        - if:
+            properties: {act: {const: signoff}}
+          then:
+            not:
+              anyOf:
+                - required: [kind]
+                - required: [amount_cents]
+    PosStepUpApproval:
+      type: object
+      required: [token, manager_name, expires_at]
+      properties:
+        token: {type: string, description: "The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash."}
+        manager_name: {type: string, description: "The manager's name, for the screen to say who approved."}
+        expires_at: {type: string, format: date-time}
+    PosStepUpManager:
+      type: object
+      required: [id, full_name, staff_no, role]
+      properties:
+        id: {type: string, format: uuid}
+        full_name: {type: string}
+        staff_no: {type: string}
+        role: {type: string}
+    PosStepUpManagerPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosStepUpManager"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
     PosTillSignoffRequest:
       type: object
       required: [reason]
       properties:
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one sign off: the manager it names is the signer. Absent, the signed in caller needs the finance or owner role."}
         reason: {type: string, minLength: 1, description: "Why the variance is accepted; not blank."}
     PosTillSignOff:
       type: object
@@ -33253,6 +34899,53 @@ components:
       properties:
         branch_id: {type: string, format: uuid}
         variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosSettings:
+      type: object
+      required: [revision, rules]
+      properties:
+        revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required, restocking_fees, restocking_fee_defaults]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
+            check_id_required:
+              type: object
+              required: [mode, over_cents]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount], description: "Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale."}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "The figure an over_amount rule names, read against the sale's checks in total; null on the other two."}
+            restocking_fees:
+              type: object
+              description: "The fee each return reason withholds, in basis points: the whole closed list (defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other), a reason never set carrying none. The return takes it half even to the cent from each line's own refund, never more than the line."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+            restocking_fee_defaults:
+              type: object
+              description: "The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+    PosSettingsRequest:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required, restocking_fees]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the limit (no limit)."}
+            check_id_required:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount]}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Read only when mode is over_amount; dropped otherwise."}
+            restocking_fees:
+              type: object
+              description: "Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee)."
+              required: [defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other]
+              additionalProperties: {type: integer, minimum: 0, maximum: 10000}
+        revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
       required: [branch_id, date, deposit_slip_ref]
@@ -33405,7 +35098,7 @@ components:
         limit: {type: integer}
     PosTillReport:
       type: object
-      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, movements, movement_totals_by_kind]
+      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method, refunds_by_method, movements, movement_totals_by_kind]
       properties:
         session:
           $ref: "#/components/schemas/PosTillSession"
@@ -33426,6 +35119,10 @@ components:
         expected_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
+        refunds_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The session's refunds per method (CASH out of the drawer, CARD back to the card), a method present only where the session refunded on it. Always present on a live read; a Z report frozen before the figure existed carries none in its stored payload."
         over_short_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
@@ -34473,7 +36170,7 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url, density_lb_per_cy, density_volume_state]
       properties:
         id:
           type: string
@@ -34561,6 +36258,15 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: >-
+            The weighed sale's density (CP-19): pounds per cubic yard, the only bridge between a scale weight and a price by the yard.
+        density_volume_state:
+          oneOf: [{type: string, enum: [LOOSE, COMPACTED]}, {type: "null"}]
+          description: The volume state the density was measured at.
         image_url:
           type: [string, "null"]
           description: >-
@@ -34618,6 +36324,13 @@ components:
         random_length:
           type: boolean
           description: The product is sold by tally; it stocks in LF and carries no fixed length.
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+          description: The weighed sale's density (CP-19); both fields together or neither.
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
     ProductPage:
       type: object
       required: [items, next_cursor, limit]
@@ -34704,6 +36417,20 @@ components:
           type: number
         revision:
           type: integer
+          format: int64
+    ProductDensityUpdate:
+      type: object
+      additionalProperties: false
+      description: The density pair, both fields or a null pair to clear.
+      properties:
+        density_lb_per_cy:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        density_volume_state:
+          oneOf: [{type: string, enum: [loose, compacted]}, {type: "null"}]
+        revision:
+          type: [integer, "null"]
           format: int64
     ProductDimensionsUpdate:
       type: object
@@ -36710,14 +38437,23 @@ components:
           description: Absent when the exemption does not expire.
         is_active: {type: boolean}
         created_at: {type: string, format: date-time}
+        status:
+          type: string
+          enum: [active, expired, future, ended]
+          description: >-
+            The certificate's standing on the customer's branch's business day, said by the server (the same window rule the counter and the orders read), so no screen computes a day of its own.
     TaxExemptionCreateRequest:
       type: object
-      required: [customer_id, exempt_reason]
+      required: [customer_id, exempt_reason, certificate_number]
       properties:
         customer_id: {type: string, format: uuid}
         exempt_reason: {type: string}
         certificate_number: {type: string}
         issuing_state: {type: string}
+        effective_date:
+          type: string
+          format: date
+          description: The certificate's first day, YYYY-MM-DD; defaults to today.
         expiry_date:
           type: string
           format: date
@@ -36815,6 +38551,84 @@ components:
         is_estimate:
           type: boolean
           description: True when the flat rate fallback was used.
+    TaxZoneRatePart:
+      type: object
+      required: [name, rate, effective_from]
+      properties:
+        name:
+          type: string
+          enum: [STATE, COUNTY, CITY, DISTRICT, GOODS_TAX, PROVINCIAL_SALES_TAX]
+        rate: {type: string, description: "The decimal fraction, such as 0.060000."}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        effective_to: {type: string, description: YYYY-MM-DD, absent while the part lives: ''}
+    TaxZoneBoundary:
+      type: object
+      required: [country, postal_code_low, postal_code_high]
+      properties:
+        country: {type: string, description: ISO 3166-1 alpha-2}
+        postal_code_low: {type: string}
+        postal_code_high: {type: string, description: Equals postal_code_low for an exact code}
+        extension_low: {type: string, description: The plus four the boundary narrows to, when it knows it: ''}
+        extension_high: {type: string}
+    TaxZone:
+      type: object
+      required: [id, country, jurisdiction_code, jurisdiction_type, jurisdiction_name, zone_kind, sourcing, effective_from, data_source, data_version, rates, boundaries]
+      properties:
+        id: {type: string, format: uuid}
+        country: {type: string}
+        jurisdiction_code: {type: string}
+        jurisdiction_type: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+        jurisdiction_name: {type: string}
+        state_code: {type: string}
+        county_code: {type: string}
+        place_code: {type: string}
+        province_code: {type: string, description: Set on a province zone}
+        zone_kind: {type: string, enum: [POSTAL, PROVINCE]}
+        sourcing: {type: string, enum: [ORIGIN, DESTINATION, BOTH]}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        effective_to: {type: [string, "null"], description: YYYY-MM-DD while the zone lives}
+        data_source: {type: string, description: Where the rate came from}
+        data_version: {type: string, description: Which version of the published data}
+        rates:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxZoneRatePart"
+        boundaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxZoneBoundary"
+    TaxZoneCreateRequest:
+      type: object
+      required: [country, jurisdiction_code, effective_from, rates]
+      properties:
+        country: {type: string, description: Two letter code}
+        jurisdiction_code: {type: string}
+        jurisdiction_type: {type: string, enum: [STA, CTY, CIT, STJ, PROV]}
+        jurisdiction_name: {type: string}
+        state_code: {type: string}
+        county_code: {type: string}
+        place_code: {type: string}
+        province_code: {type: string, description: Required on a PROVINCE zone}
+        zone_kind: {type: string, enum: [POSTAL, PROVINCE], description: Defaults POSTAL}
+        sourcing: {type: string, enum: [ORIGIN, DESTINATION, BOTH], description: Defaults DESTINATION}
+        effective_from: {type: string, description: YYYY-MM-DD}
+        data_source: {type: string}
+        data_version: {type: string}
+        rates:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/TaxZoneRatePart"
+        boundaries:
+          type: array
+          description: Required on a POSTAL zone; a boundary's country defaults to the zone's when omitted.
+          items:
+            $ref: "#/components/schemas/TaxZoneBoundary"
+    TaxZoneCloseRequest:
+      type: object
+      required: [effective_to]
+      properties:
+        effective_to: {type: string, description: YYYY-MM-DD}
     TintSystem:
       type: object
       properties:

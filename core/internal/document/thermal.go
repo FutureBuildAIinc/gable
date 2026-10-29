@@ -75,6 +75,11 @@ type ThermalReceipt struct {
 	TaxCents      httpx.Cents
 	TaxLabel      string // "TAX", "HST", "Sales tax"; empty prints "Tax"
 	TotalCents    httpx.Cents
+	// RoundingCents is the cash rounding the branch's rule made on this
+	// sale: the difference between the cash the drawer kept and the exact
+	// cash the sale needed. It prints only when it is not zero, the way the
+	// change prints only when there is change.
+	RoundingCents httpx.Cents
 	Tenders       []ThermalTender
 	BalanceCents  httpx.Cents       // 0 when the sale did not go on account
 	Signature     *ThermalSignature // nil when none captured
@@ -83,7 +88,9 @@ type ThermalReceipt struct {
 
 // ThermalLine is one sold line as the paper prints it: the product's own
 // SKU and description, the quantity with its unit, the unit price with its
-// price unit, and the extension in cents.
+// price unit, and the extension in cents. A weighed line (CP-19) also
+// carries its ticket number and the gross, tare and net the ticket proves;
+// a typed weight prints the Handbook 44 marking MAN WT.
 type ThermalLine struct {
 	SKU         string
 	Description string
@@ -92,6 +99,13 @@ type ThermalLine struct {
 	UnitPrice   httpx.Price
 	PriceUOM    string
 	LineTotal   httpx.Cents
+
+	ScaleTicket   string
+	WeightGrossLb *httpx.Quantity
+	WeightTareLb  *httpx.Quantity
+	WeightNetLb   *httpx.Quantity
+	ManualWeight  bool
+
 	// Tint is the paint line's tint record (row CP-16). Nil prints nothing;
 	// the block carries the colour code and name, the base, the container
 	// size and the colorant amounts, because that is what the customer needs
@@ -262,6 +276,21 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 					"Amounts rescaled to this size: check them before mixing", props.Text{Size: 7}))
 			}
 		}
+		// The weighed line's ticket line (CP-19): the marking the handbook
+		// names for a typed weight, the ticket number, and the gross, tare
+		// and net the ticket proves.
+		if l.ScaleTicket != "" {
+			mark := ""
+			if l.ManualWeight {
+				mark = "MAN WT "
+			}
+			weigh := ""
+			if l.WeightGrossLb != nil && l.WeightTareLb != nil && l.WeightNetLb != nil {
+				weigh = "  G " + l.WeightGrossLb.WireString() + " lb  T " + l.WeightTareLb.WireString() +
+					" lb  N " + l.WeightNetLb.WireString() + " lb"
+			}
+			add(thermalRowTiny, text.NewCol(thermalGridSize, mark+l.ScaleTicket+weigh, props.Text{Size: 7, Align: align.Right}))
+		}
 	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 
@@ -273,6 +302,9 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 	}
 	add(thermalRowBody, text.NewCol(thermalGridSize, label+": "+b.style.Money(r.TaxCents), props.Text{Size: 9, Align: align.Right}))
 	add(thermalRowLarge, text.NewCol(thermalGridSize, "Total: "+b.style.Money(r.TotalCents), props.Text{Size: 12, Style: fontstyle.Bold, Align: align.Right}))
+	if r.RoundingCents != 0 {
+		add(thermalRowBody, text.NewCol(thermalGridSize, "Cash rounding: "+b.style.Money(r.RoundingCents), props.Text{Size: 9, Align: align.Right}))
+	}
 	add(thermalHairline, text.NewCol(thermalGridSize, strings.Repeat("-", 32), props.Text{Size: 7, Align: align.Center}))
 
 	// Tenders.

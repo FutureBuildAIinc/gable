@@ -11,13 +11,32 @@ import (
 	"github.com/google/uuid"
 )
 
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. The catalogue's writes run inside one: a formula and
+// its colorant amounts are one fact, and a half written formula (a row with
+// no amounts) would be sold at the counter.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 // Service is the catalogue's business logic: the creates, the reads, the
 // rescale and the saved colours.
 type Service struct {
 	repo Repository
+	tx   TxRunner
 }
 
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
+
+// WithTxRunner gives the service the transaction runner its writes run in.
+func (s *Service) WithTxRunner(tx TxRunner) *Service { s.tx = tx; return s }
+
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
+}
 
 func httpErr(err error) error {
 	switch {
@@ -33,7 +52,12 @@ func httpErr(err error) error {
 func (s *Service) ListSystems(ctx context.Context) ([]System, error) { return s.repo.ListSystems(ctx) }
 
 func (s *Service) CreateSystem(ctx context.Context, d *SystemDraft) (*System, error) {
-	out, err := s.repo.CreateSystem(ctx, d)
+	var out *System
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateSystem(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
@@ -42,7 +66,12 @@ func (s *Service) ListBases(ctx context.Context, systemID, productID *uuid.UUID)
 }
 
 func (s *Service) CreateBase(ctx context.Context, d *BaseDraft) (*Base, error) {
-	out, err := s.repo.CreateBase(ctx, d)
+	var out *Base
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateBase(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
@@ -51,7 +80,12 @@ func (s *Service) ListColorants(ctx context.Context, systemID *uuid.UUID) ([]Col
 }
 
 func (s *Service) CreateColorant(ctx context.Context, d *ColorantDraft) (*Colorant, error) {
-	out, err := s.repo.CreateColorant(ctx, d)
+	var out *Colorant
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateColorant(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
@@ -60,7 +94,12 @@ func (s *Service) ListColors(ctx context.Context, systemID *uuid.UUID, q string)
 }
 
 func (s *Service) CreateColor(ctx context.Context, d *ColorDraft) (*Color, error) {
-	out, err := s.repo.CreateColor(ctx, d)
+	var out *Color
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateColor(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
@@ -95,7 +134,12 @@ func (s *Service) CreateFormula(ctx context.Context, d *FormulaDraft) (*Formula,
 				httpx.FieldError{Field: "components", Message: err.Error()})
 		}
 	}
-	out, err := s.repo.CreateFormula(ctx, d)
+	var out *Formula
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateFormula(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
@@ -124,12 +168,20 @@ func (s *Service) ListSavedColors(ctx context.Context, customerID *uuid.UUID, jo
 }
 
 func (s *Service) CreateSavedColor(ctx context.Context, d *SavedColorDraft) (*SavedColor, error) {
-	out, err := s.repo.CreateSavedColor(ctx, d)
+	var out *SavedColor
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.repo.CreateSavedColor(ctx, d)
+		return err
+	})
 	return out, httpErr(err)
 }
 
 func (s *Service) DeleteSavedColor(ctx context.Context, id uuid.UUID) error {
-	return httpErr(s.repo.DeleteSavedColor(ctx, id))
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		return s.repo.DeleteSavedColor(ctx, id)
+	})
+	return httpErr(err)
 }
 
 // Charge reads the dealer's tint charge setting as the counter shows it.

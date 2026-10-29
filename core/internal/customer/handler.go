@@ -85,6 +85,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/contacts/{id}", guard(h.HandleGetContact))
 	mux.HandleFunc("PUT /api/v1/contacts/{id}", guard(h.HandleUpdateContact))
 	mux.HandleFunc("DELETE /api/v1/contacts/{id}", guard(h.HandleDeleteContact))
+
+	// The alerts are a customer edit, so they stand behind the same guard as
+	// the customer's other edits.
+	mux.HandleFunc("GET /api/v1/customers/{id}/alerts", guard(h.HandleListAlerts))
+	mux.HandleFunc("POST /api/v1/customers/{id}/alerts", guard(h.HandleAddAlert))
+	mux.HandleFunc("POST /api/v1/customers/{id}/alerts/{alertId}/end", guard(h.HandleEndAlert))
 }
 
 // writeJSON writes a 2xx JSON body.
@@ -787,4 +793,129 @@ func (h *Handler) HandleUpdateTerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeTerms(w, http.StatusOK, t)
+}
+
+// ---- alerts ----
+
+// alertsScope names the alerts list's ordering: created_at then id, newest
+// first. A cursor minted for any other ordering is refused (ADR 0001
+// section 2).
+const alertsScope = "customer_alerts.created_at_id_desc"
+
+func writeAlert(w http.ResponseWriter, status int, a *Alert) {
+	httpx.WriteRevisionETag(w, a.Revision)
+	writeJSON(w, status, a)
+}
+
+// parseAlertFilter reads the alerts list's parameters: the platform three and
+// the state the list holds (open alerts by default).
+func parseAlertFilter(r *http.Request) (f AlertFilter, wantTotal bool, err error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "state")
+	if err != nil {
+		return f, false, err
+	}
+	limit, at, id, wantTotal, err := listParams(r, alertsScope, q)
+	if err != nil {
+		return f, false, err
+	}
+	f.Limit, f.AfterID = limit, id
+	if at != nil {
+		t := at.Time
+		f.AfterTime = &t
+	}
+	v := &httpx.Validator{}
+	f.State = AlertStateOpen
+	if s, ok := singleValue(v, q, "state"); ok {
+		switch s {
+		case AlertStateOpen, AlertStateEnded, AlertStateAll:
+			f.State = s
+		default:
+			v.Check(false, "state", "must be one of: open, ended, all")
+		}
+	}
+	if err := v.Err(); err != nil {
+		return f, false, err
+	}
+	return f, wantTotal, nil
+}
+
+func (h *Handler) HandleListAlerts(w http.ResponseWriter, r *http.Request) {
+	customerID, err := pathID(r, "id", "customer")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f, wantTotal, err := parseAlertFilter(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items, hasMore, total, err := h.service.ListAlerts(r.Context(), customerID, f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		if next, err = nextCursor(alertsScope, hasMore, last.CreatedAt, last.ID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, items, next, f.Limit, listOptions(total)...)
+}
+
+func (h *Handler) HandleAddAlert(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	customerID, err := pathID(r, "id", "customer")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req AlertRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	a, err := h.service.AddAlert(r.Context(), customerID, draft)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/customers/"+customerID.String()+"/alerts/"+a.ID.String())
+	writeAlert(w, http.StatusCreated, a)
+}
+
+// HandleEndAlert calls an alert off. The body carries nothing: the
+// precondition is the alert's revision in the If-Match header.
+func (h *Handler) HandleEndAlert(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	customerID, err := pathID(r, "id", "customer")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	alertID, err := pathID(r, "alertId", "alert")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	a, err := h.service.EndAlert(r.Context(), customerID, alertID, precondition(r, nil))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeAlert(w, http.StatusOK, a)
 }

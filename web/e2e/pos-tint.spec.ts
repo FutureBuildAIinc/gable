@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { pickOptionByValue } from './app-controls';
 
 /**
  * The counter's tint line (row CP-16), end to end in the UI: the catalogue is
@@ -138,10 +139,13 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
 
   // Return the tinted can as a mis tint (the store's own error): accepted
   // and recorded, so the dealer can see how many mis tints the branch mixed.
+  // The tinted can does not go back into saleable stock: it is re-tinted and
+  // put on the marked down rack.
   await page.getByRole('button', { name: 'Return', exact: true }).click();
   await page.locator('input[type="number"]').first().fill('1');
   const reason = page.getByTestId('return-reason').first();
-  await reason.selectOption('mis_tint');
+  await pickOptionByValue(reason, 'mis_tint');
+  await expect(page.getByTestId('return-tint-rack')).toBeVisible();
   await page.getByRole('button', { name: /Take the Return/ }).click();
   await expect(page.getByText(/Return RTN-\d+ complete/)).toBeVisible({ timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tint-return.png'), fullPage: true });

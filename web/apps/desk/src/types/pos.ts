@@ -80,6 +80,18 @@ export interface SaleLine {
     is_special_order: boolean;
     vendor_id: string | null;
     special_order_unit_cost_ten_thousandths: number | null;
+    /** How this line's quantity was set: a live scale reading, or a manual entry. */
+    weight_source: 'scale' | 'manual' | null;
+    weight_gross_lb: string | null;
+    weight_tare_lb: string | null;
+    weight_net_lb: string | null;
+    weight_net_basis: 'single_draft' | 'double_draft' | null;
+    scale_device_id: string | null;
+    scale_ticket_id: string | null;
+    scale_ticket_number: string | null;
+    manual_weight_reason: string | null;
+    weight_captured_by: string | null;
+    weight_captured_at: string | null;
     /** The paint line's tint record, null on every other line (row CP-16). */
     tint: LineTint | null;
     created_at: string;
@@ -128,6 +140,14 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** The sale's delivery answer (CP-10): a delivery is taxed at the ship to's zone, a pickup at the branch. */
+    delivery_type: 'pickup' | 'delivery';
+    /** The ship to a delivered sale carries. */
+    ship_to_id: string | null;
+    /** For a completed sale that has returns: sale line id -> quantity already returned. */
+    returned_quantities?: Record<string, string>;
+    /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
+    tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -145,6 +165,7 @@ export interface CounterCustomer {
     account_number: string;
     name: string;
     po_required: boolean;
+    job_required: boolean;
     credit_limit_cents: number | null;
     open_receivable_cents: number;
     available_credit_cents: number | null;
@@ -154,7 +175,7 @@ export interface CounterCustomer {
 
 // --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
 
-export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'account_hold' | 'manager_override';
 
 export interface WayForward {
     kind: 'pay_down' | 'manager_override' | 'switch_tender';
@@ -195,6 +216,61 @@ export interface CounterStanding {
     check_limit_cents: number | null;
     payment_options: TenderMethod[];
     on_account: OnAccountVerdict;
+    /** The customer's alerts that speak at the counter, oldest first. */
+    alerts: CounterAlert[];
+}
+
+/**
+ * An alert of the customer the counter reads: a note to read, or a warning
+ * that may ask to be acknowledged before the sale is taken.
+ */
+export interface CounterAlert {
+    id: string;
+    kind: 'note' | 'warning';
+    text: string;
+    /** The counter has to read this warning and say so before the sale is taken. */
+    acknowledge_required: boolean;
+}
+
+/** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
+export interface PosRules {
+    check_limit_cents: number | null;
+    check_id_required: CheckIDRule;
+    /** The restocking fee each return reason withholds, in basis points: the whole closed list. */
+    restocking_fees: Record<string, number>;
+    /** The suggested fee for each reason, read only (the read fills it; a write never carries it). */
+    restocking_fee_defaults?: Record<string, number>;
+}
+
+/** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */
+export interface ReturnFigures {
+    subtotal_cents: number;
+    tax_cents: number;
+    restocking_fee_cents: number;
+    total_cents: number;
+    /** The money that goes back, positive: the total's other sign. */
+    refund_cents: number;
+    lines: ReturnFigureLine[];
+}
+
+/** One line of the figures: the fee its reason withholds beside its refund. */
+export interface ReturnFigureLine {
+    line_id: string | null;
+    reason_code: string;
+    line_total_cents: number;
+    restocking_fee_cents: number;
+}
+
+/** The counter settings resource: its rules and the revision a write rides. */
+export interface PosSettings {
+    revision: number;
+    rules: PosRules;
 }
 
 export interface SaleSummary {
@@ -205,12 +281,16 @@ export interface SaleSummary {
     register_id: string;
     cashier_id: string;
     customer_id: string | null;
+    customer_name: string | null;
     currency: string;
     total_cents: number;
     status: SaleStatus;
     invoice_id: string | null;
+    invoice_number: string | null;
     completed_at: string | null;
     created_at: string;
+    /** The day the sale was made on in its branch's own zone (the search's date bound reads the same day). */
+    business_day: string;
     item_count: number;
 }
 
@@ -238,7 +318,7 @@ export interface ReturnLine {
 }
 
 /** The closed lowercase list of return reasons; an absent reason is other. */
-export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'other';
+export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'mis_tint' | 'other';
 
 export interface ReturnReason {
     code: ReturnReasonCode;
@@ -348,8 +428,21 @@ export interface TillReport {
     change_cents: number;
     tendered_by_method: Record<string, number>;
     expected_by_method: Record<string, number>;
+    /** What the session refunded per method (CASH out of the drawer, CARD back to the card). */
+    refunds_by_method?: Record<string, number>;
     movements: TillMovement[];
     movement_totals_by_kind: Record<string, number>;
+}
+
+/** The immutable end of day snapshot written once when a session closes; its payload is the frozen closing report. */
+export interface ZReport {
+    id: string;
+    till_session_id: string;
+    register_id: string;
+    branch_id: string | null;
+    over_short_cents: number;
+    payload: TillReport;
+    generated_at: string;
 }
 
 // --- Till movements, variance sign off and the branch day (CP-08, CP-09) ---
@@ -380,6 +473,23 @@ export interface MovementRequest {
     reason_code?: MovementReason;
     note?: string;
     taken_by?: string;
+    /** A manager's step up approval: the manager it names is the taker. */
+    approval_token?: string;
+}
+
+/** A manager the step up picker offers: active, a PIN set, a role the act admits. */
+export interface StepUpManager {
+    id: string;
+    full_name: string;
+    staff_no: string;
+    role: string;
+}
+
+/** The single use approval a verified step up mints; one act spends it. */
+export interface StepUpApproval {
+    token: string;
+    manager_name: string;
+    expires_at: string;
 }
 
 export interface DayFigures {
@@ -519,4 +629,119 @@ export interface TerminalLostItem {
 export interface TerminalSweepResult {
     claimed_closed: number;
     dispatched_lost: number;
+}
+
+// --- Scale integration (CP-19) ---
+
+export type ScaleDirection = 'weigh_in' | 'weigh_out' | 'single';
+export type ScaleTicketStatus = 'open' | 'completed' | 'void';
+export type ScaleSource = 'scale' | 'manual';
+export type ScaleNetBasis = 'single_draft' | 'double_draft' | null;
+
+export interface ScaleDevice {
+    id: string;
+    name: string;
+    certificate_no: string;
+    location_note: string;
+}
+
+export interface ScaleReading {
+    weight_lb: string | null;
+    unit: 'lb' | 'kg';
+    mode: 'gross' | 'tare' | 'net';
+    motion: boolean;
+    at_zero: boolean;
+}
+
+export interface ScaleStatus {
+    configured: boolean;
+    device: ScaleDevice | null;
+    reading: ScaleReading | null;
+    detail?: string;
+}
+
+export interface ScaleTicket {
+    id: string;
+    ticket_number: string;
+    revision: number;
+    branch_id: string;
+    scale_device_id: string;
+    vehicle_ref: string;
+    direction: ScaleDirection;
+    status: ScaleTicketStatus;
+    gross_lb: string | null;
+    tare_lb: string | null;
+    net_lb: string | null;
+    reading_unit: 'lb' | 'kg';
+    source: ScaleSource;
+    manual_reason: string | null;
+    manual_note: string | null;
+    net_basis: ScaleNetBasis;
+    weigh_in_ticket_id: string | null;
+    sale_line_id: string | null;
+    captured_by: string;
+    captured_at: string;
+    void_reason: string | null;
+    created_at: string;
+}
+
+export type ManualWeightReasonCode = 'scale_offline' | 'scale_error' | 'preweighed' | 'other';
+
+export interface ManualWeightReason {
+    code: ManualWeightReasonCode;
+    label: string;
+    needs_note: boolean;
+}
+
+export interface WeighOutResponse {
+    sale: Sale;
+    ticket: ScaleTicket;
+}
+
+export interface ScaleSimulatorInput {
+    weight_lb?: string;
+    unit?: 'lb' | 'kg';
+    motion?: boolean;
+    status?: 'none' | 'over_capacity' | 'under_capacity' | 'zero_error' | 'initial_zero_error' | 'tare_error';
+}
+
+// --- Refund intents (CP-06) ---
+
+export type RefundIntentAct = 'void' | 'return' | 'payback';
+export type RefundIntentState = 'PENDING' | 'FAILED';
+export type RefundIntentOutcome = 'refund' | 'no_refund';
+
+/** One open refund claim waiting on a manager (GET /api/v1/pos/refund-intents). */
+export interface RefundIntent {
+    id: string;
+    sale_id: string;
+    sale_number: string;
+    tender_id: string;
+    tender_method: TenderMethod;
+    amount_cents: number;
+    act: RefundIntentAct;
+    state: RefundIntentState;
+    held_credit_cents: number;
+    created_at: string;
+}
+
+export interface RefundIntentResolved {
+    id: string;
+    sale_id: string;
+    tender_id: string;
+    act: RefundIntentAct;
+    state: 'DONE' | 'FAILED';
+    outcome: RefundIntentOutcome;
+    refund_tx_id: string | null;
+    reconciliation_reference: string | null;
+}
+
+export interface RefundIntentPaidBack {
+    id: string;
+    payback_id: string;
+    sale_id: string;
+    tender_id: string;
+    amount_cents: number;
+    refund_tx_id: string;
+    state: 'DONE';
 }

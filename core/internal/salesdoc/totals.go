@@ -91,11 +91,13 @@ func TaxAt(taxableCents httpx.Cents, rateScaled int64) httpx.Cents {
 }
 
 // TaxInputs are the ingredients of a document's rate resolution (ADR 0005
-// section 3): the customer's exemption, the delivery ship-to's rate and the
-// branch's rate, each read by the document's own repository.
+// section 3): the customer's exemption, the delivery ship-to's zone rate and
+// typed rate, and the branch's rate, each read by the document's own
+// repository.
 type TaxInputs struct {
 	Exempt     bool
 	Delivery   bool
+	ZoneRate   *string
 	ShipToRate *string
 	BranchRate *string
 }
@@ -108,16 +110,24 @@ type ResolvedTax struct {
 
 // ResolveTax runs the rate resolution of ADR 0005 section 3, after the
 // exemption check and without a provider: an exempt customer pays nothing;
-// a delivery takes its ship-to's rate when set; then the branch's rate; a
-// document with no configured rate anywhere is refused. Zero is a valid
-// configured rate. The provider path sits in front of this in the document's
-// own act: when a provider is configured and the customer is not exempt, the
+// a delivery takes its ship-to's zone rate when the zone table resolves one;
+// then the dealer typed ship-to rate; then the branch's rate; a document
+// with no configured rate anywhere is refused. Zero is a valid configured
+// rate. The provider path sits in front of this in the document's own act:
+// when a provider is configured and the customer is not exempt, the
 // provider's total tax becomes the document's tax and this resolution never
 // runs.
 func ResolveTax(in TaxInputs) (ResolvedTax, error) {
 	if in.Exempt {
 		zero := "0.000000"
 		return ResolvedTax{Rate: &zero, Source: TaxSourceExempt}, nil
+	}
+	if in.Delivery && in.ZoneRate != nil && strings.TrimSpace(*in.ZoneRate) != "" {
+		rate := strings.TrimSpace(*in.ZoneRate)
+		if _, _, err := ParseTaxRate(rate); err != nil {
+			return ResolvedTax{}, err
+		}
+		return ResolvedTax{Rate: &rate, Source: TaxSourceZoneRate}, nil
 	}
 	if in.Delivery && in.ShipToRate != nil && strings.TrimSpace(*in.ShipToRate) != "" {
 		rate := strings.TrimSpace(*in.ShipToRate)

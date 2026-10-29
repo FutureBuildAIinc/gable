@@ -1,0 +1,245 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The deploy recipe: one Compose file for a Coolify based platform such as
+# FB Deploy. The platform checks out this repository at a commit, builds the
+# images from the Dockerfiles in that commit, and runs the services below.
+#
+# WHAT IT IS
+#
+#   postgres   PostgreSQL 16 on a named volume. No host port: it is reachable
+#              only from the other services on the compose network.
+#   migrate    One shot. It applies the SQL migrations, and it loads the demo
+#              seed on the first start only.
+#   core       The HTTP API.
+#   worker     The background jobs: the events outbox drain and the retention
+#              purges.
+#   web        nginx. It serves the built web apps and proxies /api to core.
+#
+# core, worker and web start only after migrate has finished and postgres is
+# healthy, so the database is migrated before anything talks to it.
+#
+# NO PUBLISHED PORTS
+#
+# No service publishes a host port. The `web` service exposes 8080 and the
+# platform's own reverse proxy is told, in the platform's domain setting, to
+# send the domain to the `web` service on port 8080. The proxy puts TLS in
+# front of it. The domain itself is an environment value (GABLE_PUBLIC_URL),
+# because the core writes it into the links it hands out.
+#
+# THE VALUES THE OPERATOR SETS
+#
+# Six values have no default and the file refuses to start without them:
+#
+#   POSTGRES_PASSWORD   the database password
+#   PAYMENT_VAULT_KEY   64 hex characters, `openssl rand -hex 32`
+#   PORTAL_JWT_SECRET   the portal's session secret
+#   GABLE_PUBLIC_URL    the deployment's public address
+#   CORS_ORIGINS        the same address
+#   TRUSTED_PROXIES     the platform's proxy network (CIDRs or addresses)
+#
+# deploy/README.md says how to make each one and which are secrets.
+#
+# THE DEMO VARIANT AND THE CUSTOMER VARIANT
+#
+# The demo sets four more values:
+#
+#   AUTH_MODE=dev        the core stops checking who the caller is
+#   DEMO_SEED=1          the migrate service loads the demo data
+#   DEMO_SEED_IMPORT=1   the same, with the larger invented catalogue
+#   VITE_AUTH_DEV_MODE=true   the web build offers the persona sign in
+#
+# AUTH_MODE=dev gives every caller full reach: no JWT is verified and every
+# role check passes, so anyone who reaches the port has the whole ERP, the
+# general ledger, the AR and the payments. The demo is safe only because the
+# platform's access gate (one shared password in front of the domain) keeps
+# the public out, and because the demo holds sample data and nothing else.
+# Never run a customer this way.
+#
+# The customer variant leaves AUTH_MODE, DEMO_SEED, DEMO_SEED_IMPORT and
+# VITE_AUTH_DEV_MODE unset, and sets JWKS_URL as a required variable of the
+# customer variant (with AUTH_ISSUER optional):
+#
+#   JWKS_URL             the identity provider's JWKS endpoint (required in
+#                        the customer variant; with AUTH_MODE unset the core
+#                        refuses to start without JWKS_URL. Note: staff sign
+#                        in moves to Appwrite in ADR 0012)
+#   AUTH_ISSUER          optional: the expected token issuer (`iss` claim)
+#
+# The seed runs once. The seed truncates the transactional tables on every run
+# it makes, so on a demo tenant that would wipe the demo on every redeploy.
+# With DEMO_SEED_ONCE=1 (the default here) the seed writes a marker when it
+# finishes and a later run finds the marker and skips. DEMO_SEED_FORCE=1 asks
+# for a reseed on purpose.
+#
+# PATHS
+#
+# Docker Compose resolves relative paths against the project directory, which
+# is this file's own directory (`deploy/`) unless the platform passes
+# `--project-directory` at the repository root. The default `..` is what
+# `docker compose -f deploy/compose.yml` needs; set GABLE_REPO_ROOT to `.`
+# only when the platform passes `--project-directory` at the repository root.
+
+# The core image, built once per service from the same Dockerfile. The
+# migrate, core and worker services all run the one binary; each subcommand
+# is one role.
+x-core-build: &core-build
+  build:
+    context: ${GABLE_REPO_ROOT:-..}
+    dockerfile: core/Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gable_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password (openssl rand -hex 16)}
+      POSTGRES_DB: ${POSTGRES_DB:-gable_db}
+    # The named volume holds the data. GABLE_PG_VOLUME names it, so a backup
+    # and a restore always have the same name to point at. Give a second
+    # deployment on the same host its own name.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gable_user} -d ${POSTGRES_DB:-gable_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # One shot: migrate, then seed. The seed is the demo's data and it runs on
+  # the first start only (see the note at the top of this file). `restart: no`
+  # is what makes it a one shot service: the platform does not start it again
+  # after it exits.
+  migrate:
+    <<: *core-build
+    command: ["sh", "-c", "./core migrate && ./core seed"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      # The demo data. Unset (the customer variant), nothing is seeded and the
+      # seed says so and exits.
+      DEMO_SEED: ${DEMO_SEED-}
+      DEMO_SEED_IMPORT: ${DEMO_SEED_IMPORT-}
+      # The seed's memory: it writes a marker when it finishes and skips on a
+      # later run. DEMO_SEED_FORCE=1 asks for a reseed on purpose.
+      DEMO_SEED_ONCE: ${DEMO_SEED_ONCE-1}
+      DEMO_SEED_FORCE: ${DEMO_SEED_FORCE-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  # The HTTP API.
+  core:
+    <<: *core-build
+    command: ["./core", "serve"]
+    environment:
+      # AUTH_MODE=dev for the demo, unset for a customer. With AUTH_MODE unset
+      # the core is fail-closed and requires JWKS_URL (AUTH_ISSUER is optional
+      # and checks the token's iss claim when set). Note: staff sign in moves
+      # to Appwrite in ADR 0012. See the note at the top of this file.
+      AUTH_MODE: ${AUTH_MODE-}
+      JWKS_URL: ${JWKS_URL-}
+      AUTH_ISSUER: ${AUTH_ISSUER-}
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      # Seals the keys an administrator enters in Tech Admin. The README says
+      # how to make one. The same value every run, never in a file.
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
+      # The portal's session secret.
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
+      # The deployment's public address, and the origins allowed to call the
+      # API. Both are the same address on a single domain deployment.
+      GABLE_PUBLIC_URL: ${GABLE_PUBLIC_URL:?set GABLE_PUBLIC_URL to the deployment's public address}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to the deployment's public address}
+      # The platform's proxy network, so each visitor has their own rate limit
+      # budget instead of sharing one with every other visitor.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:?set TRUSTED_PROXIES to the platform's proxy network}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      EDI_OUTPUT_DIR: /app/edi_out
+      # Mail. Empty keeps the log sender: the report runs and its result is
+      # logged instead of being delivered. Set all four to send mail.
+      SMTP_HOST: ${SMTP_HOST-}
+      SMTP_PORT: ${SMTP_PORT-}
+      SMTP_FROM: ${SMTP_FROM-}
+      SMTP_TLS: ${SMTP_TLS-}
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # The background jobs. It serves no HTTP, so the image's curl health check
+  # is replaced by a process check (the entrypoint is the only `core` process
+  # in the container).
+  worker:
+    <<: *core-build
+    command: ["./core", "worker"]
+    environment:
+      AUTH_MODE: ${AUTH_MODE-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
+      EDI_OUTPUT_DIR: /app/edi_out
+      SMTP_HOST: ${SMTP_HOST-}
+      SMTP_PORT: ${SMTP_PORT-}
+      SMTP_FROM: ${SMTP_FROM-}
+      SMTP_TLS: ${SMTP_TLS-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pidof core >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  # nginx: the front door at /, the desk everywhere else, and /api proxied to
+  # core. The API snippet is the same file the local stack mounts.
+  web:
+    build:
+      context: ${GABLE_REPO_ROOT:-..}
+      dockerfile: web/Dockerfile
+      args:
+        # The persona sign in is offered only by a build made with this. It
+        # matches AUTH_MODE=dev on core. The demo sets it; a customer does
+        # not.
+        VITE_AUTH_DEV_MODE: "${VITE_AUTH_DEV_MODE-false}"
+    volumes:
+      - ${GABLE_REPO_ROOT:-..}/web/nginx-local-api.conf:/etc/nginx/gable-api.conf:ro
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: ${GABLE_PG_VOLUME:-gable_postgres_data}

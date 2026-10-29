@@ -4,7 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
-import { creditLimitInputText, customerRequestFromCustomer, parseCreditLimitCents } from '../../services/CustomerService.ts';
+import { creditLimitInputText, customerRequestFromCustomer, parseCreditLimitCents, parseCheckLimitCents } from '../../services/CustomerService.ts';
 import type { Customer, CustomerRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import { BUTTON_PRIMARY, BUTTON_QUIET, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
 
@@ -31,7 +31,9 @@ export class GableCustomerForm extends LitElement {
     @state() private address = '';
     @state() private termsId = '';
     @state() private creditLimit = '';
+    @state() private checkLimit = '';
     @state() private poRequired = false;
+    @state() private jobRequired = false;
     @state() private isActive = true;
     @state() private creditError = '';
 
@@ -39,20 +41,22 @@ export class GableCustomerForm extends LitElement {
     private seeded = false;
 
     willUpdate() {
-        if (!this.seeded) {
+        // Seed from the customer once it is there: the page may render the
+        // form before the customer has loaded.
+        if (!this.seeded && this.customer) {
             this.seeded = true;
             const c = this.customer;
-            if (c) {
-                this.name = c.name;
-                this.accountNumber = c.account_number;
-                this.email = c.email ?? '';
-                this.phone = c.phone ?? '';
-                this.address = c.address ?? '';
-                this.termsId = c.payment_terms_id;
-                this.creditLimit = creditLimitInputText(c.credit_limit_cents);
-                this.poRequired = c.po_required;
-                this.isActive = c.is_active;
-            }
+            this.name = c.name;
+            this.accountNumber = c.account_number;
+            this.email = c.email ?? '';
+            this.phone = c.phone ?? '';
+            this.address = c.address ?? '';
+            this.termsId = c.payment_terms_id;
+            this.creditLimit = creditLimitInputText(c.credit_limit_cents);
+            this.checkLimit = creditLimitInputText(c.check_limit_cents);
+            this.poRequired = c.po_required;
+            this.jobRequired = c.job_required;
+            this.isActive = c.is_active;
         }
         // Create: preselect the dealer's usual terms once they have loaded.
         if (!this.customer && this.termsId === '' && this.terms.length > 0) {
@@ -65,6 +69,11 @@ export class GableCustomerForm extends LitElement {
         const limit = parseCreditLimitCents(this.creditLimit);
         if (!limit.ok) {
             this.creditError = limit.message;
+            return;
+        }
+        const checkLimit = parseCheckLimitCents(this.checkLimit);
+        if (!checkLimit.ok) {
+            this.creditError = checkLimit.message;
             return;
         }
         this.creditError = '';
@@ -81,7 +90,9 @@ export class GableCustomerForm extends LitElement {
             phone: orNull(this.phone),
             address: orNull(this.address),
             credit_limit_cents: limit.cents,
+            check_limit_cents: checkLimit.cents,
             po_required: this.poRequired,
+            job_required: this.jobRequired,
             is_active: this.isActive,
         };
         if (this.termsId) request.payment_terms_id = this.termsId;
@@ -131,10 +142,21 @@ export class GableCustomerForm extends LitElement {
                         this.creditError || err.credit_limit_cents,
                         'Leave empty for no limit. 0 means no credit (cash only).',
                     )}
+                    ${labeled(
+                        id('checklimit'),
+                        'Check limit (dollars)',
+                        textInput(id('checklimit'), this.checkLimit, v => { this.checkLimit = v; }, { mono: true, inputmode: 'decimal', placeholder: 'Empty means use the counter rule' }),
+                        err.check_limit_cents,
+                        'The most any one check this customer may write. Leave empty to use the dealer\'s counter rule. 0 means no checks.',
+                    )}
                     <div class="flex flex-col justify-end gap-2 pb-1">
                         ${checkbox(id('po'), 'Purchase order required', this.poRequired, v => { this.poRequired = v; })}
+                        ${checkbox(id('job'), 'Job required', this.jobRequired, v => { this.jobRequired = v; })}
                         ${editing ? checkbox(id('active'), 'Active', this.isActive, v => { this.isActive = v; }) : nothing}
                         ${err.po_required ? html`<p class="text-xs text-red-400" role="alert">${err.po_required}</p>` : nothing}
+                        ${err.job_required ? html`<p class="text-xs text-red-400" role="alert">${err.job_required}</p>` : nothing}
+                        ${editing && (this.customer?.branch_ids.length ?? 0) > 1 ? html`
+                            <p class="text-xs text-zinc-400" data-testid="cust-shared-controls-note">This account is held by more than one branch: changing Purchase order required or Job required takes the finance or owner role.</p>` : nothing}
                     </div>
                 </div>
                 <div class="flex justify-end gap-2">

@@ -43,7 +43,7 @@ func TestNoHeader_TaxExemptionsHoldTheCustomerWall(t *testing.T) {
 		t.Fatalf("seed ship to: %v", err)
 	}
 	create := func(customer string) string {
-		return fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, customer)
+		return fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT"}`, customer)
 	}
 	preview := func(customer string) string {
 		return fmt.Sprintf(`{"customer_id":%q,"document_type":"SalesInvoice","lines":[{"amount":100}]}`, customer)
