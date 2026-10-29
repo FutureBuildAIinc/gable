@@ -1,5 +1,226 @@
 [
   {
+    "name": "deposit.order.create",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "body": {
+        "customer_id": "<id-1>",
+        "customer_po": "GOLD-DEP-PO",
+        "delivery_type": "pickup",
+        "lines": [
+          {
+            "product_id": "<id-2>",
+            "quantity": "100"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "balance_due_after_deposits_cents": 55440,
+        "branch_id": "<id-3>",
+        "confirmed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": "GOLD-DEP-PO",
+        "delivery_type": "pickup",
+        "deposit_total_cents": 0,
+        "deposit_unapplied_cents": 0,
+        "deposits": [],
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-5>",
+            "is_special_order": false,
+            "line_total_cents": 49500,
+            "line_type": "product",
+            "manual_weight_reason": null,
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_basis": "QUANTITY_BREAK",
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 49500,
+            "product_id": "<id-2>",
+            "quantity": "100",
+            "quantity_allocated": "0",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "scale_device_id": null,
+            "scale_ticket_id": null,
+            "scale_ticket_number": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "100",
+            "stock_uom": "PCS",
+            "tally": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 49500,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null,
+            "weight_captured_at": null,
+            "weight_captured_by": null,
+            "weight_gross_lb": null,
+            "weight_net_basis": null,
+            "weight_net_lb": null,
+            "weight_source": null,
+            "weight_tare_lb": null
+          }
+        ],
+        "margin_percent": "29.2929",
+        "number": "SO-000091",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 1,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "draft",
+        "subtotal_cents": 49500,
+        "tax_cents": 5940,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 55440,
+        "total_commission_cents": 0,
+        "total_cost_cents": 35000,
+        "total_margin_cents": 14500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "deposit.order.confirm",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/orders/<id-4>/transitions",
+      "body": {
+        "revision": 1,
+        "to": "confirmed"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "balance_due_after_deposits_cents": 55440,
+        "branch_id": "<id-3>",
+        "confirmed_at": "<ts+0d>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "customer_po": "GOLD-DEP-PO",
+        "delivery_type": "pickup",
+        "deposit_total_cents": 0,
+        "deposit_unapplied_cents": 0,
+        "deposits": [],
+        "hold_note": null,
+        "hold_reason": null,
+        "id": "<id-4>",
+        "invoice_ids": [],
+        "job_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-5>",
+            "is_special_order": false,
+            "line_total_cents": 49500,
+            "line_type": "product",
+            "manual_weight_reason": null,
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_basis": "QUANTITY_BREAK",
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 49500,
+            "product_id": "<id-2>",
+            "quantity": "100",
+            "quantity_allocated": "100",
+            "quantity_backordered": "0",
+            "quantity_fulfilled": "0",
+            "quote_line_id": null,
+            "revenue_account_code": null,
+            "scale_device_id": null,
+            "scale_ticket_id": null,
+            "scale_ticket_number": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "stock_quantity": "100",
+            "stock_uom": "PCS",
+            "tally": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 49500,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null,
+            "weight_captured_at": null,
+            "weight_captured_by": null,
+            "weight_gross_lb": null,
+            "weight_net_basis": null,
+            "weight_net_lb": null,
+            "weight_source": null,
+            "weight_tare_lb": null
+          }
+        ],
+        "margin_percent": "29.2929",
+        "number": "SO-000091",
+        "ordered_by_contact_id": null,
+        "quote_id": null,
+        "revision": 2,
+        "salesperson_id": null,
+        "salesperson_name": "",
+        "scheduled_delivery_date": null,
+        "ship_to": null,
+        "ship_to_id": null,
+        "status": "confirmed",
+        "subtotal_cents": 49500,
+        "tax_cents": 5940,
+        "tax_exempt": false,
+        "tax_rate_percent": "12",
+        "tax_source": "branch_rate",
+        "total_cents": 55440,
+        "total_commission_cents": 0,
+        "total_cost_cents": 35000,
+        "total_margin_cents": 14500,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
     "name": "deposit.create",
     "request": {
       "method": "POST",
@@ -8,7 +229,7 @@
         "amount_cents": 2500,
         "customer_id": "<id-1>",
         "method": "check",
-        "order_id": "<id-2>",
+        "order_id": "<id-4>",
         "reference": "GOLD-DEP-1"
       }
     },
@@ -27,13 +248,13 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "gateway_tx_id": null,
-        "gl_entry_id": "<id-4>",
-        "id": "<id-5>",
+        "gl_entry_id": "<id-6>",
+        "id": "<id-7>",
         "job_id": null,
         "method": "check",
         "notes": null,
         "number": "PAY-000046",
-        "order_id": "<id-2>",
+        "order_id": "<id-4>",
         "received_on": "<day+0>",
         "reference": "GOLD-DEP-1",
         "refunds": [],
@@ -51,7 +272,7 @@
     "name": "deposit.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/payments/<id-5>"
+      "path": "/api/v1/payments/<id-7>"
     },
     "response": {
       "status": 200,
@@ -68,13 +289,13 @@
         "customer_id": "<id-1>",
         "customer_name": "Golden Harness Co",
         "gateway_tx_id": null,
-        "gl_entry_id": "<id-4>",
-        "id": "<id-5>",
+        "gl_entry_id": "<id-6>",
+        "id": "<id-7>",
         "job_id": null,
         "method": "check",
         "notes": null,
         "number": "PAY-000046",
-        "order_id": "<id-2>",
+        "order_id": "<id-4>",
         "received_on": "<day+0>",
         "reference": "GOLD-DEP-1",
         "refunds": [],
@@ -92,7 +313,7 @@
     "name": "deposit.list_by_order",
     "request": {
       "method": "GET",
-      "path": "/api/v1/payments?order_id=<id-2>"
+      "path": "/api/v1/payments?order_id=<id-4>"
     },
     "response": {
       "status": 200,
@@ -110,13 +331,13 @@
             "customer_id": "<id-1>",
             "customer_name": "Golden Harness Co",
             "gateway_tx_id": null,
-            "gl_entry_id": "<id-4>",
-            "id": "<id-5>",
+            "gl_entry_id": "<id-6>",
+            "id": "<id-7>",
             "job_id": null,
             "method": "check",
             "notes": null,
             "number": "PAY-000046",
-            "order_id": "<id-2>",
+            "order_id": "<id-4>",
             "received_on": "<day+0>",
             "reference": "GOLD-DEP-1",
             "revision": 1,
@@ -138,12 +359,64 @@
     "mask_body": true,
     "request": {
       "method": "GET",
-      "path": "/api/v1/orders/<id-2>"
+      "path": "/api/v1/orders/<id-4>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": "<body>"
+    }
+  },
+  {
+    "name": "deposit.create.over_balance",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 60000,
+        "customer_id": "<id-1>",
+        "method": "cash",
+        "order_id": "<id-4>"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "message": "the deposit is larger than the order's balance due after deposits"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "deposit.create.on_cancelled",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 100,
+        "customer_id": "<id-1>",
+        "method": "cash",
+        "order_id": "<id-9>"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "message": "this order is cancelled: no deposit can be taken on it"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
     }
   },
   {
@@ -172,7 +445,7 @@
           "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -186,7 +459,7 @@
         "amount_cents": 100,
         "customer_id": "<id-1>",
         "method": "cash",
-        "order_id": "<id-7>"
+        "order_id": "<id-12>"
       }
     },
     "response": {
@@ -204,7 +477,7 @@
           "message": "the request is not valid"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -213,7 +486,7 @@
     "name": "deposit.credit_memo.refund_needs_open",
     "request": {
       "method": "POST",
-      "path": "/api/v1/credit-memos/<id-9>/refunds",
+      "path": "/api/v1/credit-memos/<id-14>/refunds",
       "headers": {
         "If-Match": "\"4\""
       },
@@ -232,7 +505,7 @@
           "message": "only an open credit memo can be refunded: it is void"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-15>"
         }
       }
     }

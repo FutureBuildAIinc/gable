@@ -211,6 +211,85 @@ func (h *Handler) UpdateStaff(w http.ResponseWriter, r *http.Request) {
 	writeStaff(w, http.StatusOK, st)
 }
 
+// --- The manager's counter PIN (CP-04 slice 3) ---
+
+// pinSetRequest is PUT /api/v1/admin/staff/{id}/counter-pin. The PIN rides
+// the body once, is hashed on the server and never logged.
+type pinSetRequest struct {
+	PIN *string `json:"pin"`
+}
+
+// SetStaffCounterPIN is PUT /api/v1/admin/staff/{id}/counter-pin.
+func (h *Handler) SetStaffCounterPIN(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req pinSetRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	pin := ""
+	if req.PIN != nil {
+		pin = *req.PIN
+	}
+	if pin == "" {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "pin", Message: "is required"}))
+		return
+	}
+	st, err := h.svc.SetCounterPIN(r.Context(), id, pin, requesterSub(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pinAnswer{CounterPinSet: st.CounterPinSet, Locked: st.CounterPinLocked})
+}
+
+// ClearStaffCounterPIN is DELETE /api/v1/admin/staff/{id}/counter-pin.
+func (h *Handler) ClearStaffCounterPIN(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	st, err := h.svc.ClearCounterPIN(r.Context(), id, requesterSub(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pinAnswer{CounterPinSet: st.CounterPinSet, Locked: st.CounterPinLocked})
+}
+
+// UnlockStaffCounterPIN is POST /api/v1/admin/staff/{id}/counter-pin/unlock.
+func (h *Handler) UnlockStaffCounterPIN(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	st, err := h.svc.UnlockCounterPIN(r.Context(), id, requesterSub(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pinAnswer{CounterPinSet: st.CounterPinSet, Locked: st.CounterPinLocked})
+}
+
 // --- Module grants ---
 
 func (h *Handler) GrantModule(w http.ResponseWriter, r *http.Request) {

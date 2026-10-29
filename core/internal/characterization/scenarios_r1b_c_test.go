@@ -552,6 +552,13 @@ func r1bCPOSGroups() []groupDef {
 				{name: "pos.transaction.list.other_day", method: "GET", path: "/api/v1/pos/transactions?register_id=REG-01&date={today-30}"},
 				{name: "pos.transaction.list.bad_status", method: "GET", path: "/api/v1/pos/transactions?status=OPEN"},
 				{name: "pos.transaction.list.unknown_parameter", method: "GET", path: "/api/v1/pos/transactions?bogus=1"},
+				// The return counter's sale search (CP-06): by the sale's
+				// number and by its customer, and the manager's open refund
+				// claims list beside them (empty in a run with no terminal).
+				{name: "pos.transaction.list.search_number", method: "GET", path: "/api/v1/pos/transactions?q=POS-", sortEnvelopeItems: true},
+				{name: "pos.transaction.list.search_customer", method: "GET", path: "/api/v1/pos/transactions?q=Golden", sortEnvelopeItems: true},
+				{name: "pos.transaction.list.search_no_match", method: "GET", path: "/api/v1/pos/transactions?q=zz-no-such-sale"},
+				{name: "pos.refund_intents.list", method: "GET", path: "/api/v1/pos/refund-intents"},
 				{name: "pos.transaction.complete.no_tenders", method: "POST", path: "/api/v1/pos/transactions/{c_tx}/complete",
 					body: map[string]any{"tenders": []map[string]any{}}},
 				{name: "pos.transaction.complete.bad_id", method: "POST", path: "/api/v1/pos/transactions/not-a-uuid/complete",

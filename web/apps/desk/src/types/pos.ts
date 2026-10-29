@@ -110,6 +110,8 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** For a completed sale that has returns: sale line id -> quantity already returned. */
+    returned_quantities?: Record<string, string>;
     /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
     tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
@@ -129,6 +131,7 @@ export interface CounterCustomer {
     account_number: string;
     name: string;
     po_required: boolean;
+    job_required: boolean;
     credit_limit_cents: number | null;
     open_receivable_cents: number;
     available_credit_cents: number | null;
@@ -138,7 +141,7 @@ export interface CounterCustomer {
 
 // --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
 
-export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'account_hold' | 'manager_override';
 
 export interface WayForward {
     kind: 'pay_down' | 'manager_override' | 'switch_tender';
@@ -179,6 +182,38 @@ export interface CounterStanding {
     check_limit_cents: number | null;
     payment_options: TenderMethod[];
     on_account: OnAccountVerdict;
+    /** The customer's alerts that speak at the counter, oldest first. */
+    alerts: CounterAlert[];
+}
+
+/**
+ * An alert of the customer the counter reads: a note to read, or a warning
+ * that may ask to be acknowledged before the sale is taken.
+ */
+export interface CounterAlert {
+    id: string;
+    kind: 'note' | 'warning';
+    text: string;
+    /** The counter has to read this warning and say so before the sale is taken. */
+    acknowledge_required: boolean;
+}
+
+/** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
+export interface PosRules {
+    check_limit_cents: number | null;
+    check_id_required: CheckIDRule;
+}
+
+/** The counter settings resource: its rules and the revision a write rides. */
+export interface PosSettings {
+    revision: number;
+    rules: PosRules;
 }
 
 export interface SaleSummary {
@@ -189,12 +224,16 @@ export interface SaleSummary {
     register_id: string;
     cashier_id: string;
     customer_id: string | null;
+    customer_name: string | null;
     currency: string;
     total_cents: number;
     status: SaleStatus;
     invoice_id: string | null;
+    invoice_number: string | null;
     completed_at: string | null;
     created_at: string;
+    /** The day the sale was made on in its branch's own zone (the search's date bound reads the same day). */
+    business_day: string;
     item_count: number;
 }
 
@@ -377,6 +416,23 @@ export interface MovementRequest {
     reason_code?: MovementReason;
     note?: string;
     taken_by?: string;
+    /** A manager's step up approval: the manager it names is the taker. */
+    approval_token?: string;
+}
+
+/** A manager the step up picker offers: active, a PIN set, a role the act admits. */
+export interface StepUpManager {
+    id: string;
+    full_name: string;
+    staff_no: string;
+    role: string;
+}
+
+/** The single use approval a verified step up mints; one act spends it. */
+export interface StepUpApproval {
+    token: string;
+    manager_name: string;
+    expires_at: string;
 }
 
 export interface DayFigures {
@@ -590,4 +646,45 @@ export interface ScaleSimulatorInput {
     unit?: 'lb' | 'kg';
     motion?: boolean;
     status?: 'none' | 'over_capacity' | 'under_capacity' | 'zero_error' | 'initial_zero_error' | 'tare_error';
+}
+
+// --- Refund intents (CP-06) ---
+
+export type RefundIntentAct = 'void' | 'return' | 'payback';
+export type RefundIntentState = 'PENDING' | 'FAILED';
+export type RefundIntentOutcome = 'refund' | 'no_refund';
+
+/** One open refund claim waiting on a manager (GET /api/v1/pos/refund-intents). */
+export interface RefundIntent {
+    id: string;
+    sale_id: string;
+    sale_number: string;
+    tender_id: string;
+    tender_method: TenderMethod;
+    amount_cents: number;
+    act: RefundIntentAct;
+    state: RefundIntentState;
+    held_credit_cents: number;
+    created_at: string;
+}
+
+export interface RefundIntentResolved {
+    id: string;
+    sale_id: string;
+    tender_id: string;
+    act: RefundIntentAct;
+    state: 'DONE' | 'FAILED';
+    outcome: RefundIntentOutcome;
+    refund_tx_id: string | null;
+    reconciliation_reference: string | null;
+}
+
+export interface RefundIntentPaidBack {
+    id: string;
+    payback_id: string;
+    sale_id: string;
+    tender_id: string;
+    amount_cents: number;
+    refund_tx_id: string;
+    state: 'DONE';
 }

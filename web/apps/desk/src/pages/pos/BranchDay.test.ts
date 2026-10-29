@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import './BranchDay';
+import { authCustody } from '@gable/auth';
 import './TillSignoffQueue';
 import type { GableBranchDay } from './BranchDay';
 import type { GableTillSignoffQueue } from './TillSignoffQueue';
@@ -246,11 +247,36 @@ describe('the sign off queue', () => {
     q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
     await flush();
     await update(el, {});
+    // the step up dialog opens: the manager's approval completes the sign off
+    const stepUp = el.querySelector('gable-step-up-dialog');
+    expect(stepUp).not.toBeNull();
+    stepUp!.dispatchEvent(new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName: 'E2E Manager' }, bubbles: true }));
+    await flush();
+    await update(el, {});
     const post = requests.find((r) => r.method === 'POST');
     expect(post?.url).toContain('/api/v1/pos/till/s-1/signoff');
-    expect(post?.body).toEqual({ reason: 'recounted, the till roll agrees' });
+    expect(post?.body).toEqual({ reason: 'recounted, the till roll agrees', approval_token: 'tok-1' });
     expect(el.querySelector('[data-testid="signoff-s-1"]')).toBeNull();
     expect(text(q(el, '[data-testid="signoff-empty"]'))).toContain('No counted drawer waits');
+  });
+
+  it('a signed in finance manager signs off as themselves, with no PIN dialog', async () => {
+    const roles = vi.spyOn(authCustody, 'roles', 'get').mockReturnValue(['finance']);
+    let queue = [pending];
+    handler = (method) => (method === 'POST' ? ((queue = []), jsonResponse({ session: { ...pending, status: 'closed' } })) : jsonResponse({ items: queue, next_cursor: null, limit: 50 }));
+    const el = await mountAsync<GableTillSignoffQueue>('gable-till-signoff-queue');
+    const reason = q<HTMLInputElement>(el, '[data-testid="signoff-reason-s-1"]');
+    reason.value = 'mine to accept';
+    reason.dispatchEvent(new Event('input', { bubbles: true }));
+    await update(el, {});
+    q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
+    await flush();
+    await update(el, {});
+    // the claims path, not the step up: no token, no dialog
+    const post = requests.find((r) => r.method === 'POST');
+    expect(post?.body).toEqual({ reason: 'mine to accept' });
+    expect(el.querySelector('gable-step-up-dialog')).toBeNull();
+    roles.mockRestore();
   });
 
   it('shows the server\'s refusal when the signer is the closer', async () => {
@@ -263,6 +289,10 @@ describe('the sign off queue', () => {
     reason.dispatchEvent(new Event('input', { bubbles: true }));
     await update(el, {});
     q<HTMLButtonElement>(el, '[data-testid="signoff-button-s-1"]').click();
+    await flush();
+    await update(el, {});
+    el.querySelector('gable-step-up-dialog')!.dispatchEvent(
+      new CustomEvent('step-up-approved', { detail: { token: 'tok-1', managerName: 'E2E Manager' }, bubbles: true }));
     await flush();
     await update(el, {});
     expect(text(q(el, '[data-testid="signoff-error-s-1"]'))).toContain('cannot sign off');

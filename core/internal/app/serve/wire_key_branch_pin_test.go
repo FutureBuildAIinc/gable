@@ -286,8 +286,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		}
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, f.taxExempt, f.custB); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
@@ -1398,8 +1398,8 @@ func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UU
 func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
-		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, id, customer); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA', CURRENT_DATE - 1)`, id, customer); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 }
@@ -1658,6 +1658,13 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.twinLeg("GET", "/api/v1/pos/terminal-lost-items")
 	if !strings.Contains(string(buf), `"code":"unavailable"`) {
 		t.Errorf("bound key terminal lost items read answered another refusal: %s", buf)
+	}
+	// The manager's open refund claims list (CP-06): its sale join carries the
+	// branch wall, so the pinned key never reads another branch's claims.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/refund-intents", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/refund-intents")
+	if strings.Contains(string(buf), f.txnB.String()) {
+		t.Errorf("bound key refund intents list named the foreign sale: %s", buf)
 	}
 
 	// The open till of the foreign register: no session answers, while the

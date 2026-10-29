@@ -631,6 +631,7 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "balance_due_after_deposits_cents": 12320,
         "branch_id": "<id-1>",
         "confirmed_at": null,
         "created_at": "<ts+0d>",
@@ -639,7 +640,9 @@
         "customer_name": "Tarnwick Construction",
         "customer_po": null,
         "delivery_type": "pickup",
+        "deposit_total_cents": 0,
         "deposit_unapplied_cents": 0,
+        "deposits": [],
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-19>",

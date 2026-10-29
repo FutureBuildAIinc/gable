@@ -99,6 +99,14 @@ type Repository interface {
 	DeleteContact(ctx context.Context, id uuid.UUID) error
 	ListContacts(ctx context.Context, customerID uuid.UUID, f ChildFilter) ([]Contact, error)
 	CountContacts(ctx context.Context, customerID uuid.UUID, f ChildFilter) (int64, error)
+
+	// The alerts of a customer: added, listed and ended. An alert is ended,
+	// not deleted, so the row stays for the audit trail.
+	InsertAlert(ctx context.Context, a *Alert) error
+	GetAlert(ctx context.Context, id uuid.UUID) (*Alert, error)
+	EndAlert(ctx context.Context, a *Alert) error
+	ListAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) ([]Alert, error)
+	CountAlerts(ctx context.Context, customerID uuid.UUID, f AlertFilter) (int64, error)
 }
 
 type PostgresRepository struct {
@@ -191,7 +199,7 @@ const customerColumns = `
 	ROUND(c.balance_due * 100)::bigint,
 	c.currency,
 	COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-	c.payment_terms_id, pt.code, pt.name, c.po_required, c.named_buyer_required,
+	c.payment_terms_id, pt.code, pt.name, c.po_required, c.job_required, c.named_buyer_required,
 	CASE WHEN c.check_limit IS NULL THEN NULL ELSE ROUND(c.check_limit * 100)::bigint END,
 	c.revision, c.created_at, COALESCE(c.updated_at, c.created_at),
 	ARRAY(SELECT cb.branch_id FROM customer_branches cb WHERE cb.customer_id = c.id UNION SELECT c.primary_branch_id ORDER BY 1)`
@@ -214,7 +222,7 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		&c.SalespersonID, &c.SalespersonName,
 		&credit, &balance, &c.Currency, &c.EffectiveCurrency,
 		&c.PaymentTermsID, &c.PaymentTerms.Code, &c.PaymentTerms.Name, &c.POrequired,
-		&c.NamedBuyerRequired, &checkLimit,
+		&c.JobRequired, &c.NamedBuyerRequired, &checkLimit,
 		&c.Revision, &created, &updated, &c.BranchIDs); err != nil {
 		return err
 	}
@@ -245,10 +253,12 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 		INSERT INTO customers (
 			id, account_number, name, email, phone, address, is_active,
 			price_profile_id, salesperson_id, credit_limit, currency, payment_terms_id, po_required,
+			job_required,
 			named_buyer_required, check_limit,
 			created_at, updated_at, revision, primary_branch_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7,
 			COALESCE($8::uuid, price_profile_default_id()), $9, $10::numeric / 100, $11, COALESCE($12::uuid, payment_terms_default_id()), $13,
+			$18,
 			$16, $17::numeric / 100,
 			$14, $14, 1,
 			COALESCE($15::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
@@ -256,7 +266,7 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
 		c.IsActive,
 		c.PriceProfileID, c.SalespersonID, centsArg(c.CreditLimitCents), nullableText(c.Currency), nilIfZero(c.PaymentTermsID), c.POrequired,
-		c.CreatedAt.Time, branchArg, c.NamedBuyerRequired, centsArg(c.CheckLimitCents),
+		c.CreatedAt.Time, branchArg, c.NamedBuyerRequired, centsArg(c.CheckLimitCents), c.JobRequired,
 	).Scan(&branch)
 	if err != nil {
 		return mapWriteError(err, "failed to insert customer")
@@ -306,8 +316,15 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 }
 
 func (r *PostgresRepository) LockCustomer(ctx context.Context, id uuid.UUID) error {
+	exec := r.db.GetExecutor(ctx)
+	// Section 11 step 1a before step 7: serialize with counter sale completions
+	// that read the customer's controls and counter alerts before step 6.
+	if _, err := exec.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, id.String()); err != nil {
+		return fmt.Errorf("failed to take customer credit lock: %w", err)
+	}
 	var locked uuid.UUID
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+	err := exec.QueryRow(ctx,
 		`SELECT c.id FROM customers c WHERE c.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF c`,
 		id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -325,13 +342,14 @@ func (r *PostgresRepository) UpdateCustomer(ctx context.Context, c *Customer) er
 			account_number = $2, name = $3, email = $4, phone = $5, address = $6,
 			is_active = $7, price_profile_id = COALESCE($8::uuid, price_profile_default_id()), salesperson_id = $9,
 			credit_limit = $10::numeric / 100, currency = $11, payment_terms_id = $12, po_required = $13,
+			job_required = $17,
 			named_buyer_required = $15, check_limit = $16::numeric / 100,
 			revision = revision + 1, updated_at = $14
 		WHERE id = $1`,
 		c.ID, c.AccountNumber, c.Name, nullableText(c.Email), nullableText(c.Phone), nullableText(c.Address),
 		c.IsActive, c.PriceProfileID, c.SalespersonID, centsArg(c.CreditLimitCents),
 		nullableText(c.Currency), c.PaymentTermsID, c.POrequired, c.UpdatedAt.Time,
-		c.NamedBuyerRequired, centsArg(c.CheckLimitCents))
+		c.NamedBuyerRequired, centsArg(c.CheckLimitCents), c.JobRequired)
 	if err != nil {
 		return mapWriteError(err, "failed to update customer")
 	}

@@ -7,6 +7,9 @@
  * ApiError, so a page can show the message, the field details and the stale revision.
  */
 import type {
+    Alert,
+    AlertPage,
+    AlertRequest,
     Contact,
     ContactPage,
     ContactRequest,
@@ -46,6 +49,15 @@ export interface ListChildParams {
     includeTotal?: boolean;
 }
 
+/** The alerts list's parameters: the platform three and the state it holds. */
+export interface ListAlertsParams {
+    /** The state the list holds: the open alerts (the default), the ended ones, or both. */
+    state?: 'open' | 'ended' | 'all';
+    limit?: number;
+    cursor?: string | null;
+    includeTotal?: boolean;
+}
+
 function toQuery(entries: [string, string | undefined | null][]): string {
     const q = new URLSearchParams();
     for (const [k, v] of entries) if (v !== undefined && v !== null && v !== '') q.set(k, v);
@@ -73,6 +85,15 @@ export function buildChildQuery(params: ListChildParams = {}): string {
     ]);
 }
 
+export function buildAlertQuery(params: ListAlertsParams = {}): string {
+    return toQuery([
+        ['state', params.state],
+        ['limit', params.limit ? String(params.limit) : undefined],
+        ['cursor', params.cursor],
+        ['include', params.includeTotal ? 'total' : undefined],
+    ]);
+}
+
 /**
  * Parses a credit limit typed in dollars into integer cents with string arithmetic, never a float.
  * Empty (or blank) means no limit and gives null; "0" gives 0 (no credit). A leading "$" and comma
@@ -80,15 +101,28 @@ export function buildChildQuery(params: ListChildParams = {}): string {
  * 13 whole digits are refused.
  */
 export function parseCreditLimitCents(text: string): { ok: true; cents: number | null } | { ok: false; message: string } {
+    return parseDollarsCents(text, 'credit limit');
+}
+
+/**
+ * Parses a check limit typed in dollars into integer cents, the same shape as
+ * the credit limit parse: empty means no limit of the customer's own (the
+ * counter's rule governs), zero means no checks at all.
+ */
+export function parseCheckLimitCents(text: string): { ok: true; cents: number | null } | { ok: false; message: string } {
+    return parseDollarsCents(text, 'check limit');
+}
+
+function parseDollarsCents(text: string, label: string): { ok: true; cents: number | null } | { ok: false; message: string } {
     const t = text.trim().replace(/^\$/, '').replace(/,/g, '').trim();
     if (t === '') return { ok: true, cents: null };
-    if (t.startsWith('-')) return { ok: false, message: 'A credit limit cannot be negative' };
+    if (t.startsWith('-')) return { ok: false, message: `A ${label} cannot be negative` };
     const m = /^(\d*)(?:\.(\d{0,2}))?$/.exec(t);
     if (!m || (m[1] === '' && !m[2])) {
         return { ok: false, message: /^\d*\.\d{3,}$/.test(t) ? 'Use at most two decimal places' : 'Enter an amount in dollars, for example 5000 or 5000.50' };
     }
     const whole = m[1] === '' ? '0' : m[1].replace(/^0+(?=\d)/, '');
-    if (whole.length > 13) return { ok: false, message: 'That credit limit is too large' };
+    if (whole.length > 13) return { ok: false, message: `That ${label} is too large` };
     const frac = (m[2] ?? '').padEnd(2, '0');
     return { ok: true, cents: Number(whole) * 100 + Number(frac) };
 }
@@ -113,9 +147,12 @@ export function customerRequestFromCustomer(c: Customer): CustomerUpdateRequest 
         price_profile_id: c.price_profile_id,
         salesperson_id: c.salesperson_id,
         credit_limit_cents: c.credit_limit_cents,
+        // the customer's own check limit: null defers to the counter's rule
+        check_limit_cents: c.check_limit_cents,
         currency: c.currency,
         payment_terms_id: c.payment_terms_id,
         po_required: c.po_required,
+        job_required: c.job_required,
     };
 }
 
@@ -331,8 +368,41 @@ export const CustomerService = {
         );
     },
 
-    // Reference lists
+    // Alerts: the office's notes and warnings for the counter and the order desk
 
+    async listAlerts(customerId: string, params: ListAlertsParams = {}): Promise<AlertPage> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts${buildAlertQuery(params)}`),
+            'Failed to fetch alerts',
+        );
+        return response.json();
+    },
+
+    async addAlert(customerId: string, request: AlertRequest): Promise<Alert> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(request),
+            }),
+            'Failed to add alert',
+        );
+        return response.json();
+    },
+
+    /** An alert is ended, not deleted: the row stays for the audit trail. The revision travels in If-Match. */
+    async endAlert(customerId: string, alertId: string, revision: number): Promise<Alert> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/customers/${customerId}/alerts/${alertId}/end`, {
+                method: 'POST',
+                headers: { 'If-Match': ifMatch(revision) },
+            }),
+            'Failed to end alert',
+        );
+        return response.json();
+    },
+
+    // Reference lists
     /** Active terms by default, because only active terms can be newly assigned; pass isActive: null for all of them. */
     async listPaymentTerms(params: ListChildParams = {}): Promise<PaymentTermsRecordPage> {
         const { isActive = true, ...rest } = params;

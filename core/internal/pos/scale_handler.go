@@ -32,7 +32,7 @@ func (h *Handler) WeighIn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	ticket, err := h.service.WeighIn(r.Context(), req.RegisterID, req.VehicleRef, actorFrom(r))
+	ticket, err := h.service.WeighIn(r.Context(), req.RegisterID, req.VehicleRef, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -73,7 +73,7 @@ func (h *Handler) WeighOut(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, ticket, err := h.service.WeighOut(r.Context(), in, r.Header.Get("If-Match"), req.Revision, actorFrom(r))
+	sale, ticket, err := h.service.WeighOut(r.Context(), in, r.Header.Get("If-Match"), req.Revision, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -121,7 +121,7 @@ func (h *Handler) EnterLineWeight(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.EnterManualWeight(r.Context(), id, itemID, in, r.Header.Get("If-Match"), req.Revision, actorFrom(r))
+	sale, err := h.service.EnterManualWeight(r.Context(), id, itemID, in, r.Header.Get("If-Match"), req.Revision, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -184,7 +184,7 @@ func (h *Handler) VoidScaleTicket(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	ticket, err := h.service.VoidScaleTicket(r.Context(), id, req.Reason, r.Header.Get("If-Match"), req.Revision, actorFrom(r))
+	ticket, err := h.service.VoidScaleTicket(r.Context(), id, req.Reason, r.Header.Get("If-Match"), req.Revision, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

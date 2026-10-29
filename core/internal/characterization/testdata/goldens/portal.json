@@ -72,7 +72,7 @@
         {
           "availability": [
             {
-              "available": 255,
+              "available": 155,
               "in_stock": true,
               "lead_time_days": null,
               "on_hand": 255,
@@ -108,7 +108,7 @@
               "yard_name": "Golden Branch Renamed"
             }
           ],
-          "available": 379,
+          "available": 279,
           "base_price": 5.5,
           "category": "Lumber",
           "category_id": "<id-8>",

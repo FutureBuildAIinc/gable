@@ -156,6 +156,9 @@ GET	/api/v1/admin/staff	internal/staff	h.ListStaff
 POST	/api/v1/admin/staff	internal/staff	h.CreateStaff
 GET	/api/v1/admin/staff/{id}	internal/staff	h.GetStaff
 PUT	/api/v1/admin/staff/{id}	internal/staff	h.UpdateStaff
+DELETE	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.ClearStaffCounterPIN
+PUT	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.SetStaffCounterPIN
+POST	/api/v1/admin/staff/{id}/counter-pin/unlock	internal/staff	h.UnlockStaffCounterPIN
 POST	/api/v1/admin/staff/{id}/modules	internal/staff	h.GrantModule
 DELETE	/api/v1/admin/staff/{id}/modules/{module_id}	internal/staff	h.RevokeModule
 GET	/api/v1/ap/aging	internal/ap	h.HandleGetAgingSummary
@@ -237,6 +240,9 @@ GET	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleListContac
 POST	/api/v1/customers/{customerId}/contacts	internal/customer	h.HandleCreateContact
 GET	/api/v1/customers/{id}	internal/customer	h.HandleGetCustomer
 PUT	/api/v1/customers/{id}	internal/customer	h.HandleUpdateCustomer
+GET	/api/v1/customers/{id}/alerts	internal/customer	h.HandleListAlerts
+POST	/api/v1/customers/{id}/alerts	internal/customer	h.HandleAddAlert
+POST	/api/v1/customers/{id}/alerts/{alertId}/end	internal/customer	h.HandleEndAlert
 GET	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleGetEscalationPolicy
 PUT	/api/v1/customers/{id}/escalation-policy	internal/customer	h.HandleSetEscalationPolicy
 PATCH	/api/v1/customers/{id}/salesperson	internal/customer	h.HandleUpdateSalesperson
@@ -398,6 +404,7 @@ POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 POST	/api/v1/pos/exchanges	internal/pos	h.CreateExchange
 POST	/api/v1/pos/exchanges/preview	internal/pos	h.PreviewExchange
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
+GET	/api/v1/pos/refund-intents	internal/pos	h.ListRefundIntents
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
 POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent
 GET	/api/v1/pos/registers	internal/pos	h.ListRegisters
@@ -413,6 +420,10 @@ GET	/api/v1/pos/scale/tickets/{id}	internal/pos	h.GetScaleTicket
 POST	/api/v1/pos/scale/tickets/{id}/void	internal/pos	h.VoidScaleTicket
 POST	/api/v1/pos/scale/weigh-in	internal/pos	h.WeighIn
 POST	/api/v1/pos/scale/weigh-out	internal/pos	h.WeighOut
+GET	/api/v1/pos/settings	internal/pos	h.GetPosSettingsHandler
+PUT	/api/v1/pos/settings	internal/pos	h.PutPosSettingsHandler
+POST	/api/v1/pos/step-up	internal/pos	h.StepUpHandler
+GET	/api/v1/pos/step-up/managers	internal/pos	h.StepUpManagersHandler
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
 POST	/api/v1/pos/terminal-intents/sweep	internal/pos	h.SweepTerminalIntentsHandler
 GET	/api/v1/pos/terminal-intents/{id}	internal/pos	h.GetTerminalIntentHandler
