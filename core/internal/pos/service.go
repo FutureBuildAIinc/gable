@@ -1099,11 +1099,17 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	pl.DiscountAmount = l.DiscountAmount
 	pl.DiscountReason = derefString(l.DiscountReason)
 	// The tint rides the line (row CP-16). The charge the dealer set is
-	// already inside the line's price, so the carried tint carries the
-	// charge it was sold under and the reprice does not add it twice: the
-	// priced line's price is rebuilt from the engine and the tint's own
-	// charge is put back on it once, below.
+	// already inside the line's price, so on an override or manual line the
+	// frozen tint charge is taken back out before priceLine runs and adds
+	// the dealer's tint charge once.
 	if l.Tint != nil {
+		if pl.UnitPrice != nil && l.Tint.TintChargeCents != nil && *l.Tint.TintChargeCents > 0 {
+			base := *pl.UnitPrice - httpx.Price(int64(*l.Tint.TintChargeCents)*100)
+			if base < 0 {
+				base = 0
+			}
+			pl.UnitPrice = &base
+		}
 		tint := *l.Tint
 		tint.Components = append([]salesdoc.TintComponent(nil), l.Tint.Components...)
 		pl.Tint = &tint

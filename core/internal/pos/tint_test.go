@@ -670,3 +670,55 @@ func TestVoidOfATintedLineDoesNotRestockIt(t *testing.T) {
 		t.Errorf("the void put the tinted can back into saleable stock: %d on hand, want %d", after, afterSale)
 	}
 }
+
+// RULE: an override priced or manual priced tinted line carries the dealer's
+// tint charge once, and a reprice (a quantity change or a customer change)
+// keeps that one tint charge rather than adding a second on top of the already
+// charged unit price.
+func TestOverridePricedTintedLineRepricesWithOneTintCharge(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
+
+	sale := f.startSale(nil)
+	line := tintLine("1", formulaID, "")
+	line["product_id"] = f.productID.String()
+	line["unit_price_ten_thousandths"] = 60000
+	line["override_reason"] = "contractor match"
+	added := f.addLine(sale, line)
+	if added.status != http.StatusOK {
+		t.Fatalf("add override tinted line = %d: %s", added.status, added.raw)
+	}
+	l0 := added.body["lines"].([]any)[0].(map[string]any)
+	if got := num(t, l0, "unit_price_ten_thousandths"); got != 85000 {
+		t.Fatalf("initial unit price = %d, want the 60000 override plus the 250 cent tint charge (85000)", got)
+	}
+	lineID := lineIDs(t, added)[0]
+
+	patched := f.patchQty(sale, lineID, "2", rev(t, added))
+	if patched.status != http.StatusOK {
+		t.Fatalf("quantity change = %d: %s", patched.status, patched.raw)
+	}
+	l1 := patched.body["lines"].([]any)[0].(map[string]any)
+	if got := num(t, l1, "unit_price_ten_thousandths"); got != 85000 {
+		t.Errorf("unit price after quantity change = %d, want 85000 (the tint charge added once, not twice)", got)
+	}
+	if got := num(t, l1, "line_total_cents"); got != 1700 {
+		t.Errorf("line total after quantity change = %d, want 1700", got)
+	}
+
+	attached := f.attach(sale, map[string]any{"customer_id": f.customerID.String()})
+	if attached.status != http.StatusOK {
+		t.Fatalf("attach customer = %d: %s", attached.status, attached.raw)
+	}
+	l2 := attached.body["lines"].([]any)[0].(map[string]any)
+	if got := num(t, l2, "unit_price_ten_thousandths"); got != 85000 {
+		t.Errorf("unit price after customer change = %d, want 85000 (the tint charge added once)", got)
+	}
+	if got := num(t, l2, "line_total_cents"); got != 1700 {
+		t.Errorf("line total after customer change = %d, want 1700", got)
+	}
+}
+
