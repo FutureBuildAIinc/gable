@@ -455,6 +455,10 @@ func lastFourOf(masked string) string {
 // dispatchReversal runs one refund or void leg through void-or-refund: a
 // synchronous Payments API call with no device. The answer is delivered off
 // the caller's goroutine, as a device's own answer would be.
+//
+// The reversal takes the same no double charge guard a sale takes: a retried
+// reversal is the same leg, so the customer is refunded once and the second
+// dispatch is refused.
 func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) (TerminalReceipt, error) {
 	cfg, err := t.resolve()
 	if err != nil {
@@ -463,12 +467,21 @@ func (t *RunTerminal) dispatchReversal(ctx context.Context, d TerminalDispatch) 
 	if d.Reference == "" {
 		return TerminalReceipt{}, fmt.Errorf("the run %s leg names no trans_id to reverse", d.Kind)
 	}
+	guard := t.guardFor(d.IdempotencyKey)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	if guard.attempted {
+		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took the %s of order %s in this process: the reversal is not sent again", d.Kind, d.IdempotencyKey)
+	}
 	var amount int64
 	if d.Kind == TerminalKindRefund {
 		amount = d.AmountCents // cents; a void is the full transaction by definition
 	}
 	body, _ := json.Marshal(runVoidOrRefundTerminalRequest{
 		TransID: d.Reference, MID: cfg.MID, Amount: amount, UserIdentifier: d.IdempotencyKey})
+	// marked under the guard before the POST: a lost answer may still have
+	// refunded, so the reversal is never sent twice.
+	guard.attempted = true
 	raw, status, err := t.authed(ctx, cfg, http.MethodPost, "/api/v1/void-or-refund", body, 0)
 	if err != nil {
 		return TerminalReceipt{}, fmt.Errorf("the run %s failed: %w", d.Kind, err)

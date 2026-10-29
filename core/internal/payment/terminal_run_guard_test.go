@@ -261,3 +261,131 @@ func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		t.Fatalf("iteration %d: %d dispatches were answered, want 1", i, answered)
 	}
 }
+
+// TestRunTerminalARetriedReversalRefundsOnce: a retried reversal is the
+// same leg. The driver's own guard takes the refund and void path too, so
+// the customer is refunded once and the retried reversal is refused.
+func TestRunTerminalARetriedReversalRefundsOnce(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs, term := newRunTerminalFixtureOn(t, ledger)
+		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "refund-1",
+			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 1200,
+			Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(),
+			LeaseUntil: time.Now().Add(time.Minute)}
+		if err := ledger.Claim(context.Background(), in); err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
+			t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+		}
+		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey,
+			Reference: "TRX-SALE1"}
+		if _, err := term.Dispatch(context.Background(), d); err != nil {
+			t.Fatalf("first reversal: %v", err)
+		}
+		if n := len(fs.fake.voidPosts_()); n != 1 {
+			t.Fatalf("the first reversal posted %d voids, want 1", n)
+		}
+		if _, err := term.Dispatch(context.Background(), d); err == nil {
+			t.Fatal("the retried reversal was answered: the customer would be refunded twice")
+		}
+		if n := len(fs.fake.voidPosts_()); n != 1 {
+			t.Fatalf("the retried reversal posted %d voids, want 1: the customer would be refunded twice", n)
+		}
+		return true
+	})
+}
+
+// TestRunTerminalConcurrentReversalsOfOneLegRefundOnce (BRIEF-COMMON:
+// transactions, pool size 4 with three contenders): four reversals of one
+// leg at the same time, against a fake that holds the void-or-refund POST
+// open. The guard holds the check and the POST together, so exactly one
+// void-or-refund POST is sent and the other three reversals are refused.
+func TestRunTerminalConcurrentReversalsOfOneLegRefundOnce(t *testing.T) {
+	testutil.LockTerminalTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	ctx := context.Background()
+	var branch uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
+		t.Fatalf("default branch: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		concurrentReversalOnce(t, db, ctx, branch, i)
+	}
+}
+
+// concurrentReversalOnce runs one iteration of the concurrent reversal.
+func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) {
+	t.Helper()
+	sale := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
+			(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
+			VALUES ($1, $2, $3, 0, 0, 0, 'OPEN', $4, 0, 1, 'USD', $5, NOW(), NOW())`,
+		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
+		t.Fatalf("sale row: %v", err)
+	}
+	defer func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+	}()
+	ledger := payment.NewTerminalLedger(db)
+	fs := newRunFake(t)
+	release := fs.fake.holdPosts()
+	term := newRunDriver(t, fs, ledger)
+	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "refund-1",
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 1200,
+		Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(),
+		LeaseUntil: time.Now().Add(time.Minute)}
+	if err := ledger.Claim(ctx, in); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
+		t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+	}
+	d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+		RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey,
+		Reference: "TRX-SALE1"}
+	start := make(chan struct{})
+	errs := make([]error, 4)
+	var wg sync.WaitGroup
+	for n := 0; n < 4; n++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			_, errs[n] = term.Dispatch(ctx, d)
+		}(n)
+	}
+	close(start)
+	// wait until the void-or-refund POST is in flight and held open: this is
+	// the window in which a second reversal would refund again
+	deadline := time.Now().Add(5 * time.Second)
+	for len(fs.fake.voidPosts_()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the void-or-refund POST never arrived")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	release()
+	wg.Wait()
+	if n := len(fs.fake.voidPosts_()); n != 1 {
+		t.Fatalf("iteration %d: four reversals of one leg posted %d voids, want 1: the customer would be refunded twice", i, n)
+	}
+	answered := 0
+	for n, err := range errs {
+		if err == nil {
+			answered++
+			continue
+		}
+		if !strings.Contains(err.Error(), "not sent again") {
+			t.Fatalf("iteration %d: contender %d failed with %v, want the refusal of a repeated reversal", i, n, err)
+		}
+	}
+	if answered != 1 {
+		t.Fatalf("iteration %d: %d reversals were answered, want 1", i, answered)
+	}
+}
