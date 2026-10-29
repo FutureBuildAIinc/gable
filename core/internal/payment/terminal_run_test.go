@@ -312,12 +312,25 @@ func claimRunLegAt(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, bran
 		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: amount,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(time.Minute)}
+	if !claimRunLegIntent(t, l, in) {
+		return nil, false
+	}
+	return in, true
+}
+
+// claimRunLegIntent claims and dispatch-moves an intent the scenario built
+// itself (a lease that already ran out so the sweep takes the leg, a race
+// leg's short lease, a reversal leg): the same discipline claimRunLegAt
+// keeps for the sale leg it builds, so a leg a foreign cleanup took mid
+// flight answers false and the scenario runs again.
+func claimRunLegIntent(t *testing.T, l *payment.TerminalLedger, in *payment.TerminalIntent) bool {
+	t.Helper()
 	if err := l.Claim(context.Background(), in); err != nil {
 		// the counter suite's table cleanup deletes the sale rows whole, so
 		// the claim can fail on the foreign key: the row this intent points
 		// at is not there and the scenario runs again
-		if saleRowIsGone(t, sale) {
-			return nil, false
+		if saleRowIsGone(t, in.TransactionID) {
+			return false
 		}
 		t.Fatalf("claim: %v", err)
 	}
@@ -325,10 +338,7 @@ func claimRunLegAt(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, bran
 	if err != nil {
 		t.Fatalf("dispatch move: %v", err)
 	}
-	if !ok {
-		return nil, false
-	}
-	return in, true
+	return ok
 }
 
 // waitForIntentState polls the ledger until the intent holds one of the
@@ -812,11 +822,8 @@ func TestRunTerminalRefundAndVoidGoThroughVoidOrRefund(t *testing.T) {
 			in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: tc.kind + "-0",
 				RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: tc.amount,
 				Kind: tc.kind, IdempotencyKey: tc.kind + "-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
-			if err := ledger.Claim(context.Background(), in); err != nil {
-				t.Fatalf("claim: %v", err)
-			}
-			if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-				t.Fatalf("dispatch move: %v %v", ok, err)
+			if !claimRunLegIntent(t, ledger, in) {
+				return false
 			}
 			if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 				IntentID: in.ID, Kind: tc.kind, AmountCents: tc.amount, RegisterID: in.RegisterID,
@@ -861,11 +868,8 @@ func TestRunTerminalRefundDecline(t *testing.T) {
 		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "refund-1",
 			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 500,
 			Kind: payment.TerminalKindRefund, IdempotencyKey: "refund-" + sale.String(), LeaseUntil: time.Now().Add(time.Minute)}
-		if err := ledger.Claim(context.Background(), in); err != nil {
-			t.Fatalf("claim: %v", err)
-		}
-		if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-			t.Fatalf("dispatch move: %v %v", ok, err)
+		if !claimRunLegIntent(t, ledger, in) {
+			return false
 		}
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 			IntentID: in.ID, Kind: payment.TerminalKindRefund, AmountCents: 500, RegisterID: in.RegisterID,
@@ -923,16 +927,19 @@ func TestRunTerminalLateAnswerAfterTheSweepNeverMovesTheLeg(t *testing.T) {
 			Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 			// the lease has already run out: the sweep takes this leg
 			LeaseUntil: time.Now().Add(-time.Second)}
-		if err := ledger.Claim(context.Background(), in); err != nil {
-			t.Fatalf("claim: %v", err)
-		}
-		if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-			t.Fatalf("dispatch move: %v %v", ok, err)
+		if !claimRunLegIntent(t, ledger, in) {
+			return false
 		}
 		if _, err := ledger.Sweep(context.Background(), time.Now().Add(time.Hour)); err != nil {
 			t.Fatalf("sweep: %v", err)
 		}
 		got, err := ledger.Get(context.Background(), in.ID)
+		if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+			// the row was deleted by another suite's terminal table cleanup
+			// before the sweep took it: the scenario runs again rather than
+			// failing on a row that is not there
+			return false
+		}
 		if err != nil {
 			t.Fatalf("get intent: %v", err)
 		}
@@ -950,6 +957,9 @@ func TestRunTerminalLateAnswerAfterTheSweepNeverMovesTheLeg(t *testing.T) {
 		out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
 			IntentID: in.ID, ProviderRef: "TRX-LATE", Verdict: "authorized",
 			Brand: "VISA", Last4: "4242", AuthCode: "OK1"})
+		if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+			return false
+		}
 		if err != nil {
 			t.Fatalf("late answer: %v", err)
 		}
@@ -957,6 +967,9 @@ func TestRunTerminalLateAnswerAfterTheSweepNeverMovesTheLeg(t *testing.T) {
 			t.Fatalf("the late answer was %s, want it queued on the manager item", out)
 		}
 		after, err := ledger.Get(context.Background(), in.ID)
+		if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+			return false
+		}
 		if err != nil {
 			t.Fatalf("get intent: %v", err)
 		}
@@ -998,11 +1011,8 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 100,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(40 * time.Millisecond)}
-	if err := ledger.Claim(ctx, in); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
-		t.Fatalf("dispatch move: %v %v", ok, err)
+	if !claimRunLegIntent(t, ledger, in) {
+		return false
 	}
 	if _, err := term.Dispatch(ctx, payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind,
 		AmountCents: in.AmountCents, RegisterID: in.RegisterID, DeviceID: in.DeviceID,
