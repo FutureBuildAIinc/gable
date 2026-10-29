@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { pickOptionByValue } from './app-controls';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -42,19 +43,6 @@ async function stockedProduct(request: APIRequestContext): Promise<{ sku: string
     if (atBranch >= 50) return p;
   }
   throw new Error('no stocked product for the counter run');
-}
-
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
 }
 
 test('the counter: a delivered sale is taxed at the ship to zone, a pickup at the branch', async ({ page, request }) => {
