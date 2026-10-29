@@ -486,6 +486,8 @@ func mig105ServiceDB(t *testing.T) *database.DB {
 	mig105Apply(t, conn, "../../migrations/126_counter_buyers_returns_and_receipts.sql")
 	// and the till columns and tables 127 added (the session reads name them)
 	mig105Apply(t, conn, "../../migrations/127_till_movements_and_eod.sql")
+	// and the tint tables 142 added (the sale line read names them)
+	mig105Apply(t, conn, "../../migrations/142_paint_tint_catalogue_and_line_tints.sql")
 	conn.Close(context.Background())
 	db, err := database.Connect(url)
 	if err != nil {
