@@ -27,6 +27,7 @@ import { weightBadgeText } from './scale';
 import { formatPrice4, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 
@@ -1175,7 +1176,7 @@ export class POSTerminal extends LitElement {
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
-    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry);
+    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry, this._roundingMode);
     return plan.ok && this._idHoldWords(plan.tenders) === null;
   }
 
@@ -1439,7 +1440,61 @@ export class POSTerminal extends LitElement {
 
   /** What is still owed once the added tenders are taken (never negative). */
   private get _owedCents(): number {
-    return Math.max((this._sale?.total_cents ?? 0) - this._tenderedSoFar, 0);
+    const total = this._sale?.total_cents ?? 0;
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    if (pendingCash > 0) {
+      const otherLegs = this._pendingTenders
+        .filter((t) => t.method !== 'cash')
+        .reduce((s, t) => s + t.amount_cents, 0);
+      const cashNeeded = roundCashFor(this._roundingMode, Math.max(total - otherLegs, 0)).rounded;
+      if (pendingCash >= cashNeeded) {
+        return 0;
+      }
+    }
+    return Math.max(total - this._tenderedSoFar, 0);
+  }
+
+  /**
+   * The branch's cash rounding rule (CP-18): the drawer keeps the rounded
+   * cash, and the change falls out of the rounded figure. The rule off
+   * changes nothing.
+   */
+  private get _roundingMode(): CashRoundingMode | null {
+    const regBranchId = this._register?.branch_id;
+    if (regBranchId) {
+      const regBranch = branchContext.branches.find((b) => b.id === regBranchId);
+      if (regBranch?.cash_rounding_mode) return regBranch.cash_rounding_mode;
+    }
+    return branchContext.current?.cash_rounding_mode ?? null;
+  }
+
+  /** The cash leg, before the branch's rule moves it. */
+  private get _cashLegCents(): number {
+    const total = this._sale?.total_cents ?? 0;
+    const otherLegs = this._pendingTenders
+      .filter((t) => t.method !== 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    if (this._tenderMethod !== null && this._tenderMethod !== 'cash') {
+      // The cashier is typing a card, a cheque or an account: whatever that
+      // tender does not cover is still a cash leg. A card sale that covers
+      // the total has no cash leg at all, and no rounding.
+      const typed = dollarsToCents(this._tenderAmount.trim());
+      const covered = Number.isFinite(typed) && typed > 0 ? typed : this._owedCents;
+      return Math.max(total - otherLegs - covered, 0);
+    }
+    return Math.max(total - otherLegs, 0);
+  }
+
+  /** The cash the drawer keeps: the cash leg, rounded by the branch's rule. */
+  private get _cashDueCents(): number {
+    return roundCashFor(this._roundingMode, this._cashLegCents).rounded;
+  }
+
+  /** What the branch's rounding moves on this sale, in cents. */
+  private get _roundingDiffCents(): number {
+    return roundCashFor(this._roundingMode, this._cashLegCents).diff;
   }
 
   /**
@@ -1451,7 +1506,16 @@ export class POSTerminal extends LitElement {
     if (this._tenderMethod === null) return null;
     const text = this._tenderAmount.trim();
     // store credit defaults to what the account holds, up to what is owed
-    const fallback = this._tenderMethod === 'store_credit' ? storeCreditOffer(this._standing, this._owedCents) : this._owedCents;
+    // Cash defaults to what the drawer keeps, which the branch's rounding
+    // rule may move (CP-18); the other methods default to what is owed.
+    const pendingCash = this._pendingTenders
+      .filter((t) => t.method === 'cash')
+      .reduce((s, t) => s + t.amount_cents, 0);
+    const fallback = this._tenderMethod === 'store_credit'
+      ? storeCreditOffer(this._standing, this._owedCents)
+      : this._tenderMethod === 'cash'
+        ? Math.max(this._cashDueCents - pendingCash, 0)
+        : this._owedCents;
     const cents = text === '' ? fallback : dollarsToCents(text);
     if (isNaN(cents) || cents <= 0) return null;
     const entry: TenderIn = { method: this._tenderMethod, amount_cents: cents };
@@ -1580,7 +1644,7 @@ export class POSTerminal extends LitElement {
       }
     }
     if (entry !== null) this._stampEntryIDOntoAddedChecks(entry);
-    const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry);
+    const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry, this._roundingMode);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
       return;
@@ -2583,7 +2647,7 @@ export class POSTerminal extends LitElement {
     const owed = this._owedCents;
     const entry = this._entry;
     const isCash = this._tenderMethod === 'cash';
-    const payPlanNow = payPlan(total, this._pendingTenders, entry);
+    const payPlanNow = payPlan(total, this._pendingTenders, entry, this._roundingMode);
     // the change due is the plan's: the tendered amount above the total, given from the cash
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
@@ -2605,6 +2669,10 @@ export class POSTerminal extends LitElement {
         <div id="pos-panel-payment-body" data-testid="panel-payment-body" ?hidden=${!isOpen} class="px-4 pb-4">
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Amount due</div>
           <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
+          ${this._roundingDiffCents !== 0 ? html`
+            <div class="mt-1 flex justify-between text-sm text-amber-300" data-testid="pos-cash-due">
+              <span>Cash due (rounded to the nearest 5 cents)</span><span class="font-mono">${fmt(this._cashDueCents)}</span>
+            </div>` : nothing}
           ${this._pendingTenders.length > 0 ? html`
             <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
               ${this._pendingTenders.map((t) => {
@@ -2783,7 +2851,7 @@ export class POSTerminal extends LitElement {
     const total = sale?.total_cents ?? 0;
     const open = sale?.status === 'open';
     const completed = sale?.status === 'completed';
-    const plan = payPlan(total, this._pendingTenders, this._entry);
+    const plan = payPlan(total, this._pendingTenders, this._entry, this._roundingMode);
     const canPay = this._canPay;
     const idHold = plan.ok ? this._idHoldWords(plan.tenders) : null;
     const clearable = open && hasLines && !this._loading;

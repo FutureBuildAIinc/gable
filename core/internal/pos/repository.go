@@ -301,6 +301,9 @@ type Repository interface {
 	ConsumeOverride(ctx context.Context, saleID uuid.UUID, kind string, need int64) (*AccountOverride, bool, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	BranchTaxRate(ctx context.Context, branchID *uuid.UUID) (string, bool, error)
+	// BranchCashRoundingMode reads the branch's cash rounding rule (CP-18).
+	// A branch that has never set it rounds nothing.
+	BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error)
 
 	// Offline sync
 	SaleExists(ctx context.Context, id uuid.UUID) (bool, error)
@@ -2326,6 +2329,21 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID *uuid.U
 		return "", false, err
 	}
 	return *rate, true, nil
+}
+
+// BranchCashRoundingMode reads the branch's own cash rounding rule (CP-18):
+// off, or the nearest five cents. The branch is the unit that answers the
+// question, and a branch that has never set it takes the money exactly.
+func (r *PostgresRepository) BranchCashRoundingMode(ctx context.Context, branchID uuid.UUID) (RoundingMode, error) {
+	var mode string
+	err := r.ex(ctx).QueryRow(ctx, `SELECT cash_rounding_mode FROM locations WHERE id = $1`, branchID).Scan(&mode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RoundingOff, nil
+	}
+	if err != nil {
+		return RoundingOff, err
+	}
+	return ParseRoundingMode(mode), nil
 }
 
 func (r *PostgresRepository) SaleExists(ctx context.Context, id uuid.UUID) (bool, error) {

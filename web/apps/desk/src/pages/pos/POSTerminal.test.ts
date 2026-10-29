@@ -2826,6 +2826,23 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
     el.remove();
   });
+
+  it('rounds cash due from the selected register branch even when branchContext.current is another branch (CP-18)', async () => {
+    (branchContext as unknown as { _branches: unknown[] })._branches = [
+      { id: 'b-other', code: 'LK', name: 'Lake Country Outpost', active: true, is_home: false, timezone: 'America/Vancouver', cash_rounding_mode: 'OFF' },
+      { id: 'b-main', code: 'MAIN', name: 'main yard', active: true, is_home: false, timezone: 'America/Vancouver', cash_rounding_mode: 'NEAREST_5_CENTS' },
+    ];
+    branchContext.setCurrent('b-other');
+    const el = await mount(sale({ subtotal_cents: 103, tax_cents: 0, total_cents: 103 }));
+    await chooseCash(el);
+    const cashDue = q(el, 'pos-cash-due');
+    expect(cashDue).not.toBeNull();
+    expect(cashDue.textContent).toContain('nearest 5 cents');
+    expect(cashDue.textContent).toContain('$1.05');
+    el.remove();
+    (branchContext as unknown as { _branches: unknown[] })._branches = [];
+    branchContext.setCurrent(null);
+  });
 });
 
 describe('return a past sale', () => {

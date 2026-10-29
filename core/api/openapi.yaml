@@ -29770,7 +29770,7 @@ components:
       type: object
       description: >-
         A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12).
-      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active, branch_id, revision, created_at, updated_at]
+      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -29802,6 +29802,8 @@ components:
           type: [string, "null"]
         default_tax_rate:
           type: [number, "null"]
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
         active:
@@ -29859,6 +29861,8 @@ components:
           type: [string, "null"]
         default_tax_rate:
           type: [number, "null"]
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: [string, "null"]
         active:
@@ -29898,6 +29902,8 @@ components:
           type: string
         default_tax_rate:
           type: number
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
         timezone:
           type: string
         active:
@@ -29920,6 +29926,13 @@ components:
           type: boolean
         timezone:
           type: string
+        cash_rounding_mode:
+          $ref: "#/components/schemas/CashRoundingMode"
+    CashRoundingMode:
+      type: string
+      description: >-
+        The branch's own cash rounding rule (CP-18): the rule off, or the nearest five cents. The Government of Canada elected symmetric rounding to the nearest five cents for cash, and the rounding touches the cash leg only.
+      enum: [OFF, NEAREST_5_CENTS]
     BranchSummaryList:
       type: array
       items:
