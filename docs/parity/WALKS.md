@@ -379,9 +379,11 @@ as `curl` against `http://127.0.0.1:8080`; `$TARNWICK` is the id from
    for Tarnwick the Store credit tender is offered with what the account holds; pay half in store credit and half in
    cash. The credit memo is used up by that much, the till expects only the cash, and Void of that sale gives the
    credit back.
-7. **Returns with reasons and a fee.** Set a fee for one reason (`INSERT INTO system_settings (key, value) VALUES
-   ('pos.restocking_fee_bps.changed_mind', '1500')`). On a completed sale press Return, name a line and pick "Changed
-   their mind (15% restocking fee)": the return refunds the line less the fee, and the credit memo (open it from
+7. **Returns with reasons and a fee.** Set the fee on the screen: as an owner or admin open Admin, Counter rules
+   (`/admin/counter-rules`), press "Use the suggested fees" (the customer's own reasons at 15 percent, the dealer's
+   own mistakes at none) and Save. On a completed sale press Return, name a line and pick "Changed
+   their mind": the dialog states the restocking fee and the refund after it before the return is taken. Take the
+   return: it refunds the line less the stated fee to the cent, and the credit memo (open it from
    Credit Memos) shows "Restocking fee" as its own line. "Other" asks for a note.
 8. **An exchange.** On a completed sale press Return, name a line and a reason, press Exchange and pick the goods
    that replace it. The screen states the credit the return is worth, the replacement and what the customer pays or

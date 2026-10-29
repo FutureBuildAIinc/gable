@@ -171,7 +171,8 @@ func TestCP04_SettingsRoundTripAndGuard(t *testing.T) {
 	body := func(limit any, mode string, over any, revision int64) map[string]any {
 		return map[string]any{"revision": revision,
 			"rules": map[string]any{"check_limit_cents": limit,
-				"check_id_required": map[string]any{"mode": mode, "over_cents": over}}}
+				"check_id_required": map[string]any{"mode": mode, "over_cents": over},
+				"restocking_fees":   allReasonFees(0, 0, 0)}}
 	}
 
 	// a cashier may read but not write
@@ -256,7 +257,8 @@ func TestCP04_SettingsConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			body := map[string]any{"revision": cur,
 				"rules": map[string]any{"check_limit_cents": int64(1000 * (i + 1)),
-					"check_id_required": map[string]any{"mode": "every_check"}}}
+					"check_id_required": map[string]any{"mode": "every_check"},
+					"restocking_fees":   allReasonFees(0, 0, 0)}}
 			r := f.do("PUT", "/api/v1/pos/settings", body,
 				"X-Test-Role", "owner", "X-Test-Sub", mustUUID(t), "If-Match", fmt.Sprintf(`"%d"`, cur))
 			mu.Lock()
