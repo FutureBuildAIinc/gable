@@ -142,6 +142,7 @@ export class GableApp extends LitElement {
       '/admin/branches': 'gable-admin-branches',
       '/admin/branches/:id/users': 'gable-admin-branch-users',
       '/admin/counter-rules': 'gable-counter-rules',
+      '/admin/tax-zones': 'gable-admin-tax-zones',
       '/pricing': 'gable-pricing-matrix',
       '/pricing/market-check': 'gable-market-check',
       '/accounts': 'gable-accounts-page',

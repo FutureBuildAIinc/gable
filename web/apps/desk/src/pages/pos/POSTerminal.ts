@@ -12,7 +12,7 @@ import type {
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
-import { customerService } from '../../services/CustomerService';
+import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
@@ -691,7 +691,7 @@ export class POSTerminal extends LitElement {
   /** Reads the customer's ship tos for the Deliver to picker (CP-10). */
   private async _loadShipTos(customerId: string) {
     try {
-      const page = await customerService.listShipTos(customerId);
+      const page = await CustomerService.listShipTos(customerId);
       this._shipTos = page.items ?? [];
     } catch {
       this._shipTos = [];
