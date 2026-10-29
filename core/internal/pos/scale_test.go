@@ -305,6 +305,20 @@ func TestManualWeightEntryWithAReason(t *testing.T) {
 	if got := str(t, ticket.body, "net_basis"); got != "single_draft" {
 		t.Errorf("ticket basis = %q", got)
 	}
+
+	// The reason is what makes the entry auditable: the act's audit row
+	// carries the closed list code and the ticket number, in the act's
+	// transaction.
+	var audits int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_log WHERE action = 'pos_transaction.line_weight_manual'
+			AND entity_type = 'pos_transaction' AND entity_id = $1
+			AND changes->>'reason' = 'scale_offline' AND changes->>'ticket_number' IS NOT NULL`, saleID).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Errorf("%d manual weight audit rows, want 1 carrying the reason", audits)
+	}
 }
 
 func TestManualWeightRefusedWhileTheScaleIsNotAtZero(t *testing.T) {
@@ -471,6 +485,84 @@ func TestScaleTicketListFiltersOpen(t *testing.T) {
 	r = f.do("GET", "/api/v1/pos/scale/tickets?register_id="+f.register+"&status=open&vehicle_ref=TRUCK-L2", nil, "X-Test-Role", "cashier")
 	if got := len(r.body["items"].([]any)); got != 1 {
 		t.Errorf("vehicle filter: %d tickets", got)
+	}
+}
+
+// The line amount is the priced quantity through the one extension rule
+// (ADR 0005 section 2.4): the weight's pounds become the quantity at scale
+// 4, and the cents are the exact product rounded once, half away from zero.
+// A one pound net at fifty dollars the ton is two and a half cents, and the
+// half cent lands on the farther side of zero: 3, never a truncated 2.
+func TestScaleWeighedLineAmountRoundsHalfAwayToTheCent(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withScale())
+	productID := f.bulkProduct(t, "TON", "50.00", "")
+	f.scale.SetWeightStableMilli(32000000, scale.UnitPound)
+	in := f.weighIn("TRUCK-R")
+	saleID := f.startSale(nil)
+	added := f.addLine(saleID, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	lineID := str(t, firstLineOf(t, added.body), "id")
+	f.scale.SetWeightStableMilli(32001000, scale.UnitPound) // one pound of rock
+	out := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+		"sale_id": saleID, "line_id": lineID, "weigh_in_ticket_id": str(t, in.body, "id"),
+		"revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if out.status != http.StatusOK {
+		t.Fatalf("weigh out = %d: %s", out.status, out.raw)
+	}
+	line := firstLineOf(t, out.body["sale"].(map[string]any))
+	if got := str(t, line, "quantity"); got != "0.0005" {
+		t.Fatalf("quantity = %q, want 0.0005 tons (one pound at 2000 to the ton)", got)
+	}
+	if got := num(t, line, "line_total_cents"); got != 3 {
+		t.Errorf("line total = %d cents, want 3 (0.0005 tons at $50 is 2.5 cents, half away from zero)", got)
+	}
+}
+
+// A weigh in ticket weighs out once: a second weigh out against the same
+// ticket is refused and the second line keeps no weight, even when the two
+// sales are weighed one after the other rather than raced.
+func TestScaleWeighInTicketRefusesASecondWeighOut(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db, withScale())
+	productID := f.bulkProduct(t, "TON", "30.00", "")
+	f.scale.SetWeightStableMilli(30000000, scale.UnitPound)
+	in := f.weighIn("TRUCK-2X")
+
+	saleOne := f.startSale(nil)
+	addedOne := f.addLine(saleOne, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	f.scale.SetWeightStableMilli(42000000, scale.UnitPound)
+	out := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+		"sale_id": saleOne, "line_id": str(t, firstLineOf(t, addedOne.body), "id"),
+		"weigh_in_ticket_id": str(t, in.body, "id"), "revision": rev(t, addedOne)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if out.status != http.StatusOK {
+		t.Fatalf("the first weigh out = %d: %s", out.status, out.raw)
+	}
+
+	// A second sale, a second line, the same weigh in ticket: refused.
+	saleTwo := f.startSale(nil)
+	addedTwo := f.addLine(saleTwo, map[string]any{"product_id": productID.String(), "quantity": "1"})
+	second := f.do("POST", "/api/v1/pos/scale/weigh-out", map[string]any{
+		"sale_id": saleTwo, "line_id": str(t, firstLineOf(t, addedTwo.body), "id"),
+		"weigh_in_ticket_id": str(t, in.body, "id"), "revision": rev(t, addedTwo)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if second.status != http.StatusConflict {
+		t.Fatalf("the second weigh out on one ticket = %d: %s", second.status, second.raw)
+	}
+	if code, _, _ := errorOf(t, second); code != "invalid_state_transition" {
+		t.Errorf("code = %q, want invalid_state_transition", code)
+	}
+	two := f.getSale(t, saleTwo)
+	if firstLineOf(t, two)["weight_source"] != nil {
+		t.Errorf("the refused weigh out left a weight on the second line: %v", two["lines"])
+	}
+	var tickets int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM scale_tickets WHERE weigh_in_ticket_id = $1`, str(t, in.body, "id")).Scan(&tickets); err != nil {
+		t.Fatal(err)
+	}
+	if tickets != 1 {
+		t.Errorf("%d weigh out tickets name the weigh in, want 1", tickets)
 	}
 }
 
