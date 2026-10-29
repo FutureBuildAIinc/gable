@@ -33,6 +33,7 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/notification"
@@ -297,6 +298,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	termLedger := payment.NewTerminalLedger(db)
 	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db).WithTerminal(payment.NewSimulatedTerminalFromEnv("authorize", termLedger), termLedger)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -417,7 +419,7 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if id, ok := parent.(uuid.UUID); ok {
 			p = fmt.Sprintf("%q", id)
 		}
-		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s}`, strings.ToLower(typ), uuid.NewString()[:8], p)
+		return fmt.Sprintf(`{"type":%q,"code":"c-%s","name":"wall branch","parent_id":%s,"country_code":"US"}`, strings.ToLower(typ), uuid.NewString()[:8], p)
 	}
 	const ok = http.StatusOK
 	const no = http.StatusForbidden
@@ -1947,3 +1949,45 @@ func TestReviewManagerRoutesUnderServeGuard(t *testing.T) {
 	}
 }
 
+// TestBranchWall_LargeCashPreviewHoldsTheSale: the preview reads a sale by id
+// from the body, so the wall holds that sale to the caller's branches. A
+// cashier granted only A previews A's sale and finds B's a missing one; a
+// preview mounted without the guard would answer for both.
+func TestBranchWall_LargeCashPreviewHoldsTheSale(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+	ctx := context.Background()
+	cashier := uuid.New()
+	txnA, txnB := uuid.New(), uuid.New()
+	for txn, branch := range map[uuid.UUID]uuid.UUID{txnA: f.branchA, txnB: f.branchB} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, currency) VALUES ($1, 'LCWALL', $2, 'OPEN', $3, 'USD')`,
+			txn, cashier, branch); err != nil {
+			t.Fatalf("seed sale: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = ANY($1)`, []uuid.UUID{txnA, txnB})
+	})
+	body := func(txn uuid.UUID) string {
+		return fmt.Sprintf(`{"transaction_id":%q,"tenders":[{"method":"cash","amount_cents":500}]}`, txn)
+	}
+	const path = "/api/v1/pos/large-cash/preview"
+	if got := f.call(t, "POST", path, body(txnA), "cashier", "u-a", A); got != http.StatusOK {
+		t.Errorf("cashier previews the sale at its own branch: %d, want 200", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("cashier previews a sale at another branch (header A): %d, want 404", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", ""); got != http.StatusNotFound {
+		t.Errorf("cashier previews a sale at another branch (no header): %d, want 404", got)
+	}
+	if got := f.call(t, "POST", path, body(txnB), "cashier", "u-a", B); got != http.StatusForbidden {
+		t.Errorf("cashier names an ungranted branch header: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", path, body(txnA), "sales", "u-a", A); got != http.StatusForbidden {
+		t.Errorf("a role outside the counter's: %d, want 403", got)
+	}
+}

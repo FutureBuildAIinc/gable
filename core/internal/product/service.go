@@ -364,6 +364,29 @@ func (s *Service) UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays
 	return newRevision, err
 }
 
+// UpdateConsumerDurable sets or clears the Form 8300 consumer durable flag
+// (CP-17a): the designated reporting transaction test the counter's large
+// cash classifier reads. The default is false; the flagged exceptions are
+// the big ticket consumer goods.
+func (s *Service) UpdateConsumerDurable(ctx context.Context, id uuid.UUID, consumerDurable bool, revision int64) (int64, error) {
+	var newRevision int64
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		p, err := s.repo.GetProduct(ctx, id)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		newRevision, err = s.repo.UpdateConsumerDurable(ctx, id, consumerDurable, revision)
+		if err != nil {
+			return resolveRevision(err)
+		}
+		if err := s.auditChange(ctx, id, p.SKU, newRevision, EventProductUpdated, map[string]any{"parts": []string{"consumer_durable"}}); err != nil {
+			return err
+		}
+		return s.recordEvent(ctx, id, p.SKU, newRevision, EventProductUpdated, "consumer_durable")
+	})
+	return newRevision, err
+}
+
 // UpdateDensity writes the weighed sale's density (CP-19), audited and
 // versioned like the geometry write.
 func (s *Service) UpdateDensity(ctx context.Context, id uuid.UUID, density *httpx.Quantity, state *string, revision int64) (int64, error) {

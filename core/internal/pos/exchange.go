@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/audit"
@@ -33,13 +35,27 @@ type ExchangeIn struct {
 	// omitted one on a sale that kept no cash leaves the surplus on the
 	// account, while a named cash one is refused as any cash refund is.
 	RefundMethodGiven bool
-	Reason       string
-	Returned     []ReturnLineIn
-	Items        []salesdoc.ParsedLine
+	Reason            string
+	Returned          []ReturnLineIn
+	Items             []salesdoc.ParsedLine
 	// Tenders pay the difference when the replacement is worth more.
 	Tenders      []TenderIn
 	PickedUpBy   string
 	Acknowledged []uuid.UUID
+	// Payer is the payer's details the counter captured when the exchange's
+	// cash difference takes the payer over the branch's large cash threshold
+	// (CP-17a), the way the completion carries them.
+	Payer *largecash.PayerIn
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	PayerDeclined bool
+	// SuspectedAvoidance is the manager's mark that an instrument may be
+	// being used to avoid reporting (CP-17a).
+	SuspectedAvoidance bool
+	// TenderMethod is the method the counter will tender for the difference.
+	// The preview reads it to say what the branch's large cash rule needs of
+	// this exchange; the exchange itself takes the tender in Tenders.
+	TenderMethod TenderMethod
 }
 
 // ExchangeFigures are the money of an exchange, in cents.
@@ -64,6 +80,18 @@ type ExchangeResult struct {
 	// RefundedCents is the surplus paid back in cash (zero when it stayed
 	// on the account or there was none).
 	RefundedCents httpx.Cents `json:"refunded_cents"`
+	// LargeCash is the branch country's large cash answer for this exchange
+	// (CP-17a): whether the payer's details are required and which fields
+	// the rule needs. The preview fills it; the exchange leaves it empty.
+	LargeCash *largecash.Preview `json:"large_cash,omitempty"`
+}
+
+// ExchangePreview is what the preview answers: the exchange's figures and the
+// branch country's large cash answer for it (CP-17a), so the counter knows
+// what to capture before the exchange is rung.
+type ExchangePreview struct {
+	ExchangeFigures
+	LargeCash *largecash.Preview `json:"large_cash,omitempty"`
 }
 
 // Exchange rings the return and the replacement sale in ONE act: one
@@ -129,7 +157,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		return nil, err
 	}
 	if preview {
-		return s.previewExchange(ctx, st, preLines, pricedTax)
+		return s.previewExchange(ctx, st, preLines, pricedTax, saleCustomer, in)
 	}
 	var out *ExchangeResult
 	err = s.inTx(ctx, func(ctx context.Context) error {
@@ -199,8 +227,13 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		}
 		pre.WalkInID = walkInID
 		revision := pre.Revision
+		// The completion half of the exchange carries the payer's details and
+		// the manager's suspected avoidance mark, so an exchange whose cash
+		// difference crosses the branch's large cash threshold is answered
+		// the way a completion is (CP-17a).
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
-			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged)
+			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged, in.Payer, in.SuspectedAvoidance,
+			in.PayerDeclined)
 		if err != nil {
 			return err
 		}
@@ -284,7 +317,8 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 	return out, nil
 }
 
-func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines []salesdoc.Line, pricedTax *providerTax) (*ExchangeResult, error) {
+func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines []salesdoc.Line, pricedTax *providerTax,
+	saleCustomer *uuid.UUID, in *ExchangeIn) (*ExchangeResult, error) {
 	totals := salesdoc.SumTotals(preLines)
 	var taxCents int64
 	if pricedTax != nil {
@@ -312,14 +346,44 @@ func (s *Service) previewExchange(ctx context.Context, st *returnState, preLines
 	}
 	returned := -st.total
 	replacementTotal := int64(totals.SubtotalCents) + taxCents
-	return &ExchangeResult{
+	out := &ExchangeResult{
 		ExchangeFigures: ExchangeFigures{
 			ReturnedCents:      httpx.Cents(returned),
 			RestockingFeeCents: httpx.Cents(st.feeCents),
 			ReplacementCents:   httpx.Cents(replacementTotal),
 			DifferenceCents:    httpx.Cents(replacementTotal - returned),
 		},
-	}, nil
+	}
+	// The branch country's large cash rule (CP-17a): what this exchange needs
+	// of the counter before it is rung. The rule reads the branch, the
+	// customer and the tender for the difference; nothing is written.
+	if s.largeCash != nil {
+		lc, err := s.largeCash.Preview(ctx, exchangeLargeCashFacts(st, saleCustomer, preLines, out.DifferenceCents, in))
+		if err != nil {
+			return nil, err
+		}
+		out.LargeCash = lc
+	}
+	return out, nil
+}
+
+// exchangeLargeCashFacts answers the exchange as the branch country's large
+// cash rules see it: the replacement sale's lines, the tender for the
+// difference and the payer the counter captured.
+func exchangeLargeCashFacts(st *returnState, saleCustomer *uuid.UUID, lines []salesdoc.Line,
+	difference httpx.Cents, in *ExchangeIn) *largecash.CompletionFacts {
+	f := &largecash.CompletionFacts{BranchID: *st.branchID, CustomerID: saleCustomer, Currency: st.currency,
+		SuspectedAvoidance: in.SuspectedAvoidance, Payer: in.Payer}
+	for i := range lines {
+		if lines[i].ProductID != nil && lines[i].LineTotal != nil {
+			f.Lines = append(f.Lines, largecash.LineFact{ProductID: *lines[i].ProductID,
+				LineTotalCents: int64(*lines[i].LineTotal)})
+		}
+	}
+	if difference > 0 && in.TenderMethod != "" {
+		f.Tenders = append(f.Tenders, largecash.TenderFacts{Method: in.TenderMethod.Status(), AmountCents: int64(difference)})
+	}
+	return f
 }
 
 func (s *Service) priceReplacementLines(ctx context.Context, sale *Sale, parsed []salesdoc.ParsedLine, actor string) ([]salesdoc.Line, []audit.Entry, error) {
@@ -433,6 +497,20 @@ type exchangeRequest struct {
 	Tenders              []tenderRequest        `json:"tenders"`
 	PickedUpBy           *string                `json:"picked_up_by"`
 	AcknowledgedAlertIDs []string               `json:"acknowledged_alert_ids"`
+	// Payer is the payer's details the counter captured for a large cash
+	// crossing (CP-17a); an exchange whose cash difference takes the payer
+	// over the branch's threshold is refused 409 payer_details_required
+	// without them.
+	Payer *payerRequest `json:"payer"`
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	PayerDeclined *bool `json:"payer_declined"`
+	// SuspectedAvoidance is the manager's suspected avoidance mark (CP-17a).
+	SuspectedAvoidance *bool `json:"suspected_avoidance"`
+	// TenderMethod is the method the counter will tender for the difference.
+	// The preview reads it to say what the branch's large cash rule needs of
+	// this exchange; the exchange itself takes the tender in tenders.
+	TenderMethod string `json:"tender_method"`
 }
 
 func (r *exchangeRequest) parse() (*ExchangeIn, error) {
@@ -455,6 +533,21 @@ func (r *exchangeRequest) parse() (*ExchangeIn, error) {
 		v.Check(len(out.PickedUpBy) <= 200, "picked_up_by", "must be at most 200 characters")
 	}
 	out.Acknowledged = parseAcknowledgedAlertIDs(v, r.AcknowledgedAlertIDs)
+	out.Payer = r.Payer.payer()
+	out.PayerDeclined = r.PayerDeclined != nil && *r.PayerDeclined
+	out.SuspectedAvoidance = r.SuspectedAvoidance != nil && *r.SuspectedAvoidance
+	if r.TenderMethod != "" {
+		switch strings.ToLower(strings.TrimSpace(r.TenderMethod)) {
+		case "cash":
+			out.TenderMethod = TenderCash
+		case "check":
+			out.TenderMethod = TenderCheck
+		case "card":
+			out.TenderMethod = TenderCard
+		default:
+			v.Check(false, "tender_method", "must be cash, check or card")
+		}
+	}
 	verr := v.Err()
 	switch {
 	case rerr != nil && verr != nil:
@@ -506,7 +599,7 @@ func (h *Handler) exchange(w http.ResponseWriter, r *http.Request, preview bool)
 		return
 	}
 	if preview {
-		writeJSON(w, http.StatusOK, res.ExchangeFigures)
+		writeJSON(w, http.StatusOK, ExchangePreview{ExchangeFigures: res.ExchangeFigures, LargeCash: res.LargeCash})
 		return
 	}
 	w.Header().Set("Location", "/api/v1/pos/returns/"+res.Return.ID.String())

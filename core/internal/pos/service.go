@@ -15,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -108,9 +109,20 @@ type Service struct {
 	terminalWait   time.Duration
 	terminalCrash  func(point string) error
 	bank           BankLines
+	// largeCash is the branch country's large cash rules (CP-17a); nil
+	// keeps the completion as it was (a stack with no rules wired).
+	largeCash LargeCashCore
 	// scale is the branch scale's driver (CP-19); nil keeps the manual
 	// weight entry path, which carries its reason instead.
 	scale ScaleReader
+}
+
+// LargeCashCore is the slice of the large cash module the counter drives:
+// the preview the payment panel asks before Pay and the capture that rides
+// the completion's transaction.
+type LargeCashCore interface {
+	Preview(ctx context.Context, f *largecash.CompletionFacts) (*largecash.Preview, error)
+	Capture(ctx context.Context, f *largecash.CompletionFacts) error
 }
 
 // ARCore is the slice of the AR core the counter drives (account.Service).
@@ -131,6 +143,9 @@ type CounterInventory interface {
 	IssueQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 	RestockQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error
 }
+
+// WithLargeCash wires the branch country's large cash rules (CP-17a).
+func (s *Service) WithLargeCash(lc LargeCashCore) *Service { s.largeCash = lc; return s }
 
 // NewService builds the counter's service.
 func NewService(db *database.DB, repo Repository, logger *slog.Logger) *Service {

@@ -101,6 +101,11 @@ type Product struct {
 	ReorderQtyQ           httpx.Quantity `json:"-"`
 	Revision              int64          `json:"-"`
 
+	// ConsumerDurable is the Form 8300 designated reporting transaction
+	// flag (CP-17a): a lumber yard's default is false, and the flagged
+	// exceptions are the big ticket consumer goods.
+	ConsumerDurable bool `json:"-"`
+
 	// LeadTimeDays is the dealer-published lead time (migration 084): nil
 	// means unpublished and is a different fact than zero.
 	LeadTimeDays *int `json:"-"`
@@ -162,7 +167,8 @@ type View struct {
 	Stackable      *bool    `json:"stackable"`
 	GeometrySource *string  `json:"geometry_source"`
 
-	LeadTimeDays *int `json:"lead_time_days"`
+	LeadTimeDays    *int `json:"lead_time_days"`
+	ConsumerDurable bool `json:"consumer_durable"`
 
 	ReorderPoint httpx.Quantity `json:"reorder_point"`
 	ReorderQty   httpx.Quantity `json:"reorder_qty"`
@@ -234,7 +240,7 @@ func ViewOf(p *Product) View {
 		Vendor: p.Vendor, VendorID: p.VendorID, UPC: p.UPC, WeightLbs: p.WeightLbs,
 		LengthIn: p.LengthIn, WidthIn: p.WidthIn, HeightIn: p.HeightIn,
 		Stackable: p.Stackable, GeometrySource: p.GeometrySource,
-		LeadTimeDays: p.LeadTimeDays,
+		LeadTimeDays: p.LeadTimeDays, ConsumerDurable: p.ConsumerDurable,
 		ReorderPoint: rp, ReorderQty: rq,
 		OnHand: onHand, Allocated: allocated, Available: onHand - allocated,
 		Revision: p.Revision, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,

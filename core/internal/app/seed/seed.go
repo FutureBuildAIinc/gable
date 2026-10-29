@@ -407,6 +407,14 @@ func Run() {
 			ON CONFLICT (key) DO UPDATE SET value=$1`, kelMainID.String())
 	}
 
+	// The demo dealer is a British Columbia one: its branches take Canada as
+	// the dealer default country (CP-17a), so a branch saves without naming
+	// one. The Canadian dealer threshold stays off.
+	if _, err := db.Exec(`INSERT INTO system_settings (key, value) VALUES ('country.default', 'CA')
+		ON CONFLICT (key) DO UPDATE SET value = 'CA'`); err != nil {
+		log.Printf("Seed: country.default: %v", err)
+	}
+
 	// Child ZONEs under KEL-MAIN (trigger 058 inherits branch_id from parent).
 	type zone struct {
 		Code, Desc string

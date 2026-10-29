@@ -5,9 +5,11 @@ import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select';
 import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
+import type { PayerCaptureIn } from '../../services/POSService.ts';
+import '../../pages/pos/PayerDialog.ts';
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
-  Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister,
+  Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, ExchangeTenderMethod, RefundMethod, CounterCustomer, CounterRegister,
   CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, ReturnFigures, IdType, SaleSummary,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
@@ -101,6 +103,33 @@ export class POSTerminal extends LitElement {
   // largest check a manager approved for this sale (null: none).
   @state() private _checkRef = '';
   @state() private _idChecked = false;
+  // The large cash capture (CP-17a): the instrument kind of the check being
+  // entered, the manager's suspected avoidance mark, the payer the counter
+  // captured and the ask the preview made.
+  @state() private _checkInstrument = 'personal_check';
+  @state() private _suspectAvoidance = false;
+  @state() private _payer: PayerCaptureIn | null = null;
+  @state() private _payerAsk: {
+    fields: string[];
+    dealerThreshold: boolean;
+    /** floor is true when the branch's walk-in identity floor is the only question: who paid, so their cash sales are counted together (CP-17a). */
+    floor: boolean;
+    /** thresholdCrossed is true when the rule's threshold is crossed: the payer's details are required and a decline does not answer it. */
+    thresholdCrossed: boolean;
+  } | null = null;
+  @state() private _payerRefused = false;
+  /** The walk-in declined to identify over the branch's floor: the sale goes ahead and the fact is recorded for the manager's worklist (CP-17a). */
+  @state() private _payerDeclined = false;
+  /** The counter's plain words when the branch's floor is off: the walk-in's cash is not aggregated (CP-17a). */
+  @state() private _walkInNote = '';
+  // The identified payer stays on the till session for the rest of it, so the
+  // clerk is asked once (CP-17a). The identity is held in memory only: it is
+  // never written to the browser's storage.
+  private _sessionPayer: PayerCaptureIn | null = null;
+  private _sessionTillId: string | null = null;
+  // The payer capture was asked for by the exchange, not by a sale: the
+  // capture that answers it rings the exchange (CP-17a).
+  @state() private _payerForExchange = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
 
@@ -163,7 +192,7 @@ export class POSTerminal extends LitElement {
   private _returnAsked = 0;
   @state() private _exchangeBusy = false;
   @state() private _exchangeError: string | null = null;
-  @state() private _exchangeTender: TenderMethod = 'cash';
+  @state() private _exchangeTender: ExchangeTenderMethod = 'cash';
   @state() private _exchangeRefund: 'cash' | 'account' = 'cash';
   // The return search modal: finding a past sale to return.
   @state() private _showReturnSearch = false;
@@ -180,6 +209,10 @@ export class POSTerminal extends LitElement {
   @state() private _signatureNote: string | null = null;
   @state() private _sealed: { signer: string; seal: string } | null = null;
   private _exchangeDebounce: ReturnType<typeof setTimeout> | null = null;
+  // The counter's look before Pay (CP-17a): the server's answer for the
+  // tenders entered so far, so the plain words are on the screen before the
+  // clerk presses Pay.
+  private _lookDebounce: ReturnType<typeof setTimeout> | null = null;
 
   // Till (drawer) state
   @state() private _till: TillSession | null = null;
@@ -495,6 +528,10 @@ export class POSTerminal extends LitElement {
     if (this._standingTimer) clearTimeout(this._standingTimer);
     if (this._exchangeDebounce) clearTimeout(this._exchangeDebounce);
     if (this._exchangeSearchTimer) clearTimeout(this._exchangeSearchTimer);
+    // a counter that is off the page does not ask the server about the sale it
+    // was about (CP-17a)
+    if (this._lookDebounce) clearTimeout(this._lookDebounce);
+
     this._cardSeq++;
     if (this._cardTimer) clearTimeout(this._cardTimer);
   }
@@ -663,6 +700,7 @@ export class POSTerminal extends LitElement {
       this._acknowledgedAlerts = [];
       this._buyerId = '';
       this._resetTender();
+      this._resetLargeCashCapture();
       this._custQuery = '';
       this._custResults = [];
       this._poText = '';
@@ -712,6 +750,10 @@ export class POSTerminal extends LitElement {
       this._acknowledgedAlerts = [];
       this._buyerId = '';
       this._resetTender();
+      this._resetLargeCashCapture();
+      // the sale is a walk-in again: the identity the till session holds rides
+      // it, so the walk-in's cash sales are counted together (CP-17a)
+      this._restoreSessionPayer();
       this._poText = '';
       this._jobId = '';
       this._shipTos = [];
@@ -1027,6 +1069,9 @@ export class POSTerminal extends LitElement {
       this._tenderMethod = null;
       this._step = 'customer';
       this._open = 'customer';
+      // the identity the till session holds rides the new sale, so the clerk
+      // is asked once (CP-17a)
+      this._restoreSessionPayer();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to start the sale';
     } finally {
@@ -1530,6 +1575,8 @@ export class POSTerminal extends LitElement {
     const entry: TenderIn = { method: this._tenderMethod, amount_cents: cents };
     // the check number rides as the reference; the ID checked and its kind (never a number) on a check or a charge
     if (this._tenderMethod === 'check' && this._checkRef.trim() !== '') entry.reference = this._checkRef.trim();
+    // an ordinary check is the server's default instrument, so only a named kind rides the tender
+    if (this._tenderMethod === 'check' && this._checkInstrument !== 'personal_check') entry.instrument = this._checkInstrument;
     if ((this._tenderMethod === 'check' || this._tenderMethod === 'account') && this._idChecked && this._idType !== '') {
       entry.id_checked = true;
       entry.id_type = this._idType;
@@ -1576,7 +1623,10 @@ export class POSTerminal extends LitElement {
     this._checkRef = '';
     this._idChecked = false;
     this._idType = '';
+    this._checkInstrument = 'personal_check';
     this._checkOverWords = null;
+    // the branch's plain words went with the tenders they were about
+    this._walkInNote = '';
   }
 
   private _chooseMethod(method: TenderMethod) {
@@ -1591,6 +1641,8 @@ export class POSTerminal extends LitElement {
     if (method === 'store_credit' && storeCreditOffer(this._standing, this._owedCents) <= 0) return;
     this._tenderMethod = method;
     this._tenderAmount = '';
+    // the counter's look at what this tender means for the branch's rule
+    this._scheduleLargeCashLook();
   }
 
   /** Shows a typed tender amount with two decimals once the cashier leaves the field. */
@@ -1625,8 +1677,11 @@ export class POSTerminal extends LitElement {
     this._checkRef = '';
     this._idChecked = false;
     this._idType = '';
+    this._checkInstrument = 'personal_check';
     // The next tender is chosen again, never assumed.
     this._tenderMethod = null;
+    // the branch's plain words are about the tenders entered so far
+    this._scheduleLargeCashLook();
   }
 
   /** Pay: the added tenders plus the entry when they do not cover the total. */
@@ -1674,6 +1729,34 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    // The branch country's large cash rule (CP-17a): the server classifies
+    // the plan's tenders against the sale it holds. A crossing asks for the
+    // payer's details before Pay; a walk-in's cash sale over the branch's
+    // identity floor asks who paid so their sales are counted together. The
+    // identity the counter already holds rides the preview, so the preview
+    // and the completion key the same person.
+    try {
+      const preview = await posService.largeCashPreview(
+        this._sale.id, plan.tenders, this._suspectAvoidance, this._payer ?? undefined);
+      this._walkInNote = preview.walk_in_note ?? '';
+      // a recorded decline is the answer to the floor's ask: the sale goes
+      // ahead and the counter is not asked again
+      if (!this._payerDeclined && preview.asks_details && this._payer === null) {
+        this._payerAsk = {
+          fields: preview.fields,
+          dealerThreshold: preview.dealer_threshold,
+          // the floor is the only question when the rule's threshold is not
+          // crossed: a crossing asks for the payer's details and no decline
+          // answers it, so the counter says the crossing's words.
+          floor: preview.asks_floor && !preview.threshold_crossed,
+          thresholdCrossed: preview.threshold_crossed,
+        };
+        this._payerRefused = false;
+        return;
+      }
+    } catch {
+      // the preview is advisory: the completion's own capture is the authority
+    }
     if (!(await this._acknowledgeCounterWarnings(this._sale?.customer_id))) return;
     await this._completeSale(plan.tenders);
   }
@@ -1716,9 +1799,26 @@ export class POSTerminal extends LitElement {
       this._error = null;
       // A timer set earlier must not clear this completion's band.
       if (this._errorTimer) clearTimeout(this._errorTimer);
-      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts);
+      // the capture rides along only when the counter holds one, and a
+      // recorded decline rides with it (CP-17a)
+      const extras = this._payer || this._suspectAvoidance || this._payerDeclined
+        ? {
+          payer: this._payer ?? undefined,
+          suspected_avoidance: this._suspectAvoidance,
+          payer_declined: this._payerDeclined,
+        }
+        : undefined;
+      const completed = extras
+        ? await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts, extras)
+        : await posService.completeSale(this._sale.id, this._sale.revision, tenders, this._acknowledgedAlerts);
       // the sale completed on the card: the waiting card has nothing left to say
       this._dismissCardWait();
+      // The identified payer stays on the till session for the rest of it, so
+      // the clerk is asked once (CP-17a).
+      this._rememberSessionPayer();
+      // the payer capture and the avoidance mark went with the sale that needed them
+      this._resetLargeCashCapture();
+      this._suspectAvoidance = false;
       this._sale = completed;
       this._completed = completed;
       // The Sale complete card says it (number, total, tenders, change): no band over the page.
@@ -1735,6 +1835,24 @@ export class POSTerminal extends LitElement {
     } catch (err: unknown) {
       // a check over the limit the screen could not know of (a walk-in's, or the database wide limit) says so beside Ask a manager
       if (err instanceof ApiError && err.hasBlocker('check_over_limit')) this._checkOverWords = err.message;
+      // A large cash crossing without the payer's details, or a walk-in's cash
+      // sale over the branch's identity floor with no answer (CP-17a): the
+      // capture is asked again in the dialog, in words, and the sale stays
+      // open with its tenders still added.
+      if (err instanceof ApiError && (err.hasBlocker('payer_details_required') || err.hasBlocker('walk_in_identity_required'))) {
+        this._error = null;
+        this._payerRefused = true;
+        if (this._payerAsk === null) {
+          const floor = err.hasBlocker('walk_in_identity_required');
+          this._payerAsk = {
+            fields: ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'],
+            dealerThreshold: false,
+            floor,
+            thresholdCrossed: !floor,
+          };
+        }
+        return;
+      }
       // a warning the office added after the standing on screen was read: the
       // server is the authority, so read the standing again and let the next
       // Pay offer the read dialog instead of looping on the same refusal
@@ -1757,6 +1875,74 @@ export class POSTerminal extends LitElement {
     } finally {
       this._loading = false;
     }
+  }
+
+  /**
+   * Forgets the large cash capture (CP-17a): the payer, the ask the preview
+   * made and the check's instrument kind belong to the sale they were taken
+   * for, so a finished, voided or new sale starts without them. The identity
+   * the till session holds is not the sale's: it stays for the rest of the
+   * session.
+   */
+  private _resetLargeCashCapture() {
+    this._payer = null;
+    this._payerAsk = null;
+    this._payerRefused = false;
+    this._payerDeclined = false;
+    this._walkInNote = '';
+    this._checkInstrument = 'personal_check';
+  }
+
+  /**
+   * Asks the server what the branch's rule makes of the tenders entered so far,
+   * so the counter's plain words are on the screen before Pay (CP-17a). The
+   * look is advisory: the ask itself waits for the final plan at Pay, and the
+   * completion's own capture is the authority.
+   */
+  private _scheduleLargeCashLook() {
+    if (this._lookDebounce) clearTimeout(this._lookDebounce);
+    this._lookDebounce = setTimeout(() => { void this._lookAtLargeCash(); }, 300);
+  }
+
+  private async _lookAtLargeCash() {
+    if (!this._sale) return;
+    const entry = this._entry;
+    const tenders = [...this._pendingTenders];
+    if (entry !== null) tenders.push(entry);
+    if (tenders.length === 0) return;
+    try {
+      const preview = await posService.largeCashPreview(
+        this._sale.id, tenders, this._suspectAvoidance, this._payer ?? undefined);
+      this._walkInNote = preview.walk_in_note ?? '';
+    } catch {
+      // the look is advisory: the completion's own capture is the authority
+    }
+  }
+
+  /**
+   * Keeps the identified payer on the till session for the rest of it, so the
+   * clerk is asked once (CP-17a). A till session that is not the one the
+   * identity was captured on does not hold it.
+   */
+  private _rememberSessionPayer() {
+    const tillId = this._till?.id ?? null;
+    if (this._payer !== null && tillId !== null) {
+      this._sessionPayer = this._payer;
+      this._sessionTillId = tillId;
+    }
+  }
+
+  /**
+   * Puts the identity the till session holds on the sale, so a walk-in's cash
+   * sale over the branch's floor is counted together with the one before it
+   * without the clerk being asked again (CP-17a). A named customer is the
+   * payer's own key, so the identity does not ride that sale.
+   */
+  private _restoreSessionPayer() {
+    const tillId = this._till?.id ?? null;
+    if (this._sessionPayer === null || this._sessionTillId === null || this._sessionTillId !== tillId) return;
+    if (this._sale?.customer_id) return;
+    this._payer = this._sessionPayer;
   }
 
   /** Reads the card leg's own record until the terminal answers or the waiting is dismissed. */
@@ -1867,6 +2053,11 @@ export class POSTerminal extends LitElement {
     this._exchangeError = null;
     this._exchangeQuery = '';
     this._exchangeResults = [];
+    // the payer capture and the manager's mark belong to the exchange they
+    // were taken for
+    this._resetLargeCashCapture();
+    this._payerForExchange = false;
+    this._suspectAvoidance = false;
     this._showReturn = true;
     this._showReturnSearch = false;
     void this._loadReasons().then(() => { if (this._showReturn) this._scheduleDialogFigures(); });
@@ -2050,6 +2241,11 @@ export class POSTerminal extends LitElement {
       ? [{ method: this._exchangeTender, amount_cents: f.difference_cents }] : undefined;
     const acknowledged = withTender && this._acknowledgedAlerts.length > 0
       ? this._acknowledgedAlerts : undefined;
+    // the payer's capture and the manager's avoidance mark ride the exchange
+    // that needs them, the way they ride a completion (CP-17a)
+    const payer = withTender ? this._payer ?? undefined : undefined;
+    const suspectedAvoidance = withTender && this._suspectAvoidance;
+    const payerDeclined = withTender && this._payerDeclined;
     return {
       register_id: this._registerId,
       original_sale_id: sale.id,
@@ -2058,8 +2254,14 @@ export class POSTerminal extends LitElement {
       reason: this._returnReason.trim() || undefined,
       returned_lines: returned,
       sale_lines: this._exchangeLines.map((l) => ({ product_id: l.product.product_id, quantity: l.qty })),
+      // the preview reads the tender method to say what the branch's large cash
+      // rule needs of this exchange before it is rung
+      tender_method: this._exchangeTender,
       ...(tenders ? { tenders } : {}),
       ...(acknowledged ? { acknowledged_alert_ids: acknowledged } : {}),
+      ...(payer ? { payer } : {}),
+      ...(suspectedAvoidance ? { suspected_avoidance: true } : {}),
+      ...(payerDeclined ? { payer_declined: true } : {}),
     };
   }
 
@@ -2141,6 +2343,21 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    // The branch country's large cash rule (CP-17a): the server says what
+    // this exchange needs of the counter. A crossing asks for the payer's
+    // details before the exchange is rung; a captured payer rides it.
+    const largeCash = this._exchangeFigures.large_cash;
+    if (!this._payerDeclined && largeCash?.asks_details && this._payer === null) {
+      this._payerAsk = {
+        fields: largeCash.fields,
+        dealerThreshold: largeCash.dealer_threshold,
+        floor: largeCash.asks_floor && !largeCash.threshold_crossed,
+        thresholdCrossed: largeCash.threshold_crossed,
+      };
+      this._payerRefused = false;
+      this._payerForExchange = true;
+      return;
+    }
     if (!(await this._acknowledgeCounterWarnings(sale.customer_id))) return;
     const body = this._exchangeBody(true);
     if (body === null) {
@@ -2152,6 +2369,11 @@ export class POSTerminal extends LitElement {
       const done = await posService.createExchange(body);
       this._showReturn = false;
       this._exchangeOn = false;
+      // the payer capture and the avoidance mark went with the exchange that
+      // needed them
+      this._resetLargeCashCapture();
+      this._payerForExchange = false;
+      this._suspectAvoidance = false;
       const d = differenceOf(done);
       this._success = `Exchange ${done.return.number} complete - ${d.text}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 5000);
@@ -2161,6 +2383,25 @@ export class POSTerminal extends LitElement {
       this._sealed = null;
     } catch (err: unknown) {
       if (err instanceof ApiError && err.hasBlocker('alert_unacknowledged')) void this._syncStanding();
+      // A large cash crossing without the payer's details (CP-17a): the
+      // capture is asked again in the dialog, in words, and the exchange is
+      // not taken.
+      if (err instanceof ApiError && (err.hasBlocker('payer_details_required') || err.hasBlocker('walk_in_identity_required'))) {
+        this._error = null;
+        this._payerRefused = true;
+        this._payerForExchange = true;
+        if (this._payerAsk === null) {
+          const ask = this._exchangeFigures?.large_cash;
+          const floor = err.hasBlocker('walk_in_identity_required');
+          this._payerAsk = {
+            fields: ask?.fields ?? ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'],
+            dealerThreshold: ask?.dealer_threshold ?? false,
+            floor: floor || (ask?.asks_floor ?? false),
+            thresholdCrossed: floor ? false : (ask?.threshold_crossed ?? true),
+          };
+        }
+        return;
+      }
       this._error = apiErrorMessage(err, 'Failed to take the exchange');
     } finally {
       this._loading = false;
@@ -2463,8 +2704,8 @@ export class POSTerminal extends LitElement {
         </div>` : nothing}
       ${this._exchangeOn && this._exchangeError ? html`<p role="alert" style="margin:8px 0;font-size:13px;color:rgb(var(--gb-till-bad))" data-testid="exchange-error">${this._exchangeError}</p>` : nothing}
       <div style="display:flex;gap:8px">
-        <button @click=${() => { this._showReturn = false; this._exchangeOn = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
-        <button data-testid="return-exchange-toggle" @click=${() => { this._exchangeOn = !this._exchangeOn; this._scheduleDialogFigures(); }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-soft));font-size:14px;cursor:pointer">${this._exchangeOn ? 'Just a return' : 'Exchange'}</button>
+        <button @click=${() => { this._showReturn = false; this._exchangeOn = false; this._resetLargeCashCapture(); this._payerForExchange = false; this._suspectAvoidance = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+        <button data-testid="return-exchange-toggle" @click=${() => { this._exchangeOn = !this._exchangeOn; if (!this._exchangeOn) this._suspectAvoidance = false; this._scheduleDialogFigures(); }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-soft));font-size:14px;cursor:pointer">${this._exchangeOn ? 'Just a return' : 'Exchange'}</button>
         ${this._exchangeOn ? html`
           <button data-testid="exchange-take" @click=${() => this._confirmExchange()} ?disabled=${this._loading || this._exchangeBusy || this._exchangeLines.length === 0} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Exchange'}</button>` : html`
           <button data-testid="return-take" @click=${() => this._confirmReturn()} ?disabled=${this._loading || this._returnBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>`}
@@ -2506,10 +2747,15 @@ export class POSTerminal extends LitElement {
             <div style="flex:1">
               <gable-select data-testid="exchange-tender" .value=${this._exchangeTender}
                 .options=${[{ value: 'cash', label: 'Cash' }, { value: 'check', label: 'Check' }, { value: 'card', label: 'Card' }]}
-                @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as TenderMethod; }}
+                @change=${(e: Event) => { this._exchangeTender = (e.target as HTMLSelectElement).value as ExchangeTenderMethod; }}
               ></gable-select>
             </div>
-          </div>` : nothing}
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:13px;color:rgb(var(--gb-till-muted))" data-testid="exchange-avoidance-label">
+            <input type="checkbox" data-testid="exchange-avoidance" .checked=${this._suspectAvoidance}
+              @change=${(e: Event) => { this._suspectAvoidance = (e.target as HTMLInputElement).checked; }} />
+            <span>The manager marked this payment as suspected avoidance. A marked payment is counted as cash whatever was sold.</span>
+          </label>` : nothing}
         ${kind === 'refund' ? html`
           <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
             <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Pay back</label>
@@ -2800,13 +3046,17 @@ export class POSTerminal extends LitElement {
           <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
             placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
             ?disabled=${!hasLines || !open || this._tenderMethod === null}
-            @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
+            @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; this._scheduleLargeCashLook(); }}
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
             aria-label="Tender amount" />
           ${tendersOver ? html`
             <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
               ${overWords}
+            </div>` : nothing}
+          ${this._walkInNote !== '' ? html`
+            <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-walk-in-note">
+              ${this._walkInNote}
             </div>` : nothing}
           ${change > 0 ? html`
             <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
@@ -3233,6 +3483,40 @@ export class POSTerminal extends LitElement {
           </div>
         </div>
         ${this._renderPayBar(sale, productLines)}`}
+        ${this._payerAsk !== null ? html`
+          <gable-payer-dialog
+            .ask=${this._payerAsk}
+            ?refused=${this._payerRefused}
+            .prior=${this._payer}
+            @payer-save=${(e: CustomEvent) => {
+              this._payer = e.detail;
+              this._payerAsk = null;
+              this._payerRefused = false;
+              this._payerDeclined = false;
+              if (this._payerForExchange) {
+                // the capture answers the exchange: ring it now
+                this._payerForExchange = false;
+                void this._confirmExchange();
+                return;
+              }
+              void this._pay();
+            }}
+            @payer-decline=${() => {
+              // the walk-in declined to identify over the branch's floor: the
+              // sale goes ahead and the fact is recorded for a manager
+              this._payerDeclined = true;
+              this._payerAsk = null;
+              this._payerRefused = false;
+              if (this._payerForExchange) {
+                this._payerForExchange = false;
+                void this._confirmExchange();
+                return;
+              }
+              void this._pay();
+            }}
+            @payer-cancel=${() => { this._payerAsk = null; this._payerRefused = false; this._payerForExchange = false; }}
+          ></gable-payer-dialog>
+        ` : nothing}
       </div>
     `;
   }

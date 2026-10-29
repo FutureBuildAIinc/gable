@@ -768,6 +768,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/large-cash/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dealer's large cash settings
+         * @description The dealer's default country and the Canadian dealer threshold (CP-17a): on or off and its amount. The Canadian threshold is a dealer policy, never a legal duty, and it never produces a FINTRAC report. Admin or owner.
+         */
+        get: operations["adminGetLargeCashSettings"];
+        /**
+         * Save the dealer's large cash settings
+         * @description Writes the dealer's default country and the Canadian dealer threshold (on or off, amount) as system_settings rows, one transaction (CP-17a). Admin or owner. Omitted fields keep their stored value.
+         */
+        put: operations["adminSaveLargeCashSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ap/invoices": {
         parameters: {
             query?: never;
@@ -6393,6 +6417,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/large-cash/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What the large cash rule asks of this payment
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         */
+        post: operations["posLargeCashPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/transactions/{id}/void": {
         parameters: {
             query?: never;
@@ -8396,6 +8440,26 @@ export interface paths {
          * @description lead_time_days null is "unpublished", a different fact than zero ("available today").
          */
         patch: operations["productUpdateLeadTime"];
+        trace?: never;
+    };
+    "/api/v1/products/{id}/consumer-durable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear the consumer durable flag
+         * @description The Form 8300 designated reporting transaction flag (CP-17a): the counter's large cash classifier counts a qualifying negotiable instrument only for a sale line of a flagged product priced over the threshold. The default is false; the flagged exceptions are the big ticket consumer goods.
+         */
+        patch: operations["productUpdateConsumerDurable"];
         trace?: never;
     };
     "/api/v1/products/{id}/units": {
@@ -10500,6 +10564,16 @@ export interface components {
             limit: number;
             /** Format: int64 */
             total?: number;
+        };
+        /** @description The dealer's large cash settings (CP-17a): the default country a branch with none of its own falls back to, and the Canadian dealer threshold, off by default. */
+        AdminLargeCashSettings: {
+            /** @description The dealer's default country, two letters, or empty when unset. */
+            country_default: string;
+            ca_enabled: boolean;
+            /** Format: int64 */
+            ca_threshold_cents: number;
+            /** Format: int64 */
+            ca_default_threshold_cents: number;
         };
         /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
         ApiKey: {
@@ -14413,6 +14487,13 @@ export interface components {
             default_tax_rate: number | null;
             cash_rounding_mode: components["schemas"]["CashRoundingMode"];
             timezone: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents: number | null;
             active: boolean;
             /** Format: uuid */
             branch_id: string | null;
@@ -14445,6 +14526,13 @@ export interface components {
             default_tax_rate?: number | null;
             cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string | null;
+            /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             active?: boolean;
             /** Format: int64 */
             revision?: number;
@@ -14467,6 +14555,13 @@ export interface components {
             default_tax_rate?: number;
             cash_rounding_mode?: components["schemas"]["CashRoundingMode"];
             timezone?: string;
+            /** @description The branch's country, two letters (CP-17a); null falls back to the dealer's country.default. */
+            country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
         };
@@ -16708,6 +16803,34 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+        };
+        /** @description The payer identity a large cash crossing captures at the counter (CP-17a). The taxpayer identification number and the ID number are sensitive: sealed at rest, never logged, never printed on a receipt and never in an audit row's body. */
+        PosPayerCapture: {
+            /** @description The payer's name. */
+            name?: string;
+            /** @description The payer's address. */
+            address?: string;
+            /** @description The payer's occupation, or the nature of a sole proprietor's principal business. */
+            occupation?: string;
+            /** @description The payer's date of birth, as YYYY-MM-DD. */
+            date_of_birth?: string;
+            /**
+             * @description The kind of identification looked at.
+             * @enum {string}
+             */
+            id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other";
+            /** @description The identification number; sealed at rest. */
+            id_number?: string;
+            /** @description The taxpayer identification number (the United States rule); sealed at rest. */
+            taxpayer_id?: string;
+            /** @description Whether the person paying acts on behalf of someone else. */
+            third_party_payer?: boolean;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the sale. A warning that asks to be acknowledged must be named here, or the completion is refused with 409 alert_unacknowledged and nothing is taken. */
             acknowledged_alert_ids?: string[];
         };
@@ -16726,6 +16849,63 @@ export interface components {
              * @enum {string|null}
              */
             id_type?: "drivers_license" | "state_id" | "passport" | "military_id" | "other" | null;
+            /**
+             * @description The kind of check the tender is (CP-17a); on a check tender only. A personal check never counts as cash; a cashier's check, bank draft, traveler's check or money order at or under the threshold face value counts only for a consumer durable sale line or under the suspected avoidance mark.
+             * @enum {string|null}
+             */
+            instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+        };
+        PosLargeCashPreviewRequest: {
+            /**
+             * Format: uuid
+             * @description The sale the payment panel holds.
+             */
+            transaction_id: string;
+            /** @description The manager's suspected avoidance mark. */
+            suspected_avoidance?: boolean;
+            /** @description The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            tenders: {
+                /** @description The tender method: cash, check, card, account or store_credit. */
+                method: string;
+                /** @enum {string|null} */
+                instrument?: "personal_check" | "cashiers_check" | "bank_draft" | "travelers_check" | "money_order" | null;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
+        };
+        /** @description What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated. */
+        PosLargeCashPreview: {
+            /** @description The branch's country, two letters. */
+            country: string;
+            /** @enum {string} */
+            rule_family: "" | "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            counted_cents: number;
+            /** Format: int64 */
+            aggregate_cents: number;
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @enum {string} */
+            comparator: "greater" | "at_or_above";
+            asks_details: boolean;
+            fields: string[];
+            note?: string;
+            /** @description True for the Canadian dealer policy threshold (never a legal duty). */
+            dealer_threshold?: boolean;
+            /**
+             * Format: int64
+             * @description The branch's walk-in identity floor in cents; zero when the branch has it off.
+             */
+            walk_in_floor_cents: number;
+            /** @description True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay. */
+            asks_floor: boolean;
+            /** @description True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+            walk_in_aggregated: boolean;
+            /** @description The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+            walk_in_note?: string;
+            /** @description True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+            threshold_crossed: boolean;
         };
         PosVoidRequest: {
             reason: string;
@@ -17049,6 +17229,17 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
+            /** @description The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+            /**
+             * @description The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders.
+             * @enum {string}
+             */
+            tender_method?: "cash" | "check" | "card";
         };
         PosReturnFigures: {
             /**
@@ -17113,6 +17304,8 @@ export interface components {
              * @description Replacement less return: positive is what the customer pays, negative what goes back.
              */
             difference_cents: number;
+            /** @description The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs. */
+            large_cash?: components["schemas"]["PosLargeCashPreview"];
         };
         PosExchange: {
             return: components["schemas"]["PosReturn"];
@@ -19123,6 +19316,8 @@ export interface components {
             stackable: boolean | null;
             geometry_source: string | null;
             lead_time_days: number | null;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false. */
+            consumer_durable: boolean;
             /** @description A decimal string at scale 4. */
             reorder_point: string;
             reorder_qty: string;
@@ -19182,6 +19377,8 @@ export interface components {
             board_length_ft?: number | null;
             /** @description The product is sold by tally; it stocks in LF and carries no fixed length. */
             random_length?: boolean;
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a); false when absent. */
+            consumer_durable?: boolean | null;
             /** @description The weighed sale's density (CP-19); both fields together or neither. */
             density_lb_per_cy?: components["schemas"]["Quantity"] | null;
             density_volume_state?: ("loose" | "compacted") | null;
@@ -19252,6 +19449,12 @@ export interface components {
         };
         ProductLeadTimeUpdate: {
             lead_time_days?: number | null;
+            /** Format: int64 */
+            revision?: number;
+        };
+        ProductConsumerDurableUpdate: {
+            /** @description The Form 8300 designated reporting transaction flag (CP-17a). */
+            consumer_durable: boolean;
             /** Format: int64 */
             revision?: number;
         };
@@ -22862,6 +23065,63 @@ export interface operations {
                 };
             };
             400: components["responses"]["IdempotencyBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminGetLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer's large cash settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    adminSaveLargeCashSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminLargeCashSettings"];
+            };
+        };
+        responses: {
+            /** @description The saved settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLargeCashSettings"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ConflictEither"];
@@ -34388,6 +34648,35 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    posLargeCashPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosLargeCashPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The rule family's view of this payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosLargeCashPreview"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTransactionVoid: {
         parameters: {
             query?: never;
@@ -38355,6 +38644,47 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProductLeadTimeUpdate"];
+            };
+        };
+        responses: {
+            /** @description The product with the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductView"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productUpdateConsumerDurable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The quoted revision; required unless the body carries it. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductConsumerDurableUpdate"];
             };
         };
         responses: {

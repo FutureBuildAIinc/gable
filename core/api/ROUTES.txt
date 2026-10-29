@@ -141,6 +141,8 @@ POST	/api/v1/admin/exposure-scan	internal/pricing	h.HandleAdminScan
 GET	/api/v1/admin/keys	internal/techadmin	h.ListKeys
 POST	/api/v1/admin/keys	internal/techadmin	h.CreateKey
 DELETE	/api/v1/admin/keys/{id}	internal/techadmin	h.RevokeKey
+GET	/api/v1/admin/large-cash/settings	internal/largecash	h.GetSettings
+PUT	/api/v1/admin/large-cash/settings	internal/largecash	h.PutSettings
 GET	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.getSettings)
 PUT	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.putSettings)
 GET	/api/v1/admin/modules	internal/staff	h.ListModules
@@ -403,6 +405,7 @@ POST	/api/v1/pos/end-of-day/{id}/deposit-match	internal/pos	h.MatchDeposit
 POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 POST	/api/v1/pos/exchanges	internal/pos	h.CreateExchange
 POST	/api/v1/pos/exchanges/preview	internal/pos	h.PreviewExchange
+POST	/api/v1/pos/large-cash/preview	internal/largecash	h.Preview
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 GET	/api/v1/pos/refund-intents	internal/pos	h.ListRefundIntents
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
@@ -511,6 +514,7 @@ GET	/api/v1/products	internal/product	h.HandleListProducts
 POST	/api/v1/products	internal/product	h.HandleCreateProduct
 GET	/api/v1/products/reorder-alerts	internal/product	h.HandleReorderAlerts
 GET	/api/v1/products/{id}	internal/product	h.HandleGetProduct
+PATCH	/api/v1/products/{id}/consumer-durable	internal/product	h.HandleUpdateConsumerDurable
 PATCH	/api/v1/products/{id}/density	internal/product	h.HandleUpdateDensity
 GET	/api/v1/products/{id}/detail	internal/pim	h.HandleGetProductDetail
 PATCH	/api/v1/products/{id}/dimensions	internal/product	h.HandleUpdateDimensions

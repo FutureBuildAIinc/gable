@@ -803,6 +803,66 @@ paths:
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/consumer-durable:
+    patch:
+      operationId: productUpdateConsumerDurable
+      tags: [product]
+      summary: Set or clear the consumer durable flag
+      description: >-
+        The Form 8300 designated reporting transaction flag (CP-17a): the
+        counter's large cash classifier counts a qualifying negotiable
+        instrument only for a sale line of a flagged product priced over
+        the threshold. The default is false; the flagged exceptions are the
+        big ticket consumer goods.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The quoted revision; required unless the body carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductConsumerDurableUpdate'
+      responses:
+        '200':
+          description: The product with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductView'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/WireConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/units:
     get:
       operationId: productUnitSetGet
@@ -1187,11 +1247,11 @@ components:
       required: [id, sku, description, stock_uom, base_price_ten_thousandths,
         average_unit_cost_ten_thousandths, target_margin, commission_rate,
         vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in,
-        stackable, geometry_source, lead_time_days, reorder_point,
-        reorder_qty, on_hand, allocated, available, revision, created_at,
-        updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in,
-        board_width_in, board_length_ft, random_length, units, image_url,
-        density_lb_per_cy, density_volume_state]
+        stackable, geometry_source, lead_time_days, consumer_durable,
+        reorder_point, reorder_qty, on_hand, allocated, available, revision,
+        created_at, updated_at, sale_uom, price_uom, purchase_uom,
+        board_thickness_in, board_width_in, board_length_ft, random_length,
+        units, image_url, density_lb_per_cy, density_volume_state]
       properties:
         id:
           type: string
@@ -1234,6 +1294,9 @@ components:
           type: [string, "null"]
         lead_time_days:
           type: [integer, "null"]
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a); a lumber yard's default is false.
         reorder_point:
           type: string
           description: A decimal string at scale 4.
@@ -1347,6 +1410,9 @@ components:
         random_length:
           type: boolean
           description: The product is sold by tally; it stocks in LF and carries no fixed length.
+        consumer_durable:
+          type: [boolean, "null"]
+          description: The Form 8300 designated reporting transaction flag (CP-17a); false when absent.
         density_lb_per_cy:
           oneOf:
             - $ref: '#/components/schemas/Quantity'
@@ -1481,6 +1547,16 @@ components:
       properties:
         lead_time_days:
           type: [integer, "null"]
+        revision:
+          type: integer
+          format: int64
+    ProductConsumerDurableUpdate:
+      type: object
+      required: [consumer_durable]
+      properties:
+        consumer_durable:
+          type: boolean
+          description: The Form 8300 designated reporting transaction flag (CP-17a).
         revision:
           type: integer
           format: int64

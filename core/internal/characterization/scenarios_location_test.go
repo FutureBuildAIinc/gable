@@ -21,7 +21,7 @@ func locationGroups() []groupDef {
 				body: map[string]any{
 					"code": "GOLD", "name": "Golden Branch",
 					"address": "2 Golden Way", "city": "Kelowna", "state": "BC", "zip": "V1X 7K2",
-					"timezone": "America/Vancouver",
+					"timezone": "America/Vancouver", "country_code": "US",
 				},
 				extract: map[string]string{"newBranch": "/id"},
 			},

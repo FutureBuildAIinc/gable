@@ -48,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/links"
+	"github.com/gablelbm/gable/internal/largecash"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
@@ -216,7 +217,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		parent any
 	}{{f.branchA, "BRANCH", nil}, {f.branchB, "BRANCH", nil}, {f.branchC, "BRANCH", nil}, {f.branchC2, "BRANCH", nil},
 		{f.yardA, "YARD", f.branchA}, {f.yardB, "YARD", f.branchB}} {
-		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id) VALUES ($1, $2, $3, $4, $5)`,
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id, country_code) VALUES ($1, $2, $3, $4, $5, 'US')`,
 			r.id, r.typ, "pin-"+r.id.String()[:8], "pin row "+r.id.String()[:8], r.parent); err != nil {
 			t.Fatalf("seed location: %v", err)
 		}
@@ -474,6 +475,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithLedger(glSvc).WithAuditLog(audit.NewLogger(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
 
 	// The AI spending routes exactly as serve registers them, each call
 	// audited with whoever spent the credit (the PD-6 ruling).
@@ -1020,7 +1022,7 @@ func TestKeyBranchPin_LocationWrites(t *testing.T) {
 	// POST /branches: the directory create is refused for a bound key
 	// outright (a new branch is outside every pin), and stays open to the
 	// unbound key and the user.
-	newBranch := fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new"}`, uuid.NewString()[:8])
+	newBranch := fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new","country_code":"US"}`, uuid.NewString()[:8])
 	f.refuseForeign(t, "POST", "/api/v1/branches", newBranch, nil)
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(),
@@ -1032,7 +1034,7 @@ func TestKeyBranchPin_LocationWrites(t *testing.T) {
 	}
 	f.allow(t, "unbound", "POST", "/api/v1/branches", newBranch, nil, http.StatusCreated)
 	f.allow(t, "user", "POST", "/api/v1/branches",
-		fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new"}`, uuid.NewString()[:8]), nil, http.StatusCreated)
+		fmt.Sprintf(`{"type":"branch","code":"pin-new-%s","name":"pin new","country_code":"US"}`, uuid.NewString()[:8]), nil, http.StatusCreated)
 
 	// PUT /branches/{id}: the foreign branch is refused and unchanged, the
 	// key's own branch passes, and the unbound key and the user keep theirs.

@@ -8,6 +8,8 @@
 
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
+/** The methods an exchange's difference can be tendered by (CP-17a). */
+export type ExchangeTenderMethod = 'cash' | 'check' | 'card';
 /** The kind of ID looked at beside a check or a charge; its number is never taken. */
 export type IdType = 'drivers_license' | 'state_id' | 'passport' | 'military_id' | 'other';
 export const ID_TYPES: Array<{ value: IdType; label: string }> = [
@@ -322,6 +324,30 @@ export interface CounterReturn {
     lines: ReturnLine[];
 }
 
+/** What the large cash preview answered (CP-17a): the rule family, the counted cash and whether the payer's details are required. */
+export interface LargeCashPreview {
+    country: string;
+    rule_family: string;
+    counted_cents: number;
+    aggregate_cents: number;
+    threshold_cents: number;
+    comparator: string;
+    asks_details: boolean;
+    fields: string[];
+    note?: string;
+    dealer_threshold: boolean;
+    /** The branch's walk-in identity floor in cents; zero when the branch has it off (CP-17a). */
+    walk_in_floor_cents: number;
+    /** True when this walk-in's cash sale passes the floor and no identity is captured yet: the counter asks before Pay. */
+    asks_floor: boolean;
+    /** True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+    walk_in_aggregated: boolean;
+    /** The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+    walk_in_note?: string;
+    /** True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+    threshold_crossed: boolean;
+}
+
 /** What an exchange comes to: the credit the return is worth, the replacement and the difference. */
 export interface ExchangeFigures {
     returned_cents: number;
@@ -329,6 +355,8 @@ export interface ExchangeFigures {
     replacement_cents: number;
     /** Replacement less return: positive is what the customer pays, negative what goes back. */
     difference_cents: number;
+    /** The branch country's large cash answer for this exchange (CP-17a): what the payer's capture needs. */
+    large_cash?: LargeCashPreview;
 }
 
 export interface Exchange extends ExchangeFigures {
