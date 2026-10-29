@@ -16,6 +16,9 @@ const svc = vi.hoisted(() => ({
   removeItem: vi.fn(),
   changeQuantity: vi.fn(),
   getSale: vi.fn(),
+  searchSales: vi.fn(),
+  createReturn: vi.fn(),
+  returnReasons: vi.fn(),
   openTill: vi.fn(),
   tillReport: vi.fn(),
   closeTill: vi.fn(),
@@ -35,7 +38,7 @@ import type { POSTerminal } from './POSTerminal';
 import { branchContext } from '../../services/BranchContext';
 import { authCustody } from '@gable/auth';
 import { openAppDialog, answerAppDialog, chooseOption } from '../../test/dom';
-import type { CounterRegister } from '../../types/pos';
+import type { CounterRegister, SaleSummary } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
   id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
@@ -2808,6 +2811,178 @@ describe('drawer cash and a count held for sign off (CP-08)', () => {
     await settle(el);
     expect(el.textContent).toContain('Z-Report - Till Closed');
     expect(el.querySelector('[data-testid="till-waiting-signoff"]')).toBeNull();
+    el.remove();
+  });
+});
+
+describe('return a past sale', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const summary = (over: Partial<SaleSummary> = {}): SaleSummary => ({
+    id: 'past1', number: 'POS-000042', revision: 2, branch_id: 'b', register_id: 'REG-01', cashier_id: 'c',
+    customer_id: 'cu1', customer_name: 'Test Builders', currency: 'USD', total_cents: 12500, status: 'completed',
+    invoice_id: 'inv1', invoice_number: 'IN-000042', completed_at: new Date().toISOString(), created_at: new Date().toISOString(), business_day: '2026-10-28', item_count: 2,
+    ...over,
+  });
+
+  const fullSale = (over: Partial<Sale> = {}): Sale => sale({
+    id: 'past1', number: 'POS-000042', revision: 2, status: 'completed', total_cents: 12500,
+    lines: [line('a', 7500), line('b', 5000)] as unknown as Sale['lines'], ...over,
+  });
+
+  it('opens the search panel, searches, and renders results', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    expect(el.textContent).toContain('Return a past sale');
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS-000042';
+    query.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.searchSales).toHaveBeenCalledWith('POS-000042', undefined);
+    const result = q(el, 'return-search-result');
+    expect(result).toBeTruthy();
+    expect(q(result, 'return-search-result-number').textContent).toContain('POS-000042');
+    expect(q(result, 'return-search-result-customer').textContent).toContain('Test Builders');
+    expect(q(result, 'return-search-result-total').textContent).toContain('$125.00');
+    expect(q(result, 'return-search-result-status').textContent).toContain('Completed');
+    expect(q(result, 'return-search-result-date').textContent).toContain('2026-10-28');
+    el.remove();
+  });
+
+  it('shows an open result as not returnable, with no pick button', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary({ status: 'open', invoice_id: null, invoice_number: null })], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-result-status').textContent).toContain('Open');
+    expect(q(el, 'return-search-result-not-completed').textContent).toContain('Not completed yet');
+    expect(q(el, 'return-search-result-pick')).toBeNull();
+    el.remove();
+  });
+
+  it('shows a voided result as not returnable', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary({ status: 'voided' })], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'void';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-result-voided').textContent).toContain('Voided - cannot be returned');
+    expect(q(el, 'return-search-result-pick')).toBeNull();
+    el.remove();
+  });
+
+  it('picks a completed result and opens the return dialog on that sale', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([]);
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const query = q(el, 'return-search-query') as HTMLInputElement;
+    query.value = 'POS-000042';
+    query.dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.getSale).toHaveBeenCalledWith('past1');
+    expect(q(el, 'return-qty')).toBeTruthy();
+    expect(el.textContent).toContain('POS-000042');
+    el.remove();
+  });
+
+  it('shows the already-returned reason when every product line is fully returned', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale({ returned_quantities: { a: '1', b: '1' } }));
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'return-search-error').textContent).toContain('Everything on this sale has already been returned');
+    expect(q(el, 'return-qty')).toBeNull();
+    el.remove();
+  });
+
+  it('searches by date when no query text is typed', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    const dateField = q(el, 'return-search-date') as HTMLInputElement;
+    dateField.value = day;
+    dateField.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.searchSales).toHaveBeenCalledWith('', day);
+    expect(q(el, 'return-search-result')).toBeTruthy();
+    el.remove();
+  });
+
+  it('defaults restock to back to stock and sends restock choices with the return', async () => {
+    svc.searchSales.mockResolvedValue({ items: [summary()], next_cursor: null, limit: 50 });
+    svc.getSale.mockResolvedValue(fullSale());
+    svc.returnReasons.mockResolvedValue([]);
+    svc.createReturn.mockResolvedValue({ id: 'r1', number: 'RTN-000001', total_cents: -7500, restocking_fee_cents: 0, refund_method: 'cash' });
+    const el = await mount(sale());
+    q(el, 'return-search-open').click();
+    await el.updateComplete;
+    (q(el, 'return-search-query') as HTMLInputElement).value = 'POS-000042';
+    q(el, 'return-search-query').dispatchEvent(new Event('input'));
+    q(el, 'return-search-submit').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'return-search-result-pick').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // Default is back to stock for both lines.
+    expect((el as unknown as { _returnRestockByLine: Record<string, boolean> })._returnRestockByLine).toEqual({ a: true, b: true });
+    // Mark first line damaged, leave second back to stock.
+    const damaged = [...el.querySelectorAll('[data-testid="return-restock-damaged"]')][0] as HTMLInputElement;
+    damaged.click();
+    await el.updateComplete;
+    const qty = [...el.querySelectorAll('[data-testid="return-qty"]')][0] as HTMLInputElement;
+    qty.value = '1';
+    qty.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const note = q(el, 'return-note') as HTMLInputElement;
+    note.value = 'customer reported damage';
+    note.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    q(el, 'return-take').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.createReturn).toHaveBeenCalledWith(expect.objectContaining({
+      lines: [{ line_id: 'a', quantity: '1', restock: false }],
+    }));
+    expect(el.textContent).toContain('Return RTN-000001 complete - $75.00 refunded cash');
     el.remove();
   });
 });
