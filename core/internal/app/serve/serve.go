@@ -795,8 +795,11 @@ func Run() {
 	// The Run card terminal driver (CP-05): selected by configuration like
 	// the simulator, never by default. Its credentials are the Run Payments
 	// set (resolved at call time, DB-first); the Reporting API set is
-	// optional and only the lost answer lookup and the settlement batch
-	// need it. A demo stack's simulator wins: both are never wired.
+	// optional and only three things need it: the lookup before every
+	// charge-card POST, the lost answer lookup and the settlement batch.
+	// Without it the lookup cannot run, and the driver's own per order
+	// guard is what keeps a re dispatch from charging twice.
+	// A demo stack's simulator wins: both are never wired.
 	if cfg.POSTerminal == "run" && cfg.POSTerminalSimulator == "" {
 		runTerm := payment.NewRunTerminal(paymentKeys.Resolve, terminalLedger, logger).
 			OnKeyRotated(func(apiKey, refreshToken string) {

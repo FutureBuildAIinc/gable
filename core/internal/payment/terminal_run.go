@@ -318,7 +318,10 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	defer guard.mu.Unlock()
 	// Never re send a dispatch without looking the interaction up first:
 	// a charge that already exists at Run under this order id is recovered
-	// from the transaction lookup, never prompted again.
+	// from the transaction lookup, never prompted again. The lookup runs only
+	// when the reporting credential set is configured; without that set there
+	// is no lookup to run, and the guard below is the whole protection: it
+	// refuses a re dispatch of an order id this process already posted.
 	if t.reportingConfigured() {
 		found, lerr := t.lookupByOrder(dctx, d.IdempotencyKey)
 		if lerr != nil {
@@ -337,7 +340,14 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 		}
 	}
 	if guard.attempted {
-		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took order %s in this process and the transaction lookup found no charge for it: the dispatch is not re sent", d.IdempotencyKey)
+		// The guard is the whole protection when no reporting credential set
+		// is configured: there is no lookup to ask, so the refusal says so
+		// instead of naming a lookup that never ran.
+		why := "the transaction lookup found no charge for it"
+		if !t.reportingConfigured() {
+			why = "no transaction lookup is configured to ask"
+		}
+		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took order %s in this process and %s: the dispatch is not re sent", d.IdempotencyKey, why)
 	}
 	body, _ := json.Marshal(runChargeCardRequest{Amount: dollarsOf(d.AmountCents), OrderID: d.IdempotencyKey})
 	// The order id is marked under the guard before the POST: a lost answer
