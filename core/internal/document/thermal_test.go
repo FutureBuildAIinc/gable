@@ -255,6 +255,31 @@ func TestThermalReceiptOnAccountDrawsBalanceAndBlankSignature(t *testing.T) {
 	mustContain(t, doc, "Signature:")
 }
 
+// The cash rounding line (CP-18): it names the amount and the direction on a
+// rounded sale, and a sale the branch's rule did not touch carries no such
+// line.
+func TestThermalReceiptRoundingLine(t *testing.T) {
+	svc := brandedReceiptService(t)
+
+	rounded := sampleReceipt()
+	rounded.RoundingCents = httpx.Cents(2)
+	doc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, rounded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "Cash rounding: $0.02")
+	mustContain(t, doc, "Total: $1,073.50")
+
+	plain := sampleReceipt()
+	plainDoc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, plainDoc)
+	mustNotContain(t, plainDoc, "Cash rounding")
+}
+
 // The receipt renders even without a profile or a yard, the way every other
 // form does.
 func TestThermalReceiptWithoutBrandingStillRenders(t *testing.T) {
