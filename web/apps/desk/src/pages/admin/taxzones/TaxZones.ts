@@ -15,6 +15,7 @@ import { MapPin, Plus, X, Ban } from 'lucide';
 import { TaxZoneService, combinedRatePercent } from '../../../services/TaxZoneService.ts';
 import { apiErrorMessage } from '../../../services/apiError.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import '../../../components/ui/gable-select';
 import type { TaxZone, TaxZoneRatePart } from '../../../types/taxZone.ts';
 
 interface ZoneForm {
@@ -300,41 +301,20 @@ export class GableAdminTaxZones extends LitElement {
           <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             ${this._textField('Country *', 'country', 'US')}
             ${this._textField('Jurisdiction code *', 'jurisdiction_code', 'WA-KING-001')}
-            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
-              Jurisdiction type
-              <select
-                .value=${f.jurisdiction_type}
-                @change=${(e: Event) => this._updateField('jurisdiction_type', (e.target as HTMLSelectElement).value)}
-                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
-              >
-                ${JURISDICTION_TYPES.map((t) => html`<option value=${t}>${t}</option>`)}
-              </select>
-            </label>
+            ${this._selectField('Jurisdiction type', f.jurisdiction_type,
+              JURISDICTION_TYPES.map((t) => ({ value: t, label: t })),
+              (v) => this._updateField('jurisdiction_type', v))}
             <div class="md:col-span-2">${this._textField('Jurisdiction name', 'jurisdiction_name', 'King County')}</div>
 
-            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
-              Zone kind
-              <select
-                .value=${f.zone_kind}
-                @change=${(e: Event) => this._updateField('zone_kind', (e.target as HTMLSelectElement).value)}
-                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
-              >
-                <option value="POSTAL">Postal code zone</option>
-                <option value="PROVINCE">Canadian province zone</option>
-              </select>
-            </label>
-            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
-              Sourcing
-              <select
-                .value=${f.sourcing}
-                @change=${(e: Event) => this._updateField('sourcing', (e.target as HTMLSelectElement).value)}
-                class="mt-1 w-full bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50"
-              >
-                <option value="DESTINATION">Destination (deliveries)</option>
-                <option value="ORIGIN">Origin (pickups from here)</option>
-                <option value="BOTH">Both</option>
-              </select>
-            </label>
+            ${this._selectField('Zone kind', f.zone_kind, [
+                { value: 'POSTAL', label: 'Postal code zone' },
+                { value: 'PROVINCE', label: 'Canadian province zone' },
+              ], (v) => this._updateField('zone_kind', v))}
+            ${this._selectField('Sourcing', f.sourcing, [
+                { value: 'DESTINATION', label: 'Destination (deliveries)' },
+                { value: 'ORIGIN', label: 'Origin (pickups from here)' },
+                { value: 'BOTH', label: 'Both' },
+              ], (v) => this._updateField('sourcing', v))}
 
             ${f.zone_kind === 'POSTAL' ? html`
               ${this._textField('Postal code from *', 'postal_low', '98100')}
@@ -357,13 +337,11 @@ export class GableAdminTaxZones extends LitElement {
               <div class="space-y-2">
                 ${f.rates.map((r, i) => html`
                   <div class="flex items-center gap-2">
-                    <select
+                    <gable-select
                       .value=${r.name}
+                      .options=${PART_NAMES.map((n) => ({ value: n, label: n }))}
                       @change=${(e: Event) => this._updateRate(i, { name: (e.target as HTMLSelectElement).value })}
-                      class="bg-deep-space/60 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white focus:outline-none focus:border-gable-green/50"
-                    >
-                      ${PART_NAMES.map((n) => html`<option value=${n}>${n}</option>`)}
-                    </select>
+                    ></gable-select>
                     <input
                       type="text"
                       .value=${r.rate}
@@ -396,6 +374,20 @@ export class GableAdminTaxZones extends LitElement {
           </div>
         </div>
       </div>
+    `;
+  }
+
+/** A select on the gable select component: the desk holds no native select (the chrome guard). */
+  private _selectField(label: string, value: string, options: { value: string; label: string }[], onChange: (v: string) => void) {
+    return html`
+      <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
+        ${label}
+        <gable-select
+          .value=${value}
+          .options=${options}
+          @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+        ></gable-select>
+      </label>
     `;
   }
 
