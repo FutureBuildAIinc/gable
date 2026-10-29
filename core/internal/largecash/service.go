@@ -16,6 +16,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -69,6 +70,8 @@ type CompletionFacts struct {
 	Tenders            []TenderFacts
 	SuspectedAvoidance bool
 	Payer              *PayerIn
+	// Actor is who completes the sale, for the crossing's audit row.
+	Actor string
 }
 
 // Preview is the counter's answer before Pay: what the rule family is,
@@ -124,6 +127,10 @@ func NewService(db *database.DB, vault *payment.Vault, keyHex string) *Service {
 	return &Service{db: db, repo: NewRepository(db), vault: vault, keyHex: strings.TrimSpace(keyHex), now: time.Now}
 }
 
+// settingsEntityID is the audit entity of the dealer's large cash settings,
+// which have no row of their own.
+var settingsEntityID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("largecash.settings"))
+
 // Settings is the dealer's large cash configuration on the wire.
 type Settings struct {
 	CADefaultThresholdCents int64  `json:"ca_default_threshold_cents"`
@@ -160,7 +167,7 @@ func (s *Service) ReadSettings(ctx context.Context) (*Settings, error) {
 // SaveSettings writes the dealer's configuration: the default country and
 // the Canadian threshold (on or off, amount). One transaction, so a reader
 // never sees the switch without its amount.
-func (s *Service) SaveSettings(ctx context.Context, in *Settings) error {
+func (s *Service) SaveSettings(ctx context.Context, in *Settings, actor string) error {
 	if in.CountryDefault != "" && len(in.CountryDefault) != 2 {
 		return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed,
 			Message: "one or more fields failed validation",
@@ -176,6 +183,10 @@ func (s *Service) SaveSettings(ctx context.Context, in *Settings) error {
 		enabled = "on"
 	}
 	return s.db.RunInTx(ctx, func(ctx context.Context) error {
+		before, err := s.ReadSettings(ctx)
+		if err != nil {
+			return err
+		}
 		for _, kv := range [][2]string{
 			{KeyCountryDefault, in.CountryDefault},
 			{KeyCAEnabled, enabled},
@@ -188,7 +199,14 @@ func (s *Service) SaveSettings(ctx context.Context, in *Settings) error {
 				return err
 			}
 		}
-		return nil
+		// What the counter records follows these figures, so a change to
+		// them is audited with the old and the new, in the same transaction.
+		return audit.NewLogger(s.db).Log(ctx, audit.Entry{
+			Action: "large_cash.settings.changed", EntityType: "system_settings", EntityID: settingsEntityID, UserID: actor,
+			Changes: map[string]interface{}{
+				"before": map[string]interface{}{"country_default": before.CountryDefault, "ca_enabled": before.CAEnabled, "ca_threshold_cents": before.CAThresholdCents},
+				"after":  map[string]interface{}{"country_default": in.CountryDefault, "ca_enabled": in.CAEnabled, "ca_threshold_cents": in.CAThresholdCents},
+			}})
 	})
 }
 
@@ -352,8 +370,19 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 	if agg.rule == RuleCA {
 		state = "recorded"
 	}
-	return s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, agg.rule, f.Currency,
-		counted, agg.base+counted, uniq, agg.tenderCount+1, state)
+	if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, agg.rule, f.Currency,
+		counted, agg.base+counted, uniq, agg.tenderCount+1, state); err != nil {
+		return err
+	}
+	// The crossing is audited in the completion's transaction. The row names
+	// the rule and the figures and that a payer was captured, never an
+	// identity value (ADR 0003).
+	return audit.NewLogger(s.db).Log(ctx, audit.Entry{
+		Action: "large_cash.crossing.recorded", EntityType: "pos_transaction", EntityID: f.TransactionID, UserID: f.Actor,
+		Changes: map[string]interface{}{
+			"rule_family": agg.rule, "state": state, "branch_id": f.BranchID.String(),
+			"counted_cents": counted, "total_cents": agg.base + counted, "payer_captured": true,
+		}})
 }
 
 // payerKey is the aggregation key: the named customer, else the captured

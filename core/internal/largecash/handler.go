@@ -6,10 +6,13 @@ package largecash
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -17,16 +20,31 @@ import (
 // and the dealer's threshold settings.
 type Handler struct {
 	service *Service
+	guard   BranchGuard // see WithBranchGuard
+}
+
+// BranchGuard holds a record's branch to the caller's wall (ADR 0007 section
+// 2.3). *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
+// WithBranchGuard holds the sale a preview names to the caller's wall. The
+// preview reads a sale by id, so a handler wired with no guard refuses
+// (fail closed) rather than answer for any branch's sale.
+func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
+	h.guard = g
+	return h
 }
 
 // NewHandler builds the handler.
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 // RegisterRoutes mounts the routes. roleGuard wraps the settings routes
-// (admin or owner); the preview rides the counter's own guard, the same
-// middleware the pos routes take.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard func(http.Handler) http.Handler) {
-	mux.HandleFunc("POST /api/v1/pos/large-cash/preview", h.Preview)
+// (admin or owner); previewGuard wraps the preview with the counter's own
+// roles and the branch middleware, the same composition the pos routes take.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard, previewGuard func(http.Handler) http.Handler) {
+	mux.Handle("POST /api/v1/pos/large-cash/preview", previewGuard(http.HandlerFunc(h.Preview)))
 	if roleGuard != nil {
 		mux.Handle("GET /api/v1/admin/large-cash/settings", roleGuard(http.HandlerFunc(h.GetSettings)))
 		mux.Handle("PUT /api/v1/admin/large-cash/settings", roleGuard(http.HandlerFunc(h.PutSettings)))
@@ -63,9 +81,23 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, v.Err())
 		return
 	}
+	if h.guard == nil {
+		httpx.WriteError(w, r, httpx.Unavailable(
+			"the branch wall is not wired on this handler: a sale is previewed only inside the caller's branch"))
+		return
+	}
 	facts, err := h.service.FactsOfSale(r.Context(), id)
 	if err != nil {
 		httpx.WriteError(w, r, err)
+		return
+	}
+	// A sale outside the caller's wall answers what a missing one does.
+	if err := h.guard.CheckPayloadBranch(r.Context(), facts.BranchID); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httpx.WriteError(w, r, httpx.NotFound("sale not found"))
+			return
+		}
+		httpx.WriteError(w, r, fmt.Errorf("branch grant lookup: %w", err))
 		return
 	}
 	if req.SuspectedAvoidance != nil {
@@ -139,7 +171,7 @@ func (h *Handler) PutSettings(w http.ResponseWriter, r *http.Request) {
 	if req.CAThresholdCents > 0 {
 		in.CAThresholdCents = req.CAThresholdCents
 	}
-	if err := h.service.SaveSettings(r.Context(), in); err != nil {
+	if err := h.service.SaveSettings(r.Context(), in, actorOf(r)); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -163,4 +195,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // path.
 func (s *Service) FactsOfSale(ctx context.Context, transactionID uuid.UUID) (*CompletionFacts, error) {
 	return s.repo.SaleFacts(ctx, transactionID)
+}
+
+// actorOf names who made the request, for the audit row.
+func actorOf(r *http.Request) string {
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		return claims.Subject
+	}
+	return ""
 }

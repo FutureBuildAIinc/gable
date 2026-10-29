@@ -191,7 +191,11 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	// route holds the claim's sale to the caller's grants, so the fixture
 	// proves the same hold serve proves
 	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(db)).RegisterRoutes(mux)
-	largecash.NewHandler(f.largeCash).RegisterRoutes(mux, nil)
+	// the fixture mounts no branch middleware, so the preview's guard admits
+	// every sale; the wall itself is proved in serve (the large cash preview
+	// wall test)
+	largecash.NewHandler(f.largeCash).WithBranchGuard(admitEverySale{}).RegisterRoutes(mux, nil,
+		func(next http.Handler) http.Handler { return next })
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real
 	// walk-in payments against the sales, and a paymentGateway opt wires its
@@ -784,3 +788,9 @@ func eventTypes(t *testing.T, db *database.DB, entityType, entityID string) []st
 	}
 	return out
 }
+
+// admitEverySale is a branch guard that holds nothing, for a fixture with no
+// branch middleware.
+type admitEverySale struct{}
+
+func (admitEverySale) CheckPayloadBranch(context.Context, uuid.UUID) error { return nil }

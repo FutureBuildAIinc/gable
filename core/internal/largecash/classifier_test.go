@@ -126,3 +126,25 @@ func TestClassifierUnknownCountryCountsNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestCrossesComparators: the United States comparator is strictly greater
+// than the threshold, the Canadian one at or above it.
+func TestCrossesComparators(t *testing.T) {
+	const th = largecash.ThresholdCents
+	for _, c := range []struct {
+		rule  string
+		total int64
+		want  bool
+	}{
+		{largecash.RuleUS, th - 1, false},
+		{largecash.RuleUS, th, false},
+		{largecash.RuleUS, th + 1, true},
+		{largecash.RuleCA, th - 1, false},
+		{largecash.RuleCA, th, true},
+		{largecash.RuleCA, th + 1, true},
+	} {
+		if got := largecash.Crosses(c.rule, c.total, th); got != c.want {
+			t.Errorf("Crosses(%s, %d, %d) = %v, want %v", c.rule, c.total, th, got, c.want)
+		}
+	}
+}

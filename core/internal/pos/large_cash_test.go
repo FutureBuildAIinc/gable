@@ -412,13 +412,53 @@ func TestCP17_TINEncryptedNeverLogged(t *testing.T) {
 	}
 }
 
+// TestCP17_CrossingWritesAnAuditRow: the crossing writes one audit row in the
+// completion's transaction naming the rule, the figures and that a payer was
+// captured, and the row carries no identity value (ADR 0003).
+func TestCP17_CrossingWritesAnAuditRow(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	lcSetCountry(t, f, "US")
+	lcStock(t, f)
+	sale := lcBigSale(f, t, &f.customerID, "2000")
+	if r := lcComplete(f, t, sale, map[string]any{"payer": lcUSPayer()}, tender("cash", lcTotalCents(t, f, sale))); r.status != http.StatusOK {
+		t.Fatalf("the crossing = %d: %s", r.status, r.raw)
+	}
+	const q = `SELECT count(*) FROM audit_log WHERE action = 'large_cash.crossing.recorded' AND entity_id::text = $1`
+	if n := countOf(t, f.db, q, sale); n != 1 {
+		t.Fatalf("crossing audit rows = %d, want 1", n)
+	}
+	if n := countOf(t, f.db, q+` AND changes->>'rule_family' = 'US_8300' AND (changes->>'payer_captured')::boolean`, sale); n != 1 {
+		t.Errorf("the crossing audit row does not name the rule and the capture")
+	}
+	if n := countOf(t, f.db, q+` AND changes::text LIKE '%1234567%'`, sale); n != 0 {
+		t.Errorf("the crossing audit row carries an identity value")
+	}
+}
+
 // TestCP17_ThreeRegistersOneEvent: three registers complete cash sales for
 // one payer at once at pool size 4: every completion lands, exactly one
 // event row comes out of it, and its total is the right figure (the first
 // two sales' cash, the counter having reset at the crossing).
 func TestCP17_ThreeRegistersOneEvent(t *testing.T) {
+	lcThreeRegisters(t, true)
+}
+
+// TestCP17_ThreeRegistersWalkInOneEvent: the same race for a walk-in payer,
+// whose only key is the taxpayer identification number the payer gives. No
+// customer row serializes the three sales here, so the payer's advisory lock
+// is the only thing that does.
+func TestCP17_ThreeRegistersWalkInOneEvent(t *testing.T) {
+	lcThreeRegisters(t, false)
+}
+
+func lcThreeRegisters(t *testing.T, named bool) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	var customer *uuid.UUID
+	if named {
+		customer = &f.customerID
+	}
 	lcSetCountry(t, f, "US")
 	lcStock(t, f)
 	registers := []string{f.register}
@@ -430,7 +470,7 @@ func TestCP17_ThreeRegistersOneEvent(t *testing.T) {
 	totals := make([]int64, 3)
 	for i, reg := range registers {
 		f.ensureTillOn(reg)
-		sales[i] = lcStartSaleOn(f, t, reg, &f.customerID)
+		sales[i] = lcStartSaleOn(f, t, reg, customer)
 		if r := f.addLine(sales[i], f.productLine("1000")); r.status != http.StatusOK {
 			t.Fatalf("add line = %d: %s", r.status, r.raw)
 		}

@@ -953,7 +953,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// the payer's details refuses the whole completion (409
 		// payer_details_required) and nothing above is booked.
 		if s.largeCash != nil {
-			if err := s.largeCash.Capture(ctx, largeCashFacts(sale, lines, tenders, change, payer, suspectedAvoidance)); err != nil {
+			if err := s.largeCash.Capture(ctx, largeCashFacts(sale, lines, tenders, change, payer, suspectedAvoidance, actor)); err != nil {
 				return err
 			}
 		}
@@ -1019,10 +1019,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 // cash net of the change walked out of them (the money kept is the money
 // received).
 func largeCashFacts(sale *Sale, lines []salesdoc.Line, tenders []TenderIn, change int64,
-	payer *largecash.PayerIn, suspectedAvoidance bool) *largecash.CompletionFacts {
+	payer *largecash.PayerIn, suspectedAvoidance bool, actor string) *largecash.CompletionFacts {
 	f := &largecash.CompletionFacts{TransactionID: sale.ID, BranchID: sale.BranchID,
 		CustomerID: sale.CustomerID, Currency: sale.Currency,
-		SuspectedAvoidance: suspectedAvoidance, Payer: payer}
+		SuspectedAvoidance: suspectedAvoidance, Payer: payer, Actor: actor}
 	for i := range lines {
 		if lines[i].ProductID != nil && lines[i].LineTotal != nil {
 			f.Lines = append(f.Lines, largecash.LineFact{ProductID: *lines[i].ProductID,
