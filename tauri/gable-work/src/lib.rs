@@ -164,9 +164,13 @@ mod tests {
     }
 
     #[test]
-    fn the_platform_camera_permission_is_stated_for_the_scanner() {
+    fn the_camera_usage_description_is_prepared_for_when_the_profile_is_packaged() {
         // A tablet on the Work profile can scan at the counter: the same
-        // web API camera, and the same OS usage description wiring.
+        // web API camera, no Tauri grant. This test checks only that the
+        // usage description is prepared in the source file: the profile is
+        // not packaged yet (bundle.active false in tauri.conf.json), so
+        // nothing merges the plist into an app today, and the hand proof on
+        // a device is the only proof until the packaging lands.
         let plist = include_str!("../Info.plist");
         assert!(plist.contains("NSCameraUsageDescription"));
     }

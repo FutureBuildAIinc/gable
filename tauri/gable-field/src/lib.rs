@@ -166,10 +166,13 @@ mod tests {
     }
 
     #[test]
-    fn the_platform_camera_permission_is_stated_for_the_scanner() {
+    fn the_camera_usage_description_is_prepared_for_when_the_profile_is_packaged() {
         // The scanner asks for the camera through the webview's own web API
-        // (getUserMedia); the OS usage description is the wiring, not a
-        // Tauri grant, and Tauri merges this file into the bundle's plist.
+        // (getUserMedia); no Tauri grant is involved. This test checks only
+        // that the usage description is prepared in the source file: the
+        // profile is not packaged yet (bundle.active false in tauri.conf.json),
+        // so nothing merges the plist into an app today, and the hand proof on
+        // a device is the only proof until the packaging lands.
         let plist = include_str!("../Info.plist");
         assert!(plist.contains("NSCameraUsageDescription"));
     }
