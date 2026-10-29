@@ -539,6 +539,69 @@ func TestCP18_VoidOfRoundedSaleReversesTheRounding(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE: an exchange's receipt counts the returned credit once. The credit is
+// a store credit tender row of the new sale, so the exact cash the sale
+// needed is the total less that row; an exchange paid in exact cash names no
+// rounding, and an exchange whose cash difference the branch rounds names
+// the rounding on the cash part alone.
+func TestCP18_ExchangeReceiptCountsTheCreditOnce(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
+
+	// The rule off: one 5.99 line exchanged for two, the 5.99 difference paid
+	// in exact cash. Nothing was rounded: the receipt carries no rounding
+	// line.
+	sale, line, _ := f.cashSaleLine(t, "2")
+	r := f.exchange("", map[string]any{
+		"original_sale_id": sale, "reason": "wrong size",
+		"returned_lines": []map[string]any{lineOf(line, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("2"),
+		"tenders":        []map[string]any{tender("cash", 599)},
+	})
+	if r.status != http.StatusCreated {
+		t.Fatalf("the exchange = %d: %s", r.status, r.raw)
+	}
+	newSale := str(t, r.body["sale"].(map[string]any), "id")
+	if got := f.accountBalance("4095"); got != 0 {
+		t.Fatalf("the rounding income = %d cents, want none", got)
+	}
+	if got := f.accountBalance("5045"); got != 0 {
+		t.Fatalf("the rounding loss = %d cents, want none", got)
+	}
+	receipt := string(f.printReceipt(newSale, "layout=thermal80").raw)
+	if strings.Contains(receipt, "Cash rounding") {
+		t.Errorf("the exact exchange's receipt names a cash rounding: %s", receipt)
+	}
+
+	// The rule on: a 500 sale exchanged for the same line re-priced at 503,
+	// the 3 cent difference rounded up to 5 in cash. The receipt names the
+	// two cents the drawer kept, nothing more.
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+	plain, plainLine := f.saleAtPrice(500)
+	if r := f.completeSale(plain, tender("cash", 500)); r.status != http.StatusOK {
+		t.Fatalf("the 500 sale = %d: %s", r.status, r.raw)
+	}
+	mustExec(t, f.db, `UPDATE products SET base_price = 5.03 WHERE id = $1`, f.productID)
+	r = f.exchange("", map[string]any{
+		"original_sale_id": plain, "reason": "wrong size",
+		"returned_lines": []map[string]any{lineOf(plainLine, "1", "wrong_item")},
+		"sale_lines":     f.replaceWith("1"),
+		"tenders":        []map[string]any{tender("cash", 5)},
+	})
+	if r.status != http.StatusCreated {
+		t.Fatalf("the rounded exchange = %d: %s", r.status, r.raw)
+	}
+	roundedSale := str(t, r.body["sale"].(map[string]any), "id")
+	if got := f.accountBalance("4095"); got != -2 {
+		t.Fatalf("the rounding income = %d cents, want a credit of two", got)
+	}
+	receipt = string(f.printReceipt(roundedSale, "layout=thermal80").raw)
+	if !strings.Contains(receipt, "Cash rounding") || !strings.Contains(receipt, "$0.02") {
+		t.Errorf("the rounded exchange's receipt names no two cent rounding: %s", receipt)
+	}
+}
+
 // RULE: the receipt's rounding line names what the branch actually rounded,
 // taken from the drawer's cash, not from the tender rows: a cash tender the
 // change swallowed whole never reached the drawer and must not read as

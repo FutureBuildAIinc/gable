@@ -257,10 +257,12 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 	var accountCents int64
 	// The cash rounding the branch's rule made (CP-18), read from the
 	// drawer's cash: the cash the sale's payments kept, less the exact cash
-	// the sale needed (the total less the non-cash legs and an exchange's
-	// credit). A tender row the change swallowed whole has no payment and
-	// never reached the drawer, so it counts for nothing here; a sale the
-	// rule did not touch shows no rounding.
+	// the sale needed (the total less the non-cash legs). An exchange's
+	// credit is one of those legs, the store credit tender row the
+	// completion added, so it is counted once here. A tender row the change
+	// swallowed whole has no payment and never reached the drawer, so it
+	// counts for nothing here; a sale the rule did not touch shows no
+	// rounding.
 	var cashKept, nonCash int64
 	for i := range tenders {
 		switch tenders[i].Method {
@@ -273,17 +275,6 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 		}
 	}
 	exactCash := int64(sale.TotalCents) - nonCash
-	if sale.ExchangeReturnID != nil {
-		ret, err := s.repo.GetReturn(ctx, *sale.ExchangeReturnID)
-		if err != nil {
-			return uuid.Nil, document.ThermalReceipt{}, err
-		}
-		credit := -int64(ret.TotalCents)
-		if credit > int64(sale.TotalCents) {
-			credit = int64(sale.TotalCents)
-		}
-		exactCash -= credit
-	}
 	if exactCash < 0 {
 		exactCash = 0
 	}
