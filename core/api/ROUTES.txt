@@ -401,6 +401,7 @@ POST	/api/v1/pos/end-of-day/{id}/reopen	internal/pos	h.ReopenBranchDay
 POST	/api/v1/pos/exchanges	internal/pos	h.CreateExchange
 POST	/api/v1/pos/exchanges/preview	internal/pos	h.PreviewExchange
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
+GET	/api/v1/pos/refund-intents	internal/pos	h.ListRefundIntents
 POST	/api/v1/pos/refund-intents/{id}/payback	internal/pos	h.PaybackRefundIntent
 POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent
 GET	/api/v1/pos/registers	internal/pos	h.ListRegisters

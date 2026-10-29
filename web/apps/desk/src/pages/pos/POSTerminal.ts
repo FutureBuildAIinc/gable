@@ -8,7 +8,7 @@ import { posService, dollarsToCents, type TenderIn } from '../../services/POSSer
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
   Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister,
-  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, IdType,
+  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, IdType, SaleSummary,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
@@ -20,7 +20,7 @@ import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exch
 import { signatureRefusal, sealedWords } from './signatureLogic';
 import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
-import { formatPrice4 } from '../../lib/utils';
+import { formatPrice4, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import './PosOrderDeposit';
@@ -36,6 +36,7 @@ const YARD_OFFLINE_REFUSAL =
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
+import '../../components/ui/gable-date-field';
 import './StepUpDialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
@@ -144,6 +145,15 @@ export class POSTerminal extends LitElement {
   @state() private _exchangeError: string | null = null;
   @state() private _exchangeTender: TenderMethod = 'cash';
   @state() private _exchangeRefund: 'cash' | 'account' = 'cash';
+  // The return search modal: finding a past sale to return.
+  @state() private _showReturnSearch = false;
+  @state() private _returnSearchQuery = '';
+  @state() private _returnSearchDate = '';
+  @state() private _returnSearchResults: SaleSummary[] = [];
+  @state() private _returnSearchBusy = false;
+  @state() private _returnSearchError: string | null = null;
+  // Whether each returned line goes back to stock (true) or is damaged (false).
+  @state() private _returnRestockByLine: Record<string, boolean> = {};
   // The signature pad on the completed sale.
   @state() private _signerName = '';
   @state() private _signing = false;
@@ -1621,16 +1631,30 @@ export class POSTerminal extends LitElement {
 
   /* ---- Returns ---- */
 
-  private _beginReturn() {
-    const sale = this._completed ?? this._sale;
-    if (!sale || sale.status !== 'completed') {
+  private _beginReturn(sale?: Sale) {
+    const target = sale ?? this._completed ?? this._sale;
+    if (!target || target.status !== 'completed') {
       this._error = 'Return needs a completed sale';
       return;
     }
-    this._completed = sale;
+    const productLines = target.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
+    const allReturned = productLines.length > 0 && productLines.every((l) => {
+      const returned = Number(target.returned_quantities?.[l.id] ?? '0');
+      return returned >= Number(l.quantity ?? '0');
+    });
+    if (allReturned) {
+      this._error = 'Everything on this sale has already been returned';
+      return;
+    }
+    this._completed = target;
     const qty: Record<string, string> = {};
-    sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null).forEach(l => { qty[l.id] = '0'; });
+    const restock: Record<string, boolean> = {};
+    productLines.forEach((l) => {
+      qty[l.id] = '0';
+      restock[l.id] = true;
+    });
     this._returnQty = qty;
+    this._returnRestockByLine = restock;
     this._returnReasonByLine = {};
     this._returnReason = '';
     this._exchangeOn = false;
@@ -1640,6 +1664,7 @@ export class POSTerminal extends LitElement {
     this._exchangeQuery = '';
     this._exchangeResults = [];
     this._showReturn = true;
+    this._showReturnSearch = false;
     void this._loadReasons();
   }
 
@@ -1653,7 +1678,67 @@ export class POSTerminal extends LitElement {
     }
   }
 
-  /** The lines coming back, as the request names them: reason by line, restocked. */
+  /** Opens the search for a past sale to return. */
+  private _openReturnSearch() {
+    this._showReturnSearch = true;
+    this._returnSearchQuery = '';
+    this._returnSearchDate = '';
+    this._returnSearchResults = [];
+    this._returnSearchError = null;
+  }
+
+  /** Searches completed sales by number, invoice number, customer name, or date. */
+  private async _searchReturns() {
+    const q = this._returnSearchQuery.trim();
+    const date = this._returnSearchDate.trim();
+    if (q.length < 2 && !date) {
+      this._returnSearchError = 'Type at least two characters or pick a date to search';
+      return;
+    }
+    try {
+      this._returnSearchBusy = true;
+      this._returnSearchError = null;
+      const page = await posService.searchSales(q, date || undefined);
+      this._returnSearchResults = page.items;
+    } catch (err: unknown) {
+      this._returnSearchError = err instanceof Error ? err.message : 'Failed to search the sales';
+    } finally {
+      this._returnSearchBusy = false;
+    }
+  }
+
+  /** Loads the picked sale and opens the return dialog on it. */
+  private async _pickReturnSearchResult(summary: SaleSummary) {
+    if (summary.status === 'voided') return;
+    try {
+      this._returnSearchBusy = true;
+      this._returnSearchError = null;
+      const full = await posService.getSale(summary.id);
+      const productLines = full.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
+      const allReturned = productLines.length > 0 && productLines.every((l) => {
+        const returned = Number(full.returned_quantities?.[l.id] ?? '0');
+        return returned >= Number(l.quantity ?? '0');
+      });
+      if (allReturned) {
+        this._returnSearchError = 'Everything on this sale has already been returned';
+        return;
+      }
+      this._beginReturn(full);
+    } catch (err: unknown) {
+      this._returnSearchError = err instanceof Error ? err.message : 'Failed to read the sale';
+    } finally {
+      this._returnSearchBusy = false;
+    }
+  }
+
+  /** How many of a line are still returnable, as a decimal string. */
+  private _returnableQty(line: SaleLine): string {
+    const total = Number(line.quantity ?? '0');
+    const returned = Number(this._completed?.returned_quantities?.[line.id] ?? '0');
+    return String(Math.max(0, total - returned));
+  }
+
+  /** The lines coming back, as the request names them: reason by line, restocked or not. */
   private _returnedLines() {
     const sale = this._completed;
     if (!sale) return [];
@@ -1661,13 +1746,19 @@ export class POSTerminal extends LitElement {
       .filter(([, q]) => Number(q) > 0)
       .map(([line_id, q]) => {
         const code = this._reasons.length > 0 ? this._returnReasonByLine[line_id] : undefined;
-        return { line_id, quantity: q, restock: true, ...(code ? { reason_code: code } : {}) };
+        return { line_id, quantity: q, restock: this._returnRestockByLine[line_id] ?? true, ...(code ? { reason_code: code } : {}) };
       });
   }
 
   private _returnProblem(): string | null {
     const sale = this._completed;
     if (!sale) return 'Return needs a completed sale';
+    for (const l of sale.lines) {
+      if (!Object.prototype.hasOwnProperty.call(this._returnQty, l.id)) continue;
+      const max = Number(this._returnableQty(l));
+      const asked = Number(this._returnQty[l.id] ?? '0');
+      if (asked > max) return `${l.description}: only ${max} can be returned`;
+    }
     const rows = Object.keys(this._returnQty).map((id) => ({
       quantity: this._returnQty[id] ?? '0',
       reason: this._reasons.length > 0 ? (this._returnReasonByLine[id] ?? '') : 'other',
@@ -1696,7 +1787,7 @@ export class POSTerminal extends LitElement {
       });
       this._showReturn = false;
       const fee = ret.restocking_fee_cents > 0 ? `, less a ${fmt(ret.restocking_fee_cents)} restocking fee` : '';
-      this._success = `Return ${ret.number} complete - ${fmt(ret.total_cents)} refunded ${ret.refund_method}${fee}`;
+      this._success = `Return ${ret.number} complete - ${fmt(Math.abs(ret.total_cents))} refunded ${ret.refund_method}${fee}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 4000);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to take the return';
@@ -1950,6 +2041,53 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  private _renderReturnSearchModal() {
+    if (!this._showReturnSearch) return nothing;
+    const input = 'padding:8px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none';
+    return this._overlay(html`
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return a past sale</h2>
+      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Find the sale by its number, its invoice number, or the customer's name.</p>
+      <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Search</label>
+      <input type="text" .value=${this._returnSearchQuery} data-testid="return-search-query"
+        @input=${(e: Event) => { this._returnSearchQuery = (e.target as HTMLInputElement).value; }}
+        @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._searchReturns(); }}
+        placeholder="Sale number, invoice number, or customer"
+        style="width:100%;box-sizing:border-box;padding:10px;${input};margin-bottom:12px" />
+      <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Date (optional)</label>
+      <gable-date-field .value=${this._returnSearchDate} data-testid="return-search-date"
+        @input=${(e: Event) => { this._returnSearchDate = (e.target as HTMLInputElement).value; }}
+        style="margin-bottom:12px"></gable-date-field>
+      ${this._returnSearchError ? html`<p role="alert" style="margin:0 0 12px;font-size:13px;color:rgb(var(--gb-till-bad))" data-testid="return-search-error">${this._returnSearchError}</p>` : nothing}
+      <button @click=${() => void this._searchReturns()} ?disabled=${this._returnSearchBusy}
+        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
+        data-testid="return-search-submit">${this._returnSearchBusy ? 'Searching\u2026' : 'Search'}</button>
+      ${this._returnSearchResults.length > 0 ? html`
+        <div style="max-height:340px;overflow-y:auto" data-testid="return-search-results">
+          ${this._returnSearchResults.map((s) => html`
+            <div style="padding:10px;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;margin-bottom:8px" data-testid="return-search-result">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+                <span class="font-mono font-semibold" style="color:rgb(var(--gb-till-text))" data-testid="return-search-result-number">${s.number}</span>
+                <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-status">${({ completed: 'Completed', open: 'Open', held: 'Held', voided: 'Voided' } as Record<string, string>)[s.status] ?? s.status}</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:rgb(var(--gb-till-soft));margin-bottom:6px">
+                <span data-testid="return-search-result-customer">${s.customer_name ?? 'Walk-in'}</span>
+                <span class="font-mono" data-testid="return-search-result-total">${formatCents(s.total_cents)}</span>
+              </div>
+              <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px" data-testid="return-search-result-date">${s.business_day}</div>
+              ${s.status === 'voided' ? html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-bad))" data-testid="return-search-result-voided">Voided - cannot be returned</p>` : s.status !== 'completed' ? html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-not-completed">Not completed yet - cannot be returned</p>` : html`
+                <button @click=${() => void this._pickReturnSearchResult(s)} ?disabled=${this._returnSearchBusy}
+                  style="width:100%;padding:8px;background:rgb(var(--gb-till-go));border:none;border-radius:6px;color:rgb(var(--gb-plate));font-size:13px;font-weight:700;cursor:pointer"
+                  data-testid="return-search-result-pick">Return this sale</button>`}
+            </div>`)}
+        </div>` : nothing}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button @click=${() => { this._showReturnSearch = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+      </div>
+    `);
+  }
+
   private _renderReturnModal() {
     if (!this._showReturn || !this._completed) return nothing;
     const sale = this._completed;
@@ -1964,14 +2102,40 @@ export class POSTerminal extends LitElement {
       <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">${this._exchangeOn
         ? 'Name the lines coming back and the goods that replace them. The credit is applied to the new sale, and only the difference is paid.'
         : 'Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.'}</p>
-      ${productLines.map((l) => html`
+      ${productLines.map((l) => {
+        const remaining = this._returnableQty(l);
+        const alreadyReturned = Number(this._completed?.returned_quantities?.[l.id] ?? '0');
+        return html`
         <div style="margin-bottom:10px" data-testid="return-line">
           <div style="display:flex;align-items:center;gap:10px">
             <span style="flex:1;font-size:13px;color:rgb(var(--gb-till-soft))">${l.description}</span>
-            <span style="font-size:12px;color:rgb(var(--gb-till-muted))">of ${l.quantity}</span>
-            <input type="number" min="0" step="0.25" .value=${this._returnQty[l.id] ?? '0'} data-testid="return-qty"
-              @input=${(e: Event) => { this._returnQty = { ...this._returnQty, [l.id]: (e.target as HTMLInputElement).value }; this._scheduleExchangePreview(); }}
+            <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-line-remaining">
+              ${alreadyReturned > 0 ? html`${l.quantity} sold, ${alreadyReturned} already returned` : html`of ${l.quantity}`}
+            </span>
+            <input type="number" min="0" max=${remaining} step="0.25" .value=${this._returnQty[l.id] ?? '0'} data-testid="return-qty"
+              @input=${(e: Event) => {
+                const v = (e.target as HTMLInputElement).value;
+                const max = Number(remaining);
+                const n = Number(v);
+                const clamped = v === '' ? '' : (n > max ? String(max) : v);
+                this._returnQty = { ...this._returnQty, [l.id]: clamped };
+                this._scheduleExchangePreview();
+              }}
               style="width:80px;${input};text-align:right" />
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgb(var(--gb-till-soft));cursor:pointer">
+              <input type="radio" name=${`restock-${l.id}`} .checked=${this._returnRestockByLine[l.id] !== false}
+                @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: true }; }}
+                data-testid="return-restock-back" />
+              Back to stock
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgb(var(--gb-till-soft));cursor:pointer">
+              <input type="radio" name=${`restock-${l.id}`} .checked=${this._returnRestockByLine[l.id] === false}
+                @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: false }; }}
+                data-testid="return-restock-damaged" />
+              Damaged, not restocked
+            </label>
           </div>
           ${reasons.length > 0 && Number(this._returnQty[l.id] ?? '0') > 0 ? html`
             <div style="margin-top:6px">
@@ -1981,7 +2145,7 @@ export class POSTerminal extends LitElement {
               ></gable-select>
             </div>` : nothing}
         </div>
-      `)}
+      `;})}
       ${this._exchangeOn ? this._renderExchangeBody(sale, input) : html`
         <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
           <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Refund</label>
@@ -2131,7 +2295,11 @@ export class POSTerminal extends LitElement {
               class="min-h-11 whitespace-nowrap rounded bg-gable-green px-3 py-2 text-xs font-semibold text-deep-space">Open Till</button>
             <button @click=${() => { this._showZReports = true; }} data-testid="pos-z-reports"
               title="The frozen Z report of each past drawer of this register"
-              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Z Reports</button>`}        </div>
+              class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Z Reports</button>`}
+          ${this._register && this._till ? html`
+          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open"
+            class="min-h-11 whitespace-nowrap rounded border border-white/20 px-3 py-2 text-xs text-slate-200">Return a past sale</button>` : nothing}
+        </div>
       </header>`;
   }
 
@@ -2723,6 +2891,7 @@ export class POSTerminal extends LitElement {
         ${this._renderStepUp()}
         ${this._renderXReportModal()}
         ${this._renderZReportsModal()}
+        ${this._renderReturnSearchModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`
