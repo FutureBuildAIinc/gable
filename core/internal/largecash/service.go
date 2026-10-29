@@ -112,8 +112,9 @@ type CompletionFacts struct {
 	SuspectedAvoidance bool
 	Payer              *PayerIn
 	// PayerDeclined is the counter's record that the walk-in declined to
-	// identify over the branch's floor. The sale goes ahead and the fact is
-	// recorded for the manager's worklist.
+	// identify over the branch's floor. It answers the floor's ask only, never
+	// a crossing: there the sale waits for the payer's details. Over the floor
+	// the sale goes ahead and the fact is recorded for the manager's worklist.
 	PayerDeclined bool
 	// Actor is who completes the sale, for the crossing's audit row.
 	Actor string
@@ -465,11 +466,12 @@ func (s *Service) Preview(ctx context.Context, f *CompletionFacts) (*Preview, er
 // that counted (each with the classifier's reason), and on a threshold
 // crossing it records the captured payer and writes the large_cash_events
 // row. A crossing without the payer's details answers 409
-// payer_details_required and the whole completion refuses. A walk-in's cash
-// sale over the branch's identity floor is asked about before Pay: without
-// the payer's details and without a recorded decline it answers 409
-// walk_in_identity_required, and a recorded decline lets the sale go ahead
-// and lands in the worklist as an identity declined.
+// payer_details_required and the whole completion refuses, and a recorded
+// decline does not answer it: the crossing stands until the payer is given
+// (item 299). A walk-in's cash sale over the branch's identity floor is
+// asked about before Pay: without the payer's details and without a recorded
+// decline it answers 409 walk_in_identity_required, and a recorded decline
+// lets the sale go ahead and lands in the worklist as an identity declined.
 func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 	c, err := s.compute(ctx, f)
 	if err != nil {
@@ -491,14 +493,11 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 		}
 	}
 	if c.crossed() {
-		// the crossing: the payer's details are the condition of the completion
+		// the crossing: the payer's details are the condition of the completion,
+		// and a decline does not answer them (item 299): the refusal stands
+		// until the payer is given
 		if f.Payer == nil {
-			if !f.PayerDeclined {
-				return ErrPayerDetailsRequired
-			}
-			// the walk-in declined to identify: the sale goes ahead and the
-			// worklist holds the fact for a manager
-			return s.recordDeclined(ctx, f, c)
+			return ErrPayerDetailsRequired
 		}
 		if err := s.checkPayer(c.country, f.Payer); err != nil {
 			return err
@@ -534,7 +533,9 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 			}})
 	}
 	if c.overFloor && f.Payer == nil {
-		// the branch's floor: the counter asked who paid and has no answer yet
+		// the branch's floor, a sale that does not cross: the counter asked
+		// who paid and has no answer yet. The decline answers this ask only,
+		// never the crossing above.
 		if !f.PayerDeclined {
 			return ErrWalkInIdentityRequired
 		}

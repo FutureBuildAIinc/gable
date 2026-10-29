@@ -10,8 +10,9 @@ package pos_test
 // counter asks before Pay, the preview and the completion key the same
 // identified person, and that person's sales aggregate. With the floor off
 // nothing aggregates and the counter says so. A walk-in who declines to
-// identify lets the sale go ahead and lands in the worklist as an identity
-// declined.
+// identify over the floor lets the sale go ahead and lands in the worklist as
+// an identity declined; a decline never answers the 10,000 dollar crossing
+// (item 299), which refuses until the payer's details are given.
 
 import (
 	"net/http"
@@ -272,6 +273,86 @@ func TestCP17_WalkInIdentityDeclinedIsRecorded(t *testing.T) {
 	}
 	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_payers`); n != 0 {
 		t.Errorf("payer rows = %d, want none for a declined identity", n)
+	}
+}
+
+// TestCP17_CrossingRefusesADecline: a decline answers the branch's walk-in
+// floor only, never the 10,000 dollar crossing (item 299). A walk-in's cash
+// sale that crosses the threshold is refused with the payer's details
+// required even when the counter records that the walk-in declined to
+// identify: nothing is written, and the sale completes once the payer's
+// details are given. A sale over the floor that does not cross still takes
+// the decline, goes ahead and lands in the worklist as an identity declined.
+func TestCP17_CrossingRefusesADecline(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	lcSetCountry(t, f, "US")
+	lcSetFloor(t, f, nil)
+	lcStock(t, f)
+	f.openTill(0)
+
+	// a walk-in cash sale of 17,964.38: over the branch's 3,000 floor and
+	// over the 10,000 threshold in one sale
+	sale := lcBigSale(f, t, nil, "3000")
+	total := lcTotalCents(t, f, sale)
+	if total <= 1_000_000 {
+		t.Fatalf("the fixture sale's total = %d, want it over the 10,000 dollar threshold", total)
+	}
+	r := lcComplete(f, t, sale, map[string]any{"payer_declined": true}, tender("cash", total))
+	if r.status != http.StatusConflict {
+		t.Fatalf("the crossing with a declined identity = %d: %s, want 409: a decline does not answer the crossing", r.status, r.raw)
+	}
+	code, blockers, _ := errorOf(t, r)
+	if code != "conflict" || len(blockers) == 0 || blockers[0] != "payer_details_required" {
+		t.Errorf("the refusal's code and blockers = %s %v, want payer_details_required", code, blockers)
+	}
+	// the refusal wrote nothing: the sale is still open, and no capture, no
+	// counted tender, no payer row and no identity declined row exists
+	if f.getSale(t, sale)["status"] != "open" {
+		t.Errorf("the refused completion left the sale %v, want open with nothing booked", f.getSale(t, sale)["status"])
+	}
+	for _, table := range []string{"large_cash_events", "large_cash_tenders", "large_cash_payers"} {
+		if n := countOf(t, f.db, `SELECT count(*) FROM `+table); n != 0 {
+			t.Errorf("the refused crossing wrote %d rows into %s, want none", n, table)
+		}
+	}
+
+	// the sale completes once the payer's details are given
+	r = lcComplete(f, t, sale, map[string]any{"payer": lcUSPayer()}, tender("cash", total))
+	if r.status != http.StatusOK {
+		t.Fatalf("the crossing with the payer = %d: %s", r.status, r.raw)
+	}
+	var state string
+	var amount int64
+	if err := f.db.Pool.QueryRow(ctxBG(),
+		`SELECT state, amount_cents FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&state, &amount); err != nil {
+		t.Fatal(err)
+	}
+	if state != "reportable" || amount != total {
+		t.Errorf("the crossing's state %s amount %d, want reportable for the sale's %d", state, amount, total)
+	}
+
+	// a sale over the floor that does not cross still takes the decline: the
+	// sale goes ahead and the worklist holds the identity declined
+	floorSale := lcBigSale(f, t, nil, "1000")
+	floorTotal := lcTotalCents(t, f, floorSale)
+	if floorTotal <= lcWalkInFloorCents || floorTotal > 1_000_000 {
+		t.Fatalf("the fixture sale's total = %d, want it over the floor and under the threshold", floorTotal)
+	}
+	r = lcComplete(f, t, floorSale, map[string]any{"payer_declined": true}, tender("cash", floorTotal))
+	if r.status != http.StatusOK {
+		t.Fatalf("the floor's sale with a declined identity = %d: %s, want it to go ahead", r.status, r.raw)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE state = 'identity declined'`); n != 1 {
+		t.Fatalf("identity declined rows = %d, want the floor's sale", n)
+	}
+	var declined int64
+	if err := f.db.Pool.QueryRow(ctxBG(),
+		`SELECT amount_cents FROM large_cash_events WHERE state = 'identity declined'`).Scan(&declined); err != nil {
+		t.Fatal(err)
+	}
+	if declined != floorTotal {
+		t.Errorf("the identity declined row's amount = %d, want the sale's %d", declined, floorTotal)
 	}
 }
 
