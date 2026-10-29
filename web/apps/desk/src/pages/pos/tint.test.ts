@@ -2,7 +2,14 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, expect, it } from 'vitest';
-import { fineUnits, formatAmount, priceWithTintCharge, tintPayload, tintSummary } from './tint';
+import { colorantUnits, fineUnits, formatAmount, priceWithTintCharge, tintPayload, tintSummary } from './tint';
+
+describe('colorantUnits', () => {
+    it('sends the system denominator when no components are loaded yet', () => {
+        expect(colorantUnits([], 384)).toEqual({ units: 0, denominator: 384 });
+        expect(colorantUnits([], 48)).toEqual({ units: 0, denominator: 48 });
+    });
+});
 
 describe('fineUnits', () => {
     it('carries the coarse count through the denominator it belongs to', () => {

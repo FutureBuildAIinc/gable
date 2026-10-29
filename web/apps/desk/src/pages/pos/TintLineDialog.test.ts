@@ -56,7 +56,12 @@ beforeEach(() => {
     tint.bases.mockReset().mockResolvedValue({ items: [BASE] });
     tint.colors.mockReset().mockResolvedValue({ items: [COLOR] });
     tint.formulas.mockReset().mockResolvedValue({ items: [GAL] });
-    tint.charge.mockReset().mockResolvedValue({ tint_charge_cents: 250 });
+    tint.charge.mockReset().mockImplementation(async (params: { unit_denominator?: number }) => {
+        if (!params.unit_denominator || params.unit_denominator <= 0) {
+            throw new Error("unit_denominator: must be a whole number of the system's dispense unit, 1 or more");
+        }
+        return { tint_charge_cents: 250 };
+    });
     tint.savedColors.mockReset().mockResolvedValue({ items: [] });
     tint.saveColor.mockReset().mockResolvedValue({});
     pos.addItemTint.mockReset();
@@ -69,6 +74,12 @@ describe('gable-tint-line-dialog', () => {
         await open();
         expect(tint.bases).toHaveBeenCalledWith({ product_id: 'p1' });
         expect(tint.colors).toHaveBeenCalledWith({ tint_system_id: 'sys', q: '' });
+        expect(tint.charge).toHaveBeenCalledWith({
+            colorant_units: 0,
+            unit_denominator: 384,
+            base_tier: 'flat',
+        });
+        expect(el.querySelector('[data-testid="tint-failure"]')).toBeNull();
     });
 
     it('choosing a size the book does not hold rescales and shows the rounding flag', async () => {

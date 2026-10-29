@@ -29,9 +29,9 @@ export function editableAmount(a: TintAmount): TintAmount {
 }
 
 /** The tint's colorant total in the system's whole dispense units, and the grid they are counted on. */
-export function colorantUnits(components: Array<{ amount: TintAmount }>): { units: number; denominator: number } {
+export function colorantUnits(components: Array<{ amount: TintAmount }>, systemDenominator = 384): { units: number; denominator: number } {
     const first = components[0];
-    if (!first) return { units: 0, denominator: 0 };
+    if (!first) return { units: 0, denominator: systemDenominator > 0 ? systemDenominator : 384 };
     const denominator = first.amount.unit_denominator;
     let units = 0;
     for (const c of components) {

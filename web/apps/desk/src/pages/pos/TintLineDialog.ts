@@ -101,7 +101,8 @@ export class TintLineDialog extends LitElement {
      */
     private async refreshCharge() {
         const base = this.bases.find((b) => b.id === this.baseId);
-        const { units, denominator } = colorantUnits(this.components);
+        const sys = this.systems.find((s) => s.id === base?.tint_system_id);
+        const { units, denominator } = colorantUnits(this.components, sys?.unit_denominator);
         try {
             const charge = await tintService.charge({
                 colorant_units: units,
@@ -109,6 +110,7 @@ export class TintLineDialog extends LitElement {
                 base_tier: base?.is_deepest ? 'deep' : 'flat',
             });
             this.chargeCents = charge.tint_charge_cents ?? 0;
+            this.failure = '';
         } catch (err: unknown) {
             this.failure = err instanceof Error ? err.message : 'Failed to read the tint charge';
         }
