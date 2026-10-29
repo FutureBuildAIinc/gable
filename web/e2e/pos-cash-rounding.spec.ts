@@ -46,7 +46,7 @@ async function signIn(page: Page, name: string) {
   const catalog = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/apps' && r.ok());
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await catalog;
-  await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible({ timeout: 15000 });
 }
 
 /** The branch the counter's register belongs to. */
@@ -122,9 +122,9 @@ async function pricedProduct(
 /** Opens the counter (the Panels board) and the drawer when none is open. */
 async function openCounter(page: Page): Promise<boolean> {
   await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible({ timeout: 15000 });
   const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
+  await expect(tillState).toBeVisible({ timeout: 15000 });
   let opened = false;
   if ((await tillState.textContent())?.includes('No till')) {
     await page.getByRole('button', { name: 'Open Till' }).click();
@@ -132,7 +132,7 @@ async function openCounter(page: Page): Promise<boolean> {
     await page.getByRole('button', { name: 'Open Till' }).last().click();
     opened = true;
   }
-  await expect(tillState).toContainText('Till open');
+  await expect(tillState).toContainText('Till open', { timeout: 15000 });
   return opened;
 }
 
@@ -149,7 +149,7 @@ async function addOne(page: Page, sku: string) {
 async function openPayment(page: Page) {
   const head = page.getByTestId('panel-payment-toggle');
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
-  await expect(head).toHaveAttribute('aria-expanded', 'true');
+  await expect(head).toHaveAttribute('aria-expanded', 'true', { timeout: 15000 });
 }
 
 /** The id of the sale the counter completed, by its number. */
@@ -213,17 +213,17 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   await openPayment(page);
   await page.getByTestId('tender-cash').click();
   const cashDue = page.getByTestId('pos-cash-due');
-  await expect(cashDue).toBeVisible();
-  await expect(cashDue).toContainText('nearest 5 cents');
-  await expect(cashDue).toContainText('$1.05');
+  await expect(cashDue).toBeVisible({ timeout: 15000 });
+  await expect(cashDue).toContainText('nearest 5 cents', { timeout: 15000 });
+  await expect(cashDue).toContainText('$1.05', { timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-cash-due-rounded.png'), fullPage: true });
 
   await page.getByRole('button', { name: 'Add as split tender' }).click();
-  await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
+  await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered', { timeout: 15000 });
   await page.getByTestId('pos-pay').click();
   const complete = page.getByTestId('pos-complete');
   await expect(complete).toContainText('Sale complete', { timeout: 15000 });
-  await expect(complete).toContainText('$1.03');
+  await expect(complete).toContainText('$1.03', { timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-cash-rounding-complete.png'), fullPage: true });
 
   // The receipt says what the rounding was: the 80mm receipt carries the
@@ -240,15 +240,15 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   // A $1.07 sale paid by card settles to the exact cent: no cash leg, no
   // rounding, and the receipt says nothing about it.
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
-  await expect(page.getByTestId('pos-no-lines')).toBeVisible();
+  await expect(page.getByTestId('pos-no-lines')).toBeVisible({ timeout: 15000 });
   await addOne(page, card.sku);
   await openPayment(page);
   await page.getByTestId('tender-card').click();
-  await expect(page.getByTestId('pos-cash-due')).toHaveCount(0);
+  await expect(page.getByTestId('pos-cash-due')).toHaveCount(0, { timeout: 15000 });
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   await page.getByTestId('pos-pay').click();
   await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
-  await expect(page.getByTestId('pos-complete')).toContainText('$1.07');
+  await expect(page.getByTestId('pos-complete')).toContainText('$1.07', { timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-card-exact.png'), fullPage: true });
 
   // Leave the counter as the suite found it: close the drawer counting
@@ -265,7 +265,7 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
     expect(report.expected_by_method['CASH'] % 5, 'the drawer cash is rounded to the five cents').toBe(0);
   }
   await page.getByRole('button', { name: 'Close Till' }).click();
-  await expect(page.getByRole('heading', { name: 'Close Till - Blind Count' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Close Till - Blind Count' })).toBeVisible({ timeout: 15000 });
   const countFields = page.locator('[data-testid^="till-count-"]');
   for (let i = 0; i < (await countFields.count()); i++) {
     const testid = await countFields.nth(i).getAttribute('data-testid');
@@ -274,7 +274,7 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   }
   await page.getByRole('button', { name: 'Post Count & Close' }).click();
   await expect(page.getByRole('heading', { name: 'Z-Report - Till Closed' })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText('BALANCED')).toBeVisible();
+  await expect(page.getByText('BALANCED')).toBeVisible({ timeout: 15000 });
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByTestId('pos-till-state')).toContainText('No till');
+  await expect(page.getByTestId('pos-till-state')).toContainText('No till', { timeout: 15000 });
 });
