@@ -12,6 +12,7 @@ package pos_test
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -536,6 +537,52 @@ func TestCP18_VoidOfRoundedSaleReversesTheRounding(t *testing.T) {
 	voidTheSale(downSale, down)
 	assertAllZero()
 	f.assertARInvariants(t)
+}
+
+// RULE: the receipt's rounding line names what the branch actually rounded,
+// taken from the drawer's cash, not from the tender rows: a cash tender the
+// change swallowed whole never reached the drawer and must not read as
+// rounding. A sale the rule did not touch carries no rounding line; a rounded
+// sale carries the difference the drawer kept.
+func TestCP18_ReceiptRoundingNamesOnlyWhatTheBranchRounded(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), withRealThermalReceipts())
+	f.noTax()
+
+	// The rule off: a 20 cent sale paid with two cash tenders, 50 and 60.
+	// The change (90 cents) swallows the first tender whole; the drawer kept
+	// 20 cents and nothing was rounded, so the receipt carries no rounding
+	// line.
+	plainID, _ := f.saleAtPrice(20)
+	if r := f.completeSale(plainID, tender("cash", 50), tender("cash", 60)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	plain := string(f.printReceipt(plainID, "layout=thermal80").raw)
+	if strings.Contains(plain, "Cash rounding") {
+		t.Errorf("the unrounded sale's receipt names a cash rounding: %s", plain)
+	}
+
+	// The rule on: a 103 sale paid 105 in cash rounds up by two cents, and
+	// the receipt says so.
+	f.setRounding("NEAREST_5_CENTS")
+	upID, _ := f.saleAtPrice(103)
+	if r := f.completeSale(upID, tender("cash", 105)); r.status != http.StatusOK {
+		t.Fatalf("the rounded complete = %d: %s", r.status, r.raw)
+	}
+	up := string(f.printReceipt(upID, "layout=thermal80").raw)
+	if !strings.Contains(up, "Cash rounding") || !strings.Contains(up, "$0.02") {
+		t.Errorf("the rounded sale's receipt names no two cent rounding: %s", up)
+	}
+
+	// A 106 sale paid 105 rounds down by one cent, and the receipt says so.
+	downID, _ := f.saleAtPrice(106)
+	if r := f.completeSale(downID, tender("cash", 105)); r.status != http.StatusOK {
+		t.Fatalf("the round-down complete = %d: %s", r.status, r.raw)
+	}
+	down := string(f.printReceipt(downID, "layout=thermal80").raw)
+	if !strings.Contains(down, "Cash rounding") || !strings.Contains(down, "0.01") {
+		t.Errorf("the round-down sale's receipt names no cent rounding: %s", down)
+	}
 }
 
 // RULE: three concurrent rounded cash sales at pool size 4 serialize cleanly,
