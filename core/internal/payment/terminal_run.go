@@ -104,7 +104,7 @@ const (
 	runTerminalDispatchMargin = 5 * time.Second
 	// runTerminalDispatchRoom is the room the poller's window leaves inside
 	// the lease for the charge-card call that precedes it.
-	runTerminalDispatchRoom = runTerminalCallTimeout + runTerminalDispatchMargin
+	runTerminalDispatchRoom   = runTerminalCallTimeout + runTerminalDispatchMargin
 	runReportingTokenLifetime = 25 * time.Minute
 )
 
