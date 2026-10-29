@@ -276,6 +276,38 @@ func TestCP17_WalkInIdentityDeclinedIsRecorded(t *testing.T) {
 	}
 }
 
+// lcWalkInKey is the payer key a walk-in's sale carries when no identity is
+// captured: the sale's own id under the walk-in prefix. It names that sale
+// and nothing else, so a row that carries it is that sale's own row.
+func lcWalkInKey(saleID string) string { return "walk:" + saleID }
+
+// lcRowCount is one table's count of the rows a sale wrote.
+type lcRowCount struct {
+	table string
+	rows  int64
+}
+
+// lcOwnRows counts the large cash rows the sale itself wrote: the capture's
+// counted tenders and payer row, and the worklist's crossing row. Every count
+// is scoped to the fixture's own branch and to this sale, by the sale id the
+// row names and by the walk-in payer key the sale carries, so another
+// package's rows on the shared database cannot turn a proof red.
+func lcOwnRows(t *testing.T, f *fixture, saleID string) []lcRowCount {
+	t.Helper()
+	key := lcWalkInKey(saleID)
+	return []lcRowCount{
+		{"large_cash_events", countOf(t, f.db,
+			`SELECT count(*) FROM large_cash_events WHERE branch_id = $1 AND ($2::uuid = ANY(transaction_ids) OR payer_key = $3)`,
+			f.branchID, saleID, key)},
+		{"large_cash_tenders", countOf(t, f.db,
+			`SELECT count(*) FROM large_cash_tenders WHERE branch_id = $1 AND (transaction_id = $2 OR payer_key = $3)`,
+			f.branchID, saleID, key)},
+		{"large_cash_payers", countOf(t, f.db,
+			`SELECT count(*) FROM large_cash_payers WHERE branch_id = $1 AND transaction_id = $2`,
+			f.branchID, saleID)},
+	}
+}
+
 // TestCP17_CrossingRefusesADecline: a decline answers the branch's walk-in
 // floor only, never the 10,000 dollar crossing (item 299). A walk-in's cash
 // sale that crosses the threshold is refused with the payer's details
@@ -306,14 +338,17 @@ func TestCP17_CrossingRefusesADecline(t *testing.T) {
 	if code != "conflict" || len(blockers) == 0 || blockers[0] != "payer_details_required" {
 		t.Errorf("the refusal's code and blockers = %s %v, want payer_details_required", code, blockers)
 	}
-	// the refusal wrote nothing: the sale is still open, and no capture, no
-	// counted tender, no payer row and no identity declined row exists
+	// the refusal wrote nothing of its own: the sale is still open, and the
+	// capture's counted tender, the payer row and the worklist's crossing row
+	// are all absent. The counts are scoped to this sale and to the fixture's
+	// own branch, so another package's rows on the shared database cannot turn
+	// this proof red.
 	if f.getSale(t, sale)["status"] != "open" {
 		t.Errorf("the refused completion left the sale %v, want open with nothing booked", f.getSale(t, sale)["status"])
 	}
-	for _, table := range []string{"large_cash_events", "large_cash_tenders", "large_cash_payers"} {
-		if n := countOf(t, f.db, `SELECT count(*) FROM `+table); n != 0 {
-			t.Errorf("the refused crossing wrote %d rows into %s, want none", n, table)
+	for _, own := range lcOwnRows(t, f, sale) {
+		if own.rows != 0 {
+			t.Errorf("the refused crossing wrote %d rows into %s, want none", own.rows, own.table)
 		}
 	}
 
@@ -324,8 +359,14 @@ func TestCP17_CrossingRefusesADecline(t *testing.T) {
 	}
 	var state string
 	var amount int64
+	if n := countOf(t, f.db,
+		`SELECT count(*) FROM large_cash_events WHERE branch_id = $1 AND $2::uuid = ANY(transaction_ids)`,
+		f.branchID, sale); n != 1 {
+		t.Fatalf("the crossing wrote %d worklist rows for the sale, want exactly the crossing", n)
+	}
 	if err := f.db.Pool.QueryRow(ctxBG(),
-		`SELECT state, amount_cents FROM large_cash_events WHERE branch_id = $1`, f.branchID).Scan(&state, &amount); err != nil {
+		`SELECT state, amount_cents FROM large_cash_events WHERE branch_id = $1 AND $2::uuid = ANY(transaction_ids)`,
+		f.branchID, sale).Scan(&state, &amount); err != nil {
 		t.Fatal(err)
 	}
 	if state != "reportable" || amount != total {
@@ -343,12 +384,15 @@ func TestCP17_CrossingRefusesADecline(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("the floor's sale with a declined identity = %d: %s, want it to go ahead", r.status, r.raw)
 	}
-	if n := countOf(t, f.db, `SELECT count(*) FROM large_cash_events WHERE state = 'identity declined'`); n != 1 {
-		t.Fatalf("identity declined rows = %d, want the floor's sale", n)
+	if n := countOf(t, f.db,
+		`SELECT count(*) FROM large_cash_events WHERE branch_id = $1 AND state = 'identity declined' AND $2::uuid = ANY(transaction_ids)`,
+		f.branchID, floorSale); n != 1 {
+		t.Fatalf("identity declined rows for the floor's sale = %d, want the floor's sale", n)
 	}
 	var declined int64
 	if err := f.db.Pool.QueryRow(ctxBG(),
-		`SELECT amount_cents FROM large_cash_events WHERE state = 'identity declined'`).Scan(&declined); err != nil {
+		`SELECT amount_cents FROM large_cash_events WHERE branch_id = $1 AND state = 'identity declined' AND $2::uuid = ANY(transaction_ids)`,
+		f.branchID, floorSale).Scan(&declined); err != nil {
 		t.Fatal(err)
 	}
 	if declined != floorTotal {
