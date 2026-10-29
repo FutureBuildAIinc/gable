@@ -601,9 +601,13 @@ func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, regio
 // SetSaleDelivery names a delivered sale's ship to and delivery type
 // (CP-10), moving the revision as the other attach writes do.
 func (r *PostgresRepository) SetSaleDelivery(ctx context.Context, saleID uuid.UUID, shipToID *uuid.UUID, deliveryType string) error {
+	// A write that changes nothing is not a write: the revision moves only
+	// when the delivery answer actually changes, so a plain naming does not
+	// spend a revision (the naming tests pin one move per act).
 	_, err := r.ex(ctx).Exec(ctx, `
 		UPDATE pos_transactions SET ship_to_id = $2, delivery_type = $3, updated_at = NOW(), revision = revision + 1
-		WHERE id = $1`, saleID, shipToID, deliveryTypeArg(deliveryType))
+		WHERE id = $1
+		  AND NOT (ship_to_id IS NOT DISTINCT FROM $2 AND delivery_type = $3)`, saleID, shipToID, deliveryTypeArg(deliveryType))
 	if err != nil {
 		return fmt.Errorf("failed to name the sale's delivery: %w", mapWriteError(err))
 	}
