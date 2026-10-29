@@ -104,16 +104,28 @@ type RunTerminal struct {
 	client          *http.Client
 	logger          *slog.Logger
 
-	// sentOrders remembers the order ids this process posted, so a re
-	// dispatch of the same leg without the reporting credential set is
-	// still refused rather than blindly re sent.
-	sentMu sync.Mutex
-	sent   map[string]bool
+	// guards holds the driver's own no double charge guard, one per order
+	// id: the check and the charge-card POST that may charge it happen
+	// under one lock, so four concurrent dispatches of one leg make one
+	// charge.
+	guardMu sync.Mutex
+	guards  map[string]*runOrderGuard
 
 	// the reporting access token and when it expires.
 	tokenMu     sync.Mutex
 	token       string
 	tokenExpiry time.Time
+}
+
+// runOrderGuard is the driver's own no double charge guard for one order id.
+// The transaction lookup, the in process refusal and the charge-card POST
+// happen under it, so the check and the act it guards are one thing.
+// attempted says this process already posted the order id, or may have: a
+// lost answer (a timeout, a dropped 202) may still have charged, so the
+// order id is never posted twice.
+type runOrderGuard struct {
+	mu        sync.Mutex
+	attempted bool
 }
 
 // NewRunTerminal builds the driver on a configuration provider (the Run
@@ -126,7 +138,7 @@ func NewRunTerminal(provider func() GatewayConfig, answers AnswerSink, logger *s
 	return &RunTerminal{
 		configProvider: provider, answers: answers, logger: logger,
 		pollInterval: runTerminalPollDefault, window: runTerminalWindowDefault,
-		client: &http.Client{Timeout: 30 * time.Second}, sent: map[string]bool{},
+		client: &http.Client{Timeout: 30 * time.Second}, guards: map[string]*runOrderGuard{},
 	}
 }
 
@@ -159,6 +171,19 @@ func (t *RunTerminal) WithInteractionWindow(d time.Duration) *RunTerminal {
 		t.window = d
 	}
 	return t
+}
+
+// guardFor returns the no double charge guard of one order id, making it on
+// first use.
+func (t *RunTerminal) guardFor(orderID string) *runOrderGuard {
+	t.guardMu.Lock()
+	defer t.guardMu.Unlock()
+	g, ok := t.guards[orderID]
+	if !ok {
+		g = &runOrderGuard{}
+		t.guards[orderID] = g
+	}
+	return g
 }
 
 // ----- the documented wire shapes -----
@@ -235,6 +260,12 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	if err != nil {
 		return TerminalReceipt{}, err
 	}
+	// The guard is held across the check and the act it guards: the
+	// transaction lookup, the in process refusal and the charge-card POST.
+	// Four concurrent dispatches of one leg make one charge.
+	guard := t.guardFor(d.IdempotencyKey)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
 	// Never re send a dispatch without looking the interaction up first:
 	// a charge that already exists at Run under this order id is recovered
 	// from the transaction lookup, never prompted again.
@@ -255,13 +286,14 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 			return TerminalReceipt{ProviderRef: found.TransID, DeviceID: d.DeviceID}, nil
 		}
 	}
-	t.sentMu.Lock()
-	already := t.sent[d.IdempotencyKey]
-	t.sentMu.Unlock()
-	if already {
+	if guard.attempted {
 		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took order %s in this process and the transaction lookup found no charge for it: the dispatch is not re sent", d.IdempotencyKey)
 	}
 	body, _ := json.Marshal(runChargeCardRequest{Amount: dollarsOf(d.AmountCents), OrderID: d.IdempotencyKey})
+	// The order id is marked under the guard before the POST: a lost answer
+	// (a timeout, a dropped 202) may still have charged, so this process
+	// never posts the same order id twice.
+	guard.attempted = true
 	raw, status, err := t.authed(ctx, cfg, http.MethodPost,
 		"/api/terminal/"+d.DeviceID+"/charge-card", body, 0)
 	if err != nil {
@@ -274,9 +306,6 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	if err := json.Unmarshal(raw, &ack); err != nil || ack.InteractionID == "" {
 		return TerminalReceipt{}, fmt.Errorf("run charge-card answered no interaction id")
 	}
-	t.sentMu.Lock()
-	t.sent[d.IdempotencyKey] = true
-	t.sentMu.Unlock()
 	// the poller runs on its own context: it outlives the caller's request,
 	// never inside the dispatch call.
 	go t.poll(context.WithoutCancel(ctx), cfg, d, ack.InteractionID)

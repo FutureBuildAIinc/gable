@@ -3,11 +3,12 @@
 
 package payment_test
 
-// The transaction lookup of the Run driver (CP-05), proved against the
-// scripted fake: it answers three things, found, not found and could not
-// ask. A report that could not answer (a 500, a refused connection, an
-// expired token) is not a report that holds no charge: the dispatch is
-// refused, never charged blind, and the leg is left for reconciliation.
+// The no double charge rules of the Run driver (CP-05), proved against the
+// scripted fake: the transaction lookup answers three things, found, not
+// found and could not ask, and a report that could not answer refuses the
+// dispatch and leaves the leg for reconciliation, never charges blind; and
+// the driver's own guard holds the check and the charge-card POST together,
+// so four concurrent dispatches of one leg make one charge.
 
 import (
 	"context"
@@ -15,10 +16,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/google/uuid"
 )
 
 // brokenReportDriver wires the driver on the fake with a reporting base that
@@ -160,4 +166,98 @@ func TestRunTerminalTheReportThatCannotAnswerNeverDeclinesTheLeg(t *testing.T) {
 		}
 		return true
 	})
+}
+
+// TestRunTerminalConcurrentDispatchesOfOneLegMakeOneCharge (BRIEF-COMMON:
+// transactions, pool size 4 with three contenders): four dispatches of one
+// idempotency key at the same time, against a fake that holds the
+// charge-card POST open. The driver's own guard holds the check and the POST
+// together, so exactly one charge-card POST is sent and the other three
+// dispatches are refused.
+func TestRunTerminalConcurrentDispatchesOfOneLegMakeOneCharge(t *testing.T) {
+	testutil.LockTerminalTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	ctx := context.Background()
+	var branch uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branch); err != nil {
+		t.Fatalf("default branch: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		concurrentDispatchOnce(t, db, ctx, branch, i)
+	}
+}
+
+// concurrentDispatchOnce runs one iteration of the concurrent dispatch.
+func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UUID, i int) {
+	t.Helper()
+	sale := uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_transactions
+			(id, register_id, cashier_id, subtotal, tax_amount, total, status, branch_id, change_due, revision, currency, number, created_at, updated_at)
+			VALUES ($1, $2, $3, 0, 0, 0, 'OPEN', $4, 0, 1, 'USD', $5, NOW(), NOW())`,
+		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
+		t.Fatalf("sale row: %v", err)
+	}
+	defer func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+	}()
+	ledger := payment.NewTerminalLedger(db)
+	fs := newRunFake(t)
+	fs.fake.pollStep = func(string, int) (int, map[string]any) {
+		return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+	}
+	release := fs.fake.holdPosts()
+	term := newRunDriver(t, fs, ledger)
+	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 2500,
+		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
+		LeaseUntil: time.Now().Add(time.Minute)}
+	if err := ledger.Claim(ctx, in); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if ok, err := ledger.MarkDispatched(ctx, in.ID, "", in.LeaseUntil); err != nil || !ok {
+		t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+	}
+	d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+		RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
+	start := make(chan struct{})
+	errs := make([]error, 4)
+	var wg sync.WaitGroup
+	for n := 0; n < 4; n++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			_, errs[n] = term.Dispatch(ctx, d)
+		}(n)
+	}
+	close(start)
+	// wait until the charge-card POST is in flight and held open: this is
+	// the window in which a second dispatch would post a second charge
+	deadline := time.Now().Add(5 * time.Second)
+	for fs.fake.chargePostCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the charge-card POST never arrived")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	release()
+	wg.Wait()
+	if posts := fs.fake.chargePostCount(); posts != 1 {
+		t.Fatalf("iteration %d: four dispatches of one leg posted %d charges, want 1", i, posts)
+	}
+	answered := 0
+	for n, err := range errs {
+		if err == nil {
+			answered++
+			continue
+		}
+		if !strings.Contains(err.Error(), "not re sent") {
+			t.Fatalf("iteration %d: contender %d failed with %v, want the refusal of a re sent dispatch", i, n, err)
+		}
+	}
+	if answered != 1 {
+		t.Fatalf("iteration %d: %d dispatches were answered, want 1", i, answered)
+	}
 }

@@ -69,6 +69,11 @@ type runFakeTerminal struct {
 	// (0: 200). A 401 is an expired or refused token: the report could not
 	// answer.
 	tokenStatus int
+	// postHold, when set, holds every charge-card and void-or-refund POST
+	// open until the channel is closed: the window in which a second
+	// dispatch of the same leg would post a second charge or a second
+	// refund.
+	postHold chan struct{}
 	// lookupCalls counts the reporting lookups served.
 	lookupCalls int
 	// pollsByOrder counts the polls served per order id.
@@ -116,6 +121,15 @@ func (f *runFakeTerminal) breakReporting(reportStatus, tokenStatus int) {
 	f.reportStatus, f.tokenStatus = reportStatus, tokenStatus
 }
 
+// holdPosts holds every charge-card and void-or-refund POST open until the
+// returned release is closed.
+func (f *runFakeTerminal) holdPosts() (release func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.postHold = make(chan struct{})
+	return func() { close(f.postHold) }
+}
+
 // failedStepOf scripts one uncertain end: the first poll answers pending,
 // every later poll the named end status with no result object (a gateway
 // fault is not a decline; no verdict reached us).
@@ -145,7 +159,14 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		order, _ := body["order_id"].(string)
 		f.mu.Lock()
 		f.chargePosts = append(f.chargePosts, body)
+		hold := f.postHold
 		f.mu.Unlock()
+		if hold != nil {
+			select {
+			case <-hold:
+			case <-time.After(5 * time.Second):
+			}
+		}
 		interaction := "11111111-2222-3333-4444-" + fmt.Sprintf("%012d", len(order)%1000000) + fmt.Sprintf("%06d", f.chargePostCount()*7)
 		f.mu.Lock()
 		f.interactionOf[interaction] = order
@@ -180,7 +201,14 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.voidPosts = append(f.voidPosts, body)
 		answer := f.voidAnswer
+		hold := f.postHold
 		f.mu.Unlock()
+		if hold != nil {
+			select {
+			case <-hold:
+			case <-time.After(5 * time.Second):
+			}
+		}
 		if answer == nil {
 			answer = func(map[string]any) map[string]any {
 				return map[string]any{"result": "A", "trans_id": "TRX-TESTSTUB", "resp_code": "00", "resp_text": "APPROVED"}
