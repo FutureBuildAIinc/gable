@@ -7066,6 +7066,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/returns/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * State what a return comes to
+         * @description The same request as the return, answered with the figures only: the credit the memo will state (its subtotal net of the restocking fee, the tax and the total, negative as a credit), the restocking fee itself, the money that goes back (positive) and each line's fee beside its refund, so the counter states the fee before the return is taken. Computed from the same read-only pricing the return guards with; nothing is written, no row locks, no sequences.
+         */
+        post: operations["posReturnPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/returns/{id}": {
         parameters: {
             query?: never;
@@ -7115,12 +7135,12 @@ export interface paths {
         };
         /**
          * The counter's dealer rules
-         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+         * @description The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit), the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter), and the restocking fee each return reason withholds (pos.restocking_fee_bps.<code>, basis points; nothing set is no fee) beside the suggested figures the settings screen offers. The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
          */
         get: operations["posSettingsGet"];
         /**
          * Write the counter's dealer rules
-         * @description Writes both rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision). Admin and owner only, never a machine key; audited. rules is an object of named rules so later rules (the restocking fees) sit beside these.
+         * @description Writes the rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision): the check limit, the check ID rule and every reason's restocking fee (the whole closed list; a figure of 0 clears the reason's row). Admin and owner only, never a machine key; audited with the fees it wrote.
          */
         put: operations["posSettingsPut"];
         post?: never;
@@ -17221,6 +17241,51 @@ export interface components {
              */
             tender_method?: "cash" | "check" | "card";
         };
+        PosReturnFigures: {
+            /**
+             * Format: int64
+             * @description The credit memo's subtotal net of the fee, negative as the memo states it.
+             */
+            subtotal_cents: number;
+            /**
+             * Format: int64
+             * @description The tax refunded, negative; the fee is not taxed.
+             */
+            tax_cents: number;
+            /**
+             * Format: int64
+             * @description The restocking fee withheld, positive, half even to the cent on each line's own refund and never more than it.
+             */
+            restocking_fee_cents: number;
+            /**
+             * Format: int64
+             * @description The memo's total, negative (a credit).
+             */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description The money that goes back, positive: the total's other sign.
+             */
+            refund_cents: number;
+            /** @description The request's lines in order, each with the fee its reason withholds. */
+            lines: components["schemas"]["PosReturnFigureLine"][];
+        };
+        PosReturnFigureLine: {
+            /**
+             * Format: uuid
+             * @description The sale line a linked return names; null on a free line.
+             */
+            line_id: string | null;
+            /** @description The line's reason from the closed list; other when the request named none. */
+            reason_code: string;
+            /**
+             * Format: int64
+             * @description The line's refund, negative (the memo line's shape).
+             */
+            line_total_cents: number;
+            /** Format: int64 */
+            restocking_fee_cents: number;
+        };
         PosExchangeFigures: {
             /**
              * Format: int64
@@ -18068,6 +18133,14 @@ export interface components {
                      */
                     over_cents: number | null;
                 };
+                /** @description The fee each return reason withholds, in basis points: the whole closed list (defective, damaged, wrong_item, ordered_wrong, changed_mind, overbought, other), a reason never set carrying none. The return takes it half even to the cent from each line's own refund, never more than the line. */
+                restocking_fees: {
+                    [key: string]: number;
+                };
+                /** @description The suggested fee for each reason, read only: what the settings screen offers a dealer who has set nothing. The reasons that are the customer's own doing carry a figure; the dealer's own and the catch all carry none. Never a fee in force until written. */
+                restocking_fee_defaults: {
+                    [key: string]: number;
+                };
             };
         };
         PosSettingsRequest: {
@@ -18085,6 +18158,10 @@ export interface components {
                      * @description Read only when mode is over_amount; dropped otherwise.
                      */
                     over_cents?: number | null;
+                };
+                /** @description Every reason's fee, the whole closed list: a code outside the list, a figure outside 0 to 10000 basis points, or a reason left out is a 400 naming the field. A figure of 0 clears the reason's row (no fee). */
+                restocking_fees: {
+                    [key: string]: number;
                 };
             };
             /**
@@ -35726,6 +35803,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosReturn"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posReturnPreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosReturnRequest"];
+            };
+        };
+        responses: {
+            /** @description The figures. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosReturnFigures"];
                 };
             };
             400: components["responses"]["BadRequestEither"];

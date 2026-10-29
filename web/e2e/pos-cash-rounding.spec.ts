@@ -3,6 +3,7 @@
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { pickOption } from './app-controls';
+import { openCounter, tillState } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -119,23 +120,6 @@ async function pricedProduct(
   return { id: product.id, sku };
 }
 
-/** Opens the counter (the Panels board) and the drawer when none is open. */
-async function openCounter(page: Page): Promise<boolean> {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible({ timeout: 15000 });
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible({ timeout: 15000 });
-  let opened = false;
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-    opened = true;
-  }
-  await expect(tillState).toContainText('Till open', { timeout: 15000 });
-  return opened;
-}
-
 /** Adds one unit of the product through the Items card: the exact SKU in its search, then Enter. */
 async function addOne(page: Page, sku: string) {
   const lines = page.locator('[data-testid="pos-lines"] li');
@@ -205,7 +189,7 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   await page.getByRole('button', { name: 'Save changes' }).click();
   await saved;
 
-  const openedFresh = await openCounter(page);
+  const { opened: openedFresh } = await openCounter(page, { timeout: 15000 });
 
   // A $1.03 sale paid in cash: the drawer keeps $1.05, so the counter asks
   // for the rounded cash due and says so.
@@ -276,5 +260,5 @@ test('the counter: the branch rounds the cash, and the receipt says so', async (
   await expect(page.getByRole('heading', { name: 'Z-Report - Till Closed' })).toBeVisible({ timeout: 15000 });
   await expect(page.getByText('BALANCED')).toBeVisible({ timeout: 15000 });
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByTestId('pos-till-state')).toContainText('No till', { timeout: 15000 });
+  await expect(tillState(page)).toContainText('No till', { timeout: 15000 });
 });

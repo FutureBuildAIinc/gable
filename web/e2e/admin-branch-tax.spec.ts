@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { openCounter } from './pos-till';
 import path from 'path';
 import fs from 'fs';
 
@@ -90,15 +91,7 @@ test('a branch tax rate set on the admin screen prices the counter sale', async 
   expect(after.tax_jurisdiction_code).toBe('CT-HARTFORD');
 
   // The counter prices a sale at the branch's new rate.
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
+  await openCounter(page);
   const lines = page.locator('[data-testid="pos-lines"] li');
   await page.getByTestId('catalog-search').fill(product.sku);
   await page.getByTestId('catalog-search').press('Enter');

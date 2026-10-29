@@ -1,17 +1,34 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-/** The Counter rules screen: the check limit, and the ID rule's three choices with their validation. */
+/** The Counter rules screen: the check limit, the ID rule's three choices with their validation, and the restocking fees. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './CounterRules'
 import type { GableCounterRules } from './CounterRules'
 import { mount, update, flush, q, text, jsonResponse } from '../../test/dom'
+
+const REASONS = [
+  { code: 'defective', label: 'Defective', restocking_fee_bps: 0, needs_note: false },
+  { code: 'damaged', label: 'Damaged', restocking_fee_bps: 0, needs_note: false },
+  { code: 'wrong_item', label: 'Wrong item given', restocking_fee_bps: 0, needs_note: false },
+  { code: 'ordered_wrong', label: 'Ordered the wrong item', restocking_fee_bps: 0, needs_note: false },
+  { code: 'changed_mind', label: 'Changed their mind', restocking_fee_bps: 0, needs_note: false },
+  { code: 'overbought', label: 'Bought too much', restocking_fee_bps: 0, needs_note: false },
+  { code: 'other', label: 'Other (needs a note)', restocking_fee_bps: 0, needs_note: true },
+]
+
+const SUGGESTED: Record<string, number> = {
+  defective: 0, damaged: 0, wrong_item: 0,
+  ordered_wrong: 1500, changed_mind: 1500, overbought: 1500, other: 0,
+}
 
 const BASE = {
   revision: 4,
   rules: {
     check_limit_cents: null,
     check_id_required: { mode: 'never', over_cents: null },
+    restocking_fees: Object.fromEntries(REASONS.map((r) => [r.code, 0])),
+    restocking_fee_defaults: { ...SUGGESTED },
   },
 }
 
@@ -24,12 +41,16 @@ beforeEach(() => {
   current = structuredClone(BASE)
   puts = []
   refuse = null
-  vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('return-reasons')) {
+      const fees = (current as { rules?: { restocking_fees?: Record<string, number> } }).rules?.restocking_fees ?? {}
+      return jsonResponse({ items: REASONS.map((r) => ({ ...r, restocking_fee_bps: fees[r.code] ?? 0 })) })
+    }
     if ((init?.method ?? 'GET') === 'PUT') {
       puts.push(JSON.parse(String(init!.body)))
       if (refuse) return refuse
       const body = puts[puts.length - 1] as { rules: Record<string, unknown> }
-      current = { revision: (current.revision as number) + 1, rules: body.rules }
+      current = { revision: (current.revision as number) + 1, rules: { ...(current as { rules: object }).rules, ...body.rules } }
       return jsonResponse(current)
     }
     return jsonResponse(current)
@@ -136,5 +157,60 @@ describe('Counter rules screen', () => {
     const el = await open()
     await click(el, '[data-testid="counter-rules-save"]')
     expect(text(q(el, '[data-testid="counter-rules-error"]'))).toContain('one or more fields failed validation')
+  })
+
+  it('shows every reason with its fee and the suggested figures', async () => {
+    const el = await open()
+    expect(q(el, '[data-testid="counter-rules-fees"]')).not.toBeNull()
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-changed_mind"]').value).toBe('0')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-defective"]').value).toBe('0')
+    expect(text(q(el, '[data-testid="counter-rules-fee-suggested-changed_mind"]'))).toBe('Suggested 15%')
+    expect(el.querySelector('[data-testid="counter-rules-fee-suggested-defective"]')).toBeNull()
+  })
+
+  it('saves the fees in basis points beside the check rules', async () => {
+    const el = await open()
+    await type(el, '[data-testid="counter-rules-fee-changed_mind"]', '15')
+    await type(el, '[data-testid="counter-rules-fee-ordered_wrong"]', '12.5')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts[0]).toMatchObject({
+      rules: {
+        restocking_fees: {
+          changed_mind: 1500,
+          ordered_wrong: 1250,
+          defective: 0,
+          other: 0,
+        },
+      },
+    })
+  })
+
+  it('fills every fee from the suggested figures', async () => {
+    const el = await open()
+    await click(el, '[data-testid="counter-rules-fees-suggested"]')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-changed_mind"]').value).toBe('15')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-defective"]').value).toBe('0')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts[0]).toMatchObject({ rules: { restocking_fees: { changed_mind: 1500, defective: 0 } } })
+  })
+
+  it('refuses a fee that is not a percent from 0 to 100', async () => {
+    const el = await open()
+    await type(el, '[data-testid="counter-rules-fee-overbought"]', 'lots')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts).toHaveLength(0)
+    expect(text(q(el, '[data-testid="counter-rules-error"]'))).toContain('must be a percent from 0 to 100')
+
+    await type(el, '[data-testid="counter-rules-fee-overbought"]', '150')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(puts).toHaveLength(0)
+    expect(text(q(el, '[data-testid="counter-rules-error"]'))).toContain('must be a percent from 0 to 100')
+  })
+
+  it('keeps a saved fee on the screen after the save', async () => {
+    const el = await open()
+    await type(el, '[data-testid="counter-rules-fee-changed_mind"]', '15')
+    await click(el, '[data-testid="counter-rules-save"]')
+    expect(q<HTMLInputElement>(el, '[data-testid="counter-rules-fee-changed_mind"]').value).toBe('15')
   })
 })

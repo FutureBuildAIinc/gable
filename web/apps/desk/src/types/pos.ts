@@ -214,6 +214,29 @@ export interface CheckIDRule {
 export interface PosRules {
     check_limit_cents: number | null;
     check_id_required: CheckIDRule;
+    /** The restocking fee each return reason withholds, in basis points: the whole closed list. */
+    restocking_fees: Record<string, number>;
+    /** The suggested fee for each reason, read only (the read fills it; a write never carries it). */
+    restocking_fee_defaults?: Record<string, number>;
+}
+
+/** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */
+export interface ReturnFigures {
+    subtotal_cents: number;
+    tax_cents: number;
+    restocking_fee_cents: number;
+    total_cents: number;
+    /** The money that goes back, positive: the total's other sign. */
+    refund_cents: number;
+    lines: ReturnFigureLine[];
+}
+
+/** One line of the figures: the fee its reason withholds beside its refund. */
+export interface ReturnFigureLine {
+    line_id: string | null;
+    reason_code: string;
+    line_total_cents: number;
+    restocking_fee_cents: number;
 }
 
 /** The counter settings resource: its rules and the revision a write rides. */

@@ -40,6 +40,18 @@ var returnReasons = []returnReason{
 // settingRestockingFeePrefix prefixes the per reason fee settings.
 const settingRestockingFeePrefix = "pos.restocking_fee_bps."
 
+// defaultRestockingFeeBps are the figures the settings screen offers a dealer
+// who has set none: the reasons that are the customer's own doing carry the
+// house figure, and the ones that are the dealer's (defective goods, the
+// wrong item given, damaged goods) and the catch all carry nothing. They are
+// suggestions on the screen, never a fee in force: nothing is withheld until
+// a dealer writes the map.
+var defaultRestockingFeeBps = map[string]int{
+	"ordered_wrong": 1500,
+	"changed_mind":  1500,
+	"overbought":    1500,
+}
+
 func isReturnReason(code string) bool {
 	for _, r := range returnReasons {
 		if r.Code == code {

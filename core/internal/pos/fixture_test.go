@@ -79,6 +79,12 @@ type fixture struct {
 	// (CP-19).
 	scale         *scale.Simulator
 	scaleDeviceID uuid.UUID
+	// ownBranch, when the fixture owns its branch, is that branch: a private
+	// locations row of type BRANCH carrying its own tax rate and its own
+	// cash rounding rule, with its own yard, register, stock and customer.
+	// Nothing outside the test can move that branch's rate or rule, so a
+	// test that depends on them holds its own.
+	ownBranch bool
 }
 
 // withoutTill is the opt of a test that proves the open till rule itself.
@@ -125,27 +131,53 @@ func (w *recordingWriter) Write(ctx context.Context, ev outbox.Event) error {
 // before it is served.
 func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
 	t.Helper()
+	return newCounterFixture(t, db, false, opts...)
+}
+
+// newOwnBranchFixture builds the same counter on a branch of the fixture's
+// own: a private locations row of type BRANCH carrying its own tax rate and
+// its own cash rounding rule, its own yard, register, stock and customer,
+// every one of them removed when the test ends. No other package's fixture
+// writes that branch's row, so no other fixture can move the rate or the
+// rule a test here depends on.
+func newOwnBranchFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture {
+	t.Helper()
+	return newCounterFixture(t, db, true, opts...)
+}
+
+// newCounterFixture builds the counter, either on the deployment's default
+// branch or on a branch the fixture owns.
+func newCounterFixture(t *testing.T, db *database.DB, own bool, opts ...func(*fixture)) *fixture {
+	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
 	f := &fixture{t: t, db: db, customerID: uuid.New(), productID: uuid.New(), kitID: uuid.New(),
-		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New()}
-	if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
+		sku: "POS-" + uuid.NewString()[:8], register: "REG-" + uuid.NewString()[:8], scaleDeviceID: uuid.New(),
+		ownBranch: own}
+	if own {
+		// the branch the fixture owns: its own rate and its own rounding
+		// rule, on its own row, where no other fixture can reach them
+		f.branchID = uuid.New()
+		mustExec(t, db, `INSERT INTO locations (id, type, code, name, timezone, default_tax_rate, cash_rounding_mode)
+			VALUES ($1, 'BRANCH', $2, 'Counter own branch', 'America/New_York', 0.088750, 'OFF')`,
+			f.branchID, "BR-"+f.branchID.String()[:8])
+	} else if err := db.Pool.QueryRow(ctx, `SELECT `+defaultBranch).Scan(&f.branchID); err != nil {
 		t.Fatalf("default branch: %v", err)
 	}
-	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, `+defaultBranch+`)`,
-		f.customerID, "WPOS-"+uuid.NewString()[:8])
+	mustExec(t, db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Counter Co', $2, $3)`,
+		f.customerID, "WPOS-"+uuid.NewString()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost) VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5, 3.25)`,
 		f.productID, f.sku)
 	mustExec(t, db, `INSERT INTO products (id, sku, description, uom_primary, base_price, average_unit_cost, is_kit) VALUES ($1, $2, 'bundle kit', 'EA', 11.00, 6.50, TRUE)`,
 		f.kitID, "KIT-"+uuid.NewString()[:8])
 	mustExec(t, db, `INSERT INTO product_kit_components (kit_product_id, component_product_id, quantity, position) VALUES ($1, $2, 2, 0)`,
 		f.kitID, f.productID)
-	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = `+defaultBranch)
+	mustExec(t, db, `UPDATE locations SET default_tax_rate = 0.088750 WHERE id = $1`, f.branchID)
 	f.yardID = uuid.New()
-	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+defaultBranch+`, `+defaultBranch+`)`,
-		f.yardID, "PY-"+f.yardID.String()[:8])
+	mustExec(t, db, `INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
+		f.yardID, "PY-"+f.yardID.String()[:8], f.branchID)
 	mustExec(t, db, `INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`, f.productID, f.yardID)
-	mustExec(t, db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'Counter test', `+defaultBranch+`) ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, branch_id = EXCLUDED.branch_id`, f.register, f.yardID)
+	mustExec(t, db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'Counter test', $3) ON CONFLICT (id) DO UPDATE SET location_id = EXCLUDED.location_id, branch_id = EXCLUDED.branch_id`, f.register, f.yardID, f.branchID)
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
@@ -353,6 +385,33 @@ func (f *fixture) cleanup() {
 	exec(`UPDATE customers SET balance_due = 0 WHERE id IN ($1, `+walkIn+`)`, f.customerID)
 	exec(`DELETE FROM products WHERE id = $1 OR id = $2`, f.productID, f.kitID)
 	exec(`DELETE FROM customers WHERE id = $1`, f.customerID)
+	f.cleanupOwnBranch()
+}
+
+// cleanupOwnBranch removes the branch the fixture owned, children first: the
+// ledger rows that name it, the links that point at it, and the row itself.
+// Every row it touches names this fixture's own branch, so another
+// package's rows are never reached.
+func (f *fixture) cleanupOwnBranch() {
+	if !f.ownBranch {
+		return
+	}
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		if _, err := f.db.Pool.Exec(ctx, sql, args...); err != nil {
+			f.t.Logf("cleanup: %s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+	}
+	// the ledger first: an entry at this branch, the lines under it, and
+	// the reversal that names it from either side
+	exec(`UPDATE bank_transactions SET matched_journal_entry_id = NULL WHERE matched_journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`DELETE FROM gl_journal_lines WHERE branch_id = $1 OR journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`UPDATE gl_journal_entries SET reverses_entry_id = NULL WHERE reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE branch_id = $1)`, f.branchID)
+	exec(`DELETE FROM gl_journal_entries WHERE branch_id = $1`, f.branchID)
+	// the link's audit row names the branch it linked the customer to
+	exec(`DELETE FROM audit_log WHERE action = 'customer.branch_linked' AND changes->>'branch_id' = $1`, f.branchID.String())
+	exec(`DELETE FROM customer_branches WHERE branch_id = $1`, f.branchID)
+	exec(`DELETE FROM locations WHERE id = $1`, f.branchID)
 }
 
 func min(a, b int) int {

@@ -1777,6 +1777,19 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.allow(t, "unbound", "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil, http.StatusOK)
 	f.allow(t, "bound", "GET", "/api/v1/pos/returns/"+f.retA.String(), "", nil, http.StatusOK)
 
+	// The return preview (CP-06) prices a return of the sale it names: the
+	// foreign sale answers exactly what a missing sale answers, and nothing
+	// is written either way.
+	previewBody := fmt.Sprintf(`{"register_id":%q,"original_sale_id":%q,"refund_method":"cash","lines":[{"line_id":%q,"quantity":"1"}]}`,
+		f.regA, f.txnB.String(), f.lineB.String())
+	sMiss, _ = f.key(t, f.bound, "POST", "/api/v1/pos/returns/preview",
+		fmt.Sprintf(`{"register_id":%q,"original_sale_id":%q,"refund_method":"cash"}`, f.regA, missing), nil)
+	sPrev, bPrev := f.key(t, f.bound, "POST", "/api/v1/pos/returns/preview", previewBody, nil)
+	f.twinLeg("POST", "/api/v1/pos/returns/preview")
+	if sPrev != sMiss || strings.Contains(string(bPrev), f.txnB.String()) {
+		t.Errorf("bound key foreign return preview: %d %s, want the missing sale answer (%d, no B data)", sPrev, bPrev, sMiss)
+	}
+
 	// The transaction reads hold the pin already (branch_id predicate); the
 	// line writes now hold it too: no line is written on or removed from the
 	// foreign transaction, and the pin's own transaction takes the write.

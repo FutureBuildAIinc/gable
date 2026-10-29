@@ -46,6 +46,7 @@ import type {
     RefundIntentPaidBack,
     PosRules,
     PosSettings,
+    ReturnFigures,
     StepUpManager,
     StepUpApproval,
     LargeCashPreview,
@@ -431,6 +432,29 @@ export const posService = {
                 body: JSON.stringify({ rules, revision }),
             }),
             'Failed to save the counter rules',
+        );
+        return response.json();
+    },
+
+    /**
+     * The figures of a return before it is taken (POST /api/v1/pos/returns/
+     * preview): the restocking fee and the money back, nothing written.
+     */
+    async previewReturn(input: {
+        register_id?: string;
+        original_sale_id?: string;
+        customer_id?: string;
+        refund_method: RefundMethod;
+        reason?: string;
+        lines: ReturnLineIn[];
+    }): Promise<ReturnFigures> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/returns/preview`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to state the return',
         );
         return response.json();
     },
