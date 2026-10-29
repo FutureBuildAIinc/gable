@@ -35,8 +35,11 @@ CREATE TABLE IF NOT EXISTS large_cash_filings (
     past_deadline      BOOLEAN NOT NULL DEFAULT FALSE,
     -- The state ties to its own fields: a filing that has not happened
     -- carries no date, no acknowledgement number and no recorder, and a
-    -- filing that has happened carries all three. A filed row is never past
-    -- its deadline: the sweep only marks the filings that are still open.
+    -- filing that has happened carries the date and the recorder. A required
+    -- filing carries the BSA E-Filing acknowledgement number and a voluntary
+    -- one does not: a voluntarily filed Form 8300 below the threshold is
+    -- filed on paper. A filed row is never past its deadline: the sweep only
+    -- marks the filings that are still open.
     CONSTRAINT large_cash_filings_state_fields CHECK (
         (state = 'not_filed'
             AND filed_date IS NULL
@@ -44,9 +47,15 @@ CREATE TABLE IF NOT EXISTS large_cash_filings (
             AND recorded_by = ''
             AND past_deadline IN (FALSE, TRUE))
         OR
-        (state IN ('filed', 'voluntary')
+        (state = 'filed'
             AND filed_date IS NOT NULL
             AND acknowledgement_no <> ''
+            AND recorded_by <> ''
+            AND past_deadline = FALSE)
+        OR
+        (state = 'voluntary'
+            AND filed_date IS NOT NULL
+            AND acknowledgement_no = ''
             AND recorded_by <> ''
             AND past_deadline = FALSE)
     ),

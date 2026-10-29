@@ -298,7 +298,9 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	termLedger := payment.NewTerminalLedger(db)
 	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db).WithTerminal(payment.NewSimulatedTerminalFromEnv("authorize", termLedger), termLedger)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
-	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f

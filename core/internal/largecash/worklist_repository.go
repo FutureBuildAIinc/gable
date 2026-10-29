@@ -59,7 +59,7 @@ func (r *Repository) WorklistRecords(ctx context.Context, branch *uuid.UUID) ([]
 		       e.currency, e.total_cents, e.rule_family,
 		       COALESCE(tenders.transaction_count, 0), e.tender_count,
 		       tenders.first_date, tenders.last_date, e.created_at,
-		       e.state, COALESCE(f.state, ''), f.filed_date, f.acknowledgement_no, f.past_deadline,
+		       e.state, COALESCE(f.state, ''), f.filed_date, COALESCE(f.acknowledgement_no, ''), COALESCE(f.past_deadline, FALSE),
 		       COALESCE(st.state, ''), st.issued_date,
 		       (p.id IS NOT NULL) AS payer_details_captured
 		FROM large_cash_events e

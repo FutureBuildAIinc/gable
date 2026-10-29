@@ -475,7 +475,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithLedger(glSvc).WithAuditLog(audit.NewLogger(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
-	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")), "admin", "owner", "cashier")
+	wall.largeCash(mux, largecash.NewHandler(largecash.NewService(db, nil, "")),
+		[]string{"admin", "owner", "finance"},
+		[]string{"admin", "owner", "cashier"})
 
 	// The AI spending routes exactly as serve registers them, each call
 	// audited with whoever spent the credit (the PD-6 ruling).
