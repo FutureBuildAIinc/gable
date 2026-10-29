@@ -279,27 +279,56 @@ func newRunDriver(t *testing.T, fs *runFakeServer, ledger *payment.TerminalLedge
 		WithReporting(fs.server.URL, "clientid-teststub", "clientsecret-teststub")
 }
 
+// saleRowIsGone says whether the sale row an intent points at is not there
+// any more: the counter suite empties the sale table whole, without the
+// advisory lock the run suite holds.
+func saleRowIsGone(t *testing.T, sale uuid.UUID) bool {
+	t.Helper()
+	var n int
+	if err := testutil.RequireDB(t).Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM pos_transactions WHERE id = $1`, sale).Scan(&n); err != nil {
+		return false
+	}
+	return n == 0
+}
+
 // claimRunLeg claims and dispatch-moves one sale leg the driver takes.
-func claimRunLeg(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, amount int64) *payment.TerminalIntent {
+func claimRunLeg(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, amount int64) (*payment.TerminalIntent, bool) {
 	t.Helper()
 	return claimRunLegAt(t, l, sale, m29BranchOf(t, l), amount)
 }
 
 // claimRunLegAt is claimRunLeg with the branch already read (a scenario
 // iteration must not reread it per leg).
-func claimRunLegAt(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, branch uuid.UUID, amount int64) *payment.TerminalIntent {
+//
+// It answers false when another suite's terminal table cleanup deleted a row
+// this leg needs (the counter suite empties the tables whole without the
+// advisory lock): the caller runs its scenario again rather than failing on
+// a row that is not there, the same discipline waitForIntentState keeps for
+// a row that vanished on a read.
+func claimRunLegAt(t *testing.T, l *payment.TerminalLedger, sale uuid.UUID, branch uuid.UUID, amount int64) (*payment.TerminalIntent, bool) {
 	t.Helper()
 	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
 		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: amount,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(time.Minute)}
 	if err := l.Claim(context.Background(), in); err != nil {
+		// the counter suite's table cleanup deletes the sale rows whole, so
+		// the claim can fail on the foreign key: the row this intent points
+		// at is not there and the scenario runs again
+		if saleRowIsGone(t, sale) {
+			return nil, false
+		}
 		t.Fatalf("claim: %v", err)
 	}
-	if ok, err := l.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
-		t.Fatalf("dispatch move: ok=%v err=%v", ok, err)
+	ok, err := l.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil)
+	if err != nil {
+		t.Fatalf("dispatch move: %v", err)
 	}
-	return in
+	if !ok {
+		return nil, false
+	}
+	return in, true
 }
 
 // waitForIntentState polls the ledger until the intent holds one of the
@@ -488,7 +517,13 @@ func TestRunTerminalPollOutcomes(t *testing.T) {
 				fs := newRunFake(t)
 				fs.fake.pollStep = tc.step
 				term := newRunDriver(t, fs, ledger)
-				in := claimRunLegAt(t, ledger, sale, branch, 2500)
+				in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+				if !ok {
+					// the row was deleted by another suite's terminal table
+					// cleanup: the scenario runs again rather than failing on a
+					// row that is not there
+					return false
+				}
 				if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 					IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 					DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
@@ -534,7 +569,13 @@ func TestRunTerminalExpiryResolvedByTransactionLookup(t *testing.T) {
 		// dispatch lookup must not find it, the poll's own lookup must
 		fs.fake.deferredReport = 1
 		term := newRunDriver(t, fs, ledger)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 			IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
@@ -589,7 +630,13 @@ func TestRunTerminalFailedInteractionConsultsTheTransactionLookup(t *testing.T) 
 					"auth_code": "OK77", "card_number": "XXXXXXXXXXXX1881", "amount": 2500.0, "resp_text": "APPROVED"}
 				fs.fake.deferredReport = 1
 				term := newRunDriver(t, fs, ledger)
-				in := claimRunLegAt(t, ledger, sale, branch, 2500)
+				in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+				if !ok {
+					// the row was deleted by another suite's terminal table
+					// cleanup: the scenario runs again rather than failing on a
+					// row that is not there
+					return false
+				}
 				if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 					IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 					DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
@@ -621,7 +668,13 @@ func TestRunTerminalUncertainInteractionTheReportCannotFindDeclines(t *testing.T
 		fs := newRunFake(t)
 		fs.fake.pollStep = failedStepOf("failed")
 		term := newRunDriver(t, fs, ledger)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 			IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
@@ -655,7 +708,13 @@ func TestRunTerminalNeverResendsADispatch(t *testing.T) {
 			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
 		}
 		term := newRunDriver(t, fs, ledger)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
 		_, err := term.Dispatch(context.Background(), d)
@@ -709,7 +768,13 @@ func TestRunTerminalRefusesABlindResendWithoutTheReportingSet(t *testing.T) {
 			return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: fs.server.URL}
 		}, ledger, slog.New(slog.NewTextHandler(io.Discard, nil))).
 			WithPollInterval(5 * time.Millisecond).WithInteractionWindow(50 * time.Millisecond)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
 		if _, err := term.Dispatch(context.Background(), d); err != nil {
@@ -974,9 +1039,18 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 			// a late answer (the device's verdict after the leg settled) never
 			// moves the intent a second time: the leg is not charged twice
 			if _, err := ledger.ApplyDeviceAnswer(ctx, answer); err != nil {
+				if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+					// the row was deleted by another suite's terminal table
+					// cleanup: the iteration runs again rather than failing
+					// on a row that is not there
+					return false
+				}
 				t.Fatalf("late answer: %v", err)
 			}
 			after, err := ledger.Get(ctx, in.ID)
+			if errors.Is(err, payment.ErrTerminalIntentNotFound) {
+				return false
+			}
 			if err != nil {
 				t.Fatalf("get intent: %v", err)
 			}

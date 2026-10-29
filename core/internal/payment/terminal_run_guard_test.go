@@ -10,8 +10,14 @@ package payment_test
 // driver's own guard holds the check and the charge-card POST together, so
 // four concurrent dispatches of one leg make one charge; the refund and void
 // path takes the same guard, so a retried reversal refunds once; and the
-// poller's window fits inside the ledger's lease, so the sweep never closes
-// a leg the driver is still working.
+// poller's window fits inside the ledger's lease with room for the longest
+// charge-card call, so the sweep never closes a leg the driver is still
+// working.
+//
+// Every read of an intent in this file goes through the suite's own
+// waitForIntentState: a row that another suite's terminal table cleanup
+// deleted answers false and the scenario runs again, the way the rest of the
+// run suite does, instead of failing on a row that is not there.
 
 import (
 	"context"
@@ -50,6 +56,72 @@ func brokenReportDriver(t *testing.T, fs *runFakeServer, sink payment.AnswerSink
 		WithReporting(base, "clientid-teststub", "clientsecret-teststub")
 }
 
+// ledgerRecordingSink is the real ledger with a record of every answer the
+// driver lands: the test sees that the driver landed no answer at all, which
+// is what a leg left pending at the device means.
+type ledgerRecordingSink struct {
+	ledger  *payment.TerminalLedger
+	mu      sync.Mutex
+	answers []payment.TerminalAnswer
+}
+
+// ApplyDeviceAnswer records the answer and lands it on the real ledger.
+func (s *ledgerRecordingSink) ApplyDeviceAnswer(ctx context.Context, a payment.TerminalAnswer) (payment.AnswerOutcome, error) {
+	s.mu.Lock()
+	s.answers = append(s.answers, a)
+	s.mu.Unlock()
+	return s.ledger.ApplyDeviceAnswer(ctx, a)
+}
+
+// waitForAnswer waits for the driver to land an answer and says whether one
+// arrived. The driver lands its answers on a twenty millisecond timer, so a
+// wait well past that timer sees every answer it would land.
+func (s *ledgerRecordingSink) waitForAnswer(t *testing.T, within time.Duration) (payment.TerminalAnswer, bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		s.mu.Lock()
+		n := len(s.answers)
+		s.mu.Unlock()
+		if n > 0 {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.answers[0], true
+		}
+		if time.Now().After(deadline) {
+			return payment.TerminalAnswer{}, false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// newRunDriverOn wires the driver on the fake with any answer sink, so a test
+// can watch the answers the driver lands beside the ledger's own.
+func newRunDriverOn(t *testing.T, fs *runFakeServer, sink payment.AnswerSink) *payment.RunTerminal {
+	t.Helper()
+	return payment.NewRunTerminal(func() payment.GatewayConfig {
+		return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: fs.server.URL}
+	}, sink, slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithPollInterval(5*time.Millisecond).
+		WithInteractionWindow(2*time.Second).
+		WithReporting(fs.server.URL, "clientid-teststub", "clientsecret-teststub")
+}
+
+// waitForLookupCount waits until the fake has served the wanted number of
+// reporting lookups. The lookup before the charge-card POST is the first one;
+// the poll's own lookup after an uncertain end is the second, and the driver
+// has made its decision once that one is served.
+func waitForLookupCount(t *testing.T, fs *runFakeServer, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for fs.fake.lookupCount() < want {
+		if time.Now().After(deadline) {
+			t.Fatalf("the fake served %d reporting lookups, want %d", fs.fake.lookupCount(), want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestRunTerminalRefusesTheDispatchWhenTheTransactionLookupCannotAsk: the
 // transaction lookup answers three things, found, not found and could not
 // ask. A report that could not answer (a 500, a refused connection, an
@@ -73,7 +145,13 @@ func TestRunTerminalRefusesTheDispatchWhenTheTransactionLookupCannotAsk(t *testi
 				sale := runSaleRow(t, branch)
 				fs := newRunFake(t)
 				term := brokenReportDriver(t, fs, ledger, tc.reportStatus, tc.tokenStatus, tc.unreachable)
-				in := claimRunLegAt(t, ledger, sale, branch, 2500)
+				in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+				if !ok {
+					// the row was deleted by another suite's terminal table
+					// cleanup: the scenario runs again rather than failing on a
+					// row that is not there
+					return false
+				}
 				_, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 					IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 					DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey})
@@ -83,9 +161,13 @@ func TestRunTerminalRefusesTheDispatchWhenTheTransactionLookupCannotAsk(t *testi
 				if posts := fs.fake.chargePostCount(); posts != 0 {
 					t.Fatalf("the driver posted %d charges with a report that could not answer, want 0", posts)
 				}
-				got, err := ledger.Get(context.Background(), in.ID)
-				if err != nil {
-					t.Fatalf("get intent: %v", err)
+				got, ok := waitForIntentState(t, ledger, in.ID,
+					payment.TerminalPendingAtDevice, payment.TerminalDeclined, payment.TerminalAuthorized)
+				if !ok {
+					// the row was deleted by another suite's terminal table
+					// cleanup: the scenario runs again rather than reading a
+					// foreign state
+					return false
 				}
 				if got.State != payment.TerminalPendingAtDevice {
 					t.Fatalf("the intent is %s, want it left pending at the device for reconciliation", got.State)
@@ -110,7 +192,13 @@ func TestRunTerminalARefusedLookupNeverChargesAgainAfterARestart(t *testing.T) {
 			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
 		}
 		term := newRunDriver(t, fs, ledger)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
 			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
 		if _, err := term.Dispatch(context.Background(), d); err != nil {
@@ -152,20 +240,41 @@ func TestRunTerminalTheReportThatCannotAnswerNeverDeclinesTheLeg(t *testing.T) {
 			fs.fake.breakReporting(500, 0)
 			return 200, map[string]any{"status": "failed", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
 		}
-		term := newRunDriver(t, fs, ledger)
-		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		sink := &ledgerRecordingSink{ledger: ledger}
+		term := newRunDriverOn(t, fs, sink)
+		in, ok := claimRunLegAt(t, ledger, sale, branch, 2500)
+		if !ok {
+			// the row was deleted by another suite's terminal table
+			// cleanup: the scenario runs again rather than failing on a
+			// row that is not there
+			return false
+		}
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
 			IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents, RegisterID: in.RegisterID,
 			DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}); err != nil {
 			t.Fatalf("dispatch: %v", err)
 		}
-		time.Sleep(300 * time.Millisecond)
-		got, err := ledger.Get(context.Background(), in.ID)
-		if err != nil {
-			t.Fatalf("get intent: %v", err)
+		// the driver has consulted the report after the uncertain end: the
+		// lookup before the POST is the first one, the poll's own is the
+		// second, and the driver has decided once that one is served
+		waitForLookupCount(t, fs, 2)
+		got, ok := waitForIntentState(t, ledger, in.ID,
+			payment.TerminalPendingAtDevice, payment.TerminalDeclined, payment.TerminalAuthorized)
+		if !ok {
+			// the row was deleted by another suite's terminal table cleanup:
+			// the scenario runs again rather than reading a foreign state
+			return false
 		}
 		if got.State != payment.TerminalPendingAtDevice {
 			t.Fatalf("the intent is %s, want it left pending at the device for reconciliation", got.State)
+		}
+		// the driver lands its answers on a twenty millisecond timer, so a
+		// wait well past that timer sees every answer it would land: the
+		// driver landed none, and the leg is left for the sweep's manager
+		// item
+		if answer, landed := sink.waitForAnswer(t, 60*time.Millisecond); landed {
+			t.Fatalf("the driver landed a %s answer, want the leg left pending at the device for reconciliation",
+				answer.Verdict)
 		}
 		return true
 	})
@@ -410,3 +519,4 @@ func TestRunTerminalInteractionWindowFitsInsideTheIntentLease(t *testing.T) {
 		t.Fatalf("the interaction window is %s, want at most the intent lease %s", got, payment.TerminalAnswerLease)
 	}
 }
+
