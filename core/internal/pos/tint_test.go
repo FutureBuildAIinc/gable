@@ -635,3 +635,38 @@ func TestTheTintChargeAndTheNoReturnPolicyAreWritten(t *testing.T) {
 		t.Errorf("the tint rules' audit rows = %d, want 1", n)
 	}
 }
+
+// RULE: a void never puts a tinted can back into saleable stock (row CP-16),
+// the same rule the return path holds: a can the store mixed for a customer
+// cannot be sold again as the plain base, so the stock the sale took stays
+// taken when the sale is voided.
+func TestVoidOfATintedLineDoesNotRestockIt(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	onHand := func() int64 {
+		t.Helper()
+		return f.scalar(`SELECT ROUND(COALESCE(SUM(quantity), 0) * 10000)::bigint FROM inventory WHERE product_id = $1`,
+			f.productID).(int64)
+	}
+	before := onHand()
+	sale, _ := completeTintedSale(t, f, formulaID)
+	afterSale := onHand()
+	if afterSale >= before {
+		t.Fatalf("the tinted sale did not move the stock: %d on hand before, %d after", before, afterSale)
+	}
+	read := f.do("GET", "/api/v1/pos/transactions/"+sale, nil)
+	if read.status != http.StatusOK {
+		t.Fatalf("read the sale = %d: %s", read.status, read.raw)
+	}
+	r := f.do("POST", "/api/v1/pos/transactions/"+sale+"/void",
+		map[string]any{"reason": "rung twice", "revision": rev(t, read)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("void = %d: %s", r.status, r.raw)
+	}
+	if after := onHand(); after != afterSale {
+		t.Errorf("the void put the tinted can back into saleable stock: %d on hand, want %d", after, afterSale)
+	}
+}
