@@ -40,6 +40,9 @@ interface BranchForm {
   /** The branch's own cash rounding rule (CP-18). */
   cash_rounding_mode: CashRoundingMode;
   active: boolean;
+  /** The tax fields a person types: a jurisdiction code and a rate in percent. */
+  taxJurisdiction: string;
+  taxRatePercent: string;
 }
 
 const EMPTY_FORM: BranchForm = {
@@ -54,7 +57,25 @@ const EMPTY_FORM: BranchForm = {
   timezone: 'America/New_York',
   cash_rounding_mode: CASH_ROUNDING_OFF,
   active: true,
+  taxJurisdiction: '',
+  taxRatePercent: '',
 };
+
+/** The stored rate is a fraction (0.08875 is 8.875 percent); a person types the percent. */
+export function fractionToPercent(fraction: number | null | undefined): string {
+  if (fraction === null || fraction === undefined) return '';
+  const pct = fraction * 100;
+  return String(Math.round(pct * 1e6) / 1e6);
+}
+
+/** The typed percent back to the stored fraction; null when it is not a percent a branch can hold. */
+export function percentToFraction(typed: string): number | null | undefined {
+  const t = typed.trim();
+  if (!t) return null;
+  const pct = Number(t);
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) return undefined;
+  return pct / 100;
+}
 
 @customElement('gable-admin-branches')
 export class GableAdminBranches extends LitElement {
@@ -106,6 +127,8 @@ export class GableAdminBranches extends LitElement {
       timezone: b.timezone ?? 'America/New_York',
       cash_rounding_mode: b.cash_rounding_mode ?? CASH_ROUNDING_OFF,
       active: b.active,
+      taxJurisdiction: b.tax_jurisdiction_code ?? '',
+      taxRatePercent: fractionToPercent(b.default_tax_rate),
     };
     this._editorOpen = true;
   }
@@ -124,13 +147,19 @@ export class GableAdminBranches extends LitElement {
       ToastService.show('Code and name are required', 'error');
       return;
     }
+    const taxRate = percentToFraction(this._form.taxRatePercent);
+    if (taxRate === undefined) {
+      ToastService.show('The tax rate is a percent between 0 and 100', 'error');
+      return;
+    }
     this._saving = true;
     try {
       const text = (v: string | undefined) => v?.trim() || null;
       const f = this._form;
       if (f.id && f.revision !== undefined) {
-        // The PUT replaces the row: start from the loaded branch so the fields this form does not
-        // show (tax jurisdiction and rate) and the path survive, then overlay the form.
+        // The PUT replaces the row: start from the loaded branch so fields the
+        // form does not show and the path survive, then overlay the form (its
+        // own tax fields included).
         const loaded = this._branches.find((b) => b.id === f.id);
         if (!loaded) throw new Error('That branch is no longer in the list');
         await LocationService.updateBranch(
@@ -148,6 +177,8 @@ export class GableAdminBranches extends LitElement {
             timezone: text(f.timezone),
             cash_rounding_mode: f.cash_rounding_mode,
             active: f.active,
+            tax_jurisdiction_code: f.taxJurisdiction.trim() || null,
+            default_tax_rate: taxRate,
           },
           f.revision,
         );
@@ -167,6 +198,8 @@ export class GableAdminBranches extends LitElement {
           timezone: f.timezone?.trim() || undefined,
           cash_rounding_mode: f.cash_rounding_mode,
           active: f.active,
+          tax_jurisdiction_code: f.taxJurisdiction.trim() || undefined,
+          default_tax_rate: taxRate ?? undefined,
         });
         ToastService.show('Branch created', 'success');
       }
@@ -361,6 +394,8 @@ export class GableAdminBranches extends LitElement {
                 exact, and the difference goes to the branch's rounding account.
               </span>
             </label>
+            ${this._textField('Tax jurisdiction code', 'taxJurisdiction', 'CT-HARTFORD')}
+            ${this._textField('Default tax rate (percent)', 'taxRatePercent', '8.875', true)}
             <label class="flex items-center gap-2 text-sm text-zinc-300 md:col-span-2">
               <input
                 type="checkbox"

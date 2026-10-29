@@ -459,6 +459,7 @@
         "address": "7 Golden Way, Kelowna BC",
         "credit_limit_cents": 5000000,
         "email": "contacts@example.com",
+        "job_required": false,
         "name": "Golden Contacts Co",
         "payment_terms_id": "<id-12>",
         "phone": "250-555-0177",
@@ -483,6 +484,7 @@
         "email": "contacts@example.com",
         "id": "<id-1>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {
@@ -526,6 +528,7 @@
         "email": "contacts@example.com",
         "id": "<id-1>",
         "is_active": true,
+        "job_required": false,
         "name": "Golden Contacts Co",
         "named_buyer_required": false,
         "payment_terms": {

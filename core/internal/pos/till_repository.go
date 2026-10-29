@@ -197,9 +197,13 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT p.method, COALESCE(SUM(ROUND(p.amount * 100)::bigint), 0)
 		FROM payments p
-		JOIN pos_tenders pt ON pt.payment_id = p.id
-		JOIN pos_transactions t ON t.id = pt.transaction_id
-		WHERE t.till_session_id = $1 AND t.status = 'COMPLETED' AND p.status = 'POSTED'
+		WHERE p.status = 'POSTED'
+			AND (p.till_session_id = $1
+				OR EXISTS (
+					SELECT 1 FROM pos_tenders pt
+					JOIN pos_transactions t ON t.id = pt.transaction_id
+					WHERE pt.payment_id = p.id AND t.till_session_id = $1 AND t.status = 'COMPLETED'
+				))
 		GROUP BY p.method`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's payments: %w", err)

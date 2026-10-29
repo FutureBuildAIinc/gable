@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Builds the deploy images and pushes them to GHCR, for the demo tenant on a
+# Coolify based platform such as FB Deploy (the platform's one server runs
+# other work with priority, so nothing is built there: it pulls these images).
+#
+# Dispatch by hand with the commit to build:
+#
+#   gh workflow run publish-images.yml -f ref=<commit>
+#
+# It makes three images, all tagged with the commit's full sha:
+#
+#   ghcr.io/futurebuildaiinc/gable-core:<sha>            (core, worker, migrate)
+#   ghcr.io/futurebuildaiinc/gable-web:<sha>             (the customer web:
+#                                                         no persona sign in)
+#   ghcr.io/futurebuildaiinc/gable-web:demo-<sha>        (the demo web: the
+#                                                         persona sign in)
+#
+# deploy/compose.images.yml runs them. This workflow is dispatch only: nothing
+# here runs on a push, a schedule or a pull request, and the repository pays
+# for a runner only when the images are asked for.
+
+name: publish-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "The commit to build (sha, branch or tag)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+# One build per ref: a second dispatch of the same ref replaces the first.
+concurrency:
+  group: publish-images-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # The repository's owner, lowercased, as GHCR namespaces image names.
+  IMAGE_PREFIX: ghcr.io/futurebuildaiinc
+
+jobs:
+  publish:
+    name: Build and push the deploy images
+    runs-on: ubuntu-latest
+
+    steps:
+      # The actions are pinned to a full commit sha; the tag in the comment is
+      # the version the sha was taken from.
+      - name: Check out the ref to build
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve the full commit sha
+        id: sha
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "Building $sha" >&2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The core image: one binary, every role (serve, worker, migrate, seed).
+      # The same image runs the migrate, core and worker services.
+      - name: Build and push gable-core
+        id: core
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: core/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/gable-core:${{ steps.sha.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/FutureBuildAIinc/gable
+            org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The customer web: built WITHOUT the dev sign in. VITE_AUTH_DEV_MODE is
+      # deliberately not passed, so the persona sign in is not in the bundle.
+      - name: Build and push gable-web (customer, no dev sign in)
+        id: web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/gable-web:${{ steps.sha.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/FutureBuildAIinc/gable
+            org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The demo web: the same Dockerfile with the persona sign in turned on.
+      - name: Build and push gable-web (demo, dev sign in)
+        id: web-demo
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/gable-web:demo-${{ steps.sha.outputs.sha }}
+          build-args: |
+            VITE_AUTH_DEV_MODE=true
+          labels: |
+            org.opencontainers.image.source=https://github.com/FutureBuildAIinc/gable
+            org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The three image refs with their digests, so a deployment can point at
+      # one exactly. No secret is printed: the digests are public values.
+      - name: Image summary
+        run: |
+          {
+            echo "## Published images for ${STEP_SHA}"
+            echo ""
+            echo "| Image | Digest |"
+            echo "|---|---|"
+            echo "| \`${IMAGE_PREFIX}/gable-core:${STEP_SHA}\` | \`${STEP_CORE_DIGEST}\` |"
+            echo "| \`${IMAGE_PREFIX}/gable-web:${STEP_SHA}\` | \`${STEP_WEB_DIGEST}\` |"
+            echo "| \`${IMAGE_PREFIX}/gable-web:demo-${STEP_SHA}\` | \`${STEP_WEB_DEMO_DIGEST}\` |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "core: ${IMAGE_PREFIX}/gable-core:${STEP_SHA}@${STEP_CORE_DIGEST}"
+          echo "web:  ${IMAGE_PREFIX}/gable-web:${STEP_SHA}@${STEP_WEB_DIGEST}"
+          echo "demo web: ${IMAGE_PREFIX}/gable-web:demo-${STEP_SHA}@${STEP_WEB_DEMO_DIGEST}"
+        env:
+          STEP_SHA: ${{ steps.sha.outputs.sha }}
+          STEP_CORE_DIGEST: ${{ steps.core.outputs.digest }}
+          STEP_WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          STEP_WEB_DEMO_DIGEST: ${{ steps.web-demo.outputs.digest }}

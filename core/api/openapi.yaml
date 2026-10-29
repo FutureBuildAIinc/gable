@@ -1533,6 +1533,91 @@ paths:
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "428": {$ref: "#/components/responses/WirePreconditionRequired"}
         "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/admin/staff/{id}/counter-pin:
+    put:
+      operationId: adminSetStaffCounterPIN
+      tags: [admin]
+      summary: Set a staff member's counter PIN
+      description: >-
+        Admin or owner. The manager's step up secret (CP-04): 4 to 8 digits, never one repeated digit or a plain run like 1234. Hashed on the server with argon2id and a per PIN salt; the PIN is never logged and the answer says only counter_pin_set and locked. Setting a PIN clears the failures and the lock.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCounterPINRequest"
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+    delete:
+      operationId: adminClearStaffCounterPIN
+      tags: [admin]
+      summary: Clear a staff member's counter PIN
+      description: Admin or owner. The PIN, its set time, the failures and the lock all go; a cleared PIN is no PIN.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/admin/staff/{id}/counter-pin/unlock:
+    post:
+      operationId: adminUnlockStaffCounterPIN
+      tags: [admin]
+      summary: Unlock a staff member's counter PIN
+      description: >-
+        Admin or owner. Lifts the lock five wrong tries impose and clears the failures; the hash stands, so the manager's own PIN works again at once.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The two PIN facts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CounterPINAnswer"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "422": {$ref: "#/components/responses/UnprocessableEntity"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
   /api/v1/admin/staff/{id}/modules:
     post:
       operationId: adminGrantModule
@@ -13919,9 +14004,9 @@ paths:
     get:
       operationId: posTransactionList
       tags: [pos]
-      summary: List the day's sales
+      summary: List the day's sales, or search them
       description: >-
-        The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD that defaults to the branch's today, status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). The page is the whole day newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day is [] in the bytes.
+        The list envelope over one register's day: register_id filters (absent lists every register's), date is a YYYY-MM-DD read against the sale's business day in its branch's own zone, defaulting to the branch's today (never the server's clock), status takes one lowercase value (open, held, completed, voided; an uppercase or unknown value is a 400 naming status). q is the return counter's sale search (CP-06): a sale matches when its number (the receipt's barcode text), its invoice's number or its customer's name contains the text, case folded; a search names no day bound unless it also carries a date. The page is the whole day or the whole search newest first, so next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty day or a search nothing matches is [] in the bytes.
       parameters:
         - name: register_id
           in: query
@@ -13935,6 +14020,10 @@ paths:
           in: query
           required: false
           schema: {type: string, enum: [open, held, completed, voided]}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, description: "The search text: sale number, invoice number or customer name."}
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/Include"
@@ -14294,7 +14383,7 @@ paths:
       tags: [pos]
       summary: Tender and complete the sale
       description: >-
-        A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+        A sale started before the open till rule, with no drawer on it, completes only into the register's open session, which it joins (409 till_not_open when there is none). The money moment, one transaction: stock out through the inventory write path, the invoice (origin POS, pickup) posted through the AR core with its tax and COGS legs, each cash, check or card tender a payment applied to it and stored net (the tendered amount less change, so the payment is the money kept), an ACCOUNT tender left open on the invoice and subject to the credit check, the card charged at the gateway in the sale's currency before the transaction opens, and the pos_transaction.completed event written last: a failing event, audit or ledger write rolls the whole sale back (no invoice, payment, stock move or entry). Tenders must cover the total (change comes only from cash). Refused with 409 and a blocker: insufficient_tender, change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in customer), card_terminal, card_declined, tax_quote_stale, tax_rate_not_configured, credit_limit, credit_hold, cash_only_terms (an account tender on an account whose terms are due on receipt), account_hold (an account tender on an account the AR core holds: a standing credit hold record, or an override window on it that has passed or whose cap the sale is over), buyer_required, buyer_not_authorized, buyer_cap (the account's buyer roster), check_over_limit (a check over the customer's check limit, or the database wide one, unless a manager approved it for this sale), store_credit_short, walk_in_store_credit, one_account_leg, one_store_credit_leg, insufficient_stock; 503 when the tax provider fails before any row is written. An ACCOUNT tender is held to the same verdict the standing read states, and a manager override the sale holds is spent here, once. A store_credit tender applies the customer's open credit memos to the sale's invoice through the AR core, oldest first. The completion carries the sale's revision (If-Match or the body's revision; 428 without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -14819,6 +14908,72 @@ paths:
           $ref: "#/components/responses/ConflictEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/step-up:
+    post:
+      operationId: posStepUp
+      tags: [pos]
+      summary: A manager approves at the counter with their own PIN
+      description: >-
+        The step up (CP-04): any person at the terminal asks, the manager is picked from the roster by staff number or id, and the PIN is the authority, so the caller's own role is never checked. The server verifies the PIN in constant time (five wrong tries in a row lock it until an admin unlocks it; the answer never says which part was wrong), checks the act's approving roles and the act's own person rules (the manager is not the sale's cashier, the drawer's cashier or closer), and mints one single use approval: an opaque token, stored only as its hash, bound to the act, the target and the manager, expiring a few minutes ahead. Never a machine key.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosStepUpRequest"
+      responses:
+        "201":
+          description: The approval the one act spends, naming the manager.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosStepUpApproval"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/step-up/managers:
+    get:
+      operationId: posStepUpManagers
+      tags: [pos]
+      summary: The managers the picker offers
+      description: >-
+        The roster the step up picker shows for one act: active staff with a counter PIN whose role the act admits. Names and staff numbers only, never a hint of the PIN beyond the fact one is set. Never a machine key.
+      parameters:
+        - name: act
+          in: query
+          required: true
+          description: The act the approval is for.
+          schema: {type: string, enum: [override, pickup, signoff]}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The managers, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosStepUpManagerPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/policy:
     get:
       operationId: posTillPolicyGet
@@ -15195,6 +15350,87 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/refund-intents:
+    get:
+      operationId: posRefundIntentList
+      tags: [pos]
+      summary: List the refund claims waiting on a manager
+      description: >-
+        The list envelope over the counter's open refund claims (CP-06), oldest first: every PENDING claim (a terminal answer still owed, or a claim waiting on the resolve route) and every void's FAILED claim whose tender's posted payment still holds the declined credit the pay back route returns to the card (held_credit_cents carries it). A settled claim and a paid back credit leave the list. Only the finance and owner roles, the resolve and pay back routes' own guard; the sale join carries the branch wall, so the list never crosses the caller's branch. The page is the oldest 50 of the open set, the route's own cap: a claim past the fiftieth shows as the queue drains, so the list never claims to be the whole set. next_cursor is null and limit echoes the 50 the route serves; cursor, limit and include are accepted query names. An empty list is [] in the bytes.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The open claims.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRefundIntentPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/settings:
+    get:
+      operationId: posSettingsGet
+      tags: [pos]
+      summary: The counter's dealer rules
+      description: >-
+        The dealer's counter rules: the database wide check limit (system_settings pos.check_limit_cents; null is no limit) and the check ID rule (pos.check_id_required_over_cents: never, every check, or checks over a figure read on the sale's checks in total, so a split check cannot pass under it; the ID's number is never taken, on this contract or at the counter). The counter reads it to ask for the ID before Pay; the write is the admin and owner roles' own route.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The rules and their revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posSettingsPut
+      tags: [pos]
+      summary: Write the counter's dealer rules
+      description: >-
+        Writes both rules as one act on the caller's revision (If-Match and/or the body's revision; a stale revision is 409 stale_revision). Admin and owner only, never a machine key; audited. rules is an object of named rules so later rules (the restocking fees) sit beside these.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosSettingsRequest"
+      responses:
+        "200":
+          description: The rules now in force, with the revision the write made.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosSettings"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/refund-intents/{id}/resolve:
     post:
       operationId: posRefundIntentResolve
@@ -15428,7 +15664,7 @@ paths:
       tags: [pos]
       summary: Can this sale go on account?
       description: >-
-        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag as the counter has it today (a limit of zero), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit or cash_only_terms), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
+        The account as the counter reads it before a sale goes on it: the credit limit (null for no limit, 0 for no credit), the open receivable the credit check reads, the open credit memos (positive store credit), the available credit, the hold flag (a limit of zero, or a standing credit hold record the AR core placed), the terms kind of the payment terms, whether the account asks for a named buyer and its roster, the check limit that governs it, the payment shapes the server takes from it now, and a verdict on_account: allowed, or blocked with a reason (credit_hold, credit_limit, cash_only_terms or account_hold: the AR core's standing hold record, with its reason in the words and pay down unavailable, for paying the balance does not lift a hold), the amount in words, and the three ways forward: pay_down (with the amount that would clear it), manager_override and switch_tender, each with whether it is available. amount_cents is the account portion the sale would put on the account (default 0, the account as it stands); sale_id makes the read count the sale's live manager override, an allowed verdict with the reason manager_override. The completion enforces the same verdict, so the read states what the completion will do. The walk-in customer is no account: 404, as is a customer the caller may not name.
       parameters:
         - name: id
           in: path
@@ -15466,7 +15702,7 @@ paths:
       tags: [pos]
       summary: A manager approves one sale
       description: >-
-        One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold or credit_limit, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
+        One act for one sale: a manager (the admin or owner role, and a person other than the sale's own cashier) approves an on account sale the verdict blocks (kind account: credit_hold, credit_limit or account_hold, never the terms of a cash only account) or a check over the customer's check limit (kind check), with a reason and a cap in cents. The completion of that sale spends it, once: of any number of racing completions exactly one does, and a later sale is blocked again. One live override per sale and kind (409 override_exists). The approval and its spending are each audited. A cashier, a machine key and a token that carries no subject are refused 403 (a request with no claims at all is the local development bypass and approves as dev-mode); a sale that does not exist or that the caller's wall hides is 404; a sale that is not open or held is 409 invalid_state_transition; an account override of a walk-in sale is 409 walk_in_account.
       parameters:
         - name: id
           in: path
@@ -20279,7 +20515,7 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
+        Roles admin, owner, finance. customer_id, exempt_reason and certificate_number are required (400). The exemption is created active; effective_date is a YYYY-MM-DD string that defaults to the customer's primary branch's business day, expiry_date is a YYYY-MM-DD string on or after effective_date, and issuing_state is a two letter code when sent (any invalid field answers 400 naming the field). A customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -20330,6 +20566,28 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/tax/exemptions/{id}/end:
+    post:
+      operationId: taxExemptionEnd
+      tags: [tax]
+      summary: End a tax exemption
+      description: >-
+        Roles admin, owner, finance. Sets the certificate inactive: it stays on file (the list still shows it, ended) but exempts no sale. An unknown id answers 404; a certificate that was already ended answers 409 already_ended. An exemption whose customer is outside the user's reach answers 404 and is not ended.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: The certificate is ended.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/exemptions/{id}:
     delete:
       operationId: taxExemptionDelete
@@ -20351,6 +20609,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/preview:
     post:
@@ -22088,9 +22347,9 @@ components:
           type: integer
     StaffMember:
       type: object
-      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules]
+      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules, counter_pin_set, locked]
       description: >-
-        Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag.
+        Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. counter_pin_set and locked are the two facts the staff screen shows of the manager's counter PIN; the hash never leaves the server.
       properties:
         id:
           type: string
@@ -22117,6 +22376,26 @@ components:
           type: array
           items:
             type: string
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
+    AdminCounterPINRequest:
+      type: object
+      required: [pin]
+      description: The PIN the admin typed. It rides the request once and never logs.
+      properties:
+        pin:
+          type: string
+    CounterPINAnswer:
+      type: object
+      required: [counter_pin_set, locked]
+      description: The two facts the staff screen shows of a counter PIN, and nothing else.
+      properties:
+        counter_pin_set:
+          type: boolean
+        locked:
+          type: boolean
     StaffPage:
       type: object
       required: [items, next_cursor, limit]
@@ -23043,7 +23322,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, is_active, primary_branch_id, branch_ids, price_profile_id, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, job_required, named_buyer_required, check_limit_cents, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -23103,6 +23382,9 @@ components:
         po_required:
           type: boolean
           description: "Whether an order of this customer must carry a purchase order number."
+        job_required:
+          type: boolean
+          description: "Whether every charge sale at the counter for this customer names a job."
         named_buyer_required:
           type: boolean
           description: "Whether every sale on account at the counter names a buyer from the contacts flagged authorized_buyer."
@@ -23179,6 +23461,8 @@ components:
           description: Active payment terms; the default NET30 when left out on create.
         po_required:
           type: boolean
+        job_required:
+          type: boolean
         named_buyer_required:
           type: boolean
           description: Optional; left out keeps the value on a PUT (false on create).
@@ -23193,9 +23477,9 @@ components:
           description: PUT only, beside If-Match; a revision on create is a 400.
     CustomerUpdateRequest:
       type: object
-      required: [account_number, name, payment_terms_id, po_required]
+      required: [account_number, name, payment_terms_id, po_required, job_required]
       description: >-
-        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the two required controls (payment_terms_id and po_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
+        The body of PUT. A PUT replaces the header: a field left out takes its default (null for an optional one, retail, true), except the three required controls (payment_terms_id, po_required and job_required) and the two optional counter controls (named_buyer_required and check_limit_cents, which keep their stored value when omitted so a left out field cannot reset them). primary_branch_id is refused.
       properties:
         account_number:
           type: string
@@ -23232,6 +23516,8 @@ components:
           format: uuid
           description: Active payment terms, or terms the customer already holds.
         po_required:
+          type: boolean
+        job_required:
           type: boolean
         named_buyer_required:
           type: boolean
@@ -29734,6 +30020,9 @@ components:
         - updated_at
         - invoice_ids
         - deposit_unapplied_cents
+        - deposit_total_cents
+        - balance_due_after_deposits_cents
+        - deposits
         - ship_to
         - lines
       properties:
@@ -29876,6 +30165,37 @@ components:
           type: integer
           format: int64
           description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
+        deposit_total_cents:
+          type: integer
+          format: int64
+          description: 'Everything taken on the order (deposits), applied and unapplied both.'
+        balance_due_after_deposits_cents:
+          type: integer
+          format: int64
+          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+        deposits:
+          type: array
+          description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
+          items:
+            type: object
+            required: [id, number, received_on, method, amount_cents, unapplied_cents, reference, applications]
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string, description: "PAY-000001, the payment's own number."}
+              received_on: {type: string, format: date}
+              method: {type: string, enum: [cash, check, ach, other, card]}
+              amount_cents: {type: integer, format: int64}
+              unapplied_cents: {type: integer, format: int64}
+              reference: {type: [string, "null"]}
+              applications:
+                type: array
+                items:
+                  type: object
+                  required: [invoice_id, amount_cents, applied_on]
+                  properties:
+                    invoice_id: {type: string, format: uuid}
+                    amount_cents: {type: integer, format: int64}
+                    applied_on: {type: string, format: date}
         ship_to:
           type:
             - object
@@ -30383,6 +30703,7 @@ components:
         received_on: {type: string, format: date, description: "Defaults to the branch's business date."}
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
@@ -32239,6 +32560,32 @@ components:
           type: string
           description: "Required when the outcome is no_refund: the reference finance filed for the reconciliation."
         reason: {type: string, description: Why the record was made, 1 to 500 characters.: ''}
+    PosRefundIntentSummary:
+      type: object
+      description: One open refund claim in the manager's list (CP-06).
+      required: [id, sale_id, sale_number, tender_id, tender_method, amount_cents, act, state, held_credit_cents, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string, description: "The claim's sale, POS-000001."}
+        tender_id: {type: string, format: uuid}
+        tender_method: {type: string, enum: [cash, check, card, account, store_credit]}
+        amount_cents: {type: integer, format: int64, description: "The claim's amount."}
+        act: {type: string, enum: [void, return, payback]}
+        state: {type: string, enum: [PENDING, FAILED], description: "PENDING waits on the terminal's answer or the resolve route; FAILED is a void's declined claim whose credit the pay back route returns."}
+        held_credit_cents: {type: integer, format: int64, description: "What the tender's posted payment still holds unapplied; the credit a pay back returns."}
+        created_at: {type: string, format: date-time}
+    PosRefundIntentPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosRefundIntentSummary"
+        next_cursor: {type: [string, "null"], description: "Null: the page is the whole open set."}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
     PosRefundIntentResolved:
       type: object
       required: [id, sale_id, tender_id, act, state, outcome]
@@ -32309,7 +32656,7 @@ components:
       required: [verdict, reason, message, over_cents, ways_forward]
       properties:
         verdict: {type: string, enum: [allowed, blocked]}
-        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked; manager_override when allowed by a live override."}
+        reason: {type: string, enum: ["", credit_hold, credit_limit, cash_only_terms, account_hold, manager_override], description: "Empty when plainly allowed; the blocker code the completion refuses with when blocked (account_hold: the AR core's standing hold record); manager_override when allowed by a live override."}
         message: {type: string, description: "The verdict in plain words, with the amount."}
         over_cents: {type: [integer, "null"], format: int64, description: "How far past the limit the sale puts the account (credit_limit only)."}
         ways_forward:
@@ -32353,6 +32700,7 @@ components:
         kind: {type: string, enum: [account, check]}
         reason: {type: string, maxLength: 500}
         cap_cents: {type: integer, format: int64, minimum: 1, description: "The most the manager approves: the account portion, or the largest check."}
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one override: the manager it names is the approver, recorded by name. Absent on the signed in manager's own path."}
     PosOverride:
       type: object
       required: [id, sale_id, kind, approved_by, reason, cap_cents, created_at, consumed_at]
@@ -32504,7 +32852,7 @@ components:
     PosTransactionSummary:
       type: object
       description: A sale's head, a list item.
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count, customer_name, invoice_number, business_day]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -32520,6 +32868,9 @@ components:
         completed_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
         item_count: {type: integer}
+        customer_name: {type: [string, "null"], description: "The account the sale names; null on a walk-in."}
+        invoice_number: {type: [string, "null"], description: "The invoice's number; null until the sale completes."}
+        business_day: {type: string, description: "The day the sale was made on in its branch's own zone, YYYY-MM-DD (the date a search bounds by); never the UTC slice of the timestamp."}
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
@@ -32547,6 +32898,16 @@ components:
         buyer_contact_id: {type: [string, "null"], format: uuid, description: "The roster buyer a sale on account names."}
         print_count: {type: integer, description: "How many times the receipt has been printed."}
         exchange_return_id: {type: [string, "null"], format: uuid, description: "The return an exchange's replacement sale stands against."}
+        returned_quantities:
+          type: object
+          description: "Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it."
+          additionalProperties: {type: string, description: "A decimal string with at most 4 fraction digits."}
+        tax_exemption:
+          type: [object, "null"]
+          description: "Why there is no tax: the certificate that exempts this sale on the branch's business day (CP-10). Null when no certificate covers the day."
+          properties:
+            certificate_number: {type: string, description: "The certificate's number as the counter shows it."}
+            expiry_day: {type: string, description: "The certificate's last day, YYYY-MM-DD; absent when it does not expire."}
         lines:
           type: array
           items:
@@ -32563,12 +32924,13 @@ components:
         name: {type: string}
     PosCounterCustomer:
       type: object
-      required: [id, account_number, name, po_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
+      required: [id, account_number, name, po_required, job_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
       properties:
         id: {type: string, format: uuid}
         account_number: {type: string}
         name: {type: string}
         po_required: {type: boolean, description: "The account asks for a purchase order on a charge sale (409 po_required at completion without one)."}
+        job_required: {type: boolean, description: "The account asks for a job on a charge sale (409 job_required at completion without one)."}
         credit_limit_cents: {type: [integer, "null"], format: int64, description: "Null: no limit. 0: no credit."}
         open_receivable_cents: {type: integer, format: int64, description: "What the credit check reads: open invoices less open credit memos and unapplied cash."}
         available_credit_cents: {type: [integer, "null"], format: int64, description: "The limit less the open receivable; negative when over; null with no limit."}
@@ -32746,7 +33108,8 @@ components:
             - $ref: "#/components/schemas/PosTillReasonCode"
             - type: "null"
         note: {type: [string, "null"], description: "Required, not blank, when the reason_code is other."}
-        taken_by: {type: [string, "null"], description: "A pickup's second person, required there and absent for any other kind."}
+        taken_by: {type: [string, "null"], description: "A pickup's second person, required there and absent for any other kind. With an approval_token the manager is named by their approval, not typed."}
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one pickup: the manager it names is the taker. Only a pickup carries one."}
     PosTillMovementKind:
       type: string
       enum: [safe_drop, pickup, paid_in, paid_out]
@@ -32790,10 +33153,63 @@ components:
           items: {$ref: "#/components/schemas/PosTillSession"}
         next_cursor: {type: [string, "null"]}
         limit: {type: integer}
+    PosStepUpRequest:
+      type: object
+      additionalProperties: false
+      required: [act, manager, pin, target_id]
+      properties:
+        act: {type: string, enum: [override, pickup, signoff]}
+        kind: {type: string, enum: [account, check, refund_method], description: "The override's kind; required when the act is an override, absent otherwise. The approval binds it."}
+        manager: {type: string, description: "The manager's staff number or staff id."}
+        pin: {type: string, description: "The manager's counter PIN. Verified in constant time, never logged."}
+        target_id: {type: string, format: uuid, description: "The act's target: the sale (an override) or the till session (a pickup, a sign off)."}
+        amount_cents: {type: integer, format: int64, minimum: 1, description: "The amount the manager approves: the override's cap or the pickup's amount; required for an override or a pickup, absent for a sign off. The approval binds it."}
+      allOf:
+        - if:
+            properties: {act: {const: override}}
+          then:
+            required: [kind, amount_cents]
+        - if:
+            properties: {act: {const: pickup}}
+          then:
+            required: [amount_cents]
+            not: {required: [kind]}
+        - if:
+            properties: {act: {const: signoff}}
+          then:
+            not:
+              anyOf:
+                - required: [kind]
+                - required: [amount_cents]
+    PosStepUpApproval:
+      type: object
+      required: [token, manager_name, expires_at]
+      properties:
+        token: {type: string, description: "The opaque token the one act spends as approval_token. Stored only as its SHA-256 hash."}
+        manager_name: {type: string, description: "The manager's name, for the screen to say who approved."}
+        expires_at: {type: string, format: date-time}
+    PosStepUpManager:
+      type: object
+      required: [id, full_name, staff_no, role]
+      properties:
+        id: {type: string, format: uuid}
+        full_name: {type: string}
+        staff_no: {type: string}
+        role: {type: string}
+    PosStepUpManagerPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosStepUpManager"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
     PosTillSignoffRequest:
       type: object
       required: [reason]
       properties:
+        approval_token: {type: string, description: "A manager's step up approval (POST /pos/step-up), spent by this one sign off: the manager it names is the signer. Absent, the signed in caller needs the finance or owner role."}
         reason: {type: string, minLength: 1, description: "Why the variance is accepted; not blank."}
     PosTillSignOff:
       type: object
@@ -32817,6 +33233,38 @@ components:
       properties:
         branch_id: {type: string, format: uuid}
         variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosSettings:
+      type: object
+      required: [revision, rules]
+      properties:
+        revision: {type: integer, format: int64, minimum: 1, description: "The settings resource's revision; a write names it (If-Match and/or the body's revision)."}
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "The database wide check limit; null is no limit. A customer's own limit wins over it."}
+            check_id_required:
+              type: object
+              required: [mode, over_cents]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount], description: "Never asks for an ID; every_check asks on every check; over_amount asks once the sale's checks total over the figure, and then on every check of the sale."}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "The figure an over_amount rule names, read against the sale's checks in total; null on the other two."}
+    PosSettingsRequest:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: object
+          required: [check_limit_cents, check_id_required]
+          properties:
+            check_limit_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the limit (no limit)."}
+            check_id_required:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [never, every_check, over_amount]}
+                over_cents: {type: [integer, "null"], format: int64, minimum: 1, description: "Read only when mode is over_amount; dropped otherwise."}
+        revision: {type: integer, format: int64, minimum: 1, description: "The revision this write rides; If-Match serves the same role."}
     PosEndOfDayCloseRequest:
       type: object
       required: [branch_id, date, deposit_slip_ref]
@@ -36266,14 +36714,23 @@ components:
           description: Absent when the exemption does not expire.
         is_active: {type: boolean}
         created_at: {type: string, format: date-time}
+        status:
+          type: string
+          enum: [active, expired, future, ended]
+          description: >-
+            The certificate's standing on the customer's branch's business day, said by the server (the same window rule the counter and the orders read), so no screen computes a day of its own.
     TaxExemptionCreateRequest:
       type: object
-      required: [customer_id, exempt_reason]
+      required: [customer_id, exempt_reason, certificate_number]
       properties:
         customer_id: {type: string, format: uuid}
         exempt_reason: {type: string}
         certificate_number: {type: string}
         issuing_state: {type: string}
+        effective_date:
+          type: string
+          format: date
+          description: The certificate's first day, YYYY-MM-DD; defaults to today.
         expiry_date:
           type: string
           format: date

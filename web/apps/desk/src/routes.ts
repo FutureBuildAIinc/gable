@@ -13,6 +13,7 @@ import { appRoutes } from './apps/registry.ts';
 export const routes: RouteConfig[] = [
   // ── POS (no layout) ─────────────────────────────────────────────
   { path: '/pos/lost-answers', load: () => import('./pages/pos/TerminalLostAnswers.ts'), layout: 'erp' },
+  { path: '/pos/refund-intents', load: () => import('./pages/pos/RefundIntents.ts'), layout: 'erp' },
   { path: '/pos', load: () => import('./pages/pos/POSTerminal.ts'), layout: 'none' },
 
   // ── Portal login (no layout) ────────────────────────────────────
@@ -83,6 +84,7 @@ export const routes: RouteConfig[] = [
   { path: '/admin/branches/:id/users', load: () => import('./pages/admin/branches/BranchUsers.ts'), layout: 'erp' },
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp' },
+  { path: '/admin/counter-rules', load: () => import('./pages/admin/CounterRules.ts'), layout: 'erp' },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp' },
   { path: '/pricing/market-check', load: () => import('./pages/admin/pricing/MarketCheck.ts'), layout: 'erp' },
   { path: '/pricing', load: () => import('./pages/admin/pricing/PricingMatrix.ts'), layout: 'erp' },

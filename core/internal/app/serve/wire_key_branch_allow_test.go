@@ -677,7 +677,7 @@ func TestKeyBranchPin_SharedCustomerWrites(t *testing.T) {
 	refusedNaming("POST", "/api/v1/pricing/rules", pricingRuleBody("shared", shared))
 	refusedNaming("POST", "/api/v1/pricing/category-rules", categoryRuleBody(shared, f.freshCategory(t)))
 	refusedNaming("POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, sh))
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT"}`, sh))
 	exemptShared := uuid.New()
 	f.seedTaxExempt(t, exemptShared, shared)
 	refusedNaming("DELETE", "/api/v1/tax/exemptions/"+exemptShared.String(), "")
@@ -703,14 +703,14 @@ func TestKeyBranchPin_SharedCustomerWrites(t *testing.T) {
 	f.allow(t, "bound", "POST", "/api/v1/pricing/category-rules",
 		categoryRuleBody(f.custID, f.freshCategory(t)), nil, http.StatusCreated)
 	f.allow(t, "bound", "POST", "/api/v1/tax/exemptions",
-		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, f.custID.String()), nil, http.StatusCreated)
+		fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT"}`, f.custID.String()), nil, http.StatusCreated)
 
 	// The unbound key and the user keep the shared customer's writes (each on
 	// its own fresh target).
 	for _, who := range []string{"unbound", "user"} {
 		f.allow(t, who, "POST", "/api/v1/pricing/rules", pricingRuleBody(who, shared), nil, http.StatusCreated)
 		f.allow(t, who, "POST", "/api/v1/tax/exemptions",
-			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, sh), nil, http.StatusCreated)
+			fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin","certificate_number":"PIN-CERT"}`, sh), nil, http.StatusCreated)
 	}
 }
 

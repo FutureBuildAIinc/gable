@@ -584,7 +584,7 @@ func (s *Service) resolveReturnMoney(ctx context.Context, st *returnState) error
 		}
 	}
 	if freeTaxable > 0 {
-		exempt, err := s.repo.CustomerExempt(ctx, *st.customerID)
+		exempt, err := s.exemptOn(ctx, *st.branchID, *st.customerID)
 		if err != nil {
 			return err
 		}

@@ -8,26 +8,29 @@ import { posService, dollarsToCents, type TenderIn } from '../../services/POSSer
 import { apiErrorMessage, ApiError } from '../../services/apiError';
 import type {
   Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TillMovement, TenderMethod, RefundMethod, CounterCustomer, CounterRegister,
-  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, IdType,
+  CounterStanding, ReturnReason, ReturnReasonCode, ExchangeFigures, IdType, SaleSummary,
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
 import {
-  chargeRefusal, standingOf, money, PO_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal,
+  chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
 import './SignaturePad';
 import type { SignaturePad } from './SignaturePad';
-import { formatPrice4 } from '../../lib/utils';
+import { formatPrice4, formatCents } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
+import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { confirmDialog, promptDialog } from '../../components/ui/app-dialog';
+import '../../components/ui/gable-date-field';
+import './StepUpDialog';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 import './TillMovementDialog.ts';
@@ -73,6 +76,8 @@ export class POSTerminal extends LitElement {
   // Can this sale go on account? The server's read of the account (its verdict,
   // the buyer roster, the check limit, the store credit), and the buyer named.
   @state() private _standing: CounterStanding | null = null;
+  // The counter's deposit on an order of the attached customer (CP-07).
+  @state() private _depositOpen = false;
   @state() private _buyerId = '';
   // The check being entered: its number, the ID checked and its kind; and the
   // largest check a manager approved for this sale (null: none).
@@ -80,9 +85,19 @@ export class POSTerminal extends LitElement {
   @state() private _idChecked = false;
   @state() private _idType: IdType | '' = '';
   @state() private _checkApprovedCents: number | null = null;
+
+  // The manager step up waiting on the PIN dialog: the reason and cap are kept
+  // here, the token completes them (CP-04).
+  @state() private _stepUp: { kind: 'account' | 'check'; reason: string; capCents: number } | null = null;
   // The words a check over the limit was refused in (the server's, or the
   // screen's from the customer's own limit), with Ask a manager beside them.
   @state() private _checkOverWords: string | null = null;
+  // The dealer's check ID rule (never by default; a read failure reads as
+  // never: the server holds the rule itself at the completion).
+  @state() private _idRule: CheckIDRule | null = null;
+  // The dealer's database wide check limit from the same read, so a walk-in
+  // (no standing of its own) is warned at entry, not first at the server.
+  @state() private _dealerCheckLimitCents: number | null = null;
 
   // The linear panels: the sale's current step and the one panel open (or none).
   @state() private _step: PanelKey = 'customer';
@@ -123,6 +138,15 @@ export class POSTerminal extends LitElement {
   @state() private _exchangeError: string | null = null;
   @state() private _exchangeTender: TenderMethod = 'cash';
   @state() private _exchangeRefund: 'cash' | 'account' = 'cash';
+  // The return search modal: finding a past sale to return.
+  @state() private _showReturnSearch = false;
+  @state() private _returnSearchQuery = '';
+  @state() private _returnSearchDate = '';
+  @state() private _returnSearchResults: SaleSummary[] = [];
+  @state() private _returnSearchBusy = false;
+  @state() private _returnSearchError: string | null = null;
+  // Whether each returned line goes back to stock (true) or is damaged (false).
+  @state() private _returnRestockByLine: Record<string, boolean> = {};
   // The signature pad on the completed sale.
   @state() private _signerName = '';
   @state() private _signing = false;
@@ -171,6 +195,19 @@ export class POSTerminal extends LitElement {
     document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
+    void this._loadIDRule();
+  }
+
+  /** Reads the dealer's check ID rule and check limit; a read failure leaves them off (the server still holds both). */
+  private async _loadIDRule() {
+    try {
+      const s = await posService.settings();
+      this._idRule = s.rules.check_id_required;
+      this._dealerCheckLimitCents = s.rules.check_limit_cents;
+    } catch {
+      this._idRule = null;
+      this._dealerCheckLimitCents = null;
+    }
   }
 
   /**
@@ -438,6 +475,10 @@ export class POSTerminal extends LitElement {
 
   private _scheduleStanding() {
     if (this._standingTimer) clearTimeout(this._standingTimer);
+    if (this._standing === null) {
+      void this._syncStanding();
+      return;
+    }
     this._standingTimer = setTimeout(() => { void this._syncStanding(); }, 150);
   }
 
@@ -482,9 +523,11 @@ export class POSTerminal extends LitElement {
 
   /**
    * A manager approves this one sale (an account sale the verdict blocks, or a
-   * check over the limit), with a reason and a cap. The server wants a person
-   * with the manager role other than this sale's own cashier, so the manager
-   * signs in at this terminal; a refusal is said in the server's words.
+   * check over the limit), with a reason and a cap. A manager signed in here
+   * with the role approves as themselves (the claims path); anyone else asks
+   * the manager to step up with their own counter PIN (CP-04), and the
+   * approval the PIN mints is spent by this one sale's override, bound to the
+   * kind and the cap the manager saw.
    */
   private async _askManager(kind: 'account' | 'check', capCents: number) {
     const sale = this._sale;
@@ -494,20 +537,59 @@ export class POSTerminal extends LitElement {
       label: 'Reason', required: true, confirmLabel: 'Approve',
     });
     if (!reason) return;
+    this._error = null;
+    const roles = authCustody.roles ?? [];
+    const sub = authCustody.subject;
+    if (kind === 'account' || kind === 'check') {
+      if ((roles.includes('admin') || roles.includes('owner')) && (!sub || sale.cashier_id !== sub)) {
+        await this._recordOverride(sale, kind, reason, capCents);
+        return;
+      }
+    }
+    this._stepUp = { kind, reason, capCents };
+  }
+
+  /** Records the override, with a manager's approval token when the PIN minted one. */
+  private async _recordOverride(sale: Sale, kind: 'account' | 'check', reason: string, capCents: number, approvalToken?: string, managerName?: string) {
     try {
       this._error = null;
-      const approval = await posService.approveOverride(sale.id, kind, reason, capCents);
+      const approval = await posService.approveOverride(sale.id, kind, reason, capCents, approvalToken);
       if (kind === 'check') {
         this._checkApprovedCents = approval.cap_cents;
         this._checkOverWords = null;
       }
       await this._syncStanding();
-      this._success = 'Approved for this sale';
+      this._success = managerName ? `Approved by ${managerName}` : 'Approved for this sale';
       if (this._errorTimer) clearTimeout(this._errorTimer);
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
     } catch (err: unknown) {
       this._error = apiErrorMessage(err, 'Failed to record the approval');
     }
+  }
+
+  /** The PIN dialog's approval completes the override the cashier asked for. */
+  private async _onStepUpApproved(detail: { token: string; managerName: string }) {
+    const ask = this._stepUp;
+    const sale = this._sale;
+    this._stepUp = null;
+    if (!ask || !sale) return;
+    await this._recordOverride(sale, ask.kind, ask.reason, ask.capCents, detail.token, detail.managerName);
+  }
+
+  /** The step up dialog, over everything, whatever panel is open. The
+   * manager sees the kind and the cap they are approving. */
+  private _renderStepUp() {
+    if (!this._stepUp || !this._sale) return nothing;
+    return html`
+      <gable-step-up-dialog act="override" .kind=${this._stepUp.kind} .amountCents=${this._stepUp.capCents}
+        target-id=${this._sale.id}
+        heading=${this._stepUp.kind === 'account' ? 'A manager approves this sale on account' : 'A manager approves this check'}
+        .detail=${this._stepUp.kind === 'account'
+          ? `Approve ${fmt(this._stepUp.capCents)} on account for this sale`
+          : `Approve a check of ${fmt(this._stepUp.capCents)} for this sale`}
+        @step-up-cancel=${() => { this._stepUp = null; }}
+        @step-up-approved=${(e: CustomEvent<{ token: string; managerName: string }>) => void this._onStepUpApproved(e.detail)}></gable-step-up-dialog>
+    `;
   }
 
   /* ---- The sale's customer ---- */
@@ -546,6 +628,7 @@ export class POSTerminal extends LitElement {
       // the job; Next: Payment moves on once there is a line.
       this._step = 'customer';
       this._open = 'customer';
+      await this._syncStanding();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
@@ -573,7 +656,7 @@ export class POSTerminal extends LitElement {
     this._step = key;
   }
 
-  /** Back to a walk-in sale (only before the first line). */
+  /** Back to a walk-in sale (the tax follows the account now standing on it). */
   private async _clearCustomer() {
     if (!this._sale || this._sale.status !== 'open') return;
     try {
@@ -620,7 +703,7 @@ export class POSTerminal extends LitElement {
     const st = this._standing;
     // a manager's approval of this sale waives the credit words, never the purchase order
     const approved = st !== null && st.on_account.reason === 'manager_override';
-    const base = chargeRefusal(this._customer, owed, this._poText, approved);
+    const base = chargeRefusal(this._customer, owed, this._poText, approved, this._jobId);
     if (base) return base;
     if (st !== null) {
       // the server's verdict (the same function the completion asks), then the roster
@@ -681,6 +764,9 @@ export class POSTerminal extends LitElement {
       tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
     if (c) {
       const st = standingOf(c);
+      // a hold record the AR core placed holds the account: the standing line
+      // says so in its own words, the same blocked treatment the zero limit gets
+      const held = holdStanding(this._standing);
       return html`
         <div id="pos-customer" class="rounded-lg bg-deep-space p-3" data-testid="pos-customer">
           <div class="flex items-start justify-between gap-2">
@@ -690,18 +776,25 @@ export class POSTerminal extends LitElement {
             </div>
             <button
               @click=${() => this._clearCustomer()}
-              ?disabled=${hasLines || finished || this._loading}
-              title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              ?disabled=${finished || this._loading}
+              title=${finished ? 'Start a new sale to change the customer' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Walk-in sale</button>
           </div>
-          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
+          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(held !== null ? held.tone : st.tone)}" data-testid="pos-customer-standing">${held !== null ? held.text : st.text}</div>
+          <div class="mt-2">
+            <button type="button" data-testid="pos-deposit-on-order" ?disabled=${this._till === null}
+              @click=${() => { this._depositOpen = true; }}
+              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent">
+              Deposit on an order
+            </button>
+          </div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}
           ${this._renderBuyerPick(finished)}
-          <div class="mt-3 grid grid-cols-2 items-start gap-2">
-            <div class="${c.jobs.length > 0 ? '' : 'col-span-2'}">
+          <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 items-end gap-2">
+            <div class="${c.jobs.length > 0 || c.job_required ? '' : 'sm:col-span-2'}">
               <label class="block text-xs text-slate-400" for="pos-po">
                 Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
               </label>
@@ -712,17 +805,19 @@ export class POSTerminal extends LitElement {
                 class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40"
                 placeholder="PO number" />
             </div>
-            ${c.jobs.length > 0 ? html`
+            ${c.jobs.length > 0 || c.job_required ? html`
               <div>
-                <label class="block text-xs text-slate-400" for="pos-job">Job</label>
+                <label class="block text-xs text-slate-400" for="pos-job">Job${c.job_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}</label>
                 <div class="mt-1">
-                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
-                    .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
+                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished || (c.job_required && c.jobs.length === 0)}
+                    .options=${c.jobs.length === 0 ? [{ value: '', label: 'No jobs on file' }] : [{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
                     @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
                   ></gable-select>
                 </div>
               </div>` : nothing}
           </div>
+          ${c.job_required && c.jobs.length === 0 ? html`
+            <p class="mt-1 text-xs text-slate-400">This account requires a job and has none on file: add one on the account page.</p>` : nothing}
           ${finished ? nothing : html`
             <div class="mt-3 flex items-center justify-between gap-3">
               <span class="text-xs text-slate-400">${hasLines ? '' : 'Add items to continue'}</span>
@@ -730,6 +825,13 @@ export class POSTerminal extends LitElement {
                 @click=${() => { this._step = 'payment'; this._open = 'payment'; }}
                 class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Next: Payment</button>
             </div>`}
+          <gable-pos-order-deposit
+            .isOpen=${this._depositOpen}
+            .customerId=${c.id}
+            .branchId=${this._sale?.branch_id ?? this._till?.branch_id ?? ''}
+            .tillSessionId=${this._till?.id ?? ''}
+            @close=${() => { this._depositOpen = false; }}
+          ></gable-pos-order-deposit>
         </div>`;
     }
     return html`
@@ -743,7 +845,7 @@ export class POSTerminal extends LitElement {
           placeholder="Find by name or account number"
           aria-label="Find a customer by name or account number"
           .value=${this._custQuery}
-          ?disabled=${hasLines || this._till === null}
+          ?disabled=${this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
         ${this._till === null ? nothing : html`<div class="mt-1 text-xs text-slate-400">Name the customer, then add products</div>`}
@@ -955,7 +1057,57 @@ export class POSTerminal extends LitElement {
     // a quantity change on its way would leave the sale paid at the old quantity
     if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
-    return payPlan(sale.total_cents, this._pendingTenders, this._entry, this._roundingMode).ok;
+    const plan = payPlan(sale.total_cents, this._pendingTenders, this._entry, this._roundingMode);
+    return plan.ok && this._idHoldWords(plan.tenders) === null;
+  }
+
+  /** The sale's checks in total: the added check tenders plus the entry. */
+  private _checksTotalCents(tenders: TenderIn[]): number {
+    return tenders.filter((t) => t.method === 'check').reduce((n, t) => n + t.amount_cents, 0);
+  }
+
+  /**
+   * Why the dealer's ID rule holds the plan's checks (why, or null when it
+   * does not): the rule reads the sale's checks in total, and when it bites,
+   * every check tender must record the ID was checked, so a split cannot
+   * avoid it. A manager's approval covers the limit, never the ID.
+   */
+  private _idHoldWords(tenders: TenderIn[]): string | null {
+    const total = this._checksTotalCents(tenders);
+    for (const t of tenders) {
+      if (t.method === 'check' && !t.id_checked) {
+        const why = idRequiredWords(this._idRule, total);
+        if (why) return why;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * One ID check covers the sale's checks: when the rule bites on the checks'
+   * total and the clerk ticks the ID with its kind on the entry, the checked
+   * ID stamps onto every added check that has none, so a split added before
+   * the total passed the figure is not trapped with no way to record the ID.
+   */
+  private _stampEntryIDOntoAddedChecks(entry: TenderIn) {
+    if (!entry.id_checked || entry.id_type === undefined) return;
+    const total = this._checksTotalCents([...this._pendingTenders, entry]);
+    if (!idRequired(this._idRule, total)) return;
+    this._pendingTenders = this._pendingTenders.map((t) =>
+      t.method === 'check' && !t.id_checked ? { ...t, id_checked: true, id_type: entry.id_type } : t);
+  }
+
+  /**
+   * An added check's ID state in words, when the rule reaches it: the ID
+   * checked once, with its kind, or not checked yet. Other tenders, and checks
+   * while the rule does not bite, say nothing.
+   */
+  private _addedCheckIDWords(t: TenderIn, entry: TenderIn | null, saleTotal: number): string {
+    if (t.method !== 'check') return '';
+    if (t.id_checked) return `ID checked: ${ID_TYPES.find((o) => o.value === t.id_type)?.label ?? ''}`;
+    const planTenders = [...this._pendingTenders, ...(entry !== null && this._tenderedSoFar < saleTotal ? [entry] : [])];
+    return this._idHoldWords(planTenders) !== null ? 'ID not checked yet' : '';
+>>>>>>> origin/refactor/v1
   }
 
   /** The same facts the controls disable on, so a dimmed key means a disabled control. */
@@ -969,8 +1121,8 @@ export class POSTerminal extends LitElement {
       case 'add':
         return till && open;
       case 'customer':
-        // the lookup is off once the sale has a line: the customer is named first
-        return till && open && this._customer === null && !hasLines;
+        // the account is named before or after the lines (CP-10: the tax follows it)
+        return till && open && this._customer === null;
       case 'quantity':
         return open && hasLines;
       case 'next':
@@ -1266,12 +1418,20 @@ export class POSTerminal extends LitElement {
       if (why) return why;
     }
     if (entry.method === 'check') {
-      const overLimit = checkRefusal(this._standing, null, entry.amount_cents);
+      const overLimit = checkRefusal(this._standing, this._dealerCheckLimitCents, entry.amount_cents);
       const approved = this._checkApprovedCents !== null && entry.amount_cents <= this._checkApprovedCents;
       if (overLimit && !approved) {
         // said beside Ask a manager as well as in the band
         this._checkOverWords = overLimit;
         return overLimit;
+      }
+      // the dealer's ID rule holds the check until the ID is checked; it
+      // reads the sale's checks in total (the added ones plus this entry), so
+      // a split cannot slip under the figure; a manager's check approval
+      // covers the limit, never the ID
+      if (!entry.id_checked) {
+        const why = idRequiredWords(this._idRule, this._checksTotalCents([...this._pendingTenders, entry]));
+        if (why) return why;
       }
     }
     if (entry.method === 'store_credit') {
@@ -1321,11 +1481,18 @@ export class POSTerminal extends LitElement {
       this._error = 'Invalid tender amount';
       return;
     }
+    if (this._customer !== null && this._standing === null && (entry.method === 'check' || entry.method === 'store_credit')) {
+      void this._syncStanding().then(() => {
+        if (this._standing !== null) this._addPendingTender();
+      });
+      return;
+    }
     const refusal = this._entryRefusal(entry);
     if (refusal) {
       this._error = refusal;
       return;
     }
+    this._stampEntryIDOntoAddedChecks(entry);
     this._pendingTenders = [...this._pendingTenders, entry];
     this._tenderAmount = '';
     this._checkRef = '';
@@ -1350,9 +1517,16 @@ export class POSTerminal extends LitElement {
         return;
       }
     }
+    if (entry !== null) this._stampEntryIDOntoAddedChecks(entry);
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, entry, this._roundingMode);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
+      return;
+    }
+    // the ID rule holds added checks the same way it holds the entry
+    const idHold = this._idHoldWords(plan.tenders);
+    if (idHold) {
+      this._error = idHold;
       return;
     }
     // Every account tender on its way out is rechecked here, whether it was just
@@ -1493,16 +1667,30 @@ export class POSTerminal extends LitElement {
 
   /* ---- Returns ---- */
 
-  private _beginReturn() {
-    const sale = this._completed ?? this._sale;
-    if (!sale || sale.status !== 'completed') {
+  private _beginReturn(sale?: Sale) {
+    const target = sale ?? this._completed ?? this._sale;
+    if (!target || target.status !== 'completed') {
       this._error = 'Return needs a completed sale';
       return;
     }
-    this._completed = sale;
+    const productLines = target.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
+    const allReturned = productLines.length > 0 && productLines.every((l) => {
+      const returned = Number(target.returned_quantities?.[l.id] ?? '0');
+      return returned >= Number(l.quantity ?? '0');
+    });
+    if (allReturned) {
+      this._error = 'Everything on this sale has already been returned';
+      return;
+    }
+    this._completed = target;
     const qty: Record<string, string> = {};
-    sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null).forEach(l => { qty[l.id] = '0'; });
+    const restock: Record<string, boolean> = {};
+    productLines.forEach((l) => {
+      qty[l.id] = '0';
+      restock[l.id] = true;
+    });
     this._returnQty = qty;
+    this._returnRestockByLine = restock;
     this._returnReasonByLine = {};
     this._returnReason = '';
     this._exchangeOn = false;
@@ -1512,6 +1700,7 @@ export class POSTerminal extends LitElement {
     this._exchangeQuery = '';
     this._exchangeResults = [];
     this._showReturn = true;
+    this._showReturnSearch = false;
     void this._loadReasons();
   }
 
@@ -1525,7 +1714,67 @@ export class POSTerminal extends LitElement {
     }
   }
 
-  /** The lines coming back, as the request names them: reason by line, restocked. */
+  /** Opens the search for a past sale to return. */
+  private _openReturnSearch() {
+    this._showReturnSearch = true;
+    this._returnSearchQuery = '';
+    this._returnSearchDate = '';
+    this._returnSearchResults = [];
+    this._returnSearchError = null;
+  }
+
+  /** Searches completed sales by number, invoice number, customer name, or date. */
+  private async _searchReturns() {
+    const q = this._returnSearchQuery.trim();
+    const date = this._returnSearchDate.trim();
+    if (q.length < 2 && !date) {
+      this._returnSearchError = 'Type at least two characters or pick a date to search';
+      return;
+    }
+    try {
+      this._returnSearchBusy = true;
+      this._returnSearchError = null;
+      const page = await posService.searchSales(q, date || undefined);
+      this._returnSearchResults = page.items;
+    } catch (err: unknown) {
+      this._returnSearchError = err instanceof Error ? err.message : 'Failed to search the sales';
+    } finally {
+      this._returnSearchBusy = false;
+    }
+  }
+
+  /** Loads the picked sale and opens the return dialog on it. */
+  private async _pickReturnSearchResult(summary: SaleSummary) {
+    if (summary.status === 'voided') return;
+    try {
+      this._returnSearchBusy = true;
+      this._returnSearchError = null;
+      const full = await posService.getSale(summary.id);
+      const productLines = full.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
+      const allReturned = productLines.length > 0 && productLines.every((l) => {
+        const returned = Number(full.returned_quantities?.[l.id] ?? '0');
+        return returned >= Number(l.quantity ?? '0');
+      });
+      if (allReturned) {
+        this._returnSearchError = 'Everything on this sale has already been returned';
+        return;
+      }
+      this._beginReturn(full);
+    } catch (err: unknown) {
+      this._returnSearchError = err instanceof Error ? err.message : 'Failed to read the sale';
+    } finally {
+      this._returnSearchBusy = false;
+    }
+  }
+
+  /** How many of a line are still returnable, as a decimal string. */
+  private _returnableQty(line: SaleLine): string {
+    const total = Number(line.quantity ?? '0');
+    const returned = Number(this._completed?.returned_quantities?.[line.id] ?? '0');
+    return String(Math.max(0, total - returned));
+  }
+
+  /** The lines coming back, as the request names them: reason by line, restocked or not. */
   private _returnedLines() {
     const sale = this._completed;
     if (!sale) return [];
@@ -1533,13 +1782,19 @@ export class POSTerminal extends LitElement {
       .filter(([, q]) => Number(q) > 0)
       .map(([line_id, q]) => {
         const code = this._reasons.length > 0 ? this._returnReasonByLine[line_id] : undefined;
-        return { line_id, quantity: q, restock: true, ...(code ? { reason_code: code } : {}) };
+        return { line_id, quantity: q, restock: this._returnRestockByLine[line_id] ?? true, ...(code ? { reason_code: code } : {}) };
       });
   }
 
   private _returnProblem(): string | null {
     const sale = this._completed;
     if (!sale) return 'Return needs a completed sale';
+    for (const l of sale.lines) {
+      if (!Object.prototype.hasOwnProperty.call(this._returnQty, l.id)) continue;
+      const max = Number(this._returnableQty(l));
+      const asked = Number(this._returnQty[l.id] ?? '0');
+      if (asked > max) return `${l.description}: only ${max} can be returned`;
+    }
     const rows = Object.keys(this._returnQty).map((id) => ({
       quantity: this._returnQty[id] ?? '0',
       reason: this._reasons.length > 0 ? (this._returnReasonByLine[id] ?? '') : 'other',
@@ -1568,7 +1823,7 @@ export class POSTerminal extends LitElement {
       });
       this._showReturn = false;
       const fee = ret.restocking_fee_cents > 0 ? `, less a ${fmt(ret.restocking_fee_cents)} restocking fee` : '';
-      this._success = `Return ${ret.number} complete - ${fmt(ret.total_cents)} refunded ${ret.refund_method}${fee}`;
+      this._success = `Return ${ret.number} complete - ${fmt(Math.abs(ret.total_cents))} refunded ${ret.refund_method}${fee}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 4000);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to take the return';
@@ -1731,7 +1986,8 @@ export class POSTerminal extends LitElement {
 
   private _onMovementRecorded(m: TillMovement) {
     this._showMovement = false;
-    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded`;
+    const by = m.kind === 'pickup' && m.taken_by ? ` by ${m.taken_by}` : '';
+    this._success = `${kindLabel(m.kind)} of ${fmt(m.amount_cents)} recorded${by}`;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
   }
@@ -1821,6 +2077,53 @@ export class POSTerminal extends LitElement {
     `);
   }
 
+  private _renderReturnSearchModal() {
+    if (!this._showReturnSearch) return nothing;
+    const input = 'padding:8px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none';
+    return this._overlay(html`
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return a past sale</h2>
+      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Find the sale by its number, its invoice number, or the customer's name.</p>
+      <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Search</label>
+      <input type="text" .value=${this._returnSearchQuery} data-testid="return-search-query"
+        @input=${(e: Event) => { this._returnSearchQuery = (e.target as HTMLInputElement).value; }}
+        @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this._searchReturns(); }}
+        placeholder="Sale number, invoice number, or customer"
+        style="width:100%;box-sizing:border-box;padding:10px;${input};margin-bottom:12px" />
+      <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Date (optional)</label>
+      <gable-date-field .value=${this._returnSearchDate} data-testid="return-search-date"
+        @input=${(e: Event) => { this._returnSearchDate = (e.target as HTMLInputElement).value; }}
+        style="margin-bottom:12px"></gable-date-field>
+      ${this._returnSearchError ? html`<p role="alert" style="margin:0 0 12px;font-size:13px;color:rgb(var(--gb-till-bad))" data-testid="return-search-error">${this._returnSearchError}</p>` : nothing}
+      <button @click=${() => void this._searchReturns()} ?disabled=${this._returnSearchBusy}
+        style="width:100%;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer;margin-bottom:16px"
+        data-testid="return-search-submit">${this._returnSearchBusy ? 'Searching\u2026' : 'Search'}</button>
+      ${this._returnSearchResults.length > 0 ? html`
+        <div style="max-height:340px;overflow-y:auto" data-testid="return-search-results">
+          ${this._returnSearchResults.map((s) => html`
+            <div style="padding:10px;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;margin-bottom:8px" data-testid="return-search-result">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+                <span class="font-mono font-semibold" style="color:rgb(var(--gb-till-text))" data-testid="return-search-result-number">${s.number}</span>
+                <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-status">${({ completed: 'Completed', open: 'Open', held: 'Held', voided: 'Voided' } as Record<string, string>)[s.status] ?? s.status}</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:rgb(var(--gb-till-soft));margin-bottom:6px">
+                <span data-testid="return-search-result-customer">${s.customer_name ?? 'Walk-in'}</span>
+                <span class="font-mono" data-testid="return-search-result-total">${formatCents(s.total_cents)}</span>
+              </div>
+              <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px" data-testid="return-search-result-date">${s.business_day}</div>
+              ${s.status === 'voided' ? html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-bad))" data-testid="return-search-result-voided">Voided - cannot be returned</p>` : s.status !== 'completed' ? html`
+                <p style="margin:0;font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-search-result-not-completed">Not completed yet - cannot be returned</p>` : html`
+                <button @click=${() => void this._pickReturnSearchResult(s)} ?disabled=${this._returnSearchBusy}
+                  style="width:100%;padding:8px;background:rgb(var(--gb-till-go));border:none;border-radius:6px;color:rgb(var(--gb-plate));font-size:13px;font-weight:700;cursor:pointer"
+                  data-testid="return-search-result-pick">Return this sale</button>`}
+            </div>`)}
+        </div>` : nothing}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button @click=${() => { this._showReturnSearch = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+      </div>
+    `);
+  }
+
   private _renderReturnModal() {
     if (!this._showReturn || !this._completed) return nothing;
     const sale = this._completed;
@@ -1835,14 +2138,40 @@ export class POSTerminal extends LitElement {
       <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">${this._exchangeOn
         ? 'Name the lines coming back and the goods that replace them. The credit is applied to the new sale, and only the difference is paid.'
         : 'Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.'}</p>
-      ${productLines.map((l) => html`
+      ${productLines.map((l) => {
+        const remaining = this._returnableQty(l);
+        const alreadyReturned = Number(this._completed?.returned_quantities?.[l.id] ?? '0');
+        return html`
         <div style="margin-bottom:10px" data-testid="return-line">
           <div style="display:flex;align-items:center;gap:10px">
             <span style="flex:1;font-size:13px;color:rgb(var(--gb-till-soft))">${l.description}</span>
-            <span style="font-size:12px;color:rgb(var(--gb-till-muted))">of ${l.quantity}</span>
-            <input type="number" min="0" step="0.25" .value=${this._returnQty[l.id] ?? '0'} data-testid="return-qty"
-              @input=${(e: Event) => { this._returnQty = { ...this._returnQty, [l.id]: (e.target as HTMLInputElement).value }; this._scheduleExchangePreview(); }}
+            <span style="font-size:12px;color:rgb(var(--gb-till-muted))" data-testid="return-line-remaining">
+              ${alreadyReturned > 0 ? html`${l.quantity} sold, ${alreadyReturned} already returned` : html`of ${l.quantity}`}
+            </span>
+            <input type="number" min="0" max=${remaining} step="0.25" .value=${this._returnQty[l.id] ?? '0'} data-testid="return-qty"
+              @input=${(e: Event) => {
+                const v = (e.target as HTMLInputElement).value;
+                const max = Number(remaining);
+                const n = Number(v);
+                const clamped = v === '' ? '' : (n > max ? String(max) : v);
+                this._returnQty = { ...this._returnQty, [l.id]: clamped };
+                this._scheduleExchangePreview();
+              }}
               style="width:80px;${input};text-align:right" />
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgb(var(--gb-till-soft));cursor:pointer">
+              <input type="radio" name=${`restock-${l.id}`} .checked=${this._returnRestockByLine[l.id] !== false}
+                @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: true }; }}
+                data-testid="return-restock-back" />
+              Back to stock
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:rgb(var(--gb-till-soft));cursor:pointer">
+              <input type="radio" name=${`restock-${l.id}`} .checked=${this._returnRestockByLine[l.id] === false}
+                @change=${() => { this._returnRestockByLine = { ...this._returnRestockByLine, [l.id]: false }; }}
+                data-testid="return-restock-damaged" />
+              Damaged, not restocked
+            </label>
           </div>
           ${reasons.length > 0 && Number(this._returnQty[l.id] ?? '0') > 0 ? html`
             <div style="margin-top:6px">
@@ -1852,7 +2181,7 @@ export class POSTerminal extends LitElement {
               ></gable-select>
             </div>` : nothing}
         </div>
-      `)}
+      `;})}
       ${this._exchangeOn ? this._renderExchangeBody(sale, input) : html`
         <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
           <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Refund</label>
@@ -2014,6 +2343,8 @@ export class POSTerminal extends LitElement {
               title="The frozen Z report of each past drawer of this register"
               class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Z Reports</button>` : nothing}`}
           ${this._register && this._till ? html`
+          <button @click=${() => this._openReturnSearch()} data-testid="return-search-open"
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Return a past sale</button>
           <button @click=${() => this._beginFresh()}
             class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
         </div>
@@ -2115,6 +2446,10 @@ export class POSTerminal extends LitElement {
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
     const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
     const needsPO = accountWhy === PO_REFUSAL;
+    // the job rule is the PO's mirror: the way back to the Customer panel
+    // (where the Job select lives) belongs in the box for both; an account
+    // with no job on file has none to pick, so its words carry no way back
+    const needsJob = accountWhy === JOB_REFUSAL;
     return html`
       <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
         aria-disabled=${this._till === null ? 'true' : 'false'}>
@@ -2128,10 +2463,13 @@ export class POSTerminal extends LitElement {
             </div>` : nothing}
           ${this._pendingTenders.length > 0 ? html`
             <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
-              ${this._pendingTenders.map((t) => html`
+              ${this._pendingTenders.map((t) => {
+                const idWords = this._addedCheckIDWords(t, entry, total);
+                return html`
                 <div class="flex justify-between py-0.5 text-sm text-slate-200">
-                  <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
-                </div>`)}
+                  <span class="capitalize">${t.method}${idWords !== '' ? html` <span class="text-xs ${t.id_checked ? 'text-gable-green' : 'text-amber-400'}" data-testid="pos-added-check-id">${idWords}</span>` : nothing}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
+                </div>`;
+              })}
               <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
                 <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
               </div>
@@ -2156,9 +2494,9 @@ export class POSTerminal extends LitElement {
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>
-              ${needsPO ? html`
+              ${needsPO || needsJob ? html`
                 <button data-testid="pos-refusal-customer" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
-                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Enter the purchase order in Customer</button>` : nothing}
+                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">${needsPO ? 'Enter the purchase order in Customer' : 'Pick the job in Customer'}</button>` : nothing}
               ${waysForward(this._standing).length > 0 ? html`
                 <div class="mt-2 flex flex-wrap gap-2" data-testid="pos-refusal-ways">
                   ${waysForward(this._standing).map((w) => html`
@@ -2207,7 +2545,11 @@ export class POSTerminal extends LitElement {
   /** The check number, the ID checked and its kind (never an ID number), and a check over the limit with its way forward. */
   private _renderCheckExtras() {
     const isCheck = this._tenderMethod === 'check';
-    const limit = this._standing?.check_limit_cents ?? null;
+    const limit = this._standing?.check_limit_cents ?? this._dealerCheckLimitCents;
+    const amount = this._entry?.amount_cents ?? this._owedCents;
+    // the rule reads the sale's checks in total: the added ones plus what is typed
+    const checksTotal = isCheck ? this._checksTotalCents([...this._pendingTenders, { method: 'check', amount_cents: amount }]) : 0;
+    const idNeeded = isCheck && !this._idChecked ? idRequiredWords(this._idRule, checksTotal) : null;
     return html`
       <div class="mt-3 rounded-lg border border-white/10 p-3" data-testid="pos-tender-extras">
         ${isCheck ? html`
@@ -2216,16 +2558,20 @@ export class POSTerminal extends LitElement {
             @input=${(e: Event) => { this._checkRef = (e.target as HTMLInputElement).value; }}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-2 py-2 font-mono text-sm text-white outline-none focus:border-gable-green" />
           ${limit !== null ? html`<p class="mt-1 text-xs text-slate-400" data-testid="pos-check-limit">Check limit ${money(limit)}</p>` : nothing}` : nothing}
+        ${idNeeded !== null ? html`
+          <div class="${isCheck ? 'mt-3 ' : ''}rounded border border-amber-400/40 bg-amber-400/10 p-2 text-sm text-amber-300" role="status" data-testid="pos-check-id-needed">
+            <p>${idNeeded}</p>
+          </div>` : nothing}
         <label class="${isCheck ? 'mt-3 ' : ''}flex items-center gap-2 text-sm text-slate-200" for="pos-id-checked">
           <input id="pos-id-checked" data-testid="pos-id-checked" type="checkbox" .checked=${this._idChecked}
-            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; }} />
+            @change=${(e: Event) => { this._idChecked = (e.target as HTMLInputElement).checked; if (!this._idChecked) this._idType = ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }} />
           ID checked
         </label>
         ${this._idChecked ? html`
           <div class="mt-2">
             <gable-select id="pos-id-type" data-testid="pos-id-type" .value=${this._idType}
               .options=${[{ value: '', label: 'Kind of ID' }, ...ID_TYPES]}
-              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; }}
+              @change=${(e: Event) => { this._idType = (e.target as HTMLSelectElement).value as IdType | ''; const entry = this._entry; if (entry) this._stampEntryIDOntoAddedChecks(entry); }}
             ></gable-select>
             <p class="mt-1 text-xs text-slate-400">Only the kind of ID is kept, never its number</p>
           </div>` : nothing}
@@ -2238,9 +2584,16 @@ export class POSTerminal extends LitElement {
       </div>`;
   }
 
+  /** The name of the job a sale names, when the customer's roster holds it. */
+  private _jobName(jobId: string | null): string | null {
+    if (jobId === null || jobId === '') return null;
+    return this._customer?.jobs.find((j) => j.id === jobId)?.name ?? null;
+  }
+
   private _renderSummaryPanel(sale: Sale | null, state: PanelState, isOpen: boolean) {
     const count = (sale?.lines ?? []).filter((l) => l.parent_line_id === null).length;
     const tender = this._paymentValue(sale);
+    const jobName = this._jobName(this._jobId || sale?.job_id || null);
     return html`
       <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-summary">
         ${this._panelHead('summary', 3, 'Summary', state, isOpen, sale?.status === 'completed' ? fmt(sale.total_cents) : '')}
@@ -2248,6 +2601,12 @@ export class POSTerminal extends LitElement {
           <dl class="text-sm">
             <div class="flex justify-between py-1"><dt class="text-slate-400">Customer</dt>
               <dd class="text-white">${this._customer?.name ?? 'Walk-in sale'}</dd></div>
+            ${sale?.customer_po ? html`
+              <div class="flex justify-between py-1"><dt class="text-slate-400">Purchase order</dt>
+                <dd class="font-mono text-white" data-testid="review-po">${sale.customer_po}</dd></div>` : nothing}
+            ${jobName !== null ? html`
+              <div class="flex justify-between py-1"><dt class="text-slate-400">Job</dt>
+                <dd class="text-white" data-testid="review-job">${jobName}</dd></div>` : nothing}
             <div class="flex justify-between py-1"><dt class="text-slate-400">Lines</dt>
               <dd class="font-mono text-white" data-testid="review-lines">${count}</dd></div>
             <div class="flex justify-between py-1"><dt class="text-slate-400">Tender</dt>
@@ -2282,19 +2641,27 @@ export class POSTerminal extends LitElement {
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry, this._roundingMode);
     const canPay = this._canPay;
+    const idHold = plan.ok ? this._idHoldWords(plan.tenders) : null;
     const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
+      : plan.ok && idHold !== null ? "Check the customer's ID"
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
       : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
+    const po = (sale?.customer_po ?? this._poText).trim();
+    const jobName = this._jobName(this._jobId || sale?.job_id || null);
     return html`
       <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
         <h2 class="text-lg font-bold text-white">Order summary</h2>
         <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
+        ${po !== '' || jobName !== null ? html`
+          <p class="mt-0.5 font-mono text-xs text-slate-400" data-testid="pos-order-refs">
+            ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
+          </p>` : nothing}
         ${productLines.length === 0 ? html`
           <p class="mt-3 text-sm text-slate-400" data-testid="pos-no-lines">No items yet</p>` : html`
           <ul class="mt-3 space-y-3" aria-label="Ticket lines" data-testid="pos-lines">
@@ -2318,8 +2685,11 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
           <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
+          ${sale?.tax_exemption ? html`
+          <div class="flex items-baseline justify-between gap-2 py-1 text-slate-400"><dt>Tax</dt>
+            <dd class="text-right text-xs" data-testid="summary-tax-exempt">Tax exempt${sale.tax_exemption.certificate_number ? html` &middot; ${sale.tax_exemption.certificate_number}` : nothing}${sale.tax_exemption.expiry_day ? html` &middot; expires ${sale.tax_exemption.expiry_day}` : nothing}</dd></div>` : html`
           <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
-            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
+            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>`}
           <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-white" data-testid="summary-total">${fmt(total)}</dd></div>
           ${completed ? html`
@@ -2462,6 +2832,8 @@ export class POSTerminal extends LitElement {
       : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
     const invoice = sale.invoice_id;
+    const po = (sale.customer_po ?? '').trim();
+    const jobName = this._jobName(sale.job_id || this._jobId);
     return html`
       <section class="rounded-xl border border-gable-green bg-slate-steel p-4" data-testid="pos-complete" aria-live="polite">
         <div class="flex items-center gap-3">
@@ -2469,6 +2841,10 @@ export class POSTerminal extends LitElement {
           <div class="min-w-0">
             <h2 class="text-xl font-bold text-white">Sale complete</h2>
             <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
+            ${po !== '' || jobName !== null ? html`
+              <p class="mt-1 font-mono text-xs text-slate-400" data-testid="pos-complete-refs">
+                ${po !== '' ? html`PO ${po}` : nothing}${po !== '' && jobName !== null ? html` &middot; ` : nothing}${jobName !== null ? html`Job ${jobName}` : nothing}
+              </p>` : nothing}
           </div>
         </div>
         ${invoice ? html`
@@ -2519,8 +2895,10 @@ export class POSTerminal extends LitElement {
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderMovementModal()}
+        ${this._renderStepUp()}
         ${this._renderXReportModal()}
         ${this._renderZReportsModal()}
+        ${this._renderReturnSearchModal()}
         ${this._renderReturnModal()}
 
         ${this._error ? html`

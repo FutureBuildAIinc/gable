@@ -300,6 +300,11 @@ func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) f
 // branch), so the sync is held to the pin through the customer each replayed
 // sale names (round 10 P1-1). The cashier creates refuse a machine key
 // outright in the handler (a cashier must be a user).
+// The third guard of RegisterRoutes is the variance pair's own (the queue
+// and the sign off): every role the counter's roles name plus finance, which
+// the sign off's claims path always allowed, so a cashier can reach the pair
+// to spend a manager's step up approval while a signed in finance manager
+// loses nothing (CP-04 slice 3).
 func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 	// The counter's operator routes (the refund resolve and payback, the
 	// terminal sweep and the lost answer queue, the finance money movers) run
@@ -313,7 +318,8 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 	// routes carry.
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
 		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
-		w.scoped("finance", "owner"))
+		w.scoped("finance", "owner"),
+		w.scoped(append(append([]string{}, roles...), "finance")...))
 }
 
 // posReceipts mounts the counter's receipt pair (print and email of a sale's

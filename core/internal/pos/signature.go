@@ -352,7 +352,7 @@ func (h *Handler) CaptureSignatureHandler(w http.ResponseWriter, r *http.Request
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sig, err := h.service.CaptureSignature(r.Context(), id, in, actorFrom(r))
+	sig, err := h.service.CaptureSignature(r.Context(), id, in, h.actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
