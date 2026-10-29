@@ -124,6 +124,13 @@ func TestCP06_RestockingFeeSettingsRoundTripAndGuard(t *testing.T) {
 		"X-Test-Role", "admin", "X-Test-Sub", mustUUID(t)); r.status != http.StatusBadRequest {
 		t.Errorf("a fee map naming one code of seven = %d, want 400: %s", r.status, r.raw)
 	}
+	// every refused write left the settings untouched
+	if n := countOf(t, f.db, `SELECT count(*) FROM system_settings WHERE key LIKE 'pos.restocking_fee_bps.%'`); n != 0 {
+		t.Errorf("a refused write left %d fee rows, want none", n)
+	}
+	if rev(t, f.do("GET", "/api/v1/pos/settings", nil, "X-Test-Role", "admin", "X-Test-Sub", mustUUID(t))) != rev0 {
+		t.Errorf("a refused write moved the revision")
+	}
 
 	// the write: owner and admin both, one revision each
 	want := allReasonFees(1500, 1500, 1000)
