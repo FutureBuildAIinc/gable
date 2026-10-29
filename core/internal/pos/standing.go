@@ -212,6 +212,16 @@ type Buyer struct {
 	CapCents *httpx.Cents `json:"cap_cents"`
 }
 
+// CounterAlert is an alert of the customer that speaks at the counter: a
+// note to read, or a warning to act on. A warning may ask to be
+// acknowledged, which the counter must do before the sale is taken.
+type CounterAlert struct {
+	ID                  uuid.UUID `json:"id"`
+	Kind                string    `json:"kind"`
+	Text                string    `json:"text"`
+	AcknowledgeRequired bool      `json:"acknowledge_required"`
+}
+
 // AccountStanding is the account as the counter reads it before a sale goes
 // on it (GET /pos/customers/{id}/standing).
 type AccountStanding struct {
@@ -231,6 +241,10 @@ type AccountStanding struct {
 	NamedBuyerRequired bool         `json:"named_buyer_required"`
 	Buyers             []Buyer      `json:"buyers"`
 	CheckLimitCents    *httpx.Cents `json:"check_limit_cents"`
+	// Alerts are the customer's alerts that speak at the counter, oldest
+	// first: a note to read, or a warning that may ask to be acknowledged
+	// before the sale is taken.
+	Alerts []CounterAlert `json:"alerts"`
 	// PaymentOptions are the payment shapes the server will take from this
 	// customer now, in the order the counter shows them.
 	PaymentOptions []string         `json:"payment_options"`
@@ -271,13 +285,18 @@ func (s *Service) Standing(ctx context.Context, customerID uuid.UUID, amount int
 	if err != nil {
 		return nil, err
 	}
+	alerts, err := s.repo.CounterAlerts(ctx, customerID)
+	if err != nil {
+		return nil, err
+	}
 	checkLimit, err := s.checkLimitOf(ctx, facts)
 	if err != nil {
 		return nil, err
 	}
 	out := &AccountStanding{CustomerID: customerID, Name: facts.Name, Currency: facts.Currency,
 		OpenReceivableCents: httpx.Cents(open), OpenCreditMemoCents: httpx.Cents(memoCents),
-		TermsKind: strings.ToLower(facts.TermsKind), NamedBuyerRequired: facts.NamedBuyerRequired, Buyers: buyers}
+		TermsKind: strings.ToLower(facts.TermsKind), NamedBuyerRequired: facts.NamedBuyerRequired, Buyers: buyers,
+		Alerts: alerts}
 	if facts.CreditLimitCents != nil {
 		limit := httpx.Cents(*facts.CreditLimitCents)
 		out.CreditLimitCents = &limit

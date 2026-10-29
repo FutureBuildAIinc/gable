@@ -44,6 +44,7 @@ type walledTwins struct {
 	poA, poB, poLineA, poLineB, freightA, freightB uuid.UUID
 	appA, appB                                     uuid.UUID
 	shipA, shipB                                   uuid.UUID
+	alertA, alertB, alertC                         uuid.UUID
 	dlvA, dlvB                                     uuid.UUID
 	holdA, holdB                                   uuid.UUID
 	vendor                                         uuid.UUID
@@ -65,6 +66,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
 		freightA: uuid.New(), freightB: uuid.New(), appA: uuid.New(), appB: uuid.New(),
 		shipA: uuid.New(), shipB: uuid.New(), dlvA: uuid.New(), dlvB: uuid.New(),
+		alertA: uuid.New(), alertB: uuid.New(), alertC: uuid.New(),
 		holdA: uuid.New(), holdB: uuid.New(),
 	}
 	vendor := uuid.New()
@@ -79,10 +81,10 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
 	})
 	for _, o := range []struct {
-		id, cust, branch, inv, pay, act, con, ship uuid.UUID
+		id, cust, branch, inv, pay, act, con, ship, alert uuid.UUID
 	}{
-		{w.ordA, f.custID, f.branchA, w.invA, w.payA, w.actA, w.conA, w.shipA},
-		{w.ordB, f.custB, f.branchB, w.invB, w.payB, w.actB, w.conB, w.shipB},
+		{w.ordA, f.custID, f.branchA, w.invA, w.payA, w.actA, w.conA, w.shipA, w.alertA},
+		{w.ordB, f.custB, f.branchB, w.invB, w.payB, w.actB, w.conB, w.shipB, w.alertB},
 	} {
 		if _, err := f.db.Pool.Exec(ctx,
 			`INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency)
@@ -114,6 +116,18 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 			o.ship, o.cust); err != nil {
 			t.Fatalf("seed ship to: %v", err)
 		}
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO customer_alerts (id, customer_id, kind, text, created_by) VALUES ($1, $2, 'note', 'pin twin alert', 'pin')`,
+			o.alert, o.cust); err != nil {
+			t.Fatalf("seed alert: %v", err)
+		}
+	}
+	// A third alert of the pin's own customer: the end leg's control ends
+	// this one, so the alert the list leg reads stays open.
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO customer_alerts (id, customer_id, kind, text, created_by) VALUES ($1, $2, 'note', 'pin twin alert', 'pin')`,
+		w.alertC, f.custID); err != nil {
+		t.Fatalf("seed alert: %v", err)
 	}
 	for _, m := range []struct{ id, inv, cust, branch uuid.UUID }{
 		{w.memoA, w.invA, f.custID, f.branchA}, {w.memoB, w.invB, f.custB, f.branchB},
@@ -228,6 +242,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		exec(`DELETE FROM credit_memos WHERE id IN ($1, $2)`, w.memoA, w.memoB)
 		exec(`DELETE FROM customer_ship_tos WHERE id IN ($1, $2)`, w.shipA, w.shipB)
 		exec(`DELETE FROM customer_contacts WHERE id IN ($1, $2)`, w.conA, w.conB)
+		exec(`DELETE FROM customer_alerts WHERE id IN ($1, $2, $3)`, w.alertA, w.alertB, w.alertC)
 		exec(`DELETE FROM crm_activities WHERE id IN ($1, $2)`, w.actA, w.actB)
 		exec(`DELETE FROM payments WHERE id IN ($1, $2)`, w.payA, w.payB)
 		exec(`DELETE FROM invoices WHERE id IN ($1, $2)`, w.invA, w.invB)
@@ -518,6 +533,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/customers/%s/activities", body: fixed(`{"activity_type":"call","description":"pin new"}`), twin: f.custB, own: f.custID},
 		{method: "POST", path: "/api/v1/customers/%s/contacts", body: fixed(`{"first_name":"pin","last_name":"new"}`), twin: f.custB, own: f.custID},
 		{method: "POST", path: "/api/v1/customers/%s/ship-tos", body: fixed(`{"code":"pinnew","name":"pin new","line1":"1 pin"}`), twin: f.custB, own: f.custID},
+		{method: "POST", path: "/api/v1/customers/%s/alerts", body: fixed(`{"kind":"note","text":"pin new alert"}`), twin: f.custB, own: f.custID},
+		{method: "POST", path: "/api/v1/customers/%s/alerts/%s/end", hdr: ifMatch, twin: f.custB, twin2: w.alertB, own: f.custID, own2: w.alertC},
 		// A completion and a void act on a transaction the module reads under
 		// the wall (it answers a missing one 500).
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
@@ -695,6 +712,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{path: "/api/v1/customers/" + f.custID.String() + "/activities", absent: []string{w.actB.String()}, present: []string{w.actA.String()}},
 		{path: "/api/v1/customers/" + f.custID.String() + "/contacts", absent: []string{w.conB.String()}, present: []string{w.conA.String()}},
 		{path: "/api/v1/customers/" + f.custID.String() + "/ship-tos", absent: []string{w.shipB.String()}, present: []string{w.shipA.String()}},
+		{path: "/api/v1/customers/" + f.custID.String() + "/alerts", absent: []string{w.alertB.String()}, present: []string{w.alertA.String()}},
 		{path: "/api/v1/dashboard/summary", absent: []string{f.custB.String()}, present: nil},
 		{path: "/api/v1/dashboard/top-customers", absent: []string{f.custB.String()}, present: nil},
 		{path: "/api/v1/dashboard/order-activity", absent: []string{w.ordB.String()}, present: nil},

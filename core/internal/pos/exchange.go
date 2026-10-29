@@ -37,8 +37,9 @@ type ExchangeIn struct {
 	Returned     []ReturnLineIn
 	Items        []salesdoc.ParsedLine
 	// Tenders pay the difference when the replacement is worth more.
-	Tenders    []TenderIn
-	PickedUpBy string
+	Tenders      []TenderIn
+	PickedUpBy   string
+	Acknowledged []uuid.UUID
 }
 
 // ExchangeFigures are the money of an exchange, in cents.
@@ -199,7 +200,7 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		pre.WalkInID = walkInID
 		revision := pre.Revision
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
-			make([]*chargeResult, len(in.Tenders)), pricedTax, leg)
+			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged)
 		if err != nil {
 			return err
 		}
@@ -422,15 +423,16 @@ func (s *Service) refundSurplus(ctx context.Context, st *returnState, memoID uui
 
 // exchangeRequest is POST /pos/exchanges and POST /pos/exchanges/preview.
 type exchangeRequest struct {
-	RegisterID   *string                `json:"register_id"`
-	OriginalSale *string                `json:"original_sale_id"`
-	CustomerID   *string                `json:"customer_id"`
-	RefundMethod string                 `json:"refund_method"`
-	Reason       *string                `json:"reason"`
-	Returned     []returnLineRequest    `json:"returned_lines"`
-	SaleLines    []salesdoc.LineRequest `json:"sale_lines"`
-	Tenders      []tenderRequest        `json:"tenders"`
-	PickedUpBy   *string                `json:"picked_up_by"`
+	RegisterID           *string                `json:"register_id"`
+	OriginalSale         *string                `json:"original_sale_id"`
+	CustomerID           *string                `json:"customer_id"`
+	RefundMethod         string                 `json:"refund_method"`
+	Reason               *string                `json:"reason"`
+	Returned             []returnLineRequest    `json:"returned_lines"`
+	SaleLines            []salesdoc.LineRequest `json:"sale_lines"`
+	Tenders              []tenderRequest        `json:"tenders"`
+	PickedUpBy           *string                `json:"picked_up_by"`
+	AcknowledgedAlertIDs []string               `json:"acknowledged_alert_ids"`
 }
 
 func (r *exchangeRequest) parse() (*ExchangeIn, error) {
@@ -452,6 +454,7 @@ func (r *exchangeRequest) parse() (*ExchangeIn, error) {
 		out.PickedUpBy = *r.PickedUpBy
 		v.Check(len(out.PickedUpBy) <= 200, "picked_up_by", "must be at most 200 characters")
 	}
+	out.Acknowledged = parseAcknowledgedAlertIDs(v, r.AcknowledgedAlertIDs)
 	verr := v.Err()
 	switch {
 	case rerr != nil && verr != nil:

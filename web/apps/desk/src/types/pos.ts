@@ -170,6 +170,20 @@ export interface CounterStanding {
     check_limit_cents: number | null;
     payment_options: TenderMethod[];
     on_account: OnAccountVerdict;
+    /** The customer's alerts that speak at the counter, oldest first. */
+    alerts: CounterAlert[];
+}
+
+/**
+ * An alert of the customer the counter reads: a note to read, or a warning
+ * that may ask to be acknowledged before the sale is taken.
+ */
+export interface CounterAlert {
+    id: string;
+    kind: 'note' | 'warning';
+    text: string;
+    /** The counter has to read this warning and say so before the sale is taken. */
+    acknowledge_required: boolean;
 }
 
 /** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
