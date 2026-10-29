@@ -98,7 +98,7 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
   await expect(page.getByRole('heading', { name: 'Tint paint' })).toBeVisible();
 
   await page.getByTestId('tint-color-search').fill('Essex');
-  await page.getByTestId('tint-color-results').getByRole('button', { name: /Essex Green/ }).click();
+  await page.getByTestId('tint-color-results').getByRole('option', { name: /Essex Green/ }).click();
   await expect(page.getByTestId('tint-components')).toBeVisible();
   await expect(page.getByTestId('tint-components')).toContainText('B1 Black');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-tint-dialog.png'), fullPage: true });
@@ -110,9 +110,9 @@ test('the counter: a tinted paint line, its receipt and its mis tint return', as
 
   // Pay in cash.
   const total = Number(((await page.getByTestId('summary-total').textContent()) ?? '').replace(/[$,\s]/g, ''));
-  await page.getByTestId('pos-next-payment').click();
   const head = page.getByTestId('panel-payment-toggle');
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
   await page.getByTestId('tender-cash').click();
   await page.getByLabel('Tender amount').fill(total.toFixed(2));
   await page.getByRole('button', { name: 'Add as split tender' }).click();
