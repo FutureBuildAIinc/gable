@@ -128,6 +128,34 @@ func TestLookupHonoursTheEffectiveWindow(t *testing.T) {
 	}
 }
 
+
+func TestLookupSkipsAZoneWhosePartsAreAllDeadOnTheDay(t *testing.T) {
+	db := testutil.RequireDB(t)
+	clearZones(t, db)
+	repo := taxzone.NewRepository(db)
+	ctx := context.Background()
+	on := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	// The zone's own window covers the day, but its only part ended a year
+	// before: a zone with no live rate on the day must not match, or its
+	// COALESCE 0 would tax a delivered sale at zero and win the lowest rate
+	// rule over properly rated zones (P2-1).
+	gap := postalDraft("96000", "96099", taxzone.RatePart{Name: taxzone.PartState, Rate: "0.050000", EffectiveFrom: "2020-01-01", EffectiveTo: "2025-01-01"})
+	mustCreate(t, repo, gap)
+
+	if _, err := taxzone.Lookup(ctx, db, taxzone.LookupInput{Country: "US", Postal: "96050", On: on}); !errors.Is(err, taxzone.ErrZoneNotFound) {
+		t.Errorf("a zone with no live part on the day matched: %v, want ErrZoneNotFound", err)
+	}
+
+	// Beside it a properly rated zone for the same code wins, not the dead one.
+	live := postalDraft("96000", "96099", part(taxzone.PartState, "0.070000"))
+	mustCreate(t, repo, live)
+	z, err := taxzone.Lookup(ctx, db, taxzone.LookupInput{Country: "US", Postal: "96050", On: on})
+	if err != nil || z.CombinedRate != "0.070000" {
+		t.Errorf("lookup with a live zone beside a dead one = %v %q, want 0.070000", err, z.CombinedRate)
+	}
+}
+
 func TestLookupMatchesAProvinceZoneByRegion(t *testing.T) {
 	db := testutil.RequireDB(t)
 	clearZones(t, db)

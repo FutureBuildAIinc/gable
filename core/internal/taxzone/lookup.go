@@ -127,6 +127,9 @@ func Lookup(ctx context.Context, db *database.DB, in LookupInput) (*Snapshot, er
 		FROM tax_zones z
 		WHERE z.effective_from <= $3::date
 		  AND (z.effective_to IS NULL OR z.effective_to >= $3::date)
+		  AND EXISTS (SELECT 1 FROM tax_zone_rates r
+		              WHERE r.zone_id = z.id AND r.effective_from <= $3::date
+		                AND (r.effective_to IS NULL OR r.effective_to >= $3::date))
 		  AND (
 		        (z.zone_kind = 'POSTAL'
 		         AND EXISTS (SELECT 1 FROM tax_zone_boundaries b
