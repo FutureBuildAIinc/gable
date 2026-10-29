@@ -227,6 +227,7 @@ func TestDetachClearsTheDepartedCustomersShipTo(t *testing.T) {
 	mustExec(t, f.db, `INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, city, region, postal_code, country, is_default, is_active)
 		VALUES ($1, $2, 'SITE', 'The site', '1 Golden Way', 'Tarnwick', 'WA', '98150', 'US', TRUE, TRUE)`,
 		shipTo, f.customerID)
+	t.Cleanup(func() { mustExec(t, f.db, `DELETE FROM customer_ship_tos WHERE id = $1`, shipTo) })
 
 	f.ensureTill()
 	saleID := f.startSale(nil)
