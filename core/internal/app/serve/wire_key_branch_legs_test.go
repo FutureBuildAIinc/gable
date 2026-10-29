@@ -89,6 +89,7 @@ func (f *keyPinFixture) twinState(t *testing.T, w *walledTwins) map[string]strin
 		"activities":      `SELECT * FROM crm_activities WHERE customer_id = ` + custB,
 		"contacts":        `SELECT * FROM customer_contacts WHERE customer_id = ` + custB,
 		"ship_tos":        `SELECT * FROM customer_ship_tos WHERE customer_id = ` + custB,
+		"alerts":          `SELECT * FROM customer_alerts WHERE customer_id = ` + custB,
 		"quotes":          `SELECT * FROM quotes WHERE id = ` + q(f.quoteB) + ` OR branch_id = ` + branchB,
 		"quote_lines":     `SELECT * FROM quote_lines WHERE quote_id = ` + q(f.quoteB),
 		"deliveries":      `SELECT * FROM deliveries WHERE id = ` + q(w.delB) + ` OR order_id = ` + q(w.ordB) + ` OR route_id = ` + q(w.routeB),
@@ -156,7 +157,7 @@ func (f *keyPinFixture) customerReplaceAs(t *testing.T, role string, id uuid.UUI
 	cur := f.readJSONAs(t, role, "/api/v1/customers/"+id.String())
 	body := map[string]any{"revision": cur["revision"]}
 	for _, k := range []string{"account_number", "name", "email", "phone", "address", "is_active",
-		"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {
+		"price_profile_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required", "job_required"} {
 		body[k] = cur[k]
 	}
 	for k, v := range change {
@@ -256,6 +257,7 @@ func purgeFixtureRows(ctx context.Context, db *database.DB, customers, branches 
 		`DELETE FROM pos_returns WHERE branch_id = ANY($2)`,
 		`DELETE FROM pos_transactions WHERE branch_id = ANY($2)`,
 		`DELETE FROM customer_ship_tos WHERE customer_id = ANY($1)`,
+		`DELETE FROM customer_alerts WHERE customer_id = ANY($1)`,
 		`DELETE FROM customer_contacts WHERE customer_id = ANY($1)`,
 		`DELETE FROM crm_activities WHERE customer_id = ANY($1)`,
 		`DELETE FROM yard_schedule_windows WHERE yard_id = ANY($2)`,

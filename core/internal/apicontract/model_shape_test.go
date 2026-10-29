@@ -83,6 +83,7 @@ var modelBoundSchemas = []struct {
 	{"EscalationPolicy", customer.EscalationPolicy{}},
 	{"Contact", customer.Contact{}},
 	{"ShipTo", customer.ShipTo{}},
+	{"Alert", customer.Alert{}},
 	{"PaymentTermsRecord", customer.PaymentTerms{}},
 	// order
 	{"Order", order.Order{}},

@@ -163,7 +163,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "active_orders": 21,
+        "active_orders": 22,
         "outstanding_ar": 10860798,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
@@ -269,69 +269,69 @@
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
             "order_id": "<id-3>",
+            "status": "CONFIRMED",
+            "total_amount": 55440
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_name": "<customer>",
+            "order_id": "<id-4>",
             "status": "CANCELLED",
             "total_amount": 616
           },
           {
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
-            "order_id": "<id-4>",
+            "order_id": "<id-5>",
             "status": "FULFILLED",
             "total_amount": 3696
           },
           {
             "created_at": "<ts+0d>",
             "customer_name": "<customer>",
-            "order_id": "<id-5>",
+            "order_id": "<id-6>",
             "status": "DRAFT",
             "total_amount": 12320
           },
           {
             "created_at": "<ts-1d>",
             "customer_name": "<customer>",
-            "order_id": "<id-6>",
+            "order_id": "<id-7>",
             "status": "DRAFT",
             "total_amount": 1022502
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-7>",
+            "order_id": "<id-8>",
             "status": "FULFILLED",
             "total_amount": 1820808
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-8>",
+            "order_id": "<id-9>",
             "status": "CONFIRMED",
             "total_amount": 341800
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-9>",
+            "order_id": "<id-10>",
             "status": "CONFIRMED",
             "total_amount": 348500
           },
           {
             "created_at": "<ts-2d>",
             "customer_name": "<customer>",
-            "order_id": "<id-10>",
-            "status": "CONFIRMED",
-            "total_amount": 169450
-          },
-          {
-            "created_at": "<ts-2d>",
-            "customer_name": "<customer>",
             "order_id": "<id-11>",
             "status": "CONFIRMED",
-            "total_amount": 186600
+            "total_amount": 169450
           }
         ],
         "status_breakdown": {
           "CANCELLED": 3,
-          "CONFIRMED": 15,
+          "CONFIRMED": 16,
           "DRAFT": 5,
           "FULFILLED": 10
         }

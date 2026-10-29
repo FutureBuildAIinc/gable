@@ -94,6 +94,16 @@ describe('gable-field-shell', () => {
     dual.remove();
   });
 
+  it('states the frame\'s camera allowance: the scanner is the webview\'s own web API', async () => {
+    const el = mountField(WAREHOUSE_SESSION);
+    await el.updateComplete;
+    // The camera feature's default allowlist already permits a same origin
+    // frame; the frame states the rule rather than assuming it, so a remote
+    // Gable behind the URL override is not silently refused.
+    expect(el.querySelector<HTMLIFrameElement>('iframe[data-testid="app-frame"]')?.getAttribute('allow')).toBe('camera');
+    el.remove();
+  });
+
   it('the yard picker lists granted yards, stores and announces a granted pick, and refuses an ungranted yard', async () => {
     const el = mountField();
     (el as unknown as { _yards: { id: string; code: string; name: string; is_home?: boolean }[] })._yards = [

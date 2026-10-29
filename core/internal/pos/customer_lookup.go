@@ -78,6 +78,11 @@ type AttachCustomerIn struct {
 	// BuyerContactID is the roster buyer the sale is for; the account may
 	// ask for one on every sale on account.
 	BuyerContactID *uuid.UUID
+	// ShipToID and DeliveryType are the delivered sale's answer (CP-10):
+	// a ship to names where the goods go, so the tax is sourced to its
+	// zone instead of the branch.
+	ShipToID     *uuid.UUID
+	DeliveryType string // pickup or delivery; empty leaves the sale as it is
 }
 
 // namedCustomer is the counter's one rule for which customers a caller may
@@ -119,6 +124,19 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 	}
 	if in.CustomerID == nil && (in.CustomerPO != "" || in.JobID != nil || in.BuyerContactID != nil) {
 		return nil, invalid("customer_id", "name the customer before a purchase order, a job or a buyer")
+	}
+	// A ship to is the named customer's own and rides a delivery (CP-10).
+	if in.ShipToID != nil {
+		if in.CustomerID == nil {
+			return nil, invalid("customer_id", "a ship to needs the customer named: the walk-in customer carries none")
+		}
+		ok, err := s.repo.ShipToBelongsTo(ctx, *in.ShipToID, *in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, invalid("ship_to_id", "no such ship to for this customer")
+		}
 	}
 	// walkIn is the walk-in customer's id when the sale goes back to one, for
 	// the reprice the detach owes (the engine prices the walk-in's tier).
@@ -179,6 +197,34 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		}
 		if err := s.repo.SetSaleBuyer(ctx, saleID, in.BuyerContactID); err != nil {
 			return err
+		}
+		// The delivery answer follows the customer now standing on the sale:
+		// a detach clears it, a plain re attach resets to a pickup, and a
+		// request naming the customer's ship to sets the delivery it names
+		// (a ship to with no delivery type is a delivery: it names where the
+		// goods go). The departed customer's ship to never stays the sale's
+		// place of receipt.
+		switch {
+		case in.CustomerID == nil:
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
+				return err
+			}
+		case in.ShipToID != nil:
+			dt := in.DeliveryType
+			if dt == "" {
+				dt = "delivery"
+			}
+			if err := s.repo.SetSaleDelivery(ctx, saleID, in.ShipToID, dt); err != nil {
+				return err
+			}
+		case in.DeliveryType != "":
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, in.DeliveryType); err != nil {
+				return err
+			}
+		default:
+			if err := s.repo.SetSaleDelivery(ctx, saleID, nil, ""); err != nil {
+				return err
+			}
 		}
 		// the lines and the totals follow the customer now standing on the
 		// sale, when the customer moved on a sale with lines: the engine

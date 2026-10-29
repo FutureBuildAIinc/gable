@@ -31,6 +31,9 @@ type store interface {
 	ReadModuleRevision(ctx context.Context, moduleID string) (int64, error)
 	LockModuleRevision(ctx context.Context, moduleID string) (int64, error)
 	BumpModuleRevision(ctx context.Context, moduleID string, to int64) error
+	SetCounterPIN(ctx context.Context, id uuid.UUID, hash string) error
+	ClearCounterPIN(ctx context.Context, id uuid.UUID) error
+	UnlockCounterPIN(ctx context.Context, id uuid.UUID) error
 }
 
 // auditSink is the audit dependency, narrowed to the one method used so tests

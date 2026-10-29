@@ -1016,8 +1016,8 @@ func TestOrderTaxResolution(t *testing.T) {
 	}
 
 	// An exempt customer pays nothing.
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO tax_exemptions (id, customer_id, exempt_reason, is_active)
-		VALUES (gen_random_uuid(), $1, 'Wholesale', TRUE)`, f.customerID); err != nil {
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO tax_exemptions (id, customer_id, exempt_reason, effective_date, is_active)
+		VALUES (gen_random_uuid(), $1, 'Wholesale', CURRENT_DATE - 1, TRUE)`, f.customerID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id = $1`, f.customerID) })

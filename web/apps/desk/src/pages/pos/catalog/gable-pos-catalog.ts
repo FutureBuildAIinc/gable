@@ -36,7 +36,8 @@ const POSITIVE_QTY = /^\d+(\.\d+)?$/;
 function price(cents: number, uom: string): string {
     const sign = cents < 0 ? '-' : '';
     const abs = Math.abs(cents);
-    return `${sign}$${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')} / ${uom}`;
+    const amount = `${sign}$${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`;
+    return uom === '' ? amount : `${amount} / ${uom}`;
 }
 
 @customElement('gable-pos-catalog')
@@ -318,7 +319,7 @@ export class GablePosCatalog extends LitElement {
 
     private _picture(item: CatalogItem) {
         const shown = item.image_url && !this._brokenImages.has(item.product_id);
-        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-picture-plate">
+        return html`<div data-testid="catalog-picture" class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-picture-plate min-[768px]:h-[72px] min-[768px]:w-[72px]">
             ${shown
                 ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover mix-blend-multiply"
                       @error=${() => { this._brokenImages = new Set(this._brokenImages).add(item.product_id); }} />`
@@ -333,16 +334,21 @@ export class GablePosCatalog extends LitElement {
 
     private _tile(item: CatalogItem, on: boolean) {
         return html`<li data-testid="catalog-tile" aria-current=${on ? 'true' : 'false'}
-            class=${`flex flex-col gap-2 rounded-lg border p-3 ${on ? 'border-gable-green/60 bg-white/5' : 'border-white/10 bg-tile shadow-raised'}`}>
+            class=${`flex flex-row items-center gap-3 rounded-lg border p-3 min-[768px]:flex-col min-[768px]:gap-2 ${on ? 'border-gable-green/60 bg-white/5' : 'border-white/10 bg-tile shadow-raised'}`}>
             ${this._picture(item)}
-            <div class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-white">${item.description}</div>
-            <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>
-            <div class="mt-auto flex items-center justify-between gap-2">
-                <span class="font-mono text-sm font-semibold text-white">${price(item.unit_price_cents, item.uom)}</span>
+            <div class="min-w-0 flex-1 min-[768px]:contents">
+              <div class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-white">${item.description}</div>
+              <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>
+            </div>
+            <div class="flex shrink-0 items-center justify-between gap-2 min-[768px]:mt-auto min-[768px]:w-full">
+                <span class="font-mono text-sm font-semibold text-white">
+                  <span class="min-[768px]:hidden">${price(item.unit_price_cents, '')}</span>
+                  <span class="hidden min-[768px]:inline">${price(item.unit_price_cents, item.uom)}</span>
+                </span>
                 <button type="button" data-testid="catalog-tile-add" ?disabled=${this.disabled}
                     aria-label=${`Add ${item.description}`}
                     @click=${() => this._emit(item)}
-                    class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Add</button>
+                    class="min-h-11 rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Add</button>
             </div>
         </li>`;
     }
@@ -365,9 +371,17 @@ export class GablePosCatalog extends LitElement {
                     aria-invalid=${this._qtyValid ? 'false' : 'true'}
                     @input=${this._onQty} @keydown=${(e: KeyboardEvent) => this._onKey(e, false)}
                     class="w-16 rounded border border-white/10 bg-deep-space px-2 py-2 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40 aria-[invalid=true]:border-safety-red" />
-                <button type="button" data-testid="catalog-scan"
+                <button type="button" data-testid="catalog-scan" aria-label="Scan"
+                    title="Scan a barcode"
                     @click=${() => { this._scanning = true; }}
-                    class="rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green">Scan</button>
+                    class="flex h-11 w-11 items-center justify-center rounded border border-white/20 text-slate-200 hover:border-gable-green hover:text-gable-green min-[768px]:w-auto min-[768px]:gap-1 min-[768px]:px-3">
+                    <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                        <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                        <path d="M7 8v8"></path><path d="M11 8v8"></path><path d="M15 8v8"></path><path d="M18 8v8"></path>
+                    </svg>
+                    <span class="hidden text-sm font-semibold min-[768px]:inline">Scan</span>
+                </button>
                 <button type="button" data-testid="catalog-add" ?disabled=${this.disabled}
                     @click=${() => void this._addFromSearch()}
                     class="rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Add</button>
@@ -411,7 +425,7 @@ export class GablePosCatalog extends LitElement {
                 : this._items.length === 0
                     ? html`<p class="mt-4 text-sm text-slate-400">No products match</p>`
                     : html`<ul data-testid="catalog-grid"
-                          @keydown=${(e: KeyboardEvent) => { if (e.key !== 'Enter') this._onKey(e, false); }} class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
+                          @keydown=${(e: KeyboardEvent) => { if (e.key !== 'Enter') this._onKey(e, false); }} class=${`mt-4 grid grid-cols-1 gap-3 min-[768px]:grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] ${this.disabled ? 'opacity-50' : ''}`}
                           aria-busy=${this._loading ? 'true' : 'false'}>
                           ${this._items.map((i, n) => this._tile(i, !this.disabled && n === this._highlight))}
                       </ul>`}

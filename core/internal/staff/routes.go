@@ -28,6 +28,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/admin/staff/{id}", guard(h.GetStaff))
 	mux.HandleFunc("PUT /api/v1/admin/staff/{id}", guard(h.UpdateStaff))
 
+	// The manager's counter PIN (CP-04): set, clear, unlock. The same
+	// admin and owner guard as the staff writes; the PIN is hashed on the
+	// server and never logged.
+	mux.HandleFunc("PUT /api/v1/admin/staff/{id}/counter-pin", guard(h.SetStaffCounterPIN))
+	mux.HandleFunc("DELETE /api/v1/admin/staff/{id}/counter-pin", guard(h.ClearStaffCounterPIN))
+	mux.HandleFunc("POST /api/v1/admin/staff/{id}/counter-pin/unlock", guard(h.UnlockStaffCounterPIN))
+
 	// Per-staff module grants
 	mux.HandleFunc("POST /api/v1/admin/staff/{id}/modules", guard(h.GrantModule))
 	mux.HandleFunc("DELETE /api/v1/admin/staff/{id}/modules/{module_id}", guard(h.RevokeModule))
