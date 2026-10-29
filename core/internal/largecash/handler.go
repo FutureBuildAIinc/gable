@@ -64,6 +64,42 @@ type previewRequest struct {
 	TransactionID      string                 `json:"transaction_id"`
 	SuspectedAvoidance *bool                  `json:"suspected_avoidance"`
 	Tenders            []previewTenderRequest `json:"tenders"`
+	// Payer is the identity the counter already holds for this payer, the
+	// walk-in it identified earlier in this till session. The preview keys
+	// the same person the completion will key, so the two agree on whose
+	// cash this is and what it comes to.
+	Payer *previewPayerRequest `json:"payer"`
+}
+
+// previewPayerRequest is the captured payer identity on the wire, the same
+// shape the completion carries. Only the values that key the payer are read
+// here; the preview writes nothing.
+type previewPayerRequest struct {
+	Name            string `json:"name"`
+	Address         string `json:"address"`
+	Occupation      string `json:"occupation"`
+	DateOfBirth     string `json:"date_of_birth"`
+	IDType          string `json:"id_type"`
+	IDNumber        string `json:"id_number"`
+	TaxpayerID      string `json:"taxpayer_id"`
+	ThirdPartyPayer bool   `json:"third_party_payer"`
+}
+
+// payer answers the captured identity, nil when the request carries none.
+func (p *previewPayerRequest) payer() *PayerIn {
+	if p == nil {
+		return nil
+	}
+	return &PayerIn{
+		Name:            p.Name,
+		Address:         p.Address,
+		Occupation:      p.Occupation,
+		DateOfBirth:     p.DateOfBirth,
+		IDType:          p.IDType,
+		IDNumber:        p.IDNumber,
+		TaxpayerID:      p.TaxpayerID,
+		ThirdPartyPayer: p.ThirdPartyPayer,
+	}
 }
 
 // Preview is POST /pos/large-cash/preview: what the counter asks before
@@ -103,7 +139,7 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 	if req.SuspectedAvoidance != nil {
 		facts.SuspectedAvoidance = *req.SuspectedAvoidance
 	}
-	facts.Payer = nil
+	facts.Payer = req.Payer.payer()
 	for i := range req.Tenders {
 		t := &req.Tenders[i]
 		in := TenderFacts{Method: strings.ToLower(t.Method)}

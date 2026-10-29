@@ -14670,7 +14670,7 @@ paths:
       tags: [pos]
       summary: What the large cash rule asks of this payment
       description: >-
-        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. Writes nothing; the completion's own capture is the authority.
+        The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
       requestBody:
         required: true
         content:
@@ -29918,7 +29918,7 @@ components:
       type: object
       description: >-
         A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12).
-      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, country_code, active, branch_id, revision, created_at, updated_at]
+      required: [id, parent_id, path, type, code, description, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, country_code, walk_in_identity_cents, active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -29958,6 +29958,11 @@ components:
           type: [string, "null"]
           description: >-
             The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: boolean
         branch_id:
@@ -30021,6 +30026,11 @@ components:
           type: [string, "null"]
           description: >-
             The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: boolean
         revision:
@@ -30065,6 +30075,11 @@ components:
         country_code:
           type: [string, "null"]
           description: The branch's country, two letters (CP-17a); null falls back to the dealer's country.default.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
         active:
           type: [boolean, "null"]
           description: Defaults to true when absent; an explicit false is honored.
@@ -33681,6 +33696,7 @@ components:
         picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
         payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
     PosPayerCapture:
       type: object
@@ -33717,6 +33733,7 @@ components:
       properties:
         transaction_id: {type: string, format: uuid, description: "The sale the payment panel holds."}
         suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark."}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is."}
         tenders:
           type: array
           items:
@@ -33728,9 +33745,9 @@ components:
               amount_cents: {type: integer, format: int64, minimum: 1}
     PosLargeCashPreview:
       type: object
-      required: [country, rule_family, counted_cents, aggregate_cents, threshold_cents, comparator, asks_details, fields]
+      required: [country, rule_family, counted_cents, aggregate_cents, threshold_cents, comparator, asks_details, fields, walk_in_floor_cents, asks_floor, walk_in_aggregated, threshold_crossed]
       description: >-
-        What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report.
+        What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated.
       properties:
         country: {type: string, description: "The branch's country, two letters."}
         rule_family: {type: string, enum: ["", US_8300, CA_DEALER]}
@@ -33742,6 +33759,11 @@ components:
         fields: {type: array, items: {type: string}}
         note: {type: string}
         dealer_threshold: {type: boolean, description: "True for the Canadian dealer policy threshold (never a legal duty)."}
+        walk_in_floor_cents: {type: integer, format: int64, description: "The branch's walk-in identity floor in cents; zero when the branch has it off."}
+        asks_floor: {type: boolean, description: "True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay."}
+        walk_in_aggregated: {type: boolean, description: "True when the branch counts a walk-in's cash sales together once the walk-in is identified."}
+        walk_in_note: {type: string, description: "The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated."}
+        threshold_crossed: {type: boolean, description: "True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it."}
     PosVoidRequest:
       type: object
       required: [reason]
@@ -33991,6 +34013,7 @@ components:
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
         payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        payer_declined: {type: boolean, description: "The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined."}
         suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
         tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
     PosExchangeFigures:

@@ -42,6 +42,12 @@ interface BranchForm {
   cash_rounding_mode: CashRoundingMode;
   /** The branch's country, two letters; empty means the dealer's default country. */
   country?: string;
+  /** The walk-in identity floor in dollars (CP-17a): the amount the dealer types. */
+  walkInFloor: string;
+  /** Whether the branch asks a walk-in's identity over the floor. */
+  walkInFloorOn: boolean;
+  /** Whether the dealer changed the floor; an untouched floor keeps the country default. */
+  walkInFloorTouched: boolean;
   active: boolean;
   /** The tax fields a person types: a jurisdiction code and a rate in percent. */
   taxJurisdiction: string;
@@ -60,10 +66,40 @@ const EMPTY_FORM: BranchForm = {
   timezone: 'America/New_York',
   cash_rounding_mode: CASH_ROUNDING_OFF,
   country: '',
+  walkInFloor: '',
+  walkInFloorOn: false,
+  walkInFloorTouched: false,
   active: true,
   taxJurisdiction: '',
   taxRatePercent: '',
 };
+
+/** The United States default walk-in identity floor (CP-17a): 3,000 dollars in cents. */
+export const US_DEFAULT_WALK_IN_FLOOR_CENTS = 300000;
+
+/**
+ * The branch country's default walk-in identity floor (CP-17a): 3,000 dollars
+ * on a United States branch, off on a Canadian one.
+ */
+export function countryWalkInFloorCents(country: string | undefined | null): number {
+  return (country ?? '').toUpperCase() === 'US' ? US_DEFAULT_WALK_IN_FLOOR_CENTS : 0;
+}
+
+/**
+ * The floor the branch runs: its own amount, else the branch country's default
+ * (the United States asks at 3,000 dollars, Canada is off).
+ */
+export function walkInFloorCents(branch: Location, dealerDefault: string | undefined | null): number {
+  const country = (branch.country_code || dealerDefault || '').toUpperCase();
+  if (country !== 'US' && country !== 'CA') {
+    // no rule family of its own: there is no large cash rule to ask about
+    return 0;
+  }
+  if (branch.walk_in_identity_cents !== null && branch.walk_in_identity_cents !== undefined) {
+    return branch.walk_in_identity_cents;
+  }
+  return countryWalkInFloorCents(country);
+}
 
 /** The stored rate is a fraction (0.08875 is 8.875 percent); a person types the percent. */
 export function fractionToPercent(fraction: number | null | undefined): string {
@@ -138,7 +174,13 @@ export class GableAdminBranches extends LitElement {
   }
 
   private _openCreate() {
-    this._form = { ...EMPTY_FORM };
+    const country = this._largeCash?.country_default ?? '';
+    const floor = countryWalkInFloorCents(country);
+    this._form = {
+      ...EMPTY_FORM,
+      walkInFloor: (floor / 100).toFixed(2),
+      walkInFloorOn: floor > 0,
+    };
     this._editorOpen = true;
   }
 
@@ -157,11 +199,26 @@ export class GableAdminBranches extends LitElement {
       timezone: b.timezone ?? 'America/New_York',
       cash_rounding_mode: b.cash_rounding_mode ?? CASH_ROUNDING_OFF,
       country: b.country_code ?? '',
+      walkInFloor: (walkInFloorCents(b, this._largeCash?.country_default) / 100).toFixed(2),
+      walkInFloorOn: walkInFloorCents(b, this._largeCash?.country_default) > 0,
+      walkInFloorTouched: false,
       active: b.active,
       taxJurisdiction: b.tax_jurisdiction_code ?? '',
       taxRatePercent: fractionToPercent(b.default_tax_rate),
     };
     this._editorOpen = true;
+  }
+
+  /**
+   * The floor the branch runs: its own amount, else the branch country's
+   * default (the United States asks at 3,000 dollars, Canada is off).
+   */
+  private _formFloorCents(): number {
+    const country = this._form.country || this._largeCash?.country_default || '';
+    if (!this._form.walkInFloorOn) return 0;
+    const typed = Number(this._form.walkInFloor.trim());
+    if (!Number.isFinite(typed) || typed < 0) return countryWalkInFloorCents(country);
+    return Math.round(typed * 100);
   }
 
   private _closeEditor() {
@@ -208,6 +265,9 @@ export class GableAdminBranches extends LitElement {
             timezone: text(f.timezone),
             cash_rounding_mode: f.cash_rounding_mode,
             country_code: f.country || null,
+            // The floor (CP-17a): a touched floor is the dealer's own amount,
+            // an untouched one keeps the country default the branch had.
+            walk_in_identity_cents: f.walkInFloorTouched ? this._formFloorCents() : loaded.walk_in_identity_cents,
             active: f.active,
             tax_jurisdiction_code: f.taxJurisdiction.trim() || null,
             default_tax_rate: taxRate,
@@ -230,6 +290,7 @@ export class GableAdminBranches extends LitElement {
           timezone: f.timezone?.trim() || undefined,
           cash_rounding_mode: f.cash_rounding_mode,
           country_code: f.country || undefined,
+          walk_in_identity_cents: f.walkInFloorTouched ? this._formFloorCents() : null,
           active: f.active,
           tax_jurisdiction_code: f.taxJurisdiction.trim() || undefined,
           default_tax_rate: taxRate ?? undefined,
@@ -489,6 +550,43 @@ export class GableAdminBranches extends LitElement {
                 The country picks the branch's large cash rule. A branch saved with no country of its own needs the dealer's default country.
               </span>
             </label>
+            <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold md:col-span-2">
+              Walk-in identity floor
+              <span class="mt-2 flex items-center gap-2 text-sm font-normal normal-case tracking-normal text-zinc-300">
+                <input
+                  type="checkbox"
+                  data-testid="branch-walk-in-floor-on"
+                  .checked=${this._form.walkInFloorOn}
+                  @change=${(e: Event) => {
+                    this._updateField('walkInFloorOn', (e.target as HTMLInputElement).checked);
+                    this._updateField('walkInFloorTouched', true);
+                  }}
+                  class="rounded bg-slate-steel border-white/10 text-gable-green focus:ring-gable-green/30"
+                />
+                Ask a walk-in's identity on a cash sale over
+              </span>
+              <span class="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  inputmode="decimal"
+                  data-testid="branch-walk-in-floor"
+                  .value=${this._form.walkInFloor}
+                  ?disabled=${!this._form.walkInFloorOn}
+                  @input=${(e: Event) => {
+                    this._updateField('walkInFloor', (e.target as HTMLInputElement).value);
+                    this._updateField('walkInFloorTouched', true);
+                  }}
+                  class="w-32 bg-deep-space/60 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-normal normal-case tracking-normal focus:outline-none focus:border-gable-green/50 disabled:opacity-50"
+                />
+                <span class="text-sm font-normal normal-case tracking-normal text-zinc-400">dollars</span>
+              </span>
+              <span class="mt-1 block text-xs font-normal normal-case tracking-normal text-zinc-500" data-testid="branch-walk-in-floor-note">
+                ${this._form.walkInFloorOn
+                  ? 'Over this amount the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together.'
+                  : 'With this off, walk-in cash is not aggregated at this branch: each walk-in\u2019s cash is counted on its own.'}
+                ${this._walkInFloorDefaultWords()}
+              </span>
+            </label>
             <div class="md:col-span-2">${this._textField('Timezone', 'timezone', 'America/New_York')}</div>
             <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold md:col-span-2">
               Cash rounding
@@ -535,6 +633,16 @@ export class GableAdminBranches extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** The country default the branch starts from, in plain words. */
+  private _walkInFloorDefaultWords(): string {
+    const country = this._form.country || this._largeCash?.country_default || '';
+    if (!country) return 'No country default is set: the branch runs with the floor off.';
+    if (country.toUpperCase() === 'US') {
+      return 'The United States default is 3,000.00 dollars.';
+    }
+    return 'The Canadian default is off.';
   }
 
   private _textField(

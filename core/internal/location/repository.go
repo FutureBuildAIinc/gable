@@ -31,7 +31,7 @@ const locationColumns = `
     name, address, city, state, zip, phone,
     tax_jurisdiction_code, default_tax_rate,
     cash_rounding_mode,
-    timezone, country_code, active, branch_id,
+    timezone, country_code, walk_in_identity_cents, active, branch_id,
     revision, created_at, updated_at
 `
 
@@ -86,6 +86,7 @@ func scanLocation(row pgx.Row, loc *Location) error {
 		&loc.CashRoundingMode,
 		&loc.Timezone,
 		&loc.CountryCode,
+		&loc.WalkInIdentityCents,
 		&loc.Active,
 		&loc.BranchID,
 		&loc.Revision,
@@ -104,15 +105,17 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 		INSERT INTO locations (
 			parent_id, path, type, code, description,
 			name, address, city, state, zip, phone,
-			tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, country_code
+			tax_jurisdiction_code, default_tax_rate, cash_rounding_mode, timezone, active, country_code,
+			walk_in_identity_cents
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE(NULLIF($14,''),'OFF'),$15,COALESCE($16,TRUE),$17)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE(NULLIF($14,''),'OFF'),$15,COALESCE($16,TRUE),$17,$18)
 		RETURNING ` + locationColumns
 
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
 		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, tzOrDefault(loc.Timezone), loc.Active, loc.CountryCode,
+		loc.WalkInIdentityCents,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		return fmt.Errorf("create location: %w", err)
@@ -173,6 +176,7 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, 
 			cash_rounding_mode = COALESCE(NULLIF($14,''), cash_rounding_mode),
 			timezone = COALESCE(NULLIF($15,''), timezone),
 			country_code = $17,
+			walk_in_identity_cents = $18,
 			active = $16,
 			revision = revision + 1,
 			updated_at = NOW()
@@ -183,6 +187,7 @@ func (r *PostgresRepository) UpdateLocation(ctx context.Context, loc *Location, 
 		loc.ID, revision, loc.Path, loc.Code, loc.Description,
 		loc.Name, loc.Address, loc.City, loc.State, loc.Zip, loc.Phone,
 		loc.TaxJurisdictionCode, loc.DefaultTaxRate, loc.CashRoundingMode, derefString(loc.Timezone), loc.Active, loc.CountryCode,
+		loc.WalkInIdentityCents,
 	)
 	if err := scanLocation(row, loc); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

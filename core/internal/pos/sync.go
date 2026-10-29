@@ -103,7 +103,7 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSyn
 					continue
 				}
 				rev := current.Revision
-				if _, cerr := s.CompleteSale(ctx, pending.ID, "", &rev, item.Tenders, "", actor, nil, nil, false); cerr == nil {
+				if _, cerr := s.CompleteSale(ctx, pending.ID, "", &rev, item.Tenders, "", actor, nil, nil, false, false); cerr == nil {
 					resp.SyncedCount++
 					continue
 				} else if !errors.Is(cerr, ErrTaxProviderUnavailable) {
@@ -152,7 +152,7 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSyn
 			continue
 		}
 		rev := current.Revision
-		if _, err := s.CompleteSale(ctx, sale.ID, "", &rev, item.Tenders, "", actor, nil, nil, false); err != nil {
+		if _, err := s.CompleteSale(ctx, sale.ID, "", &rev, item.Tenders, "", actor, nil, nil, false, false); err != nil {
 			if errors.Is(err, ErrTaxProviderUnavailable) {
 				// never a rejection: the sale was made offline, and the
 				// provider will be asked again on the next sync

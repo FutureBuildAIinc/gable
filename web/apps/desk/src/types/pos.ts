@@ -313,6 +313,16 @@ export interface LargeCashPreview {
     fields: string[];
     note?: string;
     dealer_threshold: boolean;
+    /** The branch's walk-in identity floor in cents; zero when the branch has it off (CP-17a). */
+    walk_in_floor_cents: number;
+    /** True when this walk-in's cash sale passes the floor and no identity is captured yet: the counter asks before Pay. */
+    asks_floor: boolean;
+    /** True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+    walk_in_aggregated: boolean;
+    /** The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+    walk_in_note?: string;
+    /** True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+    threshold_crossed: boolean;
 }
 
 /** What an exchange comes to: the credit the return is worth, the replacement and the difference. */

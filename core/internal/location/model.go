@@ -71,9 +71,15 @@ type Location struct {
 	// country picks the branch's large cash rule. A branch falls back to
 	// the dealer's country.default when its own is unset; a branch with
 	// neither cannot be saved.
-	CountryCode *string    `json:"country_code"`
-	Active      bool       `json:"active"`
-	BranchID    *uuid.UUID `json:"branch_id"`
+	CountryCode *string `json:"country_code"`
+	// WalkInIdentityCents is the branch's floor for asking a walk-in's
+	// identity on a cash sale over it (CP-17a, item 296), so the walk-in's
+	// cash sales are counted together. Null is the branch country's default:
+	// 3,000 dollars on a United States branch, off on a Canadian one. Zero is
+	// the dealer saying off.
+	WalkInIdentityCents *int64     `json:"walk_in_identity_cents"`
+	Active              bool       `json:"active"`
+	BranchID            *uuid.UUID `json:"branch_id"`
 
 	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`

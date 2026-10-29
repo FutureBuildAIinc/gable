@@ -70,6 +70,7 @@ const BRANCH: Location = {
   cash_rounding_mode: 'OFF',
   timezone: 'America/New_York',
   country_code: null,
+  walk_in_identity_cents: null,
   active: true,
   branch_id: 'b-1',
   revision: 7,
@@ -91,7 +92,7 @@ describe('locationUpdateFromLocation', () => {
     expect(locationUpdateFromLocation(BRANCH)).toEqual({
       path: 'West Yard', code: 'WEST', description: null, name: 'West Yard', address: '1 Main St', city: 'Springfield',
       state: 'CT', zip: null, phone: null, tax_jurisdiction_code: 'CT-01', default_tax_rate: 0.0635,
-      cash_rounding_mode: 'OFF', timezone: 'America/New_York', active: true,
+      cash_rounding_mode: 'OFF', timezone: 'America/New_York', walk_in_identity_cents: null, active: true,
     })
   })
 

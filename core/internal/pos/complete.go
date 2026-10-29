@@ -115,7 +115,8 @@ func (s *Service) prepareSaleTax(ctx context.Context, sale *Sale, lines []salesd
 // tax provider call happen before the transaction opens; their results are
 // written inside it.
 func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
-	tenders []TenderIn, pickedUpBy, actor string, acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance bool) (*Sale, error) {
+	tenders []TenderIn, pickedUpBy, actor string, acknowledged []uuid.UUID, payer *largecash.PayerIn,
+	suspectedAvoidance, payerDeclined bool) (*Sale, error) {
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
@@ -342,7 +343,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged, payer, suspectedAvoidance)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged, payer, suspectedAvoidance, payerDeclined)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -367,7 +368,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
 	charges []*chargeResult, priced *providerTax, ex *exchangeLeg,
-	acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance bool) (*Sale, error) {
+	acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance, payerDeclined bool) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -953,7 +954,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// the payer's details refuses the whole completion (409
 		// payer_details_required) and nothing above is booked.
 		if s.largeCash != nil {
-			if err := s.largeCash.Capture(ctx, largeCashFacts(sale, lines, tenders, change, payer, suspectedAvoidance, actor)); err != nil {
+			if err := s.largeCash.Capture(ctx, largeCashFacts(sale, lines, tenders, change, payer, suspectedAvoidance, payerDeclined, actor)); err != nil {
 				return err
 			}
 		}
@@ -1019,10 +1020,10 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 // cash net of the change walked out of them (the money kept is the money
 // received).
 func largeCashFacts(sale *Sale, lines []salesdoc.Line, tenders []TenderIn, change int64,
-	payer *largecash.PayerIn, suspectedAvoidance bool, actor string) *largecash.CompletionFacts {
+	payer *largecash.PayerIn, suspectedAvoidance, payerDeclined bool, actor string) *largecash.CompletionFacts {
 	f := &largecash.CompletionFacts{TransactionID: sale.ID, BranchID: sale.BranchID,
 		CustomerID: sale.CustomerID, Currency: sale.Currency,
-		SuspectedAvoidance: suspectedAvoidance, Payer: payer, Actor: actor}
+		SuspectedAvoidance: suspectedAvoidance, Payer: payer, PayerDeclined: payerDeclined, Actor: actor}
 	for i := range lines {
 		if lines[i].ProductID != nil && lines[i].LineTotal != nil {
 			f.Lines = append(f.Lines, largecash.LineFact{ProductID: *lines[i].ProductID,

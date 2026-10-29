@@ -13,7 +13,10 @@ import fs from 'fs';
  * with it; a Canadian branch with the dealer threshold off (the default)
  * asks nothing; the same branch with the threshold on asks and says plainly
  * that the capture is for the dealer's own records and is not a FINTRAC
- * report.
+ * report. The branch's walk-in identity floor rides the same counter: a
+ * United States walk-in over the floor is asked who paid and the identity
+ * stays on the till session, and a branch with the floor off says on the
+ * screen that the walk-in's cash is not aggregated.
  */
 
 const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
@@ -102,6 +105,61 @@ async function payWholeInCash(page: Page) {
   return total;
 }
 
+/**
+ * A product whose branch stock can cover a cash sale over 3,000 dollars and
+ * under 10,000: the walk-in's floor asks there, and the legal threshold does
+ * not.
+ */
+async function stockedProductOverFloor(request: APIRequestContext): Promise<{ id: string; sku: string; qty: number }> {
+  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
+    items: { id: string; sku: string; base_price_ten_thousandths: number }[];
+  };
+  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
+  for (const p of list) {
+    const price = p.base_price_ten_thousandths / 10000;
+    // a price in this band keeps the quantity small: two sales of it fit on
+    // the branch's stock, and the sale stays under the legal threshold
+    if (price < 50 || price > 500) continue;
+    const qty = Math.ceil(3200 / price);
+    if (qty * price * 1.08875 >= 9000) continue;
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
+      items: { location_name: string; available: string }[];
+    };
+    const atBranch = page.items
+      .filter((r) => r.location_name === 'KEL-MAIN')
+      .reduce((n, r) => n + (Number(r.available) || 0), 0);
+    if (atBranch >= qty * 2) return { id: p.id, sku: p.sku, qty };
+  }
+  throw new Error('no stocked product for the walk-in floor run');
+}
+
+/** Rings one line of the product and raises its quantity to the given one. */
+async function ringQuantity(page: Page, sku: string, qty: number) {
+  const lines = page.locator('[data-testid="pos-lines"] li');
+  await page.getByTestId('catalog-search').fill(sku);
+  await page.getByTestId('catalog-search').press('Enter');
+  // the sale holds one line: the product that was searched for
+  await expect(lines).toHaveCount(1, { timeout: 10000 });
+  const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
+  await quantity.fill(String(qty));
+  await quantity.press('Enter');
+  await expect(page.getByTestId('summary-total')).toContainText(/[1-9][0-9,]*\.[0-9]{2}/);
+}
+
+/** Adds a cash tender for the whole total through the Payment panel. */
+async function payWholeInCashAtAnyAmount(page: Page) {
+  const head = page.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await page.getByTestId('tender-cash').click();
+  const text = (await page.getByTestId('summary-total').textContent()) ?? '';
+  const total = Number(text.replace(/[$,\s]/g, ''));
+  expect(total).toBeGreaterThan(3000);
+  await page.getByLabel('Tender amount').fill(total.toFixed(2));
+  await page.getByRole('button', { name: 'Add as split tender' }).click();
+  await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
+  return total;
+}
+
 test.afterEach(async ({ request }) => {
   // the dealer default country returns to the seeded state (Canada, threshold off) for the next spec
   await request.put('/api/v1/admin/large-cash/settings', { data: { country_default: 'CA', ca_enabled: false } });
@@ -177,5 +235,59 @@ test('the Canadian dealer threshold on asks and says it is not a FINTRAC report'
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-large-cash-ca-dialog.png'), fullPage: true });
   await page.getByTestId('payer-save').click();
 
+  await expect(page.getByRole('heading', { name: /sale complete/i })).toBeVisible({ timeout: 20000 });
+});
+
+test("a United States walk-in over the branch's identity floor is asked who paid, and the identity stays on the till session", async ({ page, request }) => {
+  await signIn(page, 'POS E2E');
+  const product = await stockedProductOverFloor(request);
+  await setCountryDefault(request, 'US');
+
+  await openCounter(page);
+  await ringQuantity(page, product.sku, product.qty);
+  await payWholeInCashAtAnyAmount(page);
+  await page.getByTestId('pos-pay').click();
+
+  // the branch's floor asked who paid, in the floor's own words
+  const dialog = page.getByTestId('payer-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId('payer-title')).toContainText('Who is paying for this walk-in?');
+  // a walk-in who declines is offered that way
+  await expect(page.getByTestId('payer-decline')).toBeVisible();
+  await page.getByTestId('payer-name').fill('Riverbend Builders');
+  await page.getByTestId('payer-address').fill('12 Mill Road, Kelowna');
+  await page.getByTestId('payer-date_of_birth').fill('1984-05-06');
+  await page.getByTestId('payer-occupation').fill('Contractor');
+  await pickOptionByValue(page.getByTestId('payer-id_type'), 'drivers_license');
+  await page.getByTestId('payer-id_number').fill('DL-00-1234567');
+  await page.getByTestId('payer-taxpayer_id').fill('00-1234567');
+  await page.getByTestId('payer-save').click();
+  await expect(page.getByRole('heading', { name: /sale complete/i })).toBeVisible({ timeout: 20000 });
+
+  // the next sale in the same till session is not asked again: the identity
+  // stays on the session, so the walk-in's cash sales are counted together
+  await page.getByTestId('pos-header').getByRole('button', { name: 'New Sale' }).click();
+  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
+  await ringQuantity(page, product.sku, product.qty);
+  await payWholeInCashAtAnyAmount(page);
+  await page.getByTestId('pos-pay').click();
+  await expect(page.getByTestId('payer-dialog')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /sale complete/i })).toBeVisible({ timeout: 20000 });
+});
+
+test('with the floor off the counter says the walk-in cash is not aggregated', async ({ page, request }) => {
+  await signIn(page, 'POS E2E');
+  const product = await stockedProductOverFloor(request);
+  // Canada: the floor is off by default
+  await setCountryDefault(request, 'CA');
+
+  await openCounter(page);
+  await ringQuantity(page, product.sku, product.qty);
+  await payWholeInCashAtAnyAmount(page);
+
+  // the counter says on the screen that the walk-in's cash is not aggregated
+  await expect(page.getByTestId('pos-walk-in-note')).toContainText('not aggregated');
+  await page.getByTestId('pos-pay').click();
+  await expect(page.getByTestId('payer-dialog')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /sale complete/i })).toBeVisible({ timeout: 20000 });
 });

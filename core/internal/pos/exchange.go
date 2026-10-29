@@ -46,6 +46,9 @@ type ExchangeIn struct {
 	// cash difference takes the payer over the branch's large cash threshold
 	// (CP-17a), the way the completion carries them.
 	Payer *largecash.PayerIn
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	PayerDeclined bool
 	// SuspectedAvoidance is the manager's mark that an instrument may be
 	// being used to avoid reporting (CP-17a).
 	SuspectedAvoidance bool
@@ -229,7 +232,8 @@ func (s *Service) Exchange(ctx context.Context, cashierID uuid.UUID, in *Exchang
 		// difference crosses the branch's large cash threshold is answered
 		// the way a completion is (CP-17a).
 		done, err := s.completeSaleTx(ctx, sale.ID, "", &revision, in.Tenders, in.PickedUpBy, actor, pre, *st.customerID,
-			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged, in.Payer, in.SuspectedAvoidance)
+			make([]*chargeResult, len(in.Tenders)), pricedTax, leg, in.Acknowledged, in.Payer, in.SuspectedAvoidance,
+			in.PayerDeclined)
 		if err != nil {
 			return err
 		}
@@ -498,6 +502,9 @@ type exchangeRequest struct {
 	// over the branch's threshold is refused 409 payer_details_required
 	// without them.
 	Payer *payerRequest `json:"payer"`
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	PayerDeclined *bool `json:"payer_declined"`
 	// SuspectedAvoidance is the manager's suspected avoidance mark (CP-17a).
 	SuspectedAvoidance *bool `json:"suspected_avoidance"`
 	// TenderMethod is the method the counter will tender for the difference.
@@ -527,6 +534,7 @@ func (r *exchangeRequest) parse() (*ExchangeIn, error) {
 	}
 	out.Acknowledged = parseAcknowledgedAlertIDs(v, r.AcknowledgedAlertIDs)
 	out.Payer = r.Payer.payer()
+	out.PayerDeclined = r.PayerDeclined != nil && *r.PayerDeclined
 	out.SuspectedAvoidance = r.SuspectedAvoidance != nil && *r.SuspectedAvoidance
 	if r.TenderMethod != "" {
 		switch strings.ToLower(strings.TrimSpace(r.TenderMethod)) {

@@ -65,6 +65,18 @@ func (r *Repository) BranchCountry(ctx context.Context, branchID uuid.UUID) (str
 	return strings.ToUpper(strings.TrimSpace(country)), err
 }
 
+// WalkInFloor answers the branch's own walk-in identity floor: the amount in
+// cents over which the counter asks a walk-in who paid cash to identify
+// themselves. Null is the branch country's default (the service resolves it).
+func (r *Repository) WalkInFloor(ctx context.Context, branchID uuid.UUID) (*int64, error) {
+	var floor *int64
+	err := r.exec(ctx).QueryRow(ctx, `SELECT walk_in_identity_cents FROM locations WHERE id = $1`, branchID).Scan(&floor)
+	if errors.Is(err, errNoRows) {
+		return nil, errors.New("the sale's branch does not exist")
+	}
+	return floor, err
+}
+
 // BranchTimezone answers the branch's timezone, UTC when unset.
 func (r *Repository) BranchTimezone(ctx context.Context, branchID uuid.UUID) *time.Location {
 	var tz *string

@@ -36,6 +36,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -77,6 +78,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }

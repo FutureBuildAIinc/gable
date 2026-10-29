@@ -634,7 +634,8 @@ components:
         optional metadata is present with null (ADR 0001 sections 6 and 12).
       required: [id, parent_id, path, type, code, description, name, address,
         city, state, zip, phone, tax_jurisdiction_code, default_tax_rate,
-        cash_rounding_mode, timezone, country_code, active, branch_id, revision, created_at, updated_at]
+        cash_rounding_mode, timezone, country_code, walk_in_identity_cents,
+        active, branch_id, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -676,6 +677,15 @@ components:
             The branch's country, two letters (CP-17a): the country picks
             the branch's large cash rule. Null falls back to the dealer's
             country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale
+            over it (CP-17a), so the walk-in's cash sales are counted
+            together. Null is the branch country's default: 3,000 dollars on
+            a United States branch, off on a Canadian one. Zero is the
+            dealer saying off.
         active:
           type: boolean
         branch_id:
@@ -741,6 +751,15 @@ components:
             The branch's country, two letters (CP-17a): the country picks
             the branch's large cash rule. Null falls back to the dealer's
             country.default; a branch with neither cannot be saved.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale
+            over it (CP-17a), so the walk-in's cash sales are counted
+            together. Null is the branch country's default: 3,000 dollars on
+            a United States branch, off on a Canadian one. Zero is the
+            dealer saying off.
         active:
           type: boolean
         revision:
@@ -785,6 +804,15 @@ components:
         country_code:
           type: [string, "null"]
           description: The branch's country, two letters (CP-17a); null falls back to the dealer's country.default.
+        walk_in_identity_cents:
+          type: [integer, "null"]
+          format: int64
+          description: >-
+            The branch's floor for asking a walk-in's identity on a cash sale
+            over it (CP-17a), so the walk-in's cash sales are counted
+            together. Null is the branch country's default: 3,000 dollars on
+            a United States branch, off on a Canadian one. Zero is the
+            dealer saying off.
         active:
           type: [boolean, "null"]
           description: Defaults to true when absent; an explicit false is honored.

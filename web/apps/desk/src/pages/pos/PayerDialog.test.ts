@@ -15,9 +15,10 @@ import { masked } from './PayerDialog';
 const US_FIELDS = ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'];
 const CA_FIELDS = ['name', 'address', 'date_of_birth', 'occupation', 'id_type'];
 
-function mount(fields: string[], dealerThreshold: boolean, refused = false, prior: PayerCapture | null = null): GablePayerDialog {
+function mount(fields: string[], dealerThreshold: boolean, refused = false, prior: PayerCapture | null = null,
+  floor = false, thresholdCrossed = false): GablePayerDialog {
     const el = document.createElement('gable-payer-dialog') as GablePayerDialog;
-    el.ask = { fields, dealerThreshold };
+    el.ask = { fields, dealerThreshold, floor, thresholdCrossed };
     el.refused = refused;
     el.prior = prior;
     document.body.appendChild(el);
@@ -98,5 +99,27 @@ describe('the payer capture dialog', () => {
     it('masks to the last four only', () => {
         expect(masked('DL-00-1234567')).toBe('****4567');
         expect(masked('')).toBe('');
+    });
+
+    it('asks the walk-in who paid over the branch floor, and lets them decline', async () => {
+        const el = mount(US_FIELDS, false, false, null, true, false);
+        await el.updateComplete;
+        expect(el.querySelector('[data-testid="payer-title"]')?.textContent).toContain('Who is paying for this walk-in?');
+        expect(el.textContent).toContain('their cash sales are counted together');
+        const decline = el.querySelector('[data-testid="payer-decline"]');
+        expect(decline).not.toBeNull();
+        let declined = false;
+        el.addEventListener('payer-decline', () => { declined = true; });
+        (decline as HTMLButtonElement).click();
+        expect(declined).toBe(true);
+    });
+
+    it('does not let a crossing be declined: the details are required there', async () => {
+        const el = mount(US_FIELDS, false, false, null, true, true);
+        await el.updateComplete;
+        expect(el.querySelector('[data-testid="payer-decline"]')).toBeNull();
+        const el2 = mount(US_FIELDS, false, false, null, false, true);
+        await el2.updateComplete;
+        expect(el2.querySelector('[data-testid="payer-decline"]')).toBeNull();
     });
 });

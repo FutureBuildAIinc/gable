@@ -7,7 +7,9 @@
 // number and the taxpayer identification number) are masked after they are
 // captured and never shown in cleartext again on this screen. A Canadian
 // crossing carries the plain sentence that the capture is for the dealer's
-// own records and is not a FINTRAC report.
+// own records and is not a FINTRAC report. The branch's walk-in identity
+// floor asks the same way, with one difference: a walk-in who declines to
+// identify lets the sale go ahead, and the fact is recorded for a manager.
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../../components/ui/gable-select.ts';
@@ -18,6 +20,15 @@ export interface PayerAsk {
     fields: string[];
     /** True for the Canadian dealer threshold: the note shows and no taxpayer id is asked. */
     dealerThreshold: boolean;
+    /**
+     * True when the branch's walk-in identity floor is the only question the
+     * counter asks: who paid, so their cash sales are counted together. A sale
+     * that also crosses the rule's threshold asks for the payer's details and
+     * no decline answers it, so the counter says the crossing's words.
+     */
+    floor?: boolean;
+    /** True when the rule's threshold is crossed: the payer's details are required and a decline does not answer it. */
+    thresholdCrossed?: boolean;
 }
 
 /** The captured payer, in the wire's shape. */
@@ -104,6 +115,21 @@ export class GablePayerDialog extends LitElement {
         }));
     }
 
+    /**
+     * The walk-in declined to identify over the branch's floor. The sale goes
+     * ahead and the fact is recorded for the manager's worklist, so the
+     * counter says so plainly. A crossing is not answered this way: the
+     * payer's details are the condition of the completion.
+     */
+    private _decline() {
+        this.dispatchEvent(new CustomEvent('payer-decline', { bubbles: true, composed: true }));
+    }
+
+    /** The decline answers the floor's ask only; a crossing cannot be declined. */
+    private get _canDecline(): boolean {
+        return (this.ask?.floor ?? false) && !(this.ask?.thresholdCrossed ?? false);
+    }
+
     private _field(label: string, key: keyof PayerCapture, placeholder: string, type = 'text') {
         return html`
             <label class="block text-xs uppercase tracking-wider text-zinc-500 font-semibold">
@@ -133,16 +159,22 @@ export class GablePayerDialog extends LitElement {
                     @click=${(e: MouseEvent) => e.stopPropagation()}
                 >
                     <div class="px-6 py-4 border-b border-white/5">
-                        <h2 class="text-lg font-semibold text-white" data-testid="payer-title">This payment needs the payer's details</h2>
+                        <h2 class="text-lg font-semibold text-white" data-testid="payer-title">${this.ask.floor
+                            ? 'Who is paying for this walk-in?'
+                            : "This payment needs the payer's details"}</h2>
                         <p class="text-sm text-zinc-400 mt-1">
-                            ${this.ask.dealerThreshold
-                                ? html`A cash payment at or above the dealer's threshold. This is for the dealer's own records. It is not a FINTRAC report.`
-                                : 'A cash payment that takes the payer over the large cash threshold. The details are kept for the report the dealer files.'}
+                            ${this.ask.floor
+                                ? html`This walk-in paid cash over the branch's identity floor. Ask who they are so their cash sales are counted together. If they decline, the sale still goes ahead and it is recorded for a manager to review.`
+                                : this.ask.dealerThreshold
+                                    ? html`A cash payment at or above the dealer's threshold. This is for the dealer's own records. It is not a FINTRAC report.`
+                                    : 'A cash payment that takes the payer over the large cash threshold. The details are kept for the report the dealer files.'}
                         </p>
                     </div>
                     ${this.refused ? html`
                         <div class="mx-6 mt-4 bg-safety-red/10 border border-safety-red/30 text-safety-red text-sm px-4 py-3 rounded-lg" data-testid="payer-refused">
-                            The payer's details are required before this payment can complete.
+                            ${this.ask.floor
+                                ? 'Ask who paid for this walk-in, or record that they declined to identify.'
+                                : "The payer's details are required before this payment can complete."}
                         </div>
                     ` : nothing}
                     <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -181,6 +213,13 @@ export class GablePayerDialog extends LitElement {
                         </div>
                     ` : nothing}
                     <div class="px-6 py-4 border-t border-white/5 flex items-center justify-end gap-3">
+                        ${this._canDecline ? html`
+                            <button
+                                @click=${() => this._decline()}
+                                class="px-4 py-2 text-sm text-zinc-300 hover:bg-white/5 rounded-lg transition-colors"
+                                data-testid="payer-decline"
+                            >They declined to identify</button>
+                        ` : nothing}
                         <button
                             @click=${() => this._cancel()}
                             class="px-4 py-2 text-sm text-zinc-300 hover:bg-white/5 rounded-lg transition-colors"

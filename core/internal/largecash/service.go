@@ -37,6 +37,47 @@ const (
 // FINTRAC reporting entity, so nothing here is a FINTRAC report.
 const CanadaNote = "This is for the dealer's own records. It is not a FINTRAC report."
 
+// The branch's walk-in identity floor (CP-17a, item 296): the amount over
+// which the counter asks a walk-in who paid cash to identify themselves, so
+// the walk-in's cash sales are counted together. The floor is the branch's
+// own setting; a branch with no setting takes its country's default, 3,000
+// dollars on a United States branch and off on a Canadian one.
+const (
+	// USDefaultWalkInFloorCents is the United States default floor, 3,000
+	// dollars in cents.
+	USDefaultWalkInFloorCents int64 = 300_000
+	// WalkInFloorOffCents is the floor that is off: the branch asks no
+	// walk-in's identity and their cash is not aggregated.
+	WalkInFloorOffCents int64 = 0
+)
+
+// WalkInFloorNote is the plain sentence the counter shows when a branch's
+// floor is off: the walk-in's cash is not aggregated.
+const WalkInFloorNote = "Walk-in cash is not aggregated at this branch: each walk-in's cash is counted on its own."
+
+// StateIdentityDeclined is the worklist's state for the walk-in who declined
+// to identify over the branch's floor: the sale went ahead and a manager
+// reviews it.
+const StateIdentityDeclined = "identity declined"
+
+// ResolveWalkInFloor answers the floor a branch runs: the branch's own
+// amount, else the branch country's default (3,000 dollars on a United
+// States branch, off on a Canadian one, and off in any country with no rule
+// family of its own).
+func ResolveWalkInFloor(country string, own *int64) int64 {
+	if country != "US" && country != "CA" {
+		// no rule family of its own: there is no large cash rule to ask about
+		return WalkInFloorOffCents
+	}
+	if own != nil {
+		return *own
+	}
+	if country == "US" {
+		return USDefaultWalkInFloorCents
+	}
+	return WalkInFloorOffCents
+}
+
 // PayerIn is the payer identity the counter captured, as the completion
 // request carries it. The taxpayer identification number and the ID number
 // are sealed before storage and never logged, never printed on a receipt
@@ -70,6 +111,10 @@ type CompletionFacts struct {
 	Tenders            []TenderFacts
 	SuspectedAvoidance bool
 	Payer              *PayerIn
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's floor. The sale goes ahead and the fact is
+	// recorded for the manager's worklist.
+	PayerDeclined bool
 	// Actor is who completes the sale, for the crossing's audit row.
 	Actor string
 }
@@ -89,6 +134,22 @@ type Preview struct {
 	Fields          []string `json:"fields"`
 	Note            string   `json:"note,omitempty"`
 	DealerThreshold bool     `json:"dealer_threshold"`
+	// WalkInFloorCents is the branch's floor for asking a walk-in's identity
+	// on a cash sale over it, zero when the branch has it off.
+	WalkInFloorCents int64 `json:"walk_in_floor_cents"`
+	// AsksFloor is true when this walk-in's cash sale passes the floor and no
+	// identity is captured yet: the counter asks before Pay.
+	AsksFloor bool `json:"asks_floor"`
+	// WalkInAggregated is true when the branch counts a walk-in's cash sales
+	// together once the walk-in is identified. With the floor off it is
+	// false and the counter says so.
+	WalkInAggregated bool `json:"walk_in_aggregated"`
+	// WalkInNote is the plain sentence the counter shows when the branch's
+	// floor is off: the walk-in's cash is not aggregated.
+	WalkInNote string `json:"walk_in_note,omitempty"`
+	// ThresholdCrossed is true when the sale's counted cash crosses the rule's
+	// threshold: the payer's details are required and no decline answers it.
+	ThresholdCrossed bool `json:"threshold_crossed"`
 }
 
 // USFields and CAFields are the payer fields each rule needs, in the order
@@ -105,6 +166,15 @@ var ErrPayerDetailsRequired = &httpx.Error{Status: http.StatusConflict, Code: ht
 	Message: "this payment takes the payer over the large cash threshold: capture the payer's details before completing",
 	Details: []httpx.FieldError{httpx.Blocker("payer_details_required",
 		"this payment takes the payer over the large cash threshold: capture the payer's details before completing")}}
+
+// ErrWalkInIdentityRequired is the 409 the completion answers when a
+// walk-in's cash sale passes the branch's identity floor and the counter has
+// neither captured the payer's details nor recorded that the walk-in declined
+// to identify. The sale waits for the answer.
+var ErrWalkInIdentityRequired = &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+	Message: "this walk-in's cash sale is over the branch's identity floor: capture the payer's details or record that the walk-in declined to identify",
+	Details: []httpx.FieldError{httpx.Blocker("walk_in_identity_required",
+		"this walk-in's cash sale is over the branch's identity floor: capture the payer's details or record that the walk-in declined to identify")}}
 
 // Service is the large cash capture, classification and aggregation.
 type Service struct {
@@ -228,92 +298,158 @@ type aggregate struct {
 	tenderCount int
 }
 
+// computed is one sale as the large cash rules see it: the branch's country,
+// the classifier's verdicts, the counted cash, the rule family's running
+// total for this payer and the branch's walk-in identity floor.
+type computed struct {
+	country   string
+	agg       *aggregate
+	decisions []Decision
+	counted   int64
+	// floor is the branch's walk-in identity floor, zero when off.
+	floor int64
+	// overFloor is true when this sale is a walk-in's cash sale that passes
+	// the floor: the counter asks who paid before Pay.
+	overFloor bool
+	// cashTendered is true when the sale takes cash: the floor's words are
+	// about cash, so they are said only when there is cash on the counter.
+	cashTendered bool
+}
+
 // compute classifies the sale's tenders under the branch's rule and reads
 // the payer's running aggregate. It takes the payer's advisory lock first,
 // so two registers crossing the threshold for one payer at once serialize
 // and the second sees the first's tenders.
-func (s *Service) compute(ctx context.Context, f *CompletionFacts) (country string, agg *aggregate, decisions []Decision, counted int64, err error) {
-	country, err = s.repo.BranchCountry(ctx, f.BranchID)
+func (s *Service) compute(ctx context.Context, f *CompletionFacts) (*computed, error) {
+	country, err := s.repo.BranchCountry(ctx, f.BranchID)
 	if err != nil {
-		return "", nil, nil, 0, err
+		return nil, err
 	}
+	out := &computed{country: country}
 	sale := SaleFacts{Country: country, SuspectedAvoidance: f.SuspectedAvoidance}
 	if country == "US" {
 		// the consumer durable test is at the sale line: a product flagged
 		// consumer durable whose line is priced over the threshold
 		durable, err := s.repo.AnyConsumerDurableLine(ctx, f.Lines, ThresholdCents)
 		if err != nil {
-			return "", nil, nil, 0, err
+			return nil, err
 		}
 		sale.ConsumerDurableOverThreshold = durable
 	}
 	for i := range f.Tenders {
 		d := Classify(sale, f.Tenders[i])
-		decisions = append(decisions, d)
+		out.decisions = append(out.decisions, d)
 		if d.Counts {
-			counted += d.CountedCents
+			out.counted += d.CountedCents
+		}
+		if f.Tenders[i].Method == "cash" {
+			out.cashTendered = true
 		}
 	}
-	if counted == 0 {
-		return country, nil, decisions, 0, nil
+	// the branch's walk-in identity floor: the branch's own amount, else the
+	// branch country's default. Only a walk-in's cash sale is asked about:
+	// a named customer is already the payer's key.
+	set, err := s.repo.WalkInFloor(ctx, f.BranchID)
+	if err != nil {
+		return nil, err
 	}
+	out.floor = ResolveWalkInFloor(country, set)
+	if out.counted == 0 {
+		return out, nil
+	}
+	out.overFloor = out.floor > 0 && f.CustomerID == nil && out.counted > out.floor
 	payerKey := s.payerKey(f)
 	if err := s.repo.AdvisoryLock(ctx, payerKey); err != nil {
-		return "", nil, nil, 0, err
+		return nil, err
 	}
 	switch country {
 	case "US":
 		base, ids, n, err := s.repo.USSinceLastEvent(ctx, payerKey, s.now().AddDate(-1, 0, 0))
 		if err != nil {
-			return "", nil, nil, 0, err
+			return nil, err
 		}
-		return country, &aggregate{rule: RuleUS, threshold: ThresholdCents, comparator: "greater",
-			base: base, txIDs: ids, tenderCount: n}, decisions, counted, nil
+		out.agg = &aggregate{rule: RuleUS, threshold: ThresholdCents, comparator: "greater",
+			base: base, txIDs: ids, tenderCount: n}
 	case "CA":
 		st, err := s.ReadSettings(ctx)
 		if err != nil {
-			return "", nil, nil, 0, err
+			return nil, err
 		}
-		if !st.CAEnabled {
-			// the dealer threshold is off: nothing is counted or recorded
-			return country, nil, decisions, 0, nil
+		if !st.CAEnabled && out.floor == WalkInFloorOffCents {
+			// the dealer threshold is off and the branch asks no walk-in's
+			// identity: nothing is counted or recorded
+			out.counted = 0
+			out.decisions = nil
+			return out, nil
 		}
 		start, end, err := s.repo.BranchDayWindow(ctx, f.BranchID, s.now())
 		if err != nil {
-			return "", nil, nil, 0, err
+			return nil, err
 		}
 		base, ids, n, err := s.repo.CAInWindow(ctx, payerKey, start, end)
 		if err != nil {
-			return "", nil, nil, 0, err
+			return nil, err
 		}
-		return country, &aggregate{rule: RuleCA, threshold: st.CAThresholdCents, comparator: "at_or_above",
-			base: base, txIDs: ids, tenderCount: n}, decisions, counted, nil
+		out.agg = &aggregate{rule: RuleCA, threshold: st.CAThresholdCents, comparator: "at_or_above",
+			base: base, txIDs: ids, tenderCount: n}
+		if !st.CAEnabled {
+			// the dealer threshold is off: the branch's own floor is the only
+			// question this sale raises, and no crossing is recorded.
+			out.agg.threshold = WalkInFloorOffCents
+		}
 	}
-	return country, nil, decisions, 0, nil
+	return out, nil
+}
+
+// crossed answers whether this sale's counted cash crosses the rule's
+// threshold: the United States duty and the Canadian dealer policy.
+func (c *computed) crossed() bool {
+	if c.agg == nil || c.agg.threshold <= 0 {
+		return false
+	}
+	return Crosses(c.agg.rule, c.agg.base+c.counted, c.agg.threshold)
 }
 
 // Preview answers what the counter asks before Pay. It writes nothing.
 func (s *Service) Preview(ctx context.Context, f *CompletionFacts) (*Preview, error) {
-	country, agg, _, counted, err := s.compute(ctx, f)
+	c, err := s.compute(ctx, f)
 	if err != nil {
 		return nil, err
 	}
-	p := &Preview{Country: country, CountedCents: counted, ThresholdCents: ThresholdCents,
+	p := &Preview{Country: c.country, CountedCents: c.counted, ThresholdCents: ThresholdCents,
 		Comparator: "greater", Fields: []string{}}
+	p.WalkInFloorCents = c.floor
+	p.WalkInAggregated = c.floor > WalkInFloorOffCents
+	if !p.WalkInAggregated && c.cashTendered {
+		// the counter takes cash: it says on the screen that the walk-in's
+		// cash is not aggregated at this branch
+		p.WalkInNote = WalkInFloorNote
+	}
 	switch {
-	case agg != nil && agg.rule == RuleUS:
+	case c.agg != nil && c.agg.rule == RuleUS:
 		p.RuleFamily = RuleUS
-		p.AggregateCents = agg.base + counted
-		p.ThresholdCents = agg.threshold
-		p.AsksDetails = Crosses(RuleUS, p.AggregateCents, agg.threshold)
-	case agg != nil && agg.rule == RuleCA:
+		p.AggregateCents = c.agg.base + c.counted
+		p.ThresholdCents = c.agg.threshold
+		p.AsksDetails = Crosses(RuleUS, p.AggregateCents, c.agg.threshold)
+		p.ThresholdCrossed = p.AsksDetails
+	case c.agg != nil && c.agg.rule == RuleCA:
 		p.RuleFamily = RuleCA
-		p.AggregateCents = agg.base + counted
-		p.ThresholdCents = agg.threshold
+		p.AggregateCents = c.agg.base + c.counted
+		p.ThresholdCents = c.agg.threshold
 		p.Comparator = "at_or_above"
-		p.DealerThreshold = true
+		p.DealerThreshold = c.agg.threshold > WalkInFloorOffCents
 		p.Note = CanadaNote
-		p.AsksDetails = Crosses(RuleCA, p.AggregateCents, agg.threshold)
+		if p.DealerThreshold {
+			p.AsksDetails = Crosses(RuleCA, p.AggregateCents, c.agg.threshold)
+			p.ThresholdCrossed = p.AsksDetails
+		}
+	}
+	// The floor asks the counter for the walk-in's identity so their cash
+	// sales are counted together. A capture that already holds the identity
+	// has answered it.
+	p.AsksFloor = c.overFloor && f.Payer == nil
+	if p.AsksFloor {
+		p.AsksDetails = true
 	}
 	if p.AsksDetails {
 		if p.RuleFamily == RuleCA {
@@ -329,16 +465,23 @@ func (s *Service) Preview(ctx context.Context, f *CompletionFacts) (*Preview, er
 // that counted (each with the classifier's reason), and on a threshold
 // crossing it records the captured payer and writes the large_cash_events
 // row. A crossing without the payer's details answers 409
-// payer_details_required and the whole completion refuses.
+// payer_details_required and the whole completion refuses. A walk-in's cash
+// sale over the branch's identity floor is asked about before Pay: without
+// the payer's details and without a recorded decline it answers 409
+// walk_in_identity_required, and a recorded decline lets the sale go ahead
+// and lands in the worklist as an identity declined.
 func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
-	country, agg, decisions, counted, err := s.compute(ctx, f)
+	c, err := s.compute(ctx, f)
 	if err != nil {
 		return err
 	}
-	if country != "US" && country != "CA" {
+	if c.country != "US" && c.country != "CA" {
 		return nil
 	}
-	for i, d := range decisions {
+	if c.counted == 0 {
+		return nil
+	}
+	for i, d := range c.decisions {
 		if !d.Counts {
 			continue
 		}
@@ -347,55 +490,120 @@ func (s *Service) Capture(ctx context.Context, f *CompletionFacts) error {
 			return err
 		}
 	}
-	if agg == nil || !Crosses(agg.rule, agg.base+counted, agg.threshold) {
-		return nil
+	if c.crossed() {
+		// the crossing: the payer's details are the condition of the completion
+		if f.Payer == nil {
+			if !f.PayerDeclined {
+				return ErrPayerDetailsRequired
+			}
+			// the walk-in declined to identify: the sale goes ahead and the
+			// worklist holds the fact for a manager
+			return s.recordDeclined(ctx, f, c)
+		}
+		if err := s.checkPayer(c.country, f.Payer); err != nil {
+			return err
+		}
+		if err := s.storePayer(ctx, f, c.country); err != nil {
+			return err
+		}
+		txIDs := append(c.agg.txIDs, f.TransactionID)
+		seen := map[uuid.UUID]bool{}
+		uniq := make([]uuid.UUID, 0, len(txIDs))
+		for _, id := range txIDs {
+			if !seen[id] {
+				seen[id] = true
+				uniq = append(uniq, id)
+			}
+		}
+		state := "reportable"
+		if c.agg.rule == RuleCA {
+			state = "recorded"
+		}
+		if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, c.agg.rule, f.Currency,
+			c.counted, c.agg.base+c.counted, uniq, c.agg.tenderCount+1, state); err != nil {
+			return err
+		}
+		// The crossing is audited in the completion's transaction. The row names
+		// the rule and the figures and that a payer was captured, never an
+		// identity value (ADR 0003).
+		return audit.NewLogger(s.db).Log(ctx, audit.Entry{
+			Action: "large_cash.crossing.recorded", EntityType: "pos_transaction", EntityID: f.TransactionID, UserID: f.Actor,
+			Changes: map[string]interface{}{
+				"rule_family": c.agg.rule, "state": state, "branch_id": f.BranchID.String(),
+				"counted_cents": c.counted, "total_cents": c.agg.base + c.counted, "payer_captured": true,
+			}})
 	}
-	// the crossing: the payer's details are the condition of the completion
-	if err := s.checkPayer(country, f.Payer); err != nil {
-		return err
+	if c.overFloor && f.Payer == nil {
+		// the branch's floor: the counter asked who paid and has no answer yet
+		if !f.PayerDeclined {
+			return ErrWalkInIdentityRequired
+		}
+		return s.recordDeclined(ctx, f, c)
 	}
-	if err := s.storePayer(ctx, f, country); err != nil {
-		return err
+	return nil
+}
+
+// recordDeclined records the walk-in who declined to identify over the
+// branch's floor: the sale goes ahead and the row lands in the worklist for a
+// manager to review. The state says identity declined and the figures are
+// the sale's, so a manager sees what the sale was.
+func (s *Service) recordDeclined(ctx context.Context, f *CompletionFacts, c *computed) error {
+	rule := RuleUS
+	if c.country == "CA" {
+		rule = RuleCA
 	}
-	txIDs := append(agg.txIDs, f.TransactionID)
-	seen := map[uuid.UUID]bool{}
-	uniq := make([]uuid.UUID, 0, len(txIDs))
-	for _, id := range txIDs {
-		if !seen[id] {
-			seen[id] = true
-			uniq = append(uniq, id)
+	counted := 0
+	for _, d := range c.decisions {
+		if d.Counts {
+			counted++
 		}
 	}
-	state := "reportable"
-	if agg.rule == RuleCA {
-		state = "recorded"
-	}
-	if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, agg.rule, f.Currency,
-		counted, agg.base+counted, uniq, agg.tenderCount+1, state); err != nil {
+	if err := s.repo.InsertEvent(ctx, s.payerKey(f), f.CustomerID, f.BranchID, rule, f.Currency,
+		c.counted, c.counted, []uuid.UUID{f.TransactionID}, counted, StateIdentityDeclined); err != nil {
 		return err
 	}
-	// The crossing is audited in the completion's transaction. The row names
-	// the rule and the figures and that a payer was captured, never an
-	// identity value (ADR 0003).
 	return audit.NewLogger(s.db).Log(ctx, audit.Entry{
-		Action: "large_cash.crossing.recorded", EntityType: "pos_transaction", EntityID: f.TransactionID, UserID: f.Actor,
+		Action: "large_cash.identity_declined.recorded", EntityType: "pos_transaction", EntityID: f.TransactionID, UserID: f.Actor,
 		Changes: map[string]interface{}{
-			"rule_family": agg.rule, "state": state, "branch_id": f.BranchID.String(),
-			"counted_cents": counted, "total_cents": agg.base + counted, "payer_captured": true,
+			"rule_family": rule, "state": StateIdentityDeclined, "branch_id": f.BranchID.String(),
+			"counted_cents": c.counted, "total_cents": c.counted, "payer_captured": false,
 		}})
 }
 
 // payerKey is the aggregation key: the named customer, else the captured
-// taxpayer identification number's digest (the walk-in's strong key), else
-// nothing aggregates.
+// identity's digest (the walk-in's key, the same person across their sales),
+// else nothing aggregates.
 func (s *Service) payerKey(f *CompletionFacts) string {
 	if f.CustomerID != nil {
 		return "cus:" + f.CustomerID.String()
 	}
-	if f.Payer != nil && strings.TrimSpace(f.Payer.TaxpayerID) != "" {
-		return "tin:" + s.tinDigest(f.Payer.TaxpayerID)
+	if f.Payer != nil {
+		if tin := strings.TrimSpace(f.Payer.TaxpayerID); tin != "" {
+			return "tin:" + s.tinDigest(tin)
+		}
+		if digest := s.identityDigest(f.Payer); digest != "" {
+			return "id:" + digest
+		}
 	}
 	return "walk:" + f.TransactionID.String()
+}
+
+// identityDigest is the HMAC-SHA256 of the captured identity's strongest
+// stable value: the ID number when the capture carries one, else the name and
+// the date of birth. It keys a walk-in's sales together without the identity
+// ever being stored in cleartext, and it is the key the preview and the
+// completion both use, so the two agree on the person.
+func (s *Service) identityDigest(p *PayerIn) string {
+	value := strings.TrimSpace(p.IDNumber)
+	if value == "" {
+		name := strings.ToLower(strings.TrimSpace(p.Name))
+		dob := strings.TrimSpace(p.DateOfBirth)
+		if name == "" || dob == "" {
+			return ""
+		}
+		value = name + "|" + dob
+	}
+	return s.digest("id", strings.ToUpper(strings.Join(strings.Fields(value), "")))
 }
 
 // tinDigest is the HMAC-SHA256 of a normalized taxpayer identification
@@ -407,15 +615,21 @@ func (s *Service) tinDigest(tin string) string {
 	if normalized == "" {
 		return ""
 	}
+	return s.digest("tin", normalized)
+}
+
+// digest is the keyed digest of a normalized value: the HMAC-SHA256 under the
+// vault key, and a plain SHA-256 without one.
+func (s *Service) digest(label, normalized string) string {
 	if s.keyHex != "" {
 		key, err := hex.DecodeString(s.keyHex)
 		if err == nil && len(key) == 32 {
 			m := hmac.New(sha256.New, key)
-			m.Write([]byte("tin:" + normalized))
+			m.Write([]byte(label + ":" + normalized))
 			return hex.EncodeToString(m.Sum(nil))
 		}
 	}
-	sum := sha256.Sum256([]byte("tin:" + normalized))
+	sum := sha256.Sum256([]byte(label + ":" + normalized))
 	return hex.EncodeToString(sum[:])
 }
 

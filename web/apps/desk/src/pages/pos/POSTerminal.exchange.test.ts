@@ -78,6 +78,12 @@ const ASKS = {
     threshold_cents: 1000000, comparator: 'greater', asks_details: true,
     fields: ['name', 'address', 'taxpayer_id', 'date_of_birth', 'occupation', 'id_type', 'id_number', 'third_party_payer'],
     dealer_threshold: false,
+    // the branch's walk-in identity floor (CP-17a): the amount over which the
+    // counter asks a walk-in who paid cash to identify themselves.
+    walk_in_floor_cents: 300000,
+    asks_floor: false,
+    walk_in_aggregated: true,
+    threshold_crossed: true,
 };
 
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement;

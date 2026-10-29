@@ -188,6 +188,10 @@ type completeSaleRequest struct {
 	AcknowledgedAlertIDs []string      `json:"acknowledged_alert_ids"`
 	Payer                *payerRequest `json:"payer"`
 	SuspectedAvoidance   *bool         `json:"suspected_avoidance"`
+	// PayerDeclined is the counter's record that the walk-in declined to
+	// identify over the branch's walk-in identity floor (CP-17a, item 296).
+	// The sale goes ahead and the fact is recorded for the manager's worklist.
+	PayerDeclined *bool `json:"payer_declined"`
 }
 
 // payerRequest is the payer identity the counter captured for a large cash
@@ -235,6 +239,12 @@ func (r *payerRequest) payer() *largecash.PayerIn {
 // suspectedAvoidance answers the manager's suspected avoidance mark.
 func (r *completeSaleRequest) suspectedAvoidance() bool {
 	return r.SuspectedAvoidance != nil && *r.SuspectedAvoidance
+}
+
+// payerDeclined answers the counter's record that the walk-in declined to
+// identify over the branch's walk-in identity floor (CP-17a, item 296).
+func (r *completeSaleRequest) payerDeclined() bool {
+	return r.PayerDeclined != nil && *r.PayerDeclined
 }
 
 func deref(s *string) string {

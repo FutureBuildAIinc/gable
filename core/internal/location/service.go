@@ -84,10 +84,15 @@ func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) 
 // the caller's transaction; the event is the transaction's last statement
 // (ADR 0003 section 2). A failed audit write fails the mutation (the
 // recipe's rule).
-func (s *Service) record(ctx context.Context, loc *Location, action, eventType string) error {
+func (s *Service) record(ctx context.Context, loc *Location, action, eventType string, extra ...map[string]any) error {
 	typeWire := strings.ToLower(string(loc.Type))
 	if s.audits != nil {
 		changes := map[string]any{"code": loc.Code, "type": typeWire, "revision": loc.Revision, "active": loc.Active}
+		for _, e := range extra {
+			for k, v := range e {
+				changes[k] = v
+			}
+		}
 		if err := s.audits.Log(ctx, audit.Entry{
 			Action: action, EntityType: "location", EntityID: loc.ID, Changes: changes,
 		}); err != nil {
@@ -214,11 +219,35 @@ func (s *Service) UpdateLocation(ctx context.Context, loc *Location, revision in
 		return err
 	}
 	return s.inTx(ctx, func(ctx context.Context) error {
+		// the floor's old value is read inside the write's own transaction, so
+		// the audit row names the floor the branch had and the floor it has.
+		// A row that is gone is the write's own answer, not this read's.
+		var before *Location
+		prior, err := s.repo.GetLocation(ctx, loc.ID)
+		if err == nil {
+			before = prior
+		} else if !errors.Is(err, ErrNotFound) {
+			return resolveWrite(err)
+		}
 		if err := resolveWrite(s.repo.UpdateLocation(ctx, loc, revision)); err != nil {
 			return err
 		}
-		return s.record(ctx, loc, EventLocationUpdated, EventLocationUpdated)
+		return s.record(ctx, loc, EventLocationUpdated, EventLocationUpdated, floorChange(before, loc))
 	})
+}
+
+// floorChange names the walk-in identity floor's old and new value in the
+// branch's audit row (CP-17a, item 296): the dealer changed the amount the
+// counter asks a walk-in's identity over, and the trail says which.
+func floorChange(before, after *Location) map[string]any {
+	var old any
+	if before != nil {
+		old = before.WalkInIdentityCents
+	}
+	return map[string]any{
+		"before": map[string]any{"walk_in_identity_cents": old},
+		"after":  map[string]any{"walk_in_identity_cents": after.WalkInIdentityCents},
+	}
 }
 
 // DeleteLocation archives the location (active=false) with its audit row and

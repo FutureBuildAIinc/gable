@@ -480,7 +480,7 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r), acknowledged, req.payer(), req.suspectedAvoidance())
+	sale, err := h.service.CompleteSale(r.Context(), id, r.Header.Get("If-Match"), revision, tenders, pickedUpBy, h.actorFrom(r), acknowledged, req.payer(), req.suspectedAvoidance(), req.payerDeclined())
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

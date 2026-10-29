@@ -6428,7 +6428,7 @@ export interface paths {
         put?: never;
         /**
          * What the large cash rule asks of this payment
-         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. Writes nothing; the completion's own capture is the authority.
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
          */
         post: operations["posLargeCashPreview"];
         delete?: never;
@@ -14469,6 +14469,11 @@ export interface components {
             timezone: string | null;
             /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
             country_code: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents: number | null;
             active: boolean;
             /** Format: uuid */
             branch_id: string | null;
@@ -14503,6 +14508,11 @@ export interface components {
             timezone?: string | null;
             /** @description The branch's country, two letters (CP-17a): the country picks the branch's large cash rule. Null falls back to the dealer's country.default; a branch with neither cannot be saved. */
             country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             active?: boolean;
             /** Format: int64 */
             revision?: number;
@@ -14527,6 +14537,11 @@ export interface components {
             timezone?: string;
             /** @description The branch's country, two letters (CP-17a); null falls back to the dealer's country.default. */
             country_code?: string | null;
+            /**
+             * Format: int64
+             * @description The branch's floor for asking a walk-in's identity on a cash sale over it (CP-17a), so the walk-in's cash sales are counted together. Null is the branch country's default: 3,000 dollars on a United States branch, off on a Canadian one. Zero is the dealer saying off.
+             */
+            walk_in_identity_cents?: number | null;
             /** @description Defaults to true when absent; an explicit false is honored. */
             active?: boolean | null;
         };
@@ -16770,6 +16785,8 @@ export interface components {
             revision?: number;
             /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
             payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
             /** @description The manager's mark that an instrument may be being used to avoid reporting (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
             suspected_avoidance?: boolean;
         };
@@ -16826,6 +16843,8 @@ export interface components {
             transaction_id: string;
             /** @description The manager's suspected avoidance mark. */
             suspected_avoidance?: boolean;
+            /** @description The identity the counter already holds for this payer (the walk-in identified earlier in this till session). The preview keys the same person the completion will, so the two agree on whose cash this is. */
+            payer?: components["schemas"]["PosPayerCapture"];
             tenders: {
                 /** @description The tender method: cash, check, card, account or store_credit. */
                 method: string;
@@ -16835,7 +16854,7 @@ export interface components {
                 amount_cents: number;
             }[];
         };
-        /** @description What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. */
+        /** @description What the counter asks before Pay (CP-17a): the branch's country and rule family, this sale's counted cash, the aggregate it comes to, the threshold with its comparator shape, whether the payer's details are required and the fields the rule needs. A Canadian branch carries the note that the capture is for the dealer's own records and is not a FINTRAC report. The walk-in floor is the branch's own amount over which the counter asks a walk-in who paid cash to identify themselves; a branch with it off says on the counter that the walk-in's cash is not aggregated. */
         PosLargeCashPreview: {
             /** @description The branch's country, two letters. */
             country: string;
@@ -16854,6 +16873,19 @@ export interface components {
             note?: string;
             /** @description True for the Canadian dealer policy threshold (never a legal duty). */
             dealer_threshold?: boolean;
+            /**
+             * Format: int64
+             * @description The branch's walk-in identity floor in cents; zero when the branch has it off.
+             */
+            walk_in_floor_cents: number;
+            /** @description True when this walk-in's cash sale passes the branch's floor and no identity is captured yet: the counter asks before Pay. */
+            asks_floor: boolean;
+            /** @description True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+            walk_in_aggregated: boolean;
+            /** @description The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+            walk_in_note?: string;
+            /** @description True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+            threshold_crossed: boolean;
         };
         PosVoidRequest: {
             reason: string;
@@ -17179,6 +17211,8 @@ export interface components {
             acknowledged_alert_ids?: string[];
             /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
             payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
+            payer_declined?: boolean;
             /** @description The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
             suspected_avoidance?: boolean;
             /**

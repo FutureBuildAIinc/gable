@@ -37,6 +37,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -78,6 +79,7 @@
         "timezone": "America/New_York",
         "type": "bin",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -116,6 +118,7 @@
             "timezone": "America/New_York",
             "type": "yard",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -140,6 +143,7 @@
             "timezone": "America/New_York",
             "type": "bin",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -164,6 +168,7 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -188,6 +193,7 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -212,6 +218,7 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -236,6 +243,7 @@
             "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": null
           },
           {
@@ -260,6 +268,7 @@
             "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
+            "walk_in_identity_cents": null,
             "zip": "V1X 7K2"
           }
         ],
@@ -409,6 +418,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -471,6 +481,7 @@
         "timezone": "America/New_York",
         "type": "yard",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }
@@ -618,6 +629,7 @@
         "timezone": "America/New_York",
         "type": "bin",
         "updated_at": "<ts+0d>",
+        "walk_in_identity_cents": null,
         "zip": null
       }
     }

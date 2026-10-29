@@ -257,11 +257,12 @@ export const posService = {
         revision: number,
         tenders: TenderIn[],
         acknowledgedAlertIds: string[] = [],
-        extras?: { payer?: PayerCaptureIn; suspected_avoidance?: boolean },
+        extras?: { payer?: PayerCaptureIn; suspected_avoidance?: boolean; payer_declined?: boolean },
     ): Promise<Sale> {
         const body: Record<string, unknown> = { tenders, acknowledged_alert_ids: acknowledgedAlertIds };
         if (extras?.payer) body.payer = extras.payer;
         if (extras?.suspected_avoidance !== undefined) body.suspected_avoidance = extras.suspected_avoidance;
+        if (extras?.payer_declined !== undefined) body.payer_declined = extras.payer_declined;
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/complete`, {
                 method: 'POST',
@@ -276,19 +277,32 @@ export const posService = {
     /**
      * What the branch country's large cash rule asks of this payment before Pay
      * (CP-17a): the server classifies the tenders against the sale it holds,
-     * so the screen never decides a rule on its own. Writes nothing.
+     * so the screen never decides a rule on its own. Writes nothing. The
+     * identity the counter already holds for this payer rides along, so the
+     * preview keys the same person the completion will.
      */
-    async largeCashPreview(saleId: string, tenders: TenderIn[], suspectedAvoidance = false): Promise<LargeCashPreview> {
+    async largeCashPreview(
+        saleId: string,
+        tenders: TenderIn[],
+        suspectedAvoidance = false,
+        payer?: PayerCaptureIn,
+    ): Promise<LargeCashPreview> {
         const wireTenders = tenders.map((t) => {
             const out: Record<string, unknown> = { method: t.method, amount_cents: t.amount_cents };
             if (t.instrument) out.instrument = t.instrument;
             return out;
         });
+        const body: Record<string, unknown> = {
+            transaction_id: saleId,
+            suspected_avoidance: suspectedAvoidance,
+            tenders: wireTenders,
+        };
+        if (payer) body.payer = payer;
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/large-cash/preview`, {
                 method: 'POST',
                 headers: JSON_HEADERS,
-                body: JSON.stringify({ transaction_id: saleId, suspected_avoidance: suspectedAvoidance, tenders: wireTenders }),
+                body: JSON.stringify(body),
             }),
             'Failed to check the large cash rule',
         );
