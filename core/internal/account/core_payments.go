@@ -811,8 +811,10 @@ type VoidPaymentIn struct {
 
 // VoidPayment reverses every live application (with its discounts), then posts
 // the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is
-// the amount less refunds, and ends the payment as VOIDED. A card payment is
-// refused (409 card_payment): it is refunded through the gateway.
+// the amount less refunds, and ends the payment as VOIDED. A rounded cash
+// payment pays the rounded cash back and reverses the rounding legs with it
+// (CP-18). A card payment is refused (409 card_payment): it is refunded
+// through the gateway.
 func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, error) {
 	if err := s.requireTx(ctx); err != nil {
 		return nil, err
@@ -884,12 +886,35 @@ func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, 
 		return nil, err
 	}
 	remaining := pay.Unapplied + r.paymentAdd
+	// Cash rounding without pennies (CP-18): a rounded counter payment kept
+	// the rounded cash while its entry booked the exact figure to the
+	// deposits and the difference to the rounding account. The void pays the
+	// rounded cash back and posts the rounding legs in reverse, so the cash,
+	// the deposits, the rounding accounts and the drawer's expectation all
+	// return to zero. The rounding is read from the payment's own entry.
+	var rounding int64
+	if err := s.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(ROUND(l.credit * 100)::bigint - ROUND(l.debit * 100)::bigint), 0)
+		FROM payments p
+		JOIN gl_journal_lines l ON l.journal_entry_id = p.gl_entry_id
+		JOIN gl_accounts a ON a.id = l.account_id
+		WHERE p.id = $1 AND a.code IN ($2, $3)`, pay.ID,
+		gl.AccountCodeRoundingIncome, gl.AccountCodeRoundingLoss).Scan(&rounding); err != nil {
+		return nil, fmt.Errorf("failed to read the payment's rounding: %w", err)
+	}
+	payout := remaining + rounding
 	payID := pay.ID
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: remaining},
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: payout},
+	}
+	if rounding > 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Debit: rounding})
+	} else if rounding < 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingLoss, Description: "Cash Rounding Loss", Credit: -rounding})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Void of payment " + pay.Number, Source: gl.SourcePayment,
-		SourceRefID: &payID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: remaining},
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: remaining},
-		}})
+		SourceRefID: &payID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return nil, err
 	}

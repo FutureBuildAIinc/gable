@@ -469,6 +469,75 @@ func TestCP18_RoundedRefusalWritesNothing(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE: the void of a rounded cash sale pays back the rounded cash the drawer
+// took and posts the rounding legs in reverse, so the cash, the deposits, the
+// rounding accounts and the till's expectation all return to zero. Round up
+// (a 103 sale paid 105) and round down (a 106 sale paid 105) both.
+func TestCP18_VoidOfRoundedSaleReversesTheRounding(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+
+	voidTheSale := func(saleID string, body resp) {
+		t.Helper()
+		r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+			map[string]any{"reason": "rung in error", "revision": rev(t, body)},
+			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+		if r.status != http.StatusOK {
+			t.Fatalf("the void = %d: %s", r.status, r.raw)
+		}
+	}
+	assertAllZero := func() {
+		t.Helper()
+		if got := f.accountBalance("1010"); got != 0 {
+			t.Errorf("the cash = %d cents, want none", got)
+		}
+		if got := f.accountBalance("2200"); got != 0 {
+			t.Errorf("the customer deposits = %d cents, want none", got)
+		}
+		if got := f.accountBalance("4095"); got != 0 {
+			t.Errorf("the rounding income = %d cents, want none", got)
+		}
+		if got := f.accountBalance("5045"); got != 0 {
+			t.Errorf("the rounding loss = %d cents, want none", got)
+		}
+		if got := f.tillExpectedCash(); got != 0 {
+			t.Errorf("the till expects %d cents of cash, want none", got)
+		}
+	}
+
+	// Round up: the drawer took 105 for a 103 sale; the void pays 105 back
+	// and takes the two cents of rounding income with it.
+	upSale, _ := f.saleAtPrice(103)
+	up := f.completeSale(upSale, tender("cash", 105))
+	if up.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", up.status, up.raw)
+	}
+	if got := f.accountBalance("4095"); got != -2 {
+		t.Fatalf("the rounding income = %d cents, want a credit of two", got)
+	}
+	voidTheSale(upSale, up)
+	assertAllZero()
+	if got := str(t, f.getSale(t, upSale), "status"); got != "voided" {
+		t.Errorf("the sale's status = %q, want voided", got)
+	}
+
+	// Round down: the drawer took 105 for a 106 sale; the void pays 105 back
+	// and gives the cent of rounding loss back.
+	downSale, _ := f.saleAtPrice(106)
+	down := f.completeSale(downSale, tender("cash", 105))
+	if down.status != http.StatusOK {
+		t.Fatalf("the round-down complete = %d: %s", down.status, down.raw)
+	}
+	if got := f.accountBalance("5045"); got != 1 {
+		t.Fatalf("the rounding loss = %d cents, want a debit of one", got)
+	}
+	voidTheSale(downSale, down)
+	assertAllZero()
+	f.assertARInvariants(t)
+}
+
 // RULE: three concurrent rounded cash sales at pool size 4 serialize cleanly,
 // book every rounding leg, keep the till's expected cash exact, and preserve
 // the AR subledger invariants.
