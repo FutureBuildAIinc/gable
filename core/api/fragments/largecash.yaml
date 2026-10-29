@@ -1,0 +1,408 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026, FutureBuild, Inc. and OpenLBM contributors
+#
+# The large cash module on the wire contract (ADR 0001; CP-17b): the manager's
+# worklist of the crossings the dealer owes a filing on, the filing itself,
+# the Form 8300 data set the filer types into BSA E-Filing, and the customer
+# statement for the year's large cash receipts.
+#
+# Three audiences, three surfaces. The clerk sees a payer's details at the
+# counter (CP-17a). The manager sees the worklist: one row per crossing, with
+# the deadline the filing is due, the severity that ranks the queue and the
+# action the row wants. The filer sees the Form 8300 data set, which is the
+# one surface that carries the payer's taxpayer identification number, because
+# the IRS form cannot be completed without it. The worklist and the statement
+# never carry that number.
+#
+# Gable does not file: the export carries the figures and the sentence that
+# says so, and the dealer confirms each filing with its own adviser.
+paths:
+  /api/v1/large-cash/worklist:
+    get:
+      operationId: largeCashWorklist
+      tags: [large-cash]
+      summary: The manager's large cash worklist
+      description: >-
+        Every crossing the dealer owes a filing on, one row per crossing, in
+        the order the manager should work them. The severity ranks by the
+        deadline first and the amount second, so a small filing due tomorrow
+        sits above a large filing due in ten days, and the recommended action
+        is the ladder: capture the payer's details, then file, then chase a
+        filing past its deadline, then issue the customer statement. A row
+        that is not reportable (a Canadian record, an identity declined
+        crossing) offers no filing; the identity declined row says so in
+        words and asks a manager to look at it.
+        The deadline is computed as a rule, the receipt anchor plus 15 days,
+        and the row carries whether it is past. The row never carries the
+        payer's taxpayer identification number. A branch scoped caller sees
+        only the crossings its branch received cash for or contributed cash
+        to; the aggregate each row carries is the dealer's central one.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The ranked worklist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashWorklist"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/filing:
+    post:
+      operationId: largeCashRecordFiling
+      tags: [large-cash]
+      summary: Record the filing of a Form 8300 for a crossing
+      description: >-
+        The manager's record of the Form 8300 they filed for this crossing:
+        the day they filed it, the BSA E-Filing acknowledgement number they
+        typed and who recorded it. A voluntary filing (a Form 8300 the dealer
+        filed of its own accord) carries no acknowledgement number, because a
+        voluntary filing below the threshold is filed on paper.
+        The crossing's filing row is taken in place: two managers recording a
+        filing on one crossing at the same time cannot both land, and the one
+        that loses is answered 409 (the crossing is already filed). A
+        Canadian crossing and an identity declined crossing are not filings at
+        all and are answered 409. The act is a manager's, so a machine key is
+        refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the filing is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashFilingRequest"
+      responses:
+        "200":
+          description: The recorded filing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashFiling"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/events/{id}/form-8300:
+    get:
+      operationId: largeCashForm8300
+      tags: [large-cash]
+      summary: The Form 8300 data set for a crossing
+      description: >-
+        The data set the filer types into BSA E-Filing: the payer's name,
+        address, taxpayer identification number, date of birth and occupation,
+        the amount and the dates of the cash, and the branch the filing is
+        made for. This is the one surface that carries the taxpayer
+        identification number, because the IRS form cannot be completed
+        without it, so the route is the dealer's own and admin's only and a
+        machine key is refused 403. The export is audited without the number
+        in the audit body. Gable does not file: the export carries the
+        sentence that says so.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing the form is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The Form 8300 data set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashForm8300"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+  /api/v1/large-cash/statements:
+    get:
+      operationId: largeCashStatements
+      tags: [large-cash]
+      summary: The customer statements for a year
+      description: >-
+        The customer statements for a year, one per payer who had reportable
+        cash in it: the business name and address, the contact name and
+        telephone number, the aggregate amount of reportable cash received in
+        the year, and the sentence that says the information was furnished to
+        the IRS. The statement is a separate obligation from the filing and
+        runs on its own clock: it is due on or before the last day of the
+        first month of the year after the cash was received. The statement
+        never carries the payer's taxpayer identification number and never
+        says the dealer noted the transaction was suspicious.
+        A branch scoped caller sees the payers whose crossings touched its
+        branch; the aggregate each statement carries is the dealer's whole
+        year for that payer, because the United States aggregation is
+        deliberately central.
+      parameters:
+        - name: year
+          in: query
+          required: false
+          description: The year the cash was received. The current year when it is absent.
+          schema: {type: integer, minimum: 2000, maximum: 2100}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The year's statements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatements"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/large-cash/events/{id}/statement:
+    post:
+      operationId: largeCashIssueStatement
+      tags: [large-cash]
+      summary: Issue the customer statement for a crossing's payer
+      description: >-
+        The customer statement for the crossing's payer and the year the cash
+        was received, issued once. The generator refuses two things, and they
+        are rules in the code rather than a training note: it refuses to carry
+        the dealer's suspicion of the transaction on the customer's statement,
+        and it refuses to produce a statement for a voluntarily filed Form
+        8300, because the statement says the information was furnished to the
+        IRS and a voluntary filing was not. The act is a manager's, so a
+        machine key is refused 403.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The crossing whose payer the statement is for.
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LargeCashStatementRequest"
+      responses:
+        "200":
+          description: The issued statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LargeCashStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+components:
+  schemas:
+    LargeCashWorklist:
+      type: object
+      required: [items, count, generated_at]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashWorklistRow"}
+        count: {type: integer}
+        generated_at: {type: string, format: date-time}
+    LargeCashWorklistRow:
+      type: object
+      required: [event_id, payer_key, payer_name, branch_id, branch_name, branch_address, contributed_branch_ids,
+                 currency, total_cents, rule_family, threshold_cents, transaction_count, tender_count, event_state,
+                 filing_state, past_deadline, statement_state, payer_details_captured, severity_score,
+                 recommended_action, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        payer_key:
+          type: string
+          description: >-
+            The aggregation key: the named customer's id, else the captured
+            identity's digest. It is a digest, never the taxpayer
+            identification number.
+        payer_name: {type: string, description: The customer's name, else the name captured at the counter.}
+        customer_id: {type: [string, "null"], format: uuid}
+        customer_account: {type: string}
+        branch_id: {type: string, format: uuid}
+        branch_name: {type: string}
+        branch_address: {type: string}
+        contributed_branch_ids:
+          type: array
+          description: Every branch that contributed to the aggregate.
+          items: {type: string, format: uuid}
+        currency: {type: string}
+        total_cents: {type: integer, format: int64, description: The reportable cash total since the last report.}
+        rule_family: {type: string, enum: [US_8300, CA_DEALER]}
+        threshold_cents: {type: integer, format: int64}
+        transaction_count: {type: integer, description: The cash transactions in the aggregate.}
+        tender_count: {type: integer, description: The cash tenders counted in the aggregate.}
+        first_date: {type: [string, "null"], format: date-time, description: The first cash in the aggregate.}
+        last_date: {type: [string, "null"], format: date-time, description: The most recent cash in the aggregate.}
+        event_state: {type: string, enum: [reportable, recorded, identity declined]}
+        filing_state:
+          type: string
+          enum: [not_reportable, reportable, filed, voluntary]
+          description: >-
+            Not yet reportable, reportable and not filed, filed, or voluntary
+            (the payer asked not to be reported).
+        filing_deadline:
+          type: [string, "null"]
+          format: date-time
+          description: The receipt anchor plus 15 days. Null when there is no filing to make.
+        past_deadline: {type: boolean}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        statement_state: {type: string, enum: [not_issued, issued]}
+        statement_issued_date: {type: [string, "null"], format: date-time}
+        payer_details_captured: {type: boolean}
+        severity_score: {type: integer, format: int64}
+        recommended_action:
+          type: string
+          enum: [capture_payer_details, file, chase_filing, issue_statement, manager_review, dealer_record]
+        note: {type: string, description: The plain sentence that says what the row is.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashFilingRequest:
+      type: object
+      properties:
+        filed_date:
+          type: string
+          format: date
+          description: The day the Form 8300 was filed. The server's day when it is absent.
+        acknowledgement_no:
+          type: string
+          maxLength: 64
+          description: >-
+            The BSA E-Filing acknowledgement number the manager typed. Required
+            for a filing, and never carried by a voluntary one.
+        voluntary:
+          type: boolean
+          description: >-
+            True when the dealer filed the Form 8300 of its own accord. A
+            voluntary filing is never stated to the customer.
+    LargeCashFiling:
+      type: object
+      required: [event_id, state, recorded_by, recorded_at, past_deadline]
+      properties:
+        event_id: {type: string, format: uuid}
+        state: {type: string, enum: [filed, voluntary]}
+        filed_date: {type: [string, "null"], format: date-time}
+        acknowledgement_no: {type: string}
+        recorded_by: {type: string}
+        recorded_at: {type: string, format: date-time}
+        past_deadline: {type: boolean}
+    LargeCashForm8300:
+      type: object
+      required: [event_id, form, currency, amount_cents, transaction_count, tender_count, first_date, last_date,
+                 received_at, filing_deadline, payer, filer, note, adviser_note]
+      properties:
+        event_id: {type: string, format: uuid}
+        form: {type: string, description: The IRS form the data set is for.}
+        currency: {type: string}
+        amount_cents: {type: integer, format: int64}
+        transaction_count: {type: integer}
+        tender_count: {type: integer}
+        first_date: {type: string, format: date-time}
+        last_date: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        filing_deadline: {type: string, format: date-time}
+        payer:
+          type: object
+          description: "Form 8300 Part I: the payer as the form takes it."
+          required: [name, address, taxpayer_id]
+          properties:
+            name: {type: string}
+            address: {type: string}
+            taxpayer_id:
+              type: string
+              description: >-
+                The payer's taxpayer identification number, in full. This is
+                the one surface that carries it.
+            date_of_birth: {type: string}
+            occupation: {type: string}
+        third_party_payer:
+          type: [object, "null"]
+          description: "Form 8300 Part II: the person on whose behalf the transaction was conducted."
+          properties:
+            name: {type: string}
+        filer:
+          type: object
+          description: "The legal person the filing is made for: the branch that received the cash."
+          required: [branch_id, branch_name]
+          properties:
+            branch_id: {type: string, format: uuid}
+            branch_name: {type: string}
+            address: {type: string}
+        note: {type: string, description:"Gable does not file: the filer types these figures into BSA E-Filing."}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+        taxpayer_id_hint:
+          type: [string, "null"]
+          description: The masked hint of the taxpayer identification number, for the filer to check.
+    LargeCashStatements:
+      type: object
+      required: [year, items, count]
+      properties:
+        year: {type: integer}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/LargeCashStatement"}
+        count: {type: integer}
+    LargeCashStatement:
+      type: object
+      required: [payer_key, year, payer_name, business_address, contact_name, telephone, aggregate_cents, currency,
+                 crossing_count, state, due_date, note, adviser_note]
+      properties:
+        payer_key: {type: string, description:"The aggregation key: the payer the statement is for."}
+        year: {type: integer}
+        payer_name: {type: string}
+        business_address: {type: string}
+        contact_name: {type: string}
+        telephone: {type: string}
+        aggregate_cents:
+          type: integer
+          format: int64
+          description: The reportable cash received from this payer in the year.
+        currency: {type: string}
+        crossing_count: {type: integer}
+        first_date: {type: [string, "null"], format: date-time}
+        last_date: {type: [string, "null"], format: date-time}
+        state: {type: string, enum: [not_issued, issued]}
+        issued_date: {type: [string, "null"], format: date-time}
+        issued_by: {type: string}
+        due_date:
+          type: string
+          format: date-time
+          description: >-
+            The statement's own deadline: the last day of the first month of
+            the year after the cash was received.
+        note: {type: string, description: The information was furnished to the IRS.}
+        adviser_note: {type: string, description: The dealer confirms each filing with its own adviser.}
+    LargeCashStatementRequest:
+      type: object
+      properties:
+        include_suspicion:
+          type: boolean
+          description: >-
+            Asks the generator to put the dealer's suspicion of the
+            transaction on the customer's statement. The generator refuses.

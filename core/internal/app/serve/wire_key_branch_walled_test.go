@@ -47,6 +47,7 @@ type walledTwins struct {
 	alertA, alertB, alertC                         uuid.UUID
 	dlvA, dlvB                                     uuid.UUID
 	holdA, holdB                                   uuid.UUID
+	lcA, lcB                                       uuid.UUID
 	vendor                                         uuid.UUID
 }
 
@@ -69,6 +70,56 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		alertA: uuid.New(), alertB: uuid.New(), alertC: uuid.New(),
 		holdA: uuid.New(), holdB: uuid.New(),
 	}
+	// The large cash twins (CP-17b): one crossing at the pin's branch and
+	// one at the foreign branch, each with its counted tender and its
+	// captured payer, so the worklist and the crossing routes have a
+	// foreign row to hold back.
+	w.lcA, w.lcB = uuid.New(), uuid.New()
+	lcTxnA, lcTxnB := uuid.New(), uuid.New()
+	for _, lc := range []struct {
+		event, txn uuid.UUID
+		branch     uuid.UUID
+		cust       uuid.UUID
+		reg        string
+		key        string
+	}{
+		{w.lcA, lcTxnA, f.branchA, f.custID, f.regA, "a"},
+		{w.lcB, lcTxnB, f.branchB, f.custB, f.regB, "b"},
+	} {
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO pos_transactions (id, register_id, cashier_id, branch_id, status, currency)
+			 VALUES ($1, $2, $3, $4, 'COMPLETED', 'USD')`, lc.txn, lc.reg, uuid.New(), lc.branch); err != nil {
+			t.Fatalf("seed large cash transaction: %v", err)
+		}
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO large_cash_tenders (transaction_id, branch_id, rule_family, payer_key, counted_cents, instrument, reason, tender_index)
+			 VALUES ($1, $2, 'US_8300', $3, 1200000, 'currency', 'currency', 0)`,
+			lc.txn, lc.branch, "cus:"+lc.cust.String()); err != nil {
+			t.Fatalf("seed large cash tender: %v", err)
+		}
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO large_cash_payers (transaction_id, branch_id, customer_id, country, name, address, occupation,
+				date_of_birth, id_type, id_number_sealed, tin_sealed, tin_hash, third_party_payer)
+			 VALUES ($1, $2, $3, 'US', $4, '1 Pin Road', 'builder', '1980-01-02', 'passport', 'PIN-ID-0001', $5, $6, FALSE)`,
+			lc.txn, lc.branch, lc.cust, "Pin Twin "+lc.key, "12-3456789", "pin-tin-"+lc.key); err != nil {
+			t.Fatalf("seed large cash payer: %v", err)
+		}
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO large_cash_events (id, payer_key, customer_id, branch_id, rule_family, currency, amount_cents,
+				total_cents, transaction_ids, tender_count, state)
+			 VALUES ($1, $2, $3, $4, 'US_8300', 'USD', 1200000, 1200000, ARRAY[$5::uuid], 1, 'reportable')`,
+			lc.event, "cus:"+lc.cust.String(), lc.cust, lc.branch, lc.txn); err != nil {
+			t.Fatalf("seed large cash event: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM large_cash_filings WHERE event_id IN ($1, $2)`, w.lcA, w.lcB)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM large_cash_events WHERE id IN ($1, $2)`, w.lcA, w.lcB)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM large_cash_payers WHERE transaction_id IN ($1, $2)`, lcTxnA, lcTxnB)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM large_cash_tenders WHERE transaction_id IN ($1, $2)`, lcTxnA, lcTxnB)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id IN ($1, $2)`, lcTxnA, lcTxnB)
+	})
+
 	vendor := uuid.New()
 	w.vendor = vendor
 	vendorName := "pin twin vendor " + vendor.String()[:8]
@@ -429,6 +480,15 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		"/api/v1/purchase-orders/%s/freight": true, // an empty freight list answers 200 for any order
 	}
 	legs := []leg{
+		// The large cash crossing routes (CP-17b): the worklist's crossing and
+		// the two acts a manager takes on it are held to the same wall, and a
+		// foreign crossing answers what a missing crossing answers.
+		{method: "GET", path: "/api/v1/large-cash/events/%s/form-8300", twin: w.lcB, own: w.lcA,
+			controlUser: true, noControl: "a machine key is refused the Form 8300 export outright, so the control is the admin user"},
+		{method: "POST", path: "/api/v1/large-cash/events/%s/filing", body: fixed(`{"acknowledgement_no":"PIN-ACK"}`), twin: w.lcB, own: w.lcA,
+			controlUser: true, noControl: "a machine key is refused the filing outright, so the control is the admin user"},
+		{method: "POST", path: "/api/v1/large-cash/events/%s/statement", body: fixed(`{}`), twin: w.lcB, own: w.lcA,
+			controlUser: true, noControl: "a machine key is refused the statement outright, so the control is the admin user"},
 		{method: "GET", path: "/api/v1/quotes/%s", twin: f.quoteB, own: f.quoteA},
 		{method: "PUT", path: "/api/v1/quotes/%s", body: quotePut, twin: f.quoteB, own: f.quoteA},
 		{method: "GET", path: "/api/v1/quotes/%s/file", twin: f.quoteB, own: f.quoteA},
@@ -732,6 +792,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{path: "/api/v1/ar/aging/summary", absent: []string{f.custB.String(), w.invB.String()}, present: nil},
 		{path: "/api/v1/ar/credit-holds", absent: []string{w.holdB.String(), f.custB.String()}, present: []string{f.custID.String()}},
 		{path: "/api/v1/ar/worklist", absent: []string{f.custB.String(), w.holdB.String()}, present: []string{f.custID.String()}},
+		{path: "/api/v1/large-cash/worklist", absent: []string{w.lcB.String()}, present: []string{w.lcA.String()}},
+		{path: "/api/v1/large-cash/statements", absent: []string{f.custB.String()}, present: []string{f.custID.String()}},
 		{path: "/api/v1/pos/transactions?register_id=" + f.regB, absent: []string{f.txnB.String()}, present: nil, first: true},
 		{path: "/api/v1/pos/transactions?register_id=" + f.regA, absent: []string{f.txnB.String()}, present: []string{f.txnA.String()}, first: true},
 	}

@@ -332,7 +332,7 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 // because it carries the payer's taxpayer identification number.
 func (w *branchWall) largeCash(mux *http.ServeMux, h *largecash.Handler, managerRoles, counterRoles []string) {
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
-		middleware.RequireRole("admin", "owner"),
+		w.scoped("admin", "owner"),
 		w.scoped(managerRoles...),
 		w.scoped(counterRoles...))
 }

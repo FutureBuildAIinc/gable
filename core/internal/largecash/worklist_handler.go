@@ -38,6 +38,9 @@ type filingRequest struct {
 // record of the Form 8300 they filed for this crossing, with the day they
 // filed it and the BSA E-Filing acknowledgement number they typed.
 func (h *Handler) RecordFiling(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "a filing is recorded by a manager in person: it is not a machine key's to write") {
+		return
+	}
 	id, err := pathUUID(r, "id")
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -73,11 +76,28 @@ func (h *Handler) RecordFiling(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, filing)
 }
 
+// refuseMachineKey answers the request with 403 when the caller
+// authenticated with a machine key, reporting whether it answered. The
+// filing and the statement are a manager's act, recorded against the person
+// who did it, and the Form 8300 export carries the payer's taxpayer
+// identification number: a key is not an owner or an admin, and none of the
+// three is a key's to do.
+func refuseMachineKey(w http.ResponseWriter, r *http.Request, message string) bool {
+	if _, isKey := middleware.KeyIDFromContext(r.Context()); !isKey {
+		return false
+	}
+	httpx.WriteError(w, r, httpx.Forbidden(message))
+	return true
+}
+
 // Form8300 is GET /api/v1/large-cash/events/{id}/form-8300: the data set the
 // filer types into BSA E-Filing. It carries the payer's taxpayer
 // identification number, so the route is the dealer's own and admin's only,
 // and it is audited without the number in the audit body.
 func (h *Handler) Form8300(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "the Form 8300 export is the dealer's own and admin's only: it is not a machine key's to read") {
+		return
+	}
 	id, err := pathUUID(r, "id")
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -130,6 +150,9 @@ type statementRequest struct {
 // customer statement for the crossing's payer and the year the cash was
 // received.
 func (h *Handler) IssueStatement(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "a customer statement is issued by a manager in person: it is not a machine key's to write") {
+		return
+	}
 	id, err := pathUUID(r, "id")
 	if err != nil {
 		httpx.WriteError(w, r, err)

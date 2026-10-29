@@ -47,8 +47,8 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
-	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/largecash"
+	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
@@ -169,6 +169,7 @@ var pinDocumentScopes = []string{
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"purchase-orders:read", "purchase-orders:write", "quotes:read", "quotes:write",
 	"email-deliveries:read", "dealer-profile:read", "dealer-profile:write",
+	"large-cash:read", "large-cash:write",
 }
 
 var pinKeyScopes = []string{
