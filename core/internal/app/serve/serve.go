@@ -272,11 +272,11 @@ func Run() {
 	// Paint tint catalogue (row CP-16): the dealer's own bases, colorants,
 	// colours and per size formulas, the rescale, and the saved colours per
 	// customer and job. Read for every desk role (the counter needs it mid
-	// sale), write for admin and owner; the catalogue is dealer wide.
+	// sale), write for admin and owner; the catalogue is dealer wide. The
+	// saved colours are customer rows, so they are walled to the customer
+	// they name, and the counter may save one.
 	tintSvc := tint.NewService(tint.NewRepository(db)).WithTxRunner(db)
-	tint.NewHandler(tintSvc).RegisterRoutes(mux,
-		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
-		middleware.RequireRole("admin", "owner"))
+	wall.tint(mux, tintSvc)
 
 	// Unified AI client: the chosen provider's key (DB-first via system_settings,
 	// env fallback for OpenRouter) powers all AI features: material-list/freight

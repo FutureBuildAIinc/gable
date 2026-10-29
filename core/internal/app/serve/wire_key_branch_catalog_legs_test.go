@@ -173,6 +173,14 @@ func TestKeyBranchPin_PricingCatalogLegs(t *testing.T) {
 		t.Fatalf("bound DELETE scheduling window A: %d %s", status, buf)
 	}
 	f.twinLeg("DELETE", "/api/v1/scheduling/windows/{id}")
+
+	// The tint saved colours (row CP-16): the read is walled to the customers
+	// that hold the pin, so a bound key reads them under the customer
+	// predicate.
+	if st, b := f.key(t, f.bound, "GET", "/api/v1/tint/saved-colors", "", nil); st != http.StatusOK {
+		t.Fatalf("bound GET tint saved colours: %d %s", st, b)
+	}
+	f.twinLeg("GET", "/api/v1/tint/saved-colors")
 }
 
 // extractID reads the id field of a created row's answer.

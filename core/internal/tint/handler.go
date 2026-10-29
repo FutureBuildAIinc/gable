@@ -20,8 +20,12 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
-// RegisterRoutes adds the catalogue's routes under /api/v1/tint.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, read, write func(http.Handler) http.Handler) {
+// RegisterRoutes adds the catalogue's routes under /api/v1/tint. The counter
+// guard is the counter's own write: the dialogue offers saving a colour to the
+// counter, so the cashier may write a saved colour (the branch wall holds it
+// to the customer it names), while the catalogue itself stays with admin and
+// owner.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, read, write, counter func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/v1/tint/systems", read(http.HandlerFunc(h.handleListSystems)))
 	mux.Handle("POST /api/v1/tint/systems", write(http.HandlerFunc(h.handleCreateSystem)))
 	mux.Handle("GET /api/v1/tint/bases", read(http.HandlerFunc(h.handleListBases)))
@@ -35,7 +39,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, read, write func(http.Handl
 	mux.Handle("GET /api/v1/tint/formulas/{id}", read(http.HandlerFunc(h.handleGetFormula)))
 	mux.Handle("POST /api/v1/tint/formulas/{id}/rescale", read(http.HandlerFunc(h.handleRescale)))
 	mux.Handle("GET /api/v1/tint/saved-colors", read(http.HandlerFunc(h.handleListSavedColors)))
-	mux.Handle("POST /api/v1/tint/saved-colors", write(http.HandlerFunc(h.handleCreateSavedColor)))
+	mux.Handle("POST /api/v1/tint/saved-colors", counter(http.HandlerFunc(h.handleCreateSavedColor)))
 	mux.Handle("DELETE /api/v1/tint/saved-colors/{id}", write(http.HandlerFunc(h.handleDeleteSavedColor)))
 	mux.Handle("GET /api/v1/tint/charge", read(http.HandlerFunc(h.handleCharge)))
 }

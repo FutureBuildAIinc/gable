@@ -21664,7 +21664,7 @@ paths:
       operationId: tintSavedColorList
       tags: [tint]
       summary: List saved colours
-      description: The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite).
+      description: "The store's record of a customer's colours, optionally filtered by the free text job note (a room or a jobsite). The saved colours are customer rows, so the read is walled to the customers the caller may see: a customer of another branch reads as missing, and a key bound to a branch reads only the saved colours of the customers that hold its pin."
       parameters:
         - name: customer_id
           in: query
@@ -21691,7 +21691,7 @@ paths:
       operationId: tintSavedColorCreate
       tags: [tint]
       summary: Save a colour for a customer
-      description: The name is unique per customer, so a customer cannot accumulate two identical names.
+      description: "The name is unique per customer, so a customer cannot accumulate two identical names. The counter dialogue offers saving a colour, so the cashier may write one; the write is walled to the customer it names, and a key bound to a branch reaches it only while that customer holds its pin."
       requestBody:
         required: true
         content:

@@ -43,6 +43,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/tint"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -297,6 +298,10 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	termLedger := payment.NewTerminalLedger(db)
 	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db).WithTerminal(payment.NewSimulatedTerminalFromEnv("authorize", termLedger), termLedger)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
+	// The tint catalogue, as serve mounts it: the catalogue is dealer wide and
+	// every desk role reads it, the saved colours are customer rows and are
+	// walled to the customer they name, and the counter may save one.
+	wall.tint(mux, tint.NewService(tint.NewRepository(db)).WithTxRunner(db))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f

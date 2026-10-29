@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -433,13 +435,20 @@ func (r *PostgresRepository) CreateFormula(ctx context.Context, d *FormulaDraft)
 	return f, nil
 }
 
+// ListSavedColors reads the saved colours of the customers the caller may
+// see: the customer predicate holds the rows, so a branch bound key reads only
+// the saved colours of the customers that hold its pin (ADR 0007 section 5.8,
+// ruling A). A caller that names no customer reads what its own reach holds.
 func (r *PostgresRepository) ListSavedColors(ctx context.Context, customerID *uuid.UUID, jobNote string) ([]SavedColor, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT id, customer_id, color_id, name, job_note, note, project_id, created_by, created_at
-		FROM paint_saved_colors
-		WHERE ($1::uuid IS NULL OR customer_id = $1)
-		  AND ($2 = '' OR job_note ILIKE '%' || $2 || '%')
-		ORDER BY created_at DESC LIMIT 200`, customerID, jobNote)
+		SELECT sc.id, sc.customer_id, sc.color_id, sc.name, sc.job_note, sc.note, sc.project_id, sc.created_by, sc.created_at
+		FROM paint_saved_colors sc
+		JOIN customers c ON c.id = sc.customer_id
+		WHERE ($1::uuid IS NULL OR sc.customer_id = $1)
+		  AND ($2 = '' OR sc.job_note ILIKE '%' || $2 || '%')
+		  AND `+customer.Wall("c", 3, 4)+`
+		ORDER BY sc.created_at DESC LIMIT 200`,
+		customerID, jobNote, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list saved colours: %w", err)
 	}
