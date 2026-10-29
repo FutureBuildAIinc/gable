@@ -530,3 +530,27 @@ describe('gable-pos-catalog', () => {
     expect(added[0].product.sku).toBe('ZZZ-900');
   });
 });
+
+describe('the catalogue on a phone (below 768)', () => {
+  const hasClass = (node: Element, cls: string) => node.className.split(/\s+/).includes(cls);
+
+  it('lays the tiles out as one column of rows below 768 and the tile grid from 768', async () => {
+    await open();
+    const grid = q(el, '[data-testid="catalog-grid"]');
+    expect(hasClass(grid, 'grid-cols-1')).toBe(true);
+    expect(grid.className).toContain('min-[768px]:grid-cols-');
+    const tile = q(el, '[data-testid="catalog-tile"]');
+    expect(hasClass(tile, 'flex-row')).toBe(true);
+    expect(hasClass(tile, 'min-[768px]:flex-col')).toBe(true);
+    expect(tile.className).not.toMatch(/min-\[900px\]/);
+  });
+
+  it('keeps the Scan control one 44px icon button below 768, with its label as the accessible name', async () => {
+    await open();
+    const scan = q<HTMLButtonElement>(el, '[data-testid="catalog-scan"]');
+    expect(scan.getAttribute('aria-label')).toBe('Scan');
+    expect(hasClass(scan, 'h-11')).toBe(true);
+    expect(hasClass(scan, 'w-11')).toBe(true);
+    expect(hasClass(scan, 'min-[768px]:w-auto')).toBe(true);
+  });
+});

@@ -419,7 +419,9 @@ describe('the counter as the Panels layout', () => {
   describe('the visual review', () => {
     // a catalogue chip is a selection, not an action
     const filled = (el: Element) => [...el.querySelectorAll('button')]
-      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip');
+      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip'
+        // the phone's pinned pay bar is the narrow surface's own Pay, not a second primary of the page body
+        && b.getAttribute('data-testid') !== 'pos-pay-bar-button');
 
     it('before a till is open, Pay is a disabled neutral button and Open Till the one primary', async () => {
       const el = await mount(sale());
@@ -485,14 +487,25 @@ describe('the counter as the Panels layout', () => {
       expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
     });
 
-    it('keeps two columns down to 900 pixels and stacks the order summary and Pay first below that', async () => {
+    it('keeps two columns down to 768 pixels and puts the catalogue first below that (the touch order)', async () => {
       const el = await mount(sale());
-      expect(q(el, 'pos-body').className).toContain('min-[900px]:flex-row');
-      expect(q(el, 'pos-items').className).toMatch(/min-\[900px\]:w-\[/);
-      expect(q(el, 'pos-panels').className).toContain('order-first');
-      expect(q(el, 'pos-panels').className).toContain('min-[900px]:order-none');
-      expect(q(el, 'pos-order-summary').className).toContain('order-first');
-      expect(q(el, 'pos-order-summary').className).toContain('min-[900px]:order-none');
+      expect(q(el, 'pos-body').className).toContain('min-[768px]:flex-row');
+      expect(q(el, 'pos-items').className).toMatch(/min-\[768px\]:w-\[/);
+      expect(q(el, 'pos-items').className).not.toContain('order-last');
+      expect(q(el, 'pos-panels').className).not.toContain('order-first');
+      // Below 768 the working order is the thumb's: the panels (one step open
+      // at a time) above the ticket, the ticket last; a pinned pay bar carries
+      // the total and Pay at the bottom of the screen.
+      const panels = q(el, 'pos-panels');
+      const items = q(el, 'pos-items');
+      expect(items.compareDocumentPosition(panels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const summary = q(el, 'pos-order-summary');
+      expect(panels.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(summary.className).not.toContain('order-first');
+      const bar = q(el, 'pos-pay-bar');
+      expect(bar).toBeTruthy();
+      expect(bar.className).toContain('min-[768px]:hidden');
+      expect(q(el, 'pos-body').compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('lists every line of the order summary, never in a clipped scroller', async () => {
