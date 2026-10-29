@@ -123,6 +123,12 @@ type Sale struct {
 	PrintCount       int        `json:"print_count"`
 	ExchangeReturnID *uuid.UUID `json:"exchange_return_id"`
 
+	// DeliveryType and ShipToID are the counter sale's own delivery answer
+	// (CP-10): a delivered sale is taxed at its ship-to's zone, a pickup at
+	// the branch rate.
+	DeliveryType string     `json:"delivery_type"` // pickup or delivery
+	ShipToID     *uuid.UUID `json:"ship_to_id"`
+
 	// ReturnedQuantities sums, per sale line id, the quantity every earlier
 	// return brought back, so the counter's return dialog can show a line
 	// already fully returned as not returnable. Set on a completed sale's

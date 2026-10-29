@@ -16,6 +16,7 @@ import (
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -748,7 +749,7 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 	if err != nil {
 		return err
 	}
-	inputs, err := s.taxInputs(ctx, o, exempt)
+	inputs, zone, err := s.taxInputs(ctx, o, exempt)
 	if err != nil {
 		return err
 	}
@@ -762,6 +763,7 @@ func (s *Service) applyRateTax(ctx context.Context, o *Order) error {
 		}
 		return err
 	}
+	applyZone(o, resolved, zone)
 	o.SubtotalCents = totals.SubtotalCents
 	pct, err := RateToPercent(*resolved.Rate)
 	if err != nil {
@@ -795,21 +797,61 @@ func (s *Service) exemptOn(ctx context.Context, branchID, customerID uuid.UUID) 
 	return standing != nil, nil
 }
 
-func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdoc.TaxInputs, error) {
+func (s *Service) taxInputs(ctx context.Context, o *Order, exempt bool) (salesdoc.TaxInputs, *taxzone.Snapshot, error) {
 	in := salesdoc.TaxInputs{Exempt: exempt, Delivery: o.DeliveryType == DeliveryDelivery}
+	var zone *taxzone.Snapshot
 	if in.Delivery && o.ShipToID != nil {
-		_, rate, err := s.repo.ShipTo(ctx, *o.ShipToID)
+		snap, rate, err := s.repo.ShipTo(ctx, *o.ShipToID)
 		if err != nil {
-			return in, err
+			return in, nil, err
 		}
 		in.ShipToRate = rate
+		// The ship-to's place of receipt resolves through the zone tables
+		// (CP-10): a zone that covers it outranks the typed rate, and no
+		// zone falls through to it.
+		country := ""
+		if snap.Country != nil {
+			country = *snap.Country
+		}
+		// The zone's effective window is read on the branch's own business
+		// day, never the server's clock (the exemption reads the same day).
+		day, err := s.repo.BranchLocalDate(ctx, o.BranchID, s.now())
+		if err != nil {
+			return in, nil, err
+		}
+		zone, err = s.repo.TaxZone(ctx, country, snap.PostalCode, snap.Region, day)
+		if err != nil {
+			return in, nil, err
+		}
+		if zone != nil {
+			in.ZoneRate = &zone.CombinedRate
+		}
 	}
 	branchRate, err := s.repo.BranchTaxRate(ctx, o.BranchID)
 	if err != nil {
-		return in, err
+		return in, nil, err
 	}
 	in.BranchRate = branchRate
-	return in, nil
+	return in, zone, nil
+}
+
+// applyZone freezes the zone that answered onto the order (CP-10): the zone
+// id, the rate parts and where the data came from, cleared when another arm
+// answered so a refresh never leaves a stale zone behind.
+func applyZone(o *Order, resolved salesdoc.ResolvedTax, zone *taxzone.Snapshot) {
+	if resolved.Source != salesdoc.TaxSourceZoneRate || zone == nil {
+		o.TaxZoneID = nil
+		o.TaxRateParts = nil
+		o.TaxZoneSource = nil
+		return
+	}
+	o.TaxZoneID = &zone.ZoneID
+	raw, err := json.Marshal(zone)
+	if err == nil {
+		o.TaxRateParts = raw
+	}
+	src := zone.DataSource
+	o.TaxZoneSource = &src
 }
 
 // taxRequest builds the provider's preview: the document's taxable lines
@@ -1625,7 +1667,7 @@ func (s *Service) refreshTax(ctx context.Context, o *Order, priced *providerTax)
 	if err != nil {
 		return err
 	}
-	inputs, err := s.taxInputs(ctx, o, exempt)
+	inputs, zone, err := s.taxInputs(ctx, o, exempt)
 	if err != nil {
 		return err
 	}
@@ -1639,6 +1681,7 @@ func (s *Service) refreshTax(ctx context.Context, o *Order, priced *providerTax)
 		}
 		return err
 	}
+	applyZone(o, resolved, zone)
 	o.SubtotalCents = totals.SubtotalCents
 	pct, err := RateToPercent(*resolved.Rate)
 	if err != nil {

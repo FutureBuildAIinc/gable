@@ -70,6 +70,7 @@ import (
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/scheduling"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
@@ -700,6 +701,11 @@ func Run() {
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
 	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
+
+	// Tax zones: Gable's own zone tables (CP-10), the dealer maintained rates
+	// a delivered sale is sourced to. Admin config, not customer scoped.
+	taxZoneHandler := taxzone.NewHandler(taxzone.NewRepository(db))
+	taxZoneHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)

@@ -581,6 +581,11 @@ GET	/api/v1/tax/exemptions/{customerID}	internal/tax	h.getExemptions
 DELETE	/api/v1/tax/exemptions/{id}	internal/tax	h.deleteExemption
 POST	/api/v1/tax/exemptions/{id}/end	internal/tax	h.endExemption
 POST	/api/v1/tax/preview	internal/tax	h.previewTax
+GET	/api/v1/tax/zones	internal/taxzone	h.list
+POST	/api/v1/tax/zones	internal/taxzone	h.create
+DELETE	/api/v1/tax/zones/{id}	internal/taxzone	h.delete
+GET	/api/v1/tax/zones/{id}	internal/taxzone	h.get
+POST	/api/v1/tax/zones/{id}/close	internal/taxzone	h.close
 GET	/api/v1/units	internal/unit	h.handleList
 POST	/api/v1/units	internal/unit	h.handleCreate
 GET	/api/v1/units/{code}	internal/unit	h.handleGet

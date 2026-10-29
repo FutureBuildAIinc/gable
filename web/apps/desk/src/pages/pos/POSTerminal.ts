@@ -12,6 +12,8 @@ import type {
 } from '../../types/pos';
 import { ID_TYPES } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
+import { CustomerService } from '../../services/CustomerService';
+import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
   storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
@@ -80,6 +82,10 @@ export class POSTerminal extends LitElement {
   @state() private _custResults: CounterCustomer[] = [];
   @state() private _poText = '';
   @state() private _jobId = '';
+  // The delivered sale's answer (CP-10): the customer's ship to the goods go
+  // to, so the tax comes from that zone instead of the branch.
+  @state() private _shipTos: ShipTo[] = [];
+  @state() private _shipToId = '';
   // Can this sale go on account? The server's read of the account (its verdict,
   // the buyer roster, the check limit, the store credit), and the buyer named.
   @state() private _standing: CounterStanding | null = null;
@@ -647,6 +653,8 @@ export class POSTerminal extends LitElement {
       this._custResults = [];
       this._poText = '';
       this._jobId = '';
+      this._shipToId = '';
+      void this._loadShipTos(c.id);
       // An account customer keeps the panel open for the purchase order and
       // the job; Next: Payment moves on once there is a line.
       this._step = 'customer';
@@ -692,10 +700,43 @@ export class POSTerminal extends LitElement {
       this._resetTender();
       this._poText = '';
       this._jobId = '';
+      this._shipTos = [];
+      this._shipToId = '';
       this._step = 'customer';
       this._open = 'customer';
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to clear the customer';
+    }
+  }
+
+  /** Reads the customer's ship tos for the Deliver to picker (CP-10). */
+  private async _loadShipTos(customerId: string) {
+    try {
+      const page = await CustomerService.listShipTos(customerId);
+      this._shipTos = page.items ?? [];
+    } catch {
+      this._shipTos = [];
+    }
+  }
+
+  /** Names the delivery: a ship to makes the sale a delivery, Pickup makes it a pickup again. */
+  private async _chooseDelivery(shipToId: string) {
+    if (!this._sale || !this._customer || this._sale.status !== 'open') return;
+    const sent = this._sale;
+    this._shipToId = shipToId;
+    try {
+      this._error = null;
+      const answer = await posService.attachCustomer(sent.id, {
+        customer_id: this._customer.id,
+        delivery_type: shipToId ? 'delivery' : 'pickup',
+        ship_to_id: shipToId || null,
+      });
+      const now = this._sale;
+      if (!now || now.id !== answer.id || answer.revision < now.revision) return;
+      this._sale = answer;
+    } catch (err: unknown) {
+      this._error = apiErrorMessage(err, 'Failed to name the delivery');
+      this._shipToId = '';
     }
   }
 
@@ -872,6 +913,22 @@ export class POSTerminal extends LitElement {
                 </div>
               </div>` : nothing}
           </div>
+          ${this._shipTos.length > 0 ? html`
+            <div class="mt-3">
+              <label class="block text-xs text-slate-400" for="pos-deliver-to">Deliver to</label>
+              <div class="mt-1">
+                <gable-select id="pos-deliver-to" data-testid="pos-deliver-to" .value=${this._shipToId} ?disabled=${finished}
+                  .options=${[
+                    { value: '', label: 'Pickup at the counter (tax at the branch rate)' },
+                    ...this._shipTos.map((sh) => ({
+                      value: sh.id,
+                      label: `Deliver to ${sh.name || sh.code} ${sh.city ?? ''} ${sh.postal_code ?? ''} (tax at that zone)`,
+                    })),
+                  ]}
+                  @change=${(e: Event) => { void this._chooseDelivery((e.target as HTMLSelectElement).value); }}
+                ></gable-select>
+              </div>
+            </div>` : nothing}
           ${c.job_required && c.jobs.length === 0 ? html`
             <p class="mt-1 text-xs text-slate-400">This account requires a job and has none on file: add one on the account page.</p>` : nothing}
           ${finished ? nothing : html`

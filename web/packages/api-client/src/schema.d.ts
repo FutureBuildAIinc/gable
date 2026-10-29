@@ -9287,6 +9287,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tax/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tax zones
+         * @description Roles admin, owner, finance. Every zone, newest first, each with its rate parts and its boundaries. The country and jurisdiction_type filters are optional; country matches the two letter code and jurisdiction_type must be STA, CTY, CIT, STJ or PROV (400 otherwise).
+         */
+        get: operations["taxZoneList"];
+        put?: never;
+        /**
+         * Create a tax zone
+         * @description Roles admin, owner, finance. country (two letters), jurisdiction_code, jurisdiction_type (STA, CTY, CIT, STJ, PROV) and effective_from are required, with at least one rate part and, for a postal zone, at least one boundary. zone_kind defaults POSTAL; a PROVINCE zone needs province_code. sourcing defaults DESTINATION. Rates are decimal fractions between 0 and 1, such as 0.06.
+         */
+        post: operations["taxZoneCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/zones/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a tax zone
+         * @description Roles admin, owner, finance. The zone with its rate parts and its boundaries.
+         */
+        get: operations["taxZoneGet"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a tax zone no document used
+         * @description Roles admin, owner, finance. A zone that an order or an invoice was taxed under answers 409: it is closed, never deleted, because the sale that used it must stay explainable from the records.
+         */
+        delete: operations["taxZoneDelete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tax/zones/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a tax zone
+         * @description Roles admin, owner, finance. Ends the zone's effective window on the named date, so sales before it keep the rate they were charged. A replacement rate is a new zone (or new rate parts from a later effective date), never an overwrite.
+         */
+        post: operations["taxZoneClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/units": {
         parameters: {
             query?: never;
@@ -16289,6 +16357,16 @@ export interface components {
              * @description Absent means the walk-in customer.
              */
             customer_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The ship to a delivered sale carries. Needs the customer named and delivery_type delivery; 400 otherwise, and 400 when the ship to is another customer's.
+             */
+            ship_to_id?: string | null;
+            /**
+             * @description pickup is the default; a delivery is sourced to the ship to's zone for tax.
+             * @enum {string}
+             */
+            delivery_type?: "pickup" | "delivery";
         };
         PosAddLineRequest: {
             line: components["schemas"]["PosLineRequest"];
@@ -16860,6 +16938,16 @@ export interface components {
              * @description The return an exchange's replacement sale stands against.
              */
             exchange_return_id: string | null;
+            /**
+             * @description The sale's own delivery answer: a delivery is taxed at the ship to's zone rate, a pickup at the branch rate.
+             * @enum {string}
+             */
+            delivery_type: "pickup" | "delivery";
+            /**
+             * Format: uuid
+             * @description The ship to a delivered sale carries.
+             */
+            ship_to_id: string | null;
             /** @description Per sale line id, the quantity every earlier return brought back (a decimal string), on a completed sale that has returns; absent otherwise. The return dialog holds a fully returned line back with it. */
             returned_quantities?: {
                 [key: string]: string;
@@ -16918,6 +17006,16 @@ export interface components {
              * @description A buyer from the account's roster (an authorized, active contact of the customer); 400 otherwise. Needs the customer named.
              */
             buyer_contact_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The ship to the goods are delivered to: the sale's tax comes from that zone (CP-10). Needs the customer named and delivery_type delivery; the ship to must be the customer's own.
+             */
+            ship_to_id?: string | null;
+            /**
+             * @description Pickup, the default, taxes at the branch rate; a delivery at the ship to's zone.
+             * @enum {string}
+             */
+            delivery_type?: "pickup" | "delivery";
         };
         PosTransactionPage: {
             items: components["schemas"]["PosTransactionSummary"][];
@@ -19822,6 +19920,88 @@ export interface components {
             lines: components["schemas"]["TaxLine"][];
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
+        };
+        TaxZoneRatePart: {
+            /** @enum {string} */
+            name: "STATE" | "COUNTY" | "CITY" | "DISTRICT" | "GOODS_TAX" | "PROVINCIAL_SALES_TAX";
+            /** @description The decimal fraction, such as 0.060000. */
+            rate: string;
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            /** @description YYYY-MM-DD */
+            effective_to?: string;
+        };
+        TaxZoneBoundary: {
+            /** @description ISO 3166-1 alpha-2 */
+            country: string;
+            postal_code_low: string;
+            /** @description Equals postal_code_low for an exact code */
+            postal_code_high: string;
+            /** @description The plus four the boundary narrows to */
+            extension_low?: string;
+            extension_high?: string;
+        };
+        TaxZone: {
+            /** Format: uuid */
+            id: string;
+            country: string;
+            jurisdiction_code: string;
+            /** @enum {string} */
+            jurisdiction_type: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            jurisdiction_name: string;
+            state_code?: string;
+            county_code?: string;
+            place_code?: string;
+            /** @description Set on a province zone */
+            province_code?: string;
+            /** @enum {string} */
+            zone_kind: "POSTAL" | "PROVINCE";
+            /** @enum {string} */
+            sourcing: "ORIGIN" | "DESTINATION" | "BOTH";
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            /** @description YYYY-MM-DD while the zone lives */
+            effective_to?: string | null;
+            /** @description Where the rate came from */
+            data_source: string;
+            /** @description Which version of the published data */
+            data_version: string;
+            rates: components["schemas"]["TaxZoneRatePart"][];
+            boundaries: components["schemas"]["TaxZoneBoundary"][];
+        };
+        TaxZoneCreateRequest: {
+            /** @description Two letter code */
+            country: string;
+            jurisdiction_code: string;
+            /** @enum {string} */
+            jurisdiction_type?: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            jurisdiction_name?: string;
+            state_code?: string;
+            county_code?: string;
+            place_code?: string;
+            /** @description Required on a PROVINCE zone */
+            province_code?: string;
+            /**
+             * @description Defaults POSTAL
+             * @enum {string}
+             */
+            zone_kind?: "POSTAL" | "PROVINCE";
+            /**
+             * @description Defaults DESTINATION
+             * @enum {string}
+             */
+            sourcing?: "ORIGIN" | "DESTINATION" | "BOTH";
+            /** @description YYYY-MM-DD */
+            effective_from: string;
+            data_source?: string;
+            data_version?: string;
+            rates: components["schemas"]["TaxZoneRatePart"][];
+            /** @description Required on a POSTAL zone; a boundary's country defaults to the zone's when omitted. */
+            boundaries?: components["schemas"]["TaxZoneBoundary"][];
+        };
+        TaxZoneCloseRequest: {
+            /** @description YYYY-MM-DD */
+            effective_to: string;
         };
         /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
         Unit: {
@@ -39437,6 +39617,153 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneList: {
+        parameters: {
+            query?: {
+                country?: string;
+                jurisdiction_type?: "STA" | "CTY" | "CIT" | "STJ" | "PROV";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zones. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxZoneCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created zone. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    taxZoneClose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxZoneCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description The closed zone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxZone"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
