@@ -864,7 +864,10 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 }
 
 // AddLine adds one line to an open cart: priced, extended, with the audit
-// rows an override or a discount owes, all in the add's own transaction.
+// rows an override or a discount owes, all in the add's own transaction. When
+// a request line names an open line of this sale (line.id), it replaces that
+// line in place in the same transaction, keeping any override price or
+// discount already on the line so tinting a scanned can never leaves two cans.
 func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesdoc.ParsedLine, actor string) (*Sale, error) {
 	if err := s.holdSaleBranch(ctx, saleID); err != nil {
 		return nil, err
@@ -890,32 +893,94 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 			}
 			sale.WalkInID = walkInID
 		}
-		var priced []salesdoc.Line
-		var audits []audit.Entry
-		for i := range parsed {
-			line, out, err := s.priceLine(ctx, sale, parsed[i], actor)
-			if err != nil {
-				return err
-			}
-			priced = append(priced, line)
-			audits = append(audits, out.overrides...)
-			audits = append(audits, out.discounts...)
-		}
-		lines, err := s.explodeAndExtend(ctx, priced)
-		if err != nil {
-			return err
-		}
 		existing, err := s.repo.GetLines(ctx, saleID)
 		if err != nil {
 			return err
 		}
-		// the new lines keep the order Explode built (a kit before its
-		// components), numbered after the cart's own
-		for i := range lines {
-			lines[i].Position = len(existing) + i
+		var appended []salesdoc.Line
+		var audits []audit.Entry
+		for i := range parsed {
+			in := parsed[i]
+			if in.ID != nil {
+				var old *salesdoc.Line
+				for j := range existing {
+					if existing[j].ID == *in.ID {
+						old = &existing[j]
+					}
+				}
+				if old == nil {
+					return httpx.NotFound("line not found on this sale")
+				}
+				if old.ParentLineID != nil {
+					return invalid("line_id", "is a kit component: change the kit line, its components follow")
+				}
+				merged := mergeReplacedLine(old, in)
+				line, pricedOut, err := s.priceLine(ctx, sale, merged, actor)
+				if err != nil {
+					return err
+				}
+				line.ID = old.ID
+				if in.UnitPrice == nil && in.DiscountPercent == nil && in.DiscountAmount == nil {
+					line.PriceAdjustedBy = old.PriceAdjustedBy
+				}
+				family, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+				if err != nil {
+					return err
+				}
+				var places []int
+				for j := range existing {
+					if existing[j].ID == old.ID || (existing[j].ParentLineID != nil && *existing[j].ParentLineID == old.ID) {
+						places = append(places, existing[j].Position)
+					}
+				}
+				for j := range family {
+					if j < len(places) {
+						family[j].Position = places[j]
+					} else {
+						family[j].Position = places[len(places)-1] + (j - len(places) + 1)
+					}
+				}
+				if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+					return err
+				}
+				if err := s.repo.AddLines(ctx, saleID, family); err != nil {
+					return err
+				}
+				if in.UnitPrice != nil || old.PriceSource != salesdoc.PriceSourceOverride {
+					for _, e := range pricedOut.overrides {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				if in.DiscountPercent != nil || in.DiscountAmount != nil {
+					for _, e := range pricedOut.discounts {
+						e.Changes["line_id"] = old.ID
+						audits = append(audits, e)
+					}
+				}
+				continue
+			}
+			line, out, err := s.priceLine(ctx, sale, in, actor)
+			if err != nil {
+				return err
+			}
+			appended = append(appended, line)
+			audits = append(audits, out.overrides...)
+			audits = append(audits, out.discounts...)
 		}
-		if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
-			return err
+		if len(appended) > 0 {
+			lines, err := s.explodeAndExtend(ctx, appended)
+			if err != nil {
+				return err
+			}
+			// the new lines keep the order Explode built (a kit before its
+			// components), numbered after the cart's own
+			for i := range lines {
+				lines[i].Position = len(existing) + i
+			}
+			if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
+				return err
+			}
 		}
 		for i := range audits {
 			if s.auditLog != nil {
@@ -934,6 +999,61 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// mergeReplacedLine overlays a line request onto the existing cart line it
+// replaces (for example tinting a scanned plain base line in place): the
+// request's tint, product, unit and quantity take effect, while an override
+// price or a discount already on the cart line stays unless the request sends
+// its own.
+func mergeReplacedLine(old *salesdoc.Line, in salesdoc.ParsedLine) salesdoc.ParsedLine {
+	qty := in.Quantity
+	if !in.HasQuantity && old.Quantity != nil {
+		qty = *old.Quantity
+	}
+	out := parsedFromLine(old, qty)
+	out.ID = in.ID
+	if in.LineType != "" {
+		out.LineType = in.LineType
+	}
+	if in.ProductID != nil {
+		out.ProductID = in.ProductID
+	}
+	if in.SKU != "" {
+		out.SKU = in.SKU
+	}
+	if in.Description != "" {
+		out.Description = in.Description
+	}
+	if in.UOM != "" {
+		out.UOM = in.UOM
+	}
+	if in.PriceUOM != "" && (in.UOMQty > 0 || in.UnitPrice != nil) {
+		out.PriceUOM = in.PriceUOM
+	}
+	if in.UOMQty > 0 && in.PriceUOMQty > 0 {
+		out.UOMQty, out.PriceUOMQty = in.UOMQty, in.PriceUOMQty
+	}
+	if in.HasQuantity {
+		out.HasQuantity = true
+		out.Quantity = in.Quantity
+	}
+	if len(in.TallyRows) > 0 {
+		out.TallyRows = in.TallyRows
+	}
+	if in.UnitPrice != nil {
+		out.UnitPrice = in.UnitPrice
+		out.OverrideReason = in.OverrideReason
+	}
+	if in.DiscountPercent != nil || in.DiscountAmount != nil {
+		out.DiscountPercent = in.DiscountPercent
+		out.DiscountAmount = in.DiscountAmount
+		out.DiscountReason = in.DiscountReason
+	}
+	if in.Tint != nil {
+		out.Tint = in.Tint
+	}
+	return out
 }
 
 // ChangeLineQuantity sets one line's quantity on an open cart. The line is

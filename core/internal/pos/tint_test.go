@@ -767,4 +767,61 @@ func TestRescaledTintLineOnADeepBaseCarriesTheDeepTierCharge(t *testing.T) {
 	}
 }
 
+// RULE: tinting a scanned plain base line in the cart replaces that line in
+// one server transaction when line.id names the open cart line, keeping its
+// override price or discount and never leaving two cans on the sale.
+func TestTintingAScannedCartLineReplacesItInOneAct(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	_, _, _, formulaID := seedTintCatalogue(t, f)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "250")
+
+	sale := f.startSale(nil)
+	plain := f.productLine("1")
+	plain["unit_price_ten_thousandths"] = 60000
+	plain["override_reason"] = "contractor match"
+	scanned := f.addLine(sale, plain)
+	if scanned.status != http.StatusOK {
+		t.Fatalf("add plain base line = %d: %s", scanned.status, scanned.raw)
+	}
+	scannedID := lineIDs(t, scanned)[0]
+
+	// Replacing the scanned line with its tinted version in one POST /items act:
+	replace := tintLine("1", formulaID, "")
+	replace["id"] = scannedID
+	replace["product_id"] = f.productID.String()
+	tinted := f.addLine(sale, replace)
+	if tinted.status != http.StatusOK {
+		t.Fatalf("replace scanned line with tint = %d: %s", tinted.status, tinted.raw)
+	}
+	lines, _ := tinted.body["lines"].([]any)
+	if len(lines) != 1 {
+		t.Fatalf("sale lines after tinting scanned line = %d, want 1 (replaced in one act, never two cans): %s", len(lines), tinted.raw)
+	}
+	l := lines[0].(map[string]any)
+	if l["id"] != scannedID {
+		t.Errorf("replaced line id = %v, want the scanned line's id %s", l["id"], scannedID)
+	}
+	if got := num(t, l, "unit_price_ten_thousandths"); got != 85000 {
+		t.Errorf("replaced line unit price = %d, want the 60000 override plus the 250 cent tint charge (85000)", got)
+	}
+	if tint := tintOf(t, tinted); tint == nil || num(t, tint, "tint_charge_cents") != 250 {
+		t.Errorf("replaced line tint = %v, want tint_charge_cents 250", tint)
+	}
+
+	// A replacement naming a line not on this sale is refused and leaves the one can untouched.
+	missing := tintLine("1", formulaID, "")
+	missing["id"] = uuid.NewString()
+	missing["product_id"] = f.productID.String()
+	if r := f.addLine(sale, missing); r.status != http.StatusNotFound {
+		t.Errorf("replace unknown line = %d, want 404: %s", r.status, r.raw)
+	}
+	read := f.do("GET", "/api/v1/pos/transactions/"+sale, nil)
+	if got := len(read.body["lines"].([]any)); got != 1 {
+		t.Errorf("sale lines after refused replacement = %d, want 1", got)
+	}
+}
+
+
 

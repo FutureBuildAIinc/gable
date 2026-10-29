@@ -225,7 +225,7 @@ export class TintLineDialog extends LitElement {
         }
         try {
             this.busy = true;
-            let sale = await posService.addItemTint(
+            const sale = await posService.addItemTint(
                 this.saleId,
                 this.productId,
                 {
@@ -239,10 +239,8 @@ export class TintLineDialog extends LitElement {
                 },
                 this.quantity || '1',
                 this.uom || undefined,
+                this.lineId || undefined,
             );
-            if (this.lineId) {
-                sale = await posService.removeItem(this.saleId, this.lineId);
-            }
             // the save is offered on every tinted sale: it is what makes a repeat order the same formula
             if (this.customerId && this.saveName.trim()) {
                 try {
