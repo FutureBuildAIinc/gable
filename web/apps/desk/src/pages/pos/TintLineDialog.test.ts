@@ -87,6 +87,15 @@ describe('gable-tint-line-dialog', () => {
         expect(tint.rescale).toHaveBeenCalledWith('gal', 32);
         expect(q(el, '[data-testid="tint-rescaled"]')).toBeTruthy();
         expect(q(el, '[data-testid="tint-price"]').textContent).toContain('$8.00');
+
+        pos.addItemTint.mockResolvedValue({ id: 'sale', lines: [{ id: 'tinted-qt' }] });
+        (q(el, '[data-testid="tint-add"]') as HTMLElement).click();
+        await tick(el);
+        expect(pos.addItemTint).toHaveBeenCalledWith('sale', 'p1', expect.objectContaining({
+            formula_id: 'gal',
+            container_size_code: 'QT',
+            rescaled: true,
+        }), '1', undefined);
     });
 
     it('editing a colorant amount updates the shown amount', async () => {

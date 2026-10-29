@@ -308,7 +308,7 @@ type Repository interface {
 	// TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
 	// deepest base of a system, "flat" otherwise, "" when it cannot be
 	// resolved.
-	TintBaseTier(ctx context.Context, formulaID *uuid.UUID) (string, error)
+	TintBaseTier(ctx context.Context, formulaID, productID *uuid.UUID, baseCode string) (string, error)
 	// TintedNoReturn reads the dealer's tinted no return policy (row CP-16):
 	// off by default, because the rule is a dealer policy and not a law.
 	TintedNoReturn(ctx context.Context) (bool, error)

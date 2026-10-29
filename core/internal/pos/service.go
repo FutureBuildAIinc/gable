@@ -706,7 +706,7 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			if err != nil {
 				return line, out, err
 			}
-			baseTier, err := s.repo.TintBaseTier(ctx, pl.Tint.FormulaID)
+			baseTier, err := s.repo.TintBaseTier(ctx, pl.Tint.FormulaID, pl.ProductID, pl.Tint.BaseCode)
 			if err != nil {
 				return line, out, err
 			}

@@ -722,3 +722,49 @@ func TestOverridePricedTintedLineRepricesWithOneTintCharge(t *testing.T) {
 	}
 }
 
+// RULE: a rescaled tint line on a deep base charges the deep base tier whether
+// the request carries the source formula id or only the line's base, so the
+// server never charges a different figure from what the preview quoted.
+func TestRescaledTintLineOnADeepBaseCarriesTheDeepTierCharge(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tintSettingsRows(t, f)
+	baseID, _, _, formulaID := seedTintCatalogue(t, f)
+	mustExec(t, f.db, `UPDATE paint_bases SET is_deepest = true, product_id = $2 WHERE id = $1`, baseID, f.productID)
+	setPosSetting(t, f.db, "pos.tint_charge_cents", "1000")
+	setPosSetting(t, f.db, "pos.tint_charge_tiers",
+		`[{"base_tier":"","min_colorant_oz":"2.0000","charge_cents":4000},{"base_tier":"deep","min_colorant_oz":"","charge_cents":9000}]`)
+
+	for _, tc := range []struct {
+		name      string
+		formulaID any
+	}{
+		{"rescaled line carrying source formula", formulaID},
+		{"rescaled line resolved from the line base", nil},
+	} {
+		sale := f.startSale(nil)
+		line := tintLine("1", formulaID, "")
+		line["product_id"] = f.productID.String()
+		tint := line["tint"].(map[string]any)
+		tint["formula_id"] = tc.formulaID
+		tint["container_size_code"] = "QT"
+		tint["rescaled"] = true
+		comp := tint["components"].([]map[string]any)[0]
+		comp["amount"] = map[string]any{
+			"whole_oz": 0, "increments_coarse": 11, "increments_fine": 0, "unit_denominator": 384,
+		}
+		added := f.addLine(sale, line)
+		if added.status != http.StatusOK {
+			t.Fatalf("%s: add rescaled tinted line = %d: %s", tc.name, added.status, added.raw)
+		}
+		if got := num(t, tintOf(t, added), "tint_charge_cents"); got != 9000 {
+			t.Errorf("%s: tint_charge_cents = %d, want the deep base tier 9000 (not the flat 1000)", tc.name, got)
+		}
+		l := added.body["lines"].([]any)[0].(map[string]any)
+		if got := num(t, l, "unit_price_ten_thousandths"); got != 955000 {
+			t.Errorf("%s: unit_price_ten_thousandths = %d, want the 55000 base plus the 9000 cent deep charge (955000)", tc.name, got)
+		}
+	}
+}
+
+

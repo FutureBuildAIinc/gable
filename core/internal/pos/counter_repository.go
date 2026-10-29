@@ -427,16 +427,39 @@ func (r *PostgresRepository) TintChargeRule(ctx context.Context) (tint.ChargeRul
 
 // TintBaseTier reads the tier of the base a tint mixes in: "deep" for the
 // deepest base of a system, "flat" otherwise, and "" when the base cannot be
-// resolved (a hand written line with no formula). The server resolves it, so
-// the charge never follows a word the screen sent.
-func (r *PostgresRepository) TintBaseTier(ctx context.Context, formulaID *uuid.UUID) (string, error) {
-	if formulaID == nil {
+// resolved (a hand written line with no formula and no matching base). The
+// server resolves it from the formula first and from the line's base next, so
+// the charge never differs from what the preview quoted and never follows a
+// tier word the screen sent.
+func (r *PostgresRepository) TintBaseTier(ctx context.Context, formulaID, productID *uuid.UUID, baseCode string) (string, error) {
+	if formulaID != nil {
+		var deep bool
+		err := r.ex(ctx).QueryRow(ctx, `
+			SELECT b.is_deepest FROM paint_formulas f JOIN paint_bases b ON b.id = f.base_id
+			WHERE f.id = $1`, *formulaID).Scan(&deep)
+		if err == nil {
+			if deep {
+				return tint.BaseTierDeep, nil
+			}
+			return tint.BaseTierFlat, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("failed to read the tint base tier: %w", err)
+		}
+	}
+	baseCode = strings.TrimSpace(baseCode)
+	if baseCode == "" && productID == nil {
 		return "", nil
 	}
 	var deep bool
 	err := r.ex(ctx).QueryRow(ctx, `
-		SELECT b.is_deepest FROM paint_formulas f JOIN paint_bases b ON b.id = f.base_id
-		WHERE f.id = $1`, *formulaID).Scan(&deep)
+		SELECT b.is_deepest
+		FROM paint_bases b
+		WHERE ($1 <> '' AND b.code = $1 AND ($2::uuid IS NULL OR b.product_id = $2 OR b.product_id IS NULL))
+		   OR ($1 = '' AND $2::uuid IS NOT NULL AND b.product_id = $2)
+		ORDER BY CASE WHEN $2::uuid IS NOT NULL AND b.product_id = $2 THEN 0 ELSE 1 END,
+		         b.created_at DESC
+		LIMIT 1`, baseCode, productID).Scan(&deep)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

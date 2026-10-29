@@ -227,7 +227,7 @@ export class TintLineDialog extends LitElement {
                 this.saleId,
                 this.productId,
                 {
-                    formula_id: this.formulas.find((f) => f.container_size_code === this.sizeCode)?.id ?? null,
+                    formula_id: (this.formulas.find((f) => f.container_size_code === this.sizeCode) ?? this.formulas[0])?.id ?? null,
                     color_code: color.manufacturer_code ?? '',
                     color_name: color.name,
                     base_code: this.bases.find((b) => b.id === this.baseId)?.code ?? '',
