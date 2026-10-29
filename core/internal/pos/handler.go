@@ -148,6 +148,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/signoff", resolveMount(h.SignOffTill))
 	mux.HandleFunc("GET /api/v1/pos/till/policy", resolveMount(h.GetVariancePolicy))
 	mux.HandleFunc("PUT /api/v1/pos/till/policy", resolveMount(h.PutVariancePolicy))
+	mux.HandleFunc("GET /api/v1/pos/offline/policy", resolveMount(h.GetOfflinePolicy))
+	mux.HandleFunc("PUT /api/v1/pos/offline/policy", resolveMount(h.PutOfflinePolicy))
 
 	// The end of day by branch (CP-09) is the managers' (finance and owner): the
 	// summary, the close and the deposit match.
@@ -462,7 +464,7 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {
-		case "open", "held", "completed", "voided":
+		case "open", "held", "completed", "voided", "abandoned":
 			f.Status = uppercase(s)
 		default:
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "status", Message: "must be one of: open, held, completed, voided"}))

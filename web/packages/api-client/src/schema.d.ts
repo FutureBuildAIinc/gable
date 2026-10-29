@@ -6573,6 +6573,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/offline/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A branch's offline counter policy
+         * @description The branch's resolved offline selling policy (ADR 0011 section 4): the branch's own row in pos_offline_policy when set (source branch), else the database wide defaults in system_settings (source default), else off (source none). Includes enrolled_register_count and max_account_exposure_cents (account_cap_cents times the branch's enrolled registers). Finance and owner only; a branch the caller may not target is 403, and an unknown branch is 404.
+         */
+        get: operations["posOfflinePolicyGet"];
+        /**
+         * Set or clear a branch's offline counter policy
+         * @description Sets the branch's own offline counter policy in pos_offline_policy, or clears it with clear true so the database wide defaults (or none) apply again. Only cash, check and account tenders may be allowed offline. Finance and owner only, never a machine key; a branch the caller may not target is 403, and an unknown branch is 404. Audited as pos.offline.policy in the same transaction.
+         */
+        put: operations["posOfflinePolicyPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/end-of-day": {
         parameters: {
             query?: never;
@@ -14107,10 +14131,10 @@ export interface components {
          */
         OrderDeliveryType: "pickup" | "delivery";
         /**
-         * @description How the order's tax was found (ADR 0005 section 3). Rows written before cycle 2 are legacy.
+         * @description How the order's tax was found (ADR 0005 section 3; ADR 0011 section 3.2). Rows written before cycle 2 are legacy.
          * @enum {string}
          */
-        OrderTaxSource: "exempt" | "provider" | "ship_to_rate" | "branch_rate" | "legacy";
+        OrderTaxSource: "exempt" | "provider" | "ship_to_rate" | "branch_rate" | "offline_rate" | "legacy";
         /**
          * @description The line types of ADR 0005 section 2.1, one shape on every sales document. kit and component lines are written by the server when a line names a kit product; a request never sends them.
          * @enum {string}
@@ -15968,7 +15992,7 @@ export interface components {
             allocations: components["schemas"]["PortalPaymentAllocation"][];
         };
         /** @enum {string} */
-        PosStatus: "open" | "held" | "completed" | "voided";
+        PosStatus: "open" | "held" | "completed" | "voided" | "abandoned";
         /** @enum {string} */
         PosTenderMethod: "cash" | "check" | "card" | "account" | "store_credit";
         /** @enum {string} */
@@ -16851,6 +16875,55 @@ export interface components {
              * @description Null clears the branch's override.
              */
             variance_threshold_cents: number | null;
+        };
+        /** @enum {string} */
+        PosOfflineTender: "cash" | "check" | "account";
+        PosOfflinePolicy: {
+            /** Format: uuid */
+            branch_id: string;
+            enabled: boolean;
+            tenders: components["schemas"]["PosOfflineTender"][];
+            /** Format: int64 */
+            sale_cap_cents: number;
+            /** Format: int64 */
+            check_cap_cents: number;
+            /** Format: int64 */
+            account_cap_cents: number;
+            /** Format: int64 */
+            queue_total_cap_cents: number;
+            max_queued: number;
+            /** @description Active (unrevoked) enrolled registers on the branch. */
+            enrolled_register_count: number;
+            /**
+             * Format: int64
+             * @description Worst case exposure for one account across the branch's enrolled registers (account_cap_cents times enrolled_register_count).
+             */
+            max_account_exposure_cents: number;
+            /** @enum {string} */
+            source: "branch" | "default" | "none";
+            updated_by: string | null;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** Format: int64 */
+            revision: number | null;
+        };
+        PosOfflinePolicyRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @description When true, deletes the branch override so the database wide defaults or none apply. */
+            clear?: boolean;
+            /** @description Required unless clear is true. */
+            enabled?: boolean;
+            tenders?: components["schemas"]["PosOfflineTender"][];
+            /** Format: int64 */
+            sale_cap_cents?: number;
+            /** Format: int64 */
+            check_cap_cents?: number;
+            /** Format: int64 */
+            account_cap_cents?: number;
+            /** Format: int64 */
+            queue_total_cap_cents?: number;
+            max_queued?: number;
         };
         PosEndOfDayCloseRequest: {
             /** Format: uuid */
@@ -32484,7 +32557,7 @@ export interface operations {
             query?: {
                 register_id?: string;
                 date?: string;
-                status?: "open" | "held" | "completed" | "voided";
+                status?: "open" | "held" | "completed" | "voided" | "abandoned";
                 /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
                 cursor?: components["parameters"]["Cursor"];
                 /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
@@ -33430,6 +33503,70 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflinePolicyGet: {
+        parameters: {
+            query: {
+                branch_id: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolved offline counter policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflinePolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posOfflinePolicyPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosOfflinePolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description The offline counter policy now in force. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosOfflinePolicy"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
         };
     };

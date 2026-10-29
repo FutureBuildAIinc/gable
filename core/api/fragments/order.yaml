@@ -613,8 +613,9 @@ components:
       - provider
       - ship_to_rate
       - branch_rate
+      - offline_rate
       - legacy
-      description: How the order's tax was found (ADR 0005 section 3). Rows written before cycle 2 are
+      description: How the order's tax was found (ADR 0005 section 3; ADR 0011 section 3.2). Rows written before cycle 2 are
         legacy.
     SalesLineType:
       type: string
