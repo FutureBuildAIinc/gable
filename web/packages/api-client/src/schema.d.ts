@@ -17177,6 +17177,15 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            payer?: components["schemas"]["PosPayerCapture"];
+            /** @description The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold. */
+            suspected_avoidance?: boolean;
+            /**
+             * @description The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders.
+             * @enum {string}
+             */
+            tender_method?: "cash" | "check" | "card";
         };
         PosExchangeFigures: {
             /**
@@ -17196,6 +17205,8 @@ export interface components {
              * @description Replacement less return: positive is what the customer pays, negative what goes back.
              */
             difference_cents: number;
+            /** @description The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs. */
+            large_cash?: components["schemas"]["PosLargeCashPreview"];
         };
         PosExchange: {
             return: components["schemas"]["PosReturn"];

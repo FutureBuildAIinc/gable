@@ -207,20 +207,27 @@ type payerRequest struct {
 
 // payer answers the parsed payer, nil when the request carries none.
 func (r *completeSaleRequest) payer() *largecash.PayerIn {
-	if r.Payer == nil {
+	return r.Payer.payer()
+}
+
+// payer answers the parsed payer, nil when the request carries none. Every
+// route that captures a payer for a large cash crossing (the completion and
+// the exchange) reads it the same way.
+func (r *payerRequest) payer() *largecash.PayerIn {
+	if r == nil {
 		return nil
 	}
 	p := &largecash.PayerIn{
-		Name:        deref(r.Payer.Name),
-		Address:     deref(r.Payer.Address),
-		Occupation:  deref(r.Payer.Occupation),
-		DateOfBirth: deref(r.Payer.DateOfBirth),
-		IDType:      deref(r.Payer.IDType),
-		IDNumber:    deref(r.Payer.IDNumber),
-		TaxpayerID:  deref(r.Payer.TaxpayerID),
+		Name:        deref(r.Name),
+		Address:     deref(r.Address),
+		Occupation:  deref(r.Occupation),
+		DateOfBirth: deref(r.DateOfBirth),
+		IDType:      deref(r.IDType),
+		IDNumber:    deref(r.IDNumber),
+		TaxpayerID:  deref(r.TaxpayerID),
 	}
-	if r.Payer.ThirdPartyPayer != nil {
-		p.ThirdPartyPayer = *r.Payer.ThirdPartyPayer
+	if r.ThirdPartyPayer != nil {
+		p.ThirdPartyPayer = *r.ThirdPartyPayer
 	}
 	return p
 }

@@ -33990,6 +33990,9 @@ components:
           description: >-
             The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written.
           items: {type: string, format: uuid}
+        payer: {$ref: "#/components/schemas/PosPayerCapture", description: "The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them."}
+        suspected_avoidance: {type: boolean, description: "The manager's suspected avoidance mark (CP-17a); it makes a qualifying instrument count as cash whatever was sold."}
+        tender_method: {type: string, enum: [cash, check, card], description: "The preview only: the method the counter will tender for the difference, so the server can say what the branch's large cash rule needs of this exchange before it is rung. The exchange takes the tender itself in tenders."}
     PosExchangeFigures:
       type: object
       required: [returned_cents, restocking_fee_cents, replacement_cents, difference_cents]
@@ -33998,6 +34001,7 @@ components:
         restocking_fee_cents: {type: integer, format: int64}
         replacement_cents: {type: integer, format: int64, description: "The replacement sale's total with its tax."}
         difference_cents: {type: integer, format: int64, description: "Replacement less return: positive is what the customer pays, negative what goes back."}
+        large_cash: {$ref: "#/components/schemas/PosLargeCashPreview", description: "The branch country's large cash answer for this exchange (CP-17a): whether the payer's details are required and which fields the rule needs."}
     PosExchange:
       type: object
       required: [return, sale, returned_cents, restocking_fee_cents, replacement_cents, difference_cents, refunded_cents]
