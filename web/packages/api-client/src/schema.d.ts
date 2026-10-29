@@ -4076,6 +4076,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/large-cash/worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The manager's large cash worklist
+         * @description Every crossing the dealer owes a filing on, one row per crossing, in the order the manager should work them. The severity ranks by the deadline first and the amount second, so a small filing due tomorrow sits above a large filing due in ten days, and the recommended action is the ladder: capture the payer's details, then file, then chase a filing past its deadline, then issue the customer statement. A row that is not reportable (a Canadian record, an identity declined crossing) offers no filing; the identity declined row says so in words and asks a manager to look at it. The deadline is computed as a rule, the receipt anchor plus 15 days, and the row carries whether it is past. The row never carries the payer's taxpayer identification number. A branch scoped caller sees only the crossings its branch received cash for or contributed cash to; the aggregate each row carries is the dealer's central one.
+         */
+        get: operations["largeCashWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/filing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the filing of a Form 8300 for a crossing
+         * @description The manager's record of the Form 8300 they filed for this crossing: the day they filed it, the BSA E-Filing acknowledgement number they typed and who recorded it. A voluntary filing (a Form 8300 the dealer filed of its own accord) carries no acknowledgement number, because a voluntary filing below the threshold is filed on paper. The crossing's filing row is taken in place: two managers recording a filing on one crossing at the same time cannot both land, and the one that loses is answered 409 (the crossing is already filed). A Canadian crossing and an identity declined crossing are not filings at all and are answered 409. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashRecordFiling"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/form-8300": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Form 8300 data set for a crossing
+         * @description The data set the filer types into BSA E-Filing: the payer's name, address, taxpayer identification number, date of birth and occupation, the amount and the dates of the cash, and the branch the filing is made for. This is the one surface that carries the taxpayer identification number, because the IRS form cannot be completed without it, so the route is the dealer's own and admin's only and a machine key is refused 403. The export is audited without the number in the audit body. Gable does not file: the export carries the sentence that says so.
+         */
+        get: operations["largeCashForm8300"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer statements for a year
+         * @description The customer statements for a year, one per payer who had reportable cash in it: the business name and address, the contact name and telephone number, the aggregate amount of reportable cash received in the year, and the sentence that says the information was furnished to the IRS. The statement is a separate obligation from the filing and runs on its own clock: it is due on or before the last day of the first month of the year after the cash was received. The statement never carries the payer's taxpayer identification number and never says the dealer noted the transaction was suspicious. A branch scoped caller sees the payers whose crossings touched its branch; the aggregate each statement carries is the dealer's whole year for that payer, because the United States aggregation is deliberately central.
+         */
+        get: operations["largeCashStatements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/large-cash/events/{id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the customer statement for a crossing's payer
+         * @description The customer statement for the crossing's payer and the year the cash was received, issued once. The generator refuses two things, and they are rules in the code rather than a training note: it refuses to carry the dealer's suspicion of the transaction on the customer's statement, and it refuses to produce a statement for a voluntarily filed Form 8300, because the statement says the information was furnished to the IRS and a voluntary filing was not. The act is a manager's, so a machine key is refused 403.
+         */
+        post: operations["largeCashIssueStatement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/links/quotes/{id}": {
         parameters: {
             query?: never;
@@ -14442,6 +14542,192 @@ export interface components {
             items: components["schemas"]["ArApplication"][];
             next_cursor: string | null;
             limit: number;
+        };
+        LargeCashWorklist: {
+            items: components["schemas"]["LargeCashWorklistRow"][];
+            count: number;
+            /** Format: date-time */
+            generated_at: string;
+        };
+        LargeCashWorklistRow: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The aggregation key: the named customer's id, else the captured identity's digest. It is a digest, never the taxpayer identification number. */
+            payer_key: string;
+            /** @description The customer's name */
+            payer_name: string;
+            /** Format: uuid */
+            customer_id?: string | null;
+            customer_account?: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_name: string;
+            branch_address: string;
+            /** @description Every branch that contributed to the aggregate. */
+            contributed_branch_ids: string[];
+            currency: string;
+            /**
+             * Format: int64
+             * @description The reportable cash total since the last report.
+             */
+            total_cents: number;
+            /** @enum {string} */
+            rule_family: "US_8300" | "CA_DEALER";
+            /** Format: int64 */
+            threshold_cents: number;
+            /** @description The cash transactions in the aggregate. */
+            transaction_count: number;
+            /** @description The cash tenders counted in the aggregate. */
+            tender_count: number;
+            /**
+             * Format: date-time
+             * @description The first cash in the aggregate.
+             */
+            first_date?: string | null;
+            /**
+             * Format: date-time
+             * @description The most recent cash in the aggregate.
+             */
+            last_date?: string | null;
+            /** @enum {string} */
+            event_state: "reportable" | "recorded" | "identity declined";
+            /**
+             * @description Not yet reportable, reportable and not filed, filed, or voluntary (the payer asked not to be reported).
+             * @enum {string}
+             */
+            filing_state: "not_reportable" | "reportable" | "filed" | "voluntary";
+            /**
+             * Format: date-time
+             * @description The receipt anchor plus 15 days. Null when there is no filing to make.
+             */
+            filing_deadline?: string | null;
+            past_deadline: boolean;
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            /** @enum {string} */
+            statement_state: "not_issued" | "issued";
+            /** Format: date-time */
+            statement_issued_date?: string | null;
+            payer_details_captured: boolean;
+            /** Format: int64 */
+            severity_score: number;
+            /** @enum {string} */
+            recommended_action: "capture_payer_details" | "file" | "chase_filing" | "issue_statement" | "manager_review" | "dealer_record";
+            /** @description The plain sentence that says what the row is. */
+            note?: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashFilingRequest: {
+            /**
+             * Format: date
+             * @description The day the Form 8300 was filed. The server's day when it is absent.
+             */
+            filed_date?: string;
+            /** @description The BSA E-Filing acknowledgement number the manager typed. Required for a filing, and never carried by a voluntary one. */
+            acknowledgement_no?: string;
+            /** @description True when the dealer filed the Form 8300 of its own accord. A voluntary filing is never stated to the customer. */
+            voluntary?: boolean;
+        };
+        LargeCashFiling: {
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            state: "filed" | "voluntary";
+            /** Format: date-time */
+            filed_date?: string | null;
+            acknowledgement_no?: string;
+            recorded_by: string;
+            /** Format: date-time */
+            recorded_at: string;
+            past_deadline: boolean;
+        };
+        LargeCashForm8300: {
+            /** Format: uuid */
+            event_id: string;
+            /** @description The IRS form the data set is for. */
+            form: string;
+            currency: string;
+            /** Format: int64 */
+            amount_cents: number;
+            transaction_count: number;
+            tender_count: number;
+            /** Format: date-time */
+            first_date: string;
+            /** Format: date-time */
+            last_date: string;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            filing_deadline: string;
+            /** @description Form 8300 Part I: the payer as the form takes it. */
+            payer: {
+                name: string;
+                address: string;
+                /** @description The payer's taxpayer identification number, in full. This is the one surface that carries it. */
+                taxpayer_id: string;
+                date_of_birth?: string;
+                occupation?: string;
+            };
+            /** @description Form 8300 Part II: the person on whose behalf the transaction was conducted. */
+            third_party_payer?: {
+                name?: string;
+            } | null;
+            /** @description The legal person the filing is made for: the branch that received the cash. */
+            filer: {
+                /** Format: uuid */
+                branch_id: string;
+                branch_name: string;
+                address?: string;
+            };
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+            /** @description The masked hint of the taxpayer identification number, for the filer to check. */
+            taxpayer_id_hint?: string | null;
+        };
+        LargeCashStatements: {
+            year: number;
+            items: components["schemas"]["LargeCashStatement"][];
+            count: number;
+        };
+        LargeCashStatement: {
+            payer_key: string;
+            year: number;
+            payer_name: string;
+            business_address: string;
+            contact_name: string;
+            telephone: string;
+            /**
+             * Format: int64
+             * @description The reportable cash received from this payer in the year.
+             */
+            aggregate_cents: number;
+            currency: string;
+            crossing_count: number;
+            /** Format: date-time */
+            first_date?: string | null;
+            /** Format: date-time */
+            last_date?: string | null;
+            /** @enum {string} */
+            state: "not_issued" | "issued";
+            /** Format: date-time */
+            issued_date?: string | null;
+            issued_by?: string;
+            /**
+             * Format: date-time
+             * @description The statement's own deadline: the last day of the first month of the year after the cash was received.
+             */
+            due_date: string;
+            /** @description The information was furnished to the IRS. */
+            note: string;
+            /** @description The dealer confirms each filing with its own adviser. */
+            adviser_note: string;
+        };
+        LargeCashStatementRequest: {
+            /** @description Asks the generator to put the dealer's suspicion of the transaction on the customer's statement. The generator refuses. */
+            include_suspicion?: boolean;
         };
         /** @description Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12). */
         LinkAnswer: {
@@ -29996,6 +30282,160 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    largeCashWorklist: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked worklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashWorklist"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashRecordFiling: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the filing is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashFilingRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded filing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashFiling"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashForm8300: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing the form is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Form 8300 data set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashForm8300"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    largeCashStatements: {
+        parameters: {
+            query?: {
+                /** @description The year the cash was received. The current year when it is absent. */
+                year?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The year's statements. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatements"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    largeCashIssueStatement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description The crossing whose payer the statement is for. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LargeCashStatementRequest"];
+            };
+        };
+        responses: {
+            /** @description The issued statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LargeCashStatement"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
         };
     };
     linksQuoteResolve: {

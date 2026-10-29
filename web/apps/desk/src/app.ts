@@ -108,6 +108,7 @@ export class GableApp extends LitElement {
       '/dashboard': 'gable-dashboard',
       '/pos': 'gable-pos-terminal',
       '/pos/lost-answers': 'gable-terminal-lost-answers',
+      '/pos/large-cash': 'gable-large-cash-worklist',
       '/pos/refund-intents': 'gable-refund-intents',
       '/inventory': 'gable-inventory',
       '/inventory/:id': 'gable-product-detail',
