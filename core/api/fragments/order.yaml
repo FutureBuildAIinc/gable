@@ -1272,6 +1272,9 @@ components:
       - updated_at
       - invoice_ids
       - deposit_unapplied_cents
+      - deposit_total_cents
+      - balance_due_after_deposits_cents
+      - deposits
       - ship_to
       - lines
       properties:
@@ -1420,6 +1423,37 @@ components:
           type: integer
           format: int64
           description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
+        deposit_total_cents:
+          type: integer
+          format: int64
+          description: 'Everything taken on the order (deposits), applied and unapplied both.'
+        balance_due_after_deposits_cents:
+          type: integer
+          format: int64
+          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+        deposits:
+          type: array
+          description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
+          items:
+            type: object
+            required: [id, number, received_on, method, amount_cents, unapplied_cents, reference, applications]
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string, description: "PAY-000001, the payment's own number."}
+              received_on: {type: string, format: date}
+              method: {type: string, enum: [cash, check, ach, other, card]}
+              amount_cents: {type: integer, format: int64}
+              unapplied_cents: {type: integer, format: int64}
+              reference: {type: [string, "null"]}
+              applications:
+                type: array
+                items:
+                  type: object
+                  required: [invoice_id, amount_cents, applied_on]
+                  properties:
+                    invoice_id: {type: string, format: uuid}
+                    amount_cents: {type: integer, format: int64}
+                    applied_on: {type: string, format: date}
         ship_to:
           type:
           - object

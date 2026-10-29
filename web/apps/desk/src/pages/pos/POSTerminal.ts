@@ -23,6 +23,7 @@ import type { SignaturePad } from './SignaturePad';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 import type { TerminalIntent } from '../../types/pos';
 import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
@@ -75,6 +76,8 @@ export class POSTerminal extends LitElement {
   @state() private _standing: CounterStanding | null = null;
   /** The counter alerts the clerk has read and said so about on this sale. */
   @state() private _acknowledgedAlerts: string[] = [];
+  // The counter's deposit on an order of the attached customer (CP-07).
+  @state() private _depositOpen = false;
   @state() private _buyerId = '';
   // The check being entered: its number, the ID checked and its kind; and the
   // largest check a manager approved for this sale (null: none).
@@ -803,6 +806,13 @@ export class POSTerminal extends LitElement {
             >Walk-in sale</button>
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(held !== null ? held.tone : st.tone)}" data-testid="pos-customer-standing">${held !== null ? held.text : st.text}</div>
+          <div class="mt-2">
+            <button type="button" data-testid="pos-deposit-on-order" ?disabled=${this._till === null}
+              @click=${() => { this._depositOpen = true; }}
+              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent">
+              Deposit on an order
+            </button>
+          </div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
           ${this._renderVerdict()}
@@ -840,6 +850,13 @@ export class POSTerminal extends LitElement {
                 @click=${() => { this._step = 'payment'; this._open = 'payment'; }}
                 class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Next: Payment</button>
             </div>`}
+          <gable-pos-order-deposit
+            .isOpen=${this._depositOpen}
+            .customerId=${c.id}
+            .branchId=${this._sale?.branch_id ?? this._till?.branch_id ?? ''}
+            .tillSessionId=${this._till?.id ?? ''}
+            @close=${() => { this._depositOpen = false; }}
+          ></gable-pos-order-deposit>
         </div>`;
     }
     return html`

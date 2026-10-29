@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './OrderDetail'
 import type { GableOrderDetail } from './OrderDetail'
 import type { Order } from '../../types/order'
-import { mountAsync, text, jsonResponse } from '../../test/dom'
+import { mountAsync, text, jsonResponse, q } from '../../test/dom'
 import { ToastService } from '../../lib/toast-service.ts'
 import { readFileSync } from 'node:fs'
 
@@ -89,8 +89,12 @@ function order(overrides: Partial<Order> = {}): Order {
     created_at: '2026-08-11T14:00:00Z',
     updated_at: '2026-08-11T15:00:00Z',
     invoice_ids: [],
+    deposit_unapplied_cents: 0,
     ship_to: null,
     lines: [line],
+    deposit_total_cents: 0,
+    balance_due_after_deposits_cents: 84_662,
+    deposits: [],
     ...overrides,
   }
   return base
@@ -134,6 +138,65 @@ describe('gable-order-detail - the order contract', () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     expect(text(el)).toContain('SO-000042')
     expect(text(el)).toContain('Confirmed')
+  })
+
+  it('shows the deposits the order answer carries: each deposit, the total, the unapplied, the balance after deposits', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(order({
+      deposit_total_cents: 40_000,
+      deposit_unapplied_cents: 40_000,
+      balance_due_after_deposits_cents: 44_662,
+      deposits: [{
+        id: '00000000-0000-4000-8000-0000000000d1',
+        number: 'PAY-000031',
+        received_on: '2026-08-11',
+        method: 'check' as const,
+        amount_cents: 40_000,
+        unapplied_cents: 40_000,
+        reference: 'CHK-4412',
+        applications: [],
+      }],
+    }))))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(text(el)).toContain('PAY-000031')
+    expect(text(el)).toContain('CHK-4412')
+    expect(q(el, '[data-testid="deposit-total"]').textContent).toContain('400.00')
+    expect(q(el, '[data-testid="deposit-unapplied"]').textContent).toContain('400.00')
+    expect(q(el, '[data-testid="balance-after-deposits"]').textContent).toContain('446.62')
+    expect(text(el)).toContain('Still unapplied')
+  })
+
+  it('names the invoice each deposit settled once the order has billed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(order({
+      invoice_ids: ['00000000-0000-4000-8000-0000000000i1'],
+      deposit_total_cents: 40_000,
+      deposit_unapplied_cents: 0,
+      balance_due_after_deposits_cents: 44_662,
+      deposits: [{
+        id: '00000000-0000-4000-8000-0000000000d1',
+        number: 'PAY-000031',
+        received_on: '2026-08-11',
+        method: 'check' as const,
+        amount_cents: 40_000,
+        unapplied_cents: 0,
+        reference: null,
+        applications: [{
+          invoice_id: '00000000-0000-4000-8000-0000000000i1',
+          amount_cents: 40_000,
+          applied_on: '2026-08-12',
+        }],
+      }],
+    }))))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(text(el)).toContain('Applied $400.00 to')
+    expect(el.querySelector('a[href="/invoices/00000000-0000-4000-8000-0000000000i1"]')).toBeDefined()
+  })
+
+  it('offers a deposit on an order that can still be billed, and not on a fulfilled one', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(el.querySelector('[data-testid="take-deposit"]')).toBeDefined()
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(order({ status: 'fulfilled' as const }))))
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    expect(el.querySelector('[data-testid="take-deposit"]')).toBeNull()
   })
 
   it('prints the pick ticket through the token, in a tab opened empty', async () => {

@@ -14730,6 +14730,40 @@ export interface components {
              * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
              */
             deposit_unapplied_cents: number;
+            /**
+             * Format: int64
+             * @description Everything taken on the order (deposits), applied and unapplied both.
+             */
+            deposit_total_cents: number;
+            /**
+             * Format: int64
+             * @description The order total less everything taken on it: what the customer still owes on the order.
+             */
+            balance_due_after_deposits_cents: number;
+            /** @description The posted payments taken against this order (deposits), oldest first, each with the invoices it settled. */
+            deposits: {
+                /** Format: uuid */
+                id: string;
+                /** @description PAY-000001, the payment's own number. */
+                number: string;
+                /** Format: date */
+                received_on: string;
+                /** @enum {string} */
+                method: "cash" | "check" | "ach" | "other" | "card";
+                /** Format: int64 */
+                amount_cents: number;
+                /** Format: int64 */
+                unapplied_cents: number;
+                reference: string | null;
+                applications: {
+                    /** Format: uuid */
+                    invoice_id: string;
+                    /** Format: int64 */
+                    amount_cents: number;
+                    /** Format: date */
+                    applied_on: string;
+                }[];
+            }[];
             /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
             ship_to: {
                 /** Format: uuid */
@@ -15128,6 +15162,11 @@ export interface components {
             order_id?: string;
             /** Format: uuid */
             job_id?: string;
+            /**
+             * Format: uuid
+             * @description The open counter till session a cash or check counter deposit rides.
+             */
+            till_session_id?: string;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {
