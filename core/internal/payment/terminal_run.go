@@ -238,7 +238,7 @@ func (t *RunTerminal) dispatchSale(ctx context.Context, d TerminalDispatch) (Ter
 	already := t.sent[d.IdempotencyKey]
 	t.sentMu.Unlock()
 	if already {
-		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took order %s in this process and the transaction lookup is not configured: the dispatch is not re sent", d.IdempotencyKey)
+		return TerminalReceipt{}, fmt.Errorf("the Run terminal already took order %s in this process and the transaction lookup found no charge for it: the dispatch is not re sent", d.IdempotencyKey)
 	}
 	body, _ := json.Marshal(runChargeCardRequest{Amount: dollarsOf(d.AmountCents), OrderID: d.IdempotencyKey})
 	raw, status, err := t.authed(ctx, cfg, http.MethodPost,

@@ -459,7 +459,9 @@ func TestRunTerminalPollOutcomes(t *testing.T) {
 // TestRunTerminalExpiryResolvedByTransactionLookup: the interaction vanishes
 // past its window (every poll 404s), and the transaction lookup by order_id
 // is the only documented recovery: the found charge authorizes the leg with
-// Run's trans id.
+// Run's trans id. The charge reaches the report only after the dispatch, so
+// the pre dispatch lookup cannot answer it: the leg is resolved by the poll's
+// own lookup, which is the path an expired interaction takes.
 func TestRunTerminalExpiryResolvedByTransactionLookup(t *testing.T) {
 	ledger, branch := newRunLedger(t)
 	runUntilItSticks(t, func(t *testing.T) bool {
@@ -471,6 +473,9 @@ func TestRunTerminalExpiryResolvedByTransactionLookup(t *testing.T) {
 		fs.fake.reporting["sale-"+sale.String()+"-card-0"] = map[string]any{
 			"order_id": "sale-" + sale.String() + "-card-0", "trans_id": "TRX-FOUND", "result": "A",
 			"auth_code": "OK42", "card_number": "XXXXXXXXXXXX4242", "amount": 2500.0, "resp_text": "APPROVED"}
+		// the charge reaches the report only after the dispatch: the pre
+		// dispatch lookup must not find it, the poll's own lookup must
+		fs.fake.deferredReport = 1
 		term := newRunDriver(t, fs, ledger)
 		in := claimRunLegAt(t, ledger, sale, branch, 2500)
 		if _, err := term.Dispatch(context.Background(), payment.TerminalDispatch{
@@ -628,6 +633,44 @@ func TestRunTerminalNeverResendsADispatch(t *testing.T) {
 	})
 }
 
+// TestRunTerminalRefusesABlindResendWithoutTheReportingSet: the reporting
+// credential set is optional, and without it the transaction lookup cannot
+// run at all. The driver still refuses to re send a dispatch its own process
+// already posted: the same idempotency key is the same leg, never a second
+// charge, so the second dispatch is refused and the device is not prompted
+// again. The no double charge rule holds with the lookup and without it.
+func TestRunTerminalRefusesABlindResendWithoutTheReportingSet(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		fs := newRunFake(t)
+		fs.fake.pollStep = func(string, int) (int, map[string]any) {
+			return 200, map[string]any{"status": "pending", "result": nil, "updated_at": "2026-01-01T00:00:00Z"}
+		}
+		// no reporting credential set: the transaction lookup cannot run
+		term := payment.NewRunTerminal(func() payment.GatewayConfig {
+			return payment.GatewayConfig{APIKey: "teststub" + "teststub", MID: "MID-TESTSTUB", BaseURL: fs.server.URL}
+		}, ledger, slog.New(slog.NewTextHandler(io.Discard, nil))).
+			WithPollInterval(5 * time.Millisecond).WithInteractionWindow(50 * time.Millisecond)
+		in := claimRunLegAt(t, ledger, sale, branch, 2500)
+		d := payment.TerminalDispatch{IntentID: in.ID, Kind: in.Kind, AmountCents: in.AmountCents,
+			RegisterID: in.RegisterID, DeviceID: in.DeviceID, IdempotencyKey: in.IdempotencyKey}
+		if _, err := term.Dispatch(context.Background(), d); err != nil {
+			t.Fatalf("first dispatch: %v", err)
+		}
+		if fs.fake.chargePostCount() != 1 {
+			t.Fatalf("the first dispatch posted %d charges, want 1", fs.fake.chargePostCount())
+		}
+		if _, err := term.Dispatch(context.Background(), d); err == nil {
+			t.Fatal("the re dispatch was answered: the driver must refuse to prompt the device a second time")
+		}
+		if fs.fake.chargePostCount() != 1 {
+			t.Fatalf("the re dispatch posted a second charge (%d posts): the leg would be charged twice", fs.fake.chargePostCount())
+		}
+		return true
+	})
+}
+
 // TestRunTerminalRefundAndVoidGoThroughVoidOrRefund: a refund and a void leg
 // are Payments API calls with no device: trans_id is the dispatch's
 // reference, the amount is cents on a refund and absent on a void, and the
@@ -721,8 +764,9 @@ func TestRunTerminalRefundDecline(t *testing.T) {
 // TestRunTerminalPollAndSweepRace (BRIEF-COMMON, transactions): the poll's
 // answer and the sweep resolving the same intent race at pool size 4 with
 // three contenders (two answers of the same verdict and the sweep). Whatever
-// the interleaving, the intent ends in exactly one final state and a lost
-// intent carries exactly one manager item.
+// the interleaving, the intent ends in exactly one final state, a late answer
+// never moves it a second time, and a lost intent carries exactly one manager
+// item that shows the device's verdict.
 func TestRunTerminalPollAndSweepRace(t *testing.T) {
 	testutil.LockTerminalTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
@@ -741,6 +785,71 @@ func TestRunTerminalPollAndSweepRace(t *testing.T) {
 			i--
 		}
 	}
+}
+
+// TestRunTerminalLateAnswerAfterTheSweepNeverMovesTheLeg: the sweep takes a
+// leg whose lease ran out and files the manager item that resolves it; the
+// device's answer arrives afterwards. The late answer never moves the intent
+// a second time (the leg is not charged twice) and the manager item carries
+// the device's verdict (the money that moved is never lost).
+func TestRunTerminalLateAnswerAfterTheSweepNeverMovesTheLeg(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	runUntilItSticks(t, func(t *testing.T) bool {
+		sale := runSaleRow(t, branch)
+		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
+			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 2500,
+			Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
+			// the lease has already run out: the sweep takes this leg
+			LeaseUntil: time.Now().Add(-time.Second)}
+		if err := ledger.Claim(context.Background(), in); err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if ok, err := ledger.MarkDispatched(context.Background(), in.ID, "", in.LeaseUntil); err != nil || !ok {
+			t.Fatalf("dispatch move: %v %v", ok, err)
+		}
+		if _, err := ledger.Sweep(context.Background(), time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+		got, err := ledger.Get(context.Background(), in.ID)
+		if err != nil {
+			t.Fatalf("get intent: %v", err)
+		}
+		if got.State != payment.TerminalLost {
+			t.Fatalf("the intent is %s, want the sweep to have taken it", got.State)
+		}
+		item, err := ledger.LostItemOfIntent(context.Background(), in.ID)
+		if err != nil {
+			t.Fatalf("lost item read: %v", err)
+		}
+		if item == nil {
+			t.Fatal("the lost intent carries no manager item: the money that moved would be lost")
+		}
+		// the device's answer arrives after the sweep took the leg
+		out, err := ledger.ApplyDeviceAnswer(context.Background(), payment.TerminalAnswer{
+			IntentID: in.ID, ProviderRef: "TRX-LATE", Verdict: "authorized",
+			Brand: "VISA", Last4: "4242", AuthCode: "OK1"})
+		if err != nil {
+			t.Fatalf("late answer: %v", err)
+		}
+		if out != payment.AnswerLateQueued {
+			t.Fatalf("the late answer was %s, want it queued on the manager item", out)
+		}
+		after, err := ledger.Get(context.Background(), in.ID)
+		if err != nil {
+			t.Fatalf("get intent: %v", err)
+		}
+		if after.State != payment.TerminalLost {
+			t.Fatalf("the late answer moved the intent to %s: the leg would be charged twice", after.State)
+		}
+		item, err = ledger.LostItemOfIntent(context.Background(), in.ID)
+		if err != nil {
+			t.Fatalf("lost item read: %v", err)
+		}
+		if item.LateVerdict != "authorized" {
+			t.Fatalf("the manager item carries the late verdict %q, want the device's answer", item.LateVerdict)
+		}
+		return true
+	})
 }
 
 // raceOnce runs one iteration of the race and answers false when an outside
@@ -805,6 +914,18 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 		}
 		final := got.State == payment.TerminalAuthorized || got.State == payment.TerminalLost
 		if final {
+			// a late answer (the device's verdict after the leg settled) never
+			// moves the intent a second time: the leg is not charged twice
+			if _, err := ledger.ApplyDeviceAnswer(ctx, answer); err != nil {
+				t.Fatalf("late answer: %v", err)
+			}
+			after, err := ledger.Get(ctx, in.ID)
+			if err != nil {
+				t.Fatalf("get intent: %v", err)
+			}
+			if after.State != got.State {
+				t.Fatalf("iteration %d: the late answer moved the intent from %s to %s", i, got.State, after.State)
+			}
 			if got.State == payment.TerminalLost {
 				item, err := ledger.LostItemOfIntent(ctx, in.ID)
 				if err != nil {
