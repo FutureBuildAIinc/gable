@@ -2598,8 +2598,8 @@ export class POSTerminal extends LitElement {
         </div>
         <div class="relative flex w-full min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:static min-[900px]:w-auto min-[900px]:flex-nowrap">
           ${this._till ? html`
-            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
-            <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
+            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="whitespace-nowrap rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
+            <span class="whitespace-nowrap rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
           <span class="hidden max-w-[8rem] truncate text-xs text-slate-200 min-[900px]:inline" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             ${this._renderTillMenu()}
