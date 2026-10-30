@@ -73,13 +73,13 @@ test.describe('A kit on a quote', () => {
 
     // The product page: the Kit Components tab makes the product a kit.
     await page.goto(`/inventory/${kitProduct.id}`);
-    await expect(page.getByRole('heading', { name: kit.sku })).toBeVisible();
+    await expect(page.getByRole('heading', { name: kit.description })).toBeVisible();
     await page.getByRole('button', { name: 'Kit Components' }).click();
-    await expect(page.getByText('No parts yet. This product is not a kit.')).toBeVisible();
+    await expect(page.locator('[data-testid="kit-empty"]')).toBeVisible();
 
     for (const part of parts) {
       await page.getByPlaceholder('Search by SKU or description...').fill(part.sku);
-      await page.locator('div.cursor-pointer', { hasText: part.sku }).first().click();
+      await page.locator('gable-product-kit-tab div.cursor-pointer', { hasText: part.sku }).first().click();
       await page.locator('[data-testid="kit-new-quantity"]').fill('2');
       await page.locator('[data-testid="kit-add-part"]').click();
       await expect(page.locator('[data-testid="kit-part"]')).toHaveCount(parts.indexOf(part) + 1);
@@ -105,7 +105,7 @@ test.describe('A kit on a quote', () => {
     await page.getByPlaceholder('Select Customer...').click();
     await page.getByText(customer.name, { exact: true }).first().click();
     await page.getByPlaceholder('Search SKU or Desc...').fill(kit.sku);
-    await page.locator('div.cursor-pointer', { hasText: kit.sku }).first().click();
+    await page.locator('gable-line-item-editor div.cursor-pointer', { hasText: kit.sku }).first().click();
     await page.locator('gable-line-item-editor input[type="number"]').first().fill('3');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
 
