@@ -9,25 +9,19 @@
 # the organization; deploy/README.md ("Running from prebuilt images") says how
 # to dispatch it and how to point a platform at this file.
 #
-# The one difference from the recipe: the web image is chosen by two values.
+# The one difference from the recipe: the images are chosen by one value.
 #
 #   GABLE_IMAGE_TAG     required. The commit sha the images were built for
 #                       (the workflow tags every image with the full sha).
-#   GABLE_WEB_TAG_PREFIX  empty for a customer, `demo-` for the demo. The demo
-#                       web image is built with the persona sign in
-#                       (VITE_AUTH_DEV_MODE=true) and carries the `demo-`
-#                       prefix on its tag; the customer web image does not.
+#
+# The web image is the customer image for the demo and for a customer alike:
+# it is built without the persona sign in, and staff sign in through Appwrite
+# (ADR 0012, item 345).
 #
 # Everything else is the recipe unchanged: no published port, every secret with
-# no default, the seed once guard, and the plain warning below on AUTH_MODE=dev.
+# no default, and the seed once guard. AUTH_MODE=dev is not part of this recipe;
+# it belongs to the local root compose stack alone.
 # See deploy/compose.yml's header for the full commentary.
-#
-# AUTH_MODE=dev gives every caller full reach: no JWT is verified and every
-# role check passes, so anyone who reaches the port has the whole ERP, the
-# general ledger, the AR and the payments. The demo is safe only because the
-# platform's access gate (one shared password in front of the domain) keeps
-# the public out, and because the demo holds sample data and nothing else.
-# Never run a customer this way.
 
 x-core-image: &core-image
   # One core image: the migrate, core and worker services all run the one
@@ -83,11 +77,11 @@ services:
     <<: *core-image
     command: ["./core", "serve"]
     environment:
-      # AUTH_MODE=dev for the demo, unset for a customer. With AUTH_MODE unset
-      # the core is fail-closed and requires JWKS_URL (AUTH_ISSUER is optional
-      # and checks the token's iss claim when set). Note: staff sign in moves
-      # to Appwrite in ADR 0012. See the note at the top of deploy/compose.yml.
-      AUTH_MODE: ${AUTH_MODE-}
+      # Staff sign in is Appwrite (ADR 0012). The core is fail-closed: with
+      # AUTH_MODE unset, which is the only mode this recipe offers, it
+      # requires its Appwrite settings or JWKS_URL (AUTH_ISSUER is optional
+      # and checks the token's iss claim when set). See the note at the top of
+      # deploy/compose.yml.
       JWKS_URL: ${JWKS_URL-}
       AUTH_ISSUER: ${AUTH_ISSUER-}
       PORT: "8080"
@@ -134,7 +128,6 @@ services:
     <<: *core-image
     command: ["./core", "worker"]
     environment:
-      AUTH_MODE: ${AUTH_MODE-}
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to the database password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:?set PAYMENT_VAULT_KEY to 64 hex characters (openssl rand -hex 32)}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:?set PORTAL_JWT_SECRET to a long random string}
@@ -158,11 +151,10 @@ services:
 
   # nginx: the front door at /, the desk everywhere else, and /api proxied to
   # core. The API snippet is the same file the local stack mounts; the image
-  # itself is the one the publish-images workflow built for the commit (the
-  # demo variant's tag, when GABLE_WEB_TAG_PREFIX is `demo-`, was built with
-  # the persona sign in).
+  # itself is the one the publish-images workflow built for the commit, without
+  # the persona sign in.
   web:
-    image: ghcr.io/futurebuildaiinc/gable-web:${GABLE_WEB_TAG_PREFIX:-}${GABLE_IMAGE_TAG:?set GABLE_IMAGE_TAG to the commit sha the images were built for}
+    image: ghcr.io/futurebuildaiinc/gable-web:${GABLE_IMAGE_TAG:?set GABLE_IMAGE_TAG to the commit sha the images were built for}
     volumes:
       - ${GABLE_REPO_ROOT:-..}/web/nginx-local-api.conf:/etc/nginx/gable-api.conf:ro
     expose:

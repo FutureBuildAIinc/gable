@@ -19,7 +19,10 @@
 #   5. the recipe builds this repository's own Dockerfiles (compose.yml), or
 #      every service runs a prebuilt image ref (compose.images.yml);
 #   6. the customer variant (AUTH_MODE unset) passes JWKS_URL and AUTH_ISSUER
-#      to the core service.
+#      to the core service;
+#   7. the recipe has no dev sign in: neither core nor worker takes AUTH_MODE,
+#      the web build takes no VITE_AUTH_DEV_MODE, and the web image is the
+#      customer image (no `demo-` tag).
 #
 # Run it from anywhere inside the repository:
 #
@@ -69,7 +72,7 @@ command -v python3 >/dev/null 2>&1 || fail "python3 is not on the PATH"
 # the one named. `docker compose --env-file` reads them for the file's
 # interpolation, exactly as a platform's own environment would. The extra
 # pairs argument carries the images file's own values (the tag, the demo
-# prefix), so both files are checked through the same path.
+# values), so both files are checked through the same path.
 write_env_file() {
 	local omit="$1"
 	local out="$2"
@@ -204,12 +207,21 @@ else:
             problems.append("service %s runs %s, not %s:<sha>" % (name, image, expected))
         elif not tag.endswith(expected_tag):
             problems.append("service %s runs %s, which is not tagged with the required tag" % (name, image))
-    # The web tag may carry the demo prefix in front of the sha; the core
-    # roles must not.
+    # The web image is the customer image: its tag is the sha alone, never
+    # the `demo-` tag of the persona sign in build.
     web_image = services.get("web", {}).get("image", "")
     _, _, web_tag = web_image.rpartition(":")
     if web_tag != expected_tag:
-        problems.append("the web tag %s is not the required tag; GABLE_WEB_TAG_PREFIX must be empty in this check" % web_tag)
+        problems.append("the web tag %s is not the required tag; the demo runs the customer web image" % web_tag)
+
+# No dev sign in in the recipe (item 345): the demo signs in through Appwrite,
+# so nothing takes AUTH_MODE and the web build takes no persona sign in arg.
+for name in ("core", "worker"):
+    if "AUTH_MODE" in services.get(name, {}).get("environment", {}):
+        problems.append("service %s takes AUTH_MODE; AUTH_MODE=dev belongs to the local root stack only" % name)
+web_args = services.get("web", {}).get("build", {}).get("args", {})
+if "VITE_AUTH_DEV_MODE" in (web_args or {}):
+    problems.append("the web build takes VITE_AUTH_DEV_MODE; the persona sign in is not part of the recipe")
 
 # The data lives on a named volume.
 volumes = config.get("volumes", {})
@@ -237,6 +249,7 @@ if mode == "build":
 else:
     print("check-deploy: ok: every made service runs a prebuilt image ref pinned to the required tag")
 print("check-deploy: ok: the customer variant passes JWKS_URL and AUTH_ISSUER to core")
+print("check-deploy: ok: the recipe has no dev sign in (no AUTH_MODE, no persona sign in build, customer web image)")
 PY
 }
 

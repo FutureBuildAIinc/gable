@@ -10,7 +10,10 @@ values changed:
 
 - the **demo variant** loads the Gable Building Supply sample data on the
   first start and keeps it through every later redeploy;
-- the **customer variant** never seeds anything and signs people in for real.
+- the **customer variant** never seeds anything.
+
+Both sign staff in through Appwrite (ADR 0012, item 345). The recipe has no
+dev sign in.
 
 Both hold nothing but what the demo seed writes in the first case, and what
 the dealer enters in the second. The demo tenant holds sample data only:
@@ -69,46 +72,25 @@ says which one is missing.
 | `CORS_ORIGINS` | The origins allowed to call the API. The same address on a single domain deployment. | `https://demo.gablelbm.com` | no |
 | `TRUSTED_PROXIES` | The platform's proxy network (and the compose network where `web` fronts `core`), as CIDRs or addresses separated by commas, so each visitor gets their own rate limit budget instead of sharing one budget on the proxy's address. | For example `10.0.0.0/8,172.16.0.0/12` (confirm from the `core` boot log on the first deploy) | no |
 
-The demo adds four more:
+The demo adds two more, and both are data, not authentication:
 
 | Value | What it is |
 |---|---|
-| `AUTH_MODE` | `dev`. The core stops checking who the caller is. |
 | `DEMO_SEED` | `1`. The `migrate` service loads the demo data. |
 | `DEMO_SEED_IMPORT` | `1`. The same, with the larger invented catalogue and its history. |
-| `VITE_AUTH_DEV_MODE` | `true`, and it is a build argument: the web image is built with the persona sign in. |
 
-`AUTH_MODE=dev` gives every caller full reach. No token is verified and
-every role check passes, so anyone who reaches the port has the whole ERP,
-the general ledger, the accounts and the payments. The demo is safe only
-because the access gate in front of it keeps the public out and because it
-holds sample data and nothing else. **Never run a customer this way.**
+The demo signs in the way a customer does, through Appwrite. Seed the demo
+people once into the Appwrite project the demo points at, with
+`scripts/appwrite/seed-demo-people.sh --config <file>` and the password in
+`DEMO_PEOPLE_PASSWORD` from the vault.
 
-The customer variant leaves those four unset and sets `JWKS_URL` as a
-required variable of the customer variant (with `AUTH_ISSUER` optional); see
+`AUTH_MODE=dev` and the persona sign in (`VITE_AUTH_DEV_MODE`) are not part of
+this recipe. They belong to the local root compose stack alone, where the core
+is built with the `devauth` tag; the images this recipe builds and runs carry
+neither, and a core given `AUTH_MODE=dev` refuses to start.
+
+The customer variant leaves `DEMO_SEED` and `DEMO_SEED_IMPORT` unset; see
 [Sign in](#sign-in) below.
-
-`VITE_AUTH_DEV_MODE` is a build argument, so changing it needs a rebuild.
-A platform that passes the application's environment values to the build
-picks it up as it is; one that does not needs the value added to the build
-arguments.
-
-Optional values, all with a default:
-
-| Value | Default | What it is |
-|---|---|---|
-| `GABLE_REPO_ROOT` | `..` | Where the repository root is, relative to the compose project directory. |
-| `GABLE_PG_VOLUME` | `gable_postgres_data` | The name of the data volume. Give a second deployment on the same host its own name. |
-| `RATE_LIMIT_PER_MINUTE` | `120` | The API's request limit per caller address. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TLS` | empty | Mail. Left empty, the report runs and its result is logged instead of being delivered, and the report's screen says that the delivery was logged and not sent. |
-| `DEMO_SEED_ONCE` | `1` | The seed's memory. With it on, the seed runs on the first start only. |
-| `DEMO_SEED_FORCE` | empty | `1` asks for a reseed on purpose. |
-| `POSTGRES_USER`, `POSTGRES_DB` | `gable_user`, `gable_db` | The database's user and name. |
-| `AUTH_ISSUER` | empty | Optional in the customer variant: the expected token issuer (`iss` claim) when `JWKS_URL` is used. |
-
-No payment processor key and no AI key are in the recipe. Without a payment
-key the portal's online payment is off. Without an AI key every AI feature
-answers that AI is off, and nothing pretends to have run.
 
 ### 4. The domain
 
@@ -120,8 +102,8 @@ front of it and terminates the certificate.
 
 Turn the platform's access gate on in front of the domain. It is an HTTP
 password prompt with one shared password, and the demo's owner gives that
-password to the people the demo is shown to. It is the only thing between
-the internet and a deployment running with `AUTH_MODE=dev`.
+password to the people the demo is shown to. It keeps the public
+out of a deployment that holds sample data and nothing else.
 
 ### 6. The first deploy
 
@@ -166,21 +148,18 @@ nothing. A customer's database never holds sample data.
 
 ### Sign in
 
-Leave `AUTH_MODE` unset and set `JWKS_URL`. With `AUTH_MODE` unset the core
-is fail-closed: `JWKS_URL` is a required variable of the customer variant and
-the core refuses to start without it.
+Leave `AUTH_MODE` unset. With `AUTH_MODE` unset the core is fail-closed: it
+signs staff in through Appwrite (ADR 0012) and refuses to start without its
+sign in settings.
 
 | Value | Required in customer variant | What it is |
 |---|---|---|
-| `JWKS_URL` | yes | The identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
+| `JWKS_URL` | until the Appwrite settings are set | The identity provider's JWKS endpoint URL, used by the core to verify bearer tokens. |
 | `AUTH_ISSUER` | no | When set, the core also checks that each token's `iss` claim matches this issuer string. |
 
-Note: staff sign in moves to Appwrite in ADR 0012. Until ADR 0012 lands, a
-customer deployment authenticates staff tokens against `JWKS_URL`.
-
-Build the web image without `VITE_AUTH_DEV_MODE`, so the persona sign in is
-not offered. The demo's sign in is a display name and no credential, and it
-must not be in a customer's deployment.
+The web image is the customer image, built without the persona sign in. The
+persona sign in is a display name and no credential, and it must not be in a
+customer's deployment.
 
 The other demo settings go with it: `DEMO_SEED`, `DEMO_SEED_IMPORT` and
 `DEMO_SEED_FORCE` stay unset, and `GABLE_PUBLIC_URL` and `CORS_ORIGINS`
@@ -212,9 +191,8 @@ the `migrate` service has to finish before the others start.
 
 ### What is not in the package yet
 
-- The staff sign in (staff sign in moves to Appwrite in ADR 0012). Until it
-  lands, a customer's deployment requires `JWKS_URL` from its own identity
-  provider.
+- The link from an Appwrite user to its Gable staff row and yard grants
+  (ADR 0012 slice 2).
 - An automated backup. Back the volume up yourself, on a schedule, and
   restore one to be sure.
 - Mail. Without the SMTP values the sender logs instead of delivering, and
@@ -256,26 +234,25 @@ images, all tagged with that sha:
 - `ghcr.io/futurebuildaiinc/gable-core:<sha>`: the one core binary, used by
   the `migrate`, `core` and `worker` services;
 - `ghcr.io/futurebuildaiinc/gable-web:<sha>`: the web image built WITHOUT the
-  persona sign in (the customer's web);
-- `ghcr.io/futurebuildaiinc/gable-web:demo-<sha>`: the same web image built
-  WITH `VITE_AUTH_DEV_MODE=true` (the demo's web).
+  persona sign in. It is the web image for the demo and for a customer alike.
 
-The run's summary lists the three image refs with their digests. No secret is
+The workflow also pushes a `demo-<sha>` web image built with the persona sign
+in. The recipe does not run it: the demo signs in through Appwrite.
+
+The run's summary lists the image refs with their digests. No secret is
 printed or stored.
 
 ### 2. Point the platform at the images file
 
-Set the compose file path to `deploy/compose.images.yml` and add two values to
+Set the compose file path to `deploy/compose.images.yml` and add one value to
 the environment:
 
 | Value | What it is |
 |---|---|
 | `GABLE_IMAGE_TAG` | Required. The commit sha the images were built for (the `<sha>` above). The file refuses to start without it. |
-| `GABLE_WEB_TAG_PREFIX` | Empty by default (the customer's web, built without the persona sign in). The demo sets it to `demo-`, so the web service runs `ghcr.io/futurebuildaiinc/gable-web:demo-<sha>`. |
 
 Everything else is the recipe as written above: the demo variant sets the same
-four demo values (including `AUTH_MODE=dev`, with the same warning), the
-customer variant leaves them unset and sets `JWKS_URL`. A deployment upgrade
+two demo values, the customer variant leaves them unset. A deployment upgrade
 is: dispatch the workflow for the new commit, change `GABLE_IMAGE_TAG`, deploy
 again. The `migrate` service applies the new migrations before the others
 start, and the volume keeps the data.
