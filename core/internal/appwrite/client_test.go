@@ -156,3 +156,59 @@ func TestAdmitWithClientShape(t *testing.T) {
 		t.Fatalf("MapRoles = %v, want [driver]", got)
 	}
 }
+
+// The membership read asks Appwrite for the one user, so a team larger than
+// one page still finds a later member.
+func TestClientListMembershipsFiltersByUser(t *testing.T) {
+	var queries []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/teams/{teamId}/memberships", func(w http.ResponseWriter, r *http.Request) {
+		queries = r.URL.Query()["queries[]"]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":1,"memberships":[{"$id":"m9","userId":"u9","roles":["gable-sales"],"confirm":true}]}`))
+	})
+	c := newTestServer(t, mux)
+	m, found, err := c.ListMemberships(t.Context(), "team1", "u9")
+	if err != nil || !found || m.ID != "m9" {
+		t.Fatalf("m=%+v found=%v err=%v", m, found, err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("queries = %q, want two", queries)
+	}
+	var byUser struct {
+		Method    string   `json:"method"`
+		Attribute string   `json:"attribute"`
+		Values    []string `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[0]), &byUser); err != nil {
+		t.Fatalf("first query is not JSON: %q: %v", queries[0], err)
+	}
+	if byUser.Method != "equal" || byUser.Attribute != "userId" || len(byUser.Values) != 1 || byUser.Values[0] != "u9" {
+		t.Fatalf("request did not filter by user id: %+v", byUser)
+	}
+	var page struct {
+		Method string `json:"method"`
+		Values []int  `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(queries[1]), &page); err != nil {
+		t.Fatalf("second query is not JSON: %q: %v", queries[1], err)
+	}
+	if page.Method != "limit" || len(page.Values) != 1 || page.Values[0] != 25 {
+		t.Fatalf("request did not set the page size: %+v", page)
+	}
+}
+
+// A page that is not the whole answer (more members than it holds, user not
+// on it) is not a definite "not a member": it is an error.
+func TestClientListMembershipsPartialReadIsAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/teams/{teamId}/memberships", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":60,"memberships":[{"$id":"m1","userId":"u1","roles":[],"confirm":true}]}`))
+	})
+	c := newTestServer(t, mux)
+	_, found, err := c.ListMemberships(t.Context(), "team1", "u9")
+	if err == nil || found {
+		t.Fatalf("partial read gave found=%v err=%v, want an error", found, err)
+	}
+}

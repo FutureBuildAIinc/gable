@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -77,7 +78,7 @@ func noQuery(r *http.Request) error {
 // caller reads who is acting from the auth chain: the audit subject.
 func caller(r *http.Request) Caller {
 	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		return Caller{Actor: claims.Subject, Role: claims.Role}
+		return Caller{Actor: claims.Subject, Role: account.RoleOf(claims)}
 	}
 	return Caller{}
 }

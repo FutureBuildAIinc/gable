@@ -21537,6 +21537,181 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/WireInternalError"
+  /api/v1/auth/signin:
+    post:
+      operationId: authSignIn
+      tags: [auth]
+      summary: Sign a staff member in with email and password
+      description: >-
+        Public. The core opens an Appwrite session server side, reads the account and the membership in the dealer's Team, ends the Appwrite session at once and, when the person is admitted, issues its own session: a fresh random id every time (a presented one is ignored), set as an HttpOnly, Secure, SameSite=Strict cookie on Path /api with no Domain. The request must carry the X-Gable-CSRF header or an Origin that is Gable's own. Every refusal (wrong credentials, unconfirmed or absent membership, blocked or deleted user, unverified email, no mapped role, an Appwrite Team owner, multi factor on) gets the one fixed 401 answer. Limited per client address and per email; past the limit a 429 with Retry-After.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSignInRequest"
+      responses:
+        "200":
+          description: Signed in; the session cookie is set.
+          headers:
+            Set-Cookie:
+              description: The gable_session cookie (HttpOnly, Secure, SameSite=Strict, Path=/api, no Domain).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/auth/refresh:
+    post:
+      operationId: authRefresh
+      tags: [auth]
+      summary: Re-read the signed in person's membership now
+      description: >-
+        The session cookie and the X-Gable-CSRF header are required. The core re-reads the account and the membership with its key; a definite answer that the person may no longer enter revokes the session (401), changed roles replace the snapshot. An answer that is not definite keeps the session on its snapshot until the snapshot reaches its maximum age.
+      security:
+        - StaffSession: []
+      responses:
+        "200":
+          description: The roles the session now holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/signout:
+    post:
+      operationId: authSignOut
+      tags: [auth]
+      summary: Sign out
+      description: >-
+        Revokes the session behind the cookie and clears the cookie. The X-Gable-CSRF header is required. Answers 204 whatever the cookie held.
+      security:
+        - StaffSession: []
+      responses:
+        "204":
+          description: Signed out; the cookie is cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/session:
+    get:
+      operationId: authSession
+      tags: [auth]
+      summary: The signed in person's display data
+      description: >-
+        The subject and role set of the session behind the cookie. No email: a staff session carries none.
+      security:
+        - StaffSession: []
+      responses:
+        "200":
+          description: The subject and roles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffIdentity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/admin/staff/sign-in-people:
+    get:
+      operationId: adminStaffSignInPeople
+      tags: [auth]
+      summary: The people who have signed in, for the roster link
+      description: >-
+        Owner and admin. The distinct subjects the core's sessions have seen, each with the email read from Appwrite by the stored Appwrite user id (the session row holds none) and the staff row it is linked to, if any. This is the list the staff screen picks from to link a roster row.
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "200":
+          description: The people.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffSignInPeople"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/admin/staff/{id}/sign-in-link:
+    put:
+      operationId: adminStaffSignInLinkSet
+      tags: [auth]
+      summary: Link a staff row to a person who has signed in
+      description: >-
+        Owner and admin. Sets the staff row's sub to a person the sessions have seen, audited. A sub no session has seen is a 400, an unknown staff row a 404, and a staff row or a person already linked a 409 (the link is unique when set).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffSignInLinkRequest"
+      responses:
+        "204":
+          description: Linked.
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+    delete:
+      operationId: adminStaffSignInLinkClear
+      tags: [auth]
+      summary: Clear a staff row's sign in link
+      description: Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The staff row.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - BearerJWT: []
+        - StaffSession: []
+      responses:
+        "204":
+          description: Cleared.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/tax/exemptions:
     post:
       operationId: taxExemptionCreate
@@ -22403,7 +22578,7 @@ paths:
       tags: [uploads]
       summary: Serve an uploaded file
       description: >-
-        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles do not include admin, owner or user is a 403; a machine key is a 403 on this path whatever scope it holds.
+        Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles include none of the staff roles (owner, admin, sales, finance, purchasing, warehouse, cashier, driver) is a 403; a machine key is a 403 on this path whatever scope it holds.
       security:
         - BearerJWT: []
       responses:
@@ -22553,6 +22728,12 @@ components:
       bearerFormat: JWT
       description: >-
         The user JWT the auth middleware verifies against the configured JWKS issuer. Role guards run per module (the census column in ROUTES.txt names the registering module; cmd/server/main.go names the roles each module registers with). AUTH_MODE=dev disables verification entirely.
+    StaffSession:
+      type: apiKey
+      in: cookie
+      name: gable_session
+      description: >-
+        The staff session cookie the sign in sets (ADR 0012): HttpOnly, Secure, SameSite=Strict, Path /api. A state changing request authenticated by it must also carry the X-Gable-CSRF header.
     IntegrationKey:
       type: apiKey
       in: header
@@ -39308,6 +39489,53 @@ components:
               oidc_label:
                 type: string
                 description: The display label; optional on the oidc method, refused on any other.
+    StaffSignInPeople:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [sub, email, linked_staff_id]
+            properties:
+              sub:
+                type: string
+                format: uuid
+              email:
+                type: string
+              linked_staff_id:
+                type: [string, 'null']
+                format: uuid
+    StaffSignInLinkRequest:
+      type: object
+      required: [sub]
+      properties:
+        sub:
+          type: string
+          format: uuid
+    StaffSignInRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    StaffIdentity:
+      type: object
+      required: [sub, roles]
+      properties:
+        sub:
+          type: string
+          format: uuid
+          description: The name based subject UUID of the Appwrite user.
+        roles:
+          type: array
+          description: The Gable roles of the person, in the fixed role order.
+          items:
+            type: string
+            enum: [owner, admin, sales, finance, purchasing, warehouse, cashier, driver]
     TaxExemption:
       type: object
       required: [id, customer_id, exempt_reason, certificate_number, issuing_state, effective_date, is_active, created_at]

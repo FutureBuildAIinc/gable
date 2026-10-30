@@ -61,7 +61,6 @@ func (h *ExposureHandler) HandleListExposure(w http.ResponseWriter, r *http.Requ
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	summary := q.Get("summary") == "true"
 
-	role := userRole(r)
 	uid := userID(r)
 
 	var spFilter *uuid.UUID
@@ -75,12 +74,12 @@ func (h *ExposureHandler) HandleListExposure(w http.ResponseWriter, r *http.Requ
 		if uid != uuid.Nil {
 			id := uid
 			spFilter = &id
-		} else if role != "owner" && role != "admin" {
+		} else if !holdsRole(r, "owner", "admin") {
 			httputil.RespondError(w, r, "no salesperson context — cannot scope to your book", http.StatusForbidden, nil)
 			return
 		}
 	case "all":
-		if role != "owner" && role != "admin" {
+		if !holdsRole(r, "owner", "admin") {
 			httputil.RespondError(w, r, "owner=all requires owner or admin role", http.StatusForbidden, nil)
 			return
 		}
@@ -92,7 +91,7 @@ func (h *ExposureHandler) HandleListExposure(w http.ResponseWriter, r *http.Requ
 			httputil.RespondError(w, r, "invalid owner id", http.StatusBadRequest, err)
 			return
 		}
-		if role == "sales" && id != uid {
+		if holdsRole(r, "sales") && !holdsRole(r, "owner", "admin") && id != uid {
 			httputil.RespondError(w, r, "cannot view another salesperson's book", http.StatusForbidden, nil)
 			return
 		}
@@ -243,7 +242,7 @@ func (h *ExposureHandler) HandleRequestAck(w http.ResponseWriter, r *http.Reques
 
 func (h *ExposureHandler) HandleOverride(w http.ResponseWriter, r *http.Request) {
 	role := userRole(r)
-	if role != "owner" && role != "admin" {
+	if !holdsRole(r, "owner", "admin") {
 		httputil.RespondError(w, r, "override requires owner or admin role", http.StatusForbidden, nil)
 		return
 	}
@@ -291,10 +290,9 @@ func (h *ExposureHandler) HandleEscalateNow(w http.ResponseWriter, r *http.Reque
 
 func (h *ExposureHandler) HandleReportExposure(w http.ResponseWriter, r *http.Request) {
 	summary := r.URL.Query().Get("summary") == "true"
-	role := userRole(r)
 
 	var spFilter *uuid.UUID
-	if role == "sales" {
+	if holdsRole(r, "sales") && !holdsRole(r, "owner", "admin") {
 		id := userID(r)
 		if id != uuid.Nil {
 			spFilter = &id
@@ -323,7 +321,7 @@ func (h *ExposureHandler) HandleReportExposure(w http.ResponseWriter, r *http.Re
 // ---------- POST /api/v1/admin/exposure-scan ----------
 
 func (h *ExposureHandler) HandleAdminScan(w http.ResponseWriter, r *http.Request) {
-	if role := userRole(r); role != "admin" && role != "owner" {
+	if !holdsRole(r, "admin", "owner") {
 		httputil.RespondError(w, r, "admin scan requires admin or owner role", http.StatusForbidden, nil)
 		return
 	}
@@ -434,10 +432,31 @@ func userIDString(r *http.Request) string {
 	return claims.Subject
 }
 
-// userRole returns the effective role for authorization decisions: the
-// single-valued "role" claim if present, else the first entry of "roles".
-// On missing claims it returns "owner" under AUTH_MODE=dev and "" otherwise
-// (see the note above these helpers — "" fails every role check).
+// holdsRole reports whether the caller holds any of the roles, over both the
+// role and the roles claims: a decision never depends on which field, or in
+// which order, a person's roles arrive (ADR 0012 section 2). On missing claims
+// it answers true for owner under AUTH_MODE=dev and false otherwise (see the
+// note above these helpers: nil claims fail every other check).
+func holdsRole(r *http.Request, roles ...string) bool {
+	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
+	if claims == nil {
+		if !devAuthMode() {
+			return false
+		}
+		for _, want := range roles {
+			if want == "owner" {
+				return true
+			}
+		}
+		return false
+	}
+	return middleware.ClaimsHaveAnyRole(claims, roles...)
+}
+
+// userRole is the role string an audit row records: the first of the caller's
+// mapped roles in the fixed order. It is never used to decide anything; the
+// decisions ask holdsRole. On missing claims it returns "owner" under
+// AUTH_MODE=dev and "" otherwise.
 func userRole(r *http.Request) string {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
@@ -446,11 +465,5 @@ func userRole(r *http.Request) string {
 		}
 		return ""
 	}
-	if claims.Role != "" {
-		return claims.Role
-	}
-	if len(claims.Roles) > 0 {
-		return claims.Roles[0]
-	}
-	return ""
+	return middleware.ClaimsPrimaryRole(claims)
 }

@@ -346,10 +346,11 @@ type Repository interface {
 	LockHeldAt(ctx context.Context, register string, epoch, seq int64) (*offlineExceptionRow, error)
 	ReopenHeldAs(ctx context.Context, id uuid.UUID, code, message string) error
 	MarkHeldRelinked(ctx context.Context, id, saleID uuid.UUID) error
+	MarkHeldSoldPastWarning(ctx context.Context, id, saleID uuid.UUID, warnings []uuid.UUID, code, message string) error
 	OfflineSnapshotByID(ctx context.Context, id uuid.UUID) (*offlineSnapshotRow, error)
 	OfflineSessionFacts(ctx context.Context, id uuid.UUID) (*offlineSessionFacts, error)
 	BranchDayClosedOn(ctx context.Context, branch uuid.UUID, date time.Time) (bool, error)
-	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time) (int64, error)
+	OfflineAccountUsedSince(ctx context.Context, register string, customer uuid.UUID, since time.Time, sale uuid.UUID) (int64, error)
 
 	// The offline exception queue (ADR 0011 3.4, slice O4)
 	OfflineExceptionHead(ctx context.Context, id uuid.UUID) (*offlineExceptionHead, error)
