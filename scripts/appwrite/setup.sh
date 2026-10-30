@@ -72,8 +72,14 @@ PROJECT=("X-Appwrite-Project: $PROJECT_ID" "X-Appwrite-Mode: admin")
 # 1. Console account (tolerate exists), then log in for the console cookie.
 # 501 user_console_count_exceeded is the "a console root already exists" answer
 # on a stack whose whitelist-root switch is on.
-code="$(req POST /v1/account "$(jq -nc --arg id "s9proof-root" --arg email "$CONSOLE_EMAIL" --arg pw "$PASSWORD" \
-  '{userId:$id,email:$email,password:$pw,name:"S9 proof console admin"}')" "${CONSOLE[@]}")"
+# A fresh stack answers the public version route before its database install
+# has finished, so the first database backed call can answer 5xx; retry it.
+for _ in $(seq 1 30); do
+  code="$(req POST /v1/account "$(jq -nc --arg id "s9proof-root" --arg email "$CONSOLE_EMAIL" --arg pw "$PASSWORD" \
+    '{userId:$id,email:$email,password:$pw,name:"S9 proof console admin"}')" "${CONSOLE[@]}")"
+  [[ "$code" -lt 500 ]] && break
+  sleep 3
+done
 [[ "$code" == 201 || "$code" == 409 || "$code" == 501 ]] || die "console account create failed" "$code"
 
 code="$(req POST /v1/account/sessions/email "$(jq -nc --arg email "$CONSOLE_EMAIL" --arg pw "$PASSWORD" \
@@ -126,6 +132,12 @@ done
 # 5. Client email+password auth OFF: only key calls may mint email sessions.
 code="$(req PATCH /v1/project/auth-methods/email-password '{"enabled":false}' "${PROJECT[@]}")"
 [[ "$code" == 200 ]] || die "auth method switch failed" "$code"
+
+# 5b. One OAuth2 provider with placeholder credentials, so the proof can start
+# a real createOAuth2Token and see Appwrite check the success URL against the
+# platform list. No sign in ever completes against it; the values are invented.
+code="$(req PATCH /v1/project/oauth2/google '{"enabled":true,"clientId":"s9proof-client-id","clientSecret":"s9proof-client-placeholder"}' "${PROJECT[@]}")"
+[[ "$code" == 200 ]] || die "oauth2 provider enable failed" "$code"
 
 # 6. Staff team (server key; an API-created team has no owner membership).
 code="$(req GET "/v1/teams/$STAFF_TEAM_ID" "" "${KEY[@]}")"

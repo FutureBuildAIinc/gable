@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,6 +229,32 @@ func TestProof(t *testing.T) {
 	}
 	t.Log("platform check: callback on 127.0.0.1 accepted, unregistered host refused")
 
+	// (e2) The same check on the redirect method itself: createOAuth2Token
+	// takes Gable's callback as its success and failure URL once the host is
+	// a Web platform (a 301 to the provider), and refuses a foreign host.
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	oauthStart := func(cb string) (int, string) {
+		u := seed.Endpoint + "/v1/account/tokens/oauth2/google?success=" + url.QueryEscape(cb) + "&failure=" + url.QueryEscape(cb)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Appwrite-Project", seed.ProjectID)
+		resp, err := noRedirect.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header.Get("Location")
+	}
+	if code, loc := oauthStart(seed.Endpoint + "/api/v1/auth/callback"); code != http.StatusMovedPermanently || !strings.HasPrefix(loc, "https://accounts.google.com/") {
+		t.Fatalf("oauth2 token start on registered host = %d to %q, want 301 to the provider", code, loc)
+	}
+	if code, _ := oauthStart("http://unregistered-host.example/api/v1/auth/callback"); code != http.StatusBadRequest {
+		t.Fatalf("oauth2 token start on unregistered host = %d, want 400", code)
+	}
+	t.Log("oauth2 token start: callback accepted as the success URL, foreign host refused")
+
 	// (g) The client email+password switch is OFF: a client call (no key) is
 	// refused, while the key call still succeeds.
 	code, body = rawRequest(ctx, http.MethodPost, seed.Endpoint+"/v1/account/sessions/email", map[string]any{
@@ -240,6 +268,18 @@ func TestProof(t *testing.T) {
 		t.Fatalf("key email session with switch off: %v", err)
 	}
 	t.Log("key-vs-client proof: client refused (501), key session created")
+
+	// (h) The client sign up stays closed while the switch is off, so no
+	// stranger can register under an invitee's address.
+	code, body = rawRequest(ctx, http.MethodPost, seed.Endpoint+"/v1/account", map[string]any{
+		"userId":   "unique()",
+		"email":    "stranger@s9proof.example",
+		"password": proofPassword,
+	}, map[string]string{"X-Appwrite-Project": seed.ProjectID})
+	if code < 400 {
+		t.Fatalf("client sign up with the switch off = %d, want a refusal: %s", code, body)
+	}
+	t.Logf("client sign up refused (%d)", code)
 }
 
 // rawRequest performs one plain HTTP call and returns the status and body.
