@@ -76,12 +76,13 @@ says which one is missing.
 | `APPWRITE_API_KEY` | The Appwrite server key. It goes in the platform's environment from the vault, never into a file. | made in the Appwrite console | yes |
 | `TRUSTED_PROXIES` | The platform's proxy network (and the compose network where `web` fronts `core`), as CIDRs or addresses separated by commas, so each visitor gets their own rate limit budget instead of sharing one budget on the proxy's address. | For example `10.0.0.0/8,172.16.0.0/12` (confirm from the `core` boot log on the first deploy) | no |
 
-The demo adds two more, and both are data, not authentication:
+The demo adds three more, and none is authentication:
 
 | Value | What it is |
 |---|---|
 | `DEMO_SEED` | `1`. The `migrate` service loads the demo data. |
 | `DEMO_SEED_IMPORT` | `1`. The same, with the larger invented catalogue and its history. |
+| `DEMO_POS_TERMINAL_SIMULATOR` | `approve`. The `core` service gets `POS_TERMINAL_SIMULATOR=approve`, so the counter takes a card with no machine. No card is charged, and the counter says so in words beside Card ("Simulated card terminal: no card is charged"). |
 
 The demo signs in the way a customer does, through Appwrite. Seed the demo
 people once into the Appwrite project the demo points at, with
@@ -93,8 +94,8 @@ this recipe. They belong to the local root compose stack alone, where the core
 is built with the `devauth` tag; the images this recipe builds and runs carry
 neither, and a core given `AUTH_MODE=dev` refuses to start.
 
-The customer variant leaves `DEMO_SEED` and `DEMO_SEED_IMPORT` unset; see
-[Sign in](#sign-in) below.
+The customer variant leaves `DEMO_SEED`, `DEMO_SEED_IMPORT` and
+`DEMO_POS_TERMINAL_SIMULATOR` unset; see [Sign in](#sign-in) below.
 
 ### 4. The domain
 
@@ -166,9 +167,16 @@ The web image is the customer image, built without the persona sign in. The
 persona sign in is a display name and no credential, and it must not be in a
 customer's deployment.
 
-The other demo settings go with it: `DEMO_SEED`, `DEMO_SEED_IMPORT` and
-`DEMO_SEED_FORCE` stay unset, and `GABLE_PUBLIC_URL` and `CORS_ORIGINS`
+The other demo settings go with it: `DEMO_SEED`, `DEMO_SEED_IMPORT`,
+`DEMO_SEED_FORCE` and `DEMO_POS_TERMINAL_SIMULATOR` stay unset, and `GABLE_PUBLIC_URL` and `CORS_ORIGINS`
 become the customer's own address.
+
+A production deployment never runs the simulated card terminal. The recipe
+passes `POS_TERMINAL_SIMULATOR` to `core` only from `DEMO_POS_TERMINAL_SIMULATOR`,
+so a stray `POS_TERMINAL_SIMULATOR` in a customer's environment does nothing.
+Without a terminal the counter refuses a card in words ("This register has no
+card terminal: take cash, check or the account"). `deploy/check.sh` asserts
+all of this.
 
 ### Backups of the named volume
 
@@ -291,4 +299,6 @@ the ten required values is missing (the images file also refuses without
 that every long running service has a health check, that `deploy/compose.yml`
 builds from this repository's own Dockerfiles while `deploy/compose.images.yml`
 runs prebuilt image refs pinned to the required tag, and that the customer
-variant passes `JWKS_URL` and `AUTH_ISSUER` to `core`.
+variant passes `JWKS_URL` and `AUTH_ISSUER` to `core`. It also proves that
+the demo variant gives `core` the simulated card terminal and that the
+customer variant never does.

@@ -6,7 +6,7 @@
 // functions of the wire figures (integer cents), so the words are tested
 // without the screen.
 
-import type { CounterCustomer, CounterStanding, WayForward, TenderMethod } from '../../types/pos';
+import type { CounterCustomer, CounterRegister, CounterStanding, WayForward, TenderMethod } from '../../types/pos';
 
 export type Tone = 'ok' | 'warn' | 'stop';
 
@@ -160,6 +160,30 @@ export function storeCreditOffer(s: CounterStanding | null, owedCents: number): 
 export function tenderMethods(s: CounterStanding | null): TenderMethod[] {
     const base: TenderMethod[] = ['cash', 'check', 'card', 'account'];
     return s !== null && s.open_credit_memo_cents > 0 ? [...base, 'store_credit'] : base;
+}
+
+/** The server's own refusal of a card where no terminal is wired (CP-05 A1, card_terminal_not_wired). */
+export const NO_CARD_TERMINAL = 'This register has no card terminal: take cash, check or the account';
+
+/** Why Card is not offered at the register, or null when it is: a register with no card terminal takes no card. */
+export function cardRefusal(register: CounterRegister | null): string | null {
+    return register?.card_terminal === 'none' ? NO_CARD_TERMINAL : null;
+}
+
+/** The same refusal in a refund's words, beside the return dialog's Card (CP-05 round 3 P3-C). */
+export const NO_CARD_TERMINAL_REFUND = 'This register has no card terminal: give it back in cash or as account credit';
+
+/** Why a refund back on the card is not offered at the register, or null when it is. */
+export function cardRefundRefusal(register: CounterRegister | null): string | null {
+    return register?.card_terminal === 'none' ? NO_CARD_TERMINAL_REFUND : null;
+}
+
+/** The counter's plain words beside Card at a register whose card terminal is the simulator (CP-05 round 2). */
+export const SIMULATED_CARD_TERMINAL = 'Simulated card terminal: no card is charged';
+
+/** The note beside Card when the register's terminal is the simulator, or null: nothing real is charged there. */
+export function cardSimulatorNote(register: CounterRegister | null): string | null {
+    return register?.card_terminal === 'simulator' ? SIMULATED_CARD_TERMINAL : null;
 }
 
 /** The ID kinds a check or charge may record, as the select lists them. */

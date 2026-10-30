@@ -54,6 +54,9 @@ type runFakeTerminal struct {
 	pollStep func(order string, poll int) (int, map[string]any)
 	// voidAnswer scripts the void-or-refund answer (nil: approved).
 	voidAnswer func(body map[string]any) map[string]any
+	// voidStatus is the status void-or-refund answers (0: 200). A 500 is a
+	// reversal that failed after its POST went out: the outcome is unknown.
+	voidStatus int
 	// reporting holds the transactions the lookup answers, by order id.
 	reporting map[string]map[string]any
 	// deferredReport hides the reporting row until this many polls of the
@@ -201,6 +204,7 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.voidPosts = append(f.voidPosts, body)
 		answer := f.voidAnswer
+		status := f.voidStatus
 		hold := f.postHold
 		f.mu.Unlock()
 		if hold != nil {
@@ -208,6 +212,10 @@ func (f *runFakeTerminal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case <-hold:
 			case <-time.After(5 * time.Second):
 			}
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+			return
 		}
 		if answer == nil {
 			answer = func(map[string]any) map[string]any {

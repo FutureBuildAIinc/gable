@@ -618,6 +618,17 @@ func reversalFailure(ref string) *httpx.Error {
 		Message: fmt.Sprintf("the terminal charged and the reversal failed; finance must reconcile terminal reference %s", ref)}
 }
 
+// reversalUnknown is the manager's 502 when the card machine's answer to the
+// reversal is unknown (CP-05 round 4 P1-E): the reversal may have gone
+// through, so Gable sends nothing on top, and while this process's guard
+// holds every resolve answers the same until a restart. The manager reads
+// Run's own record and settles the money there.
+func reversalUnknown(ref string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusBadGateway, Code: httpx.CodeChargeNotReversed, Operator: true,
+		Message: fmt.Sprintf("The card machine's answer to sending this money back is unknown, so Gable will not send it back again. "+
+			"Check terminal reference %s in Run's portal and resolve it there by hand.", ref)}
+}
+
 // derefUUID answers the pointed id or the nil uuid.
 func derefUUID(id *uuid.UUID) uuid.UUID {
 	if id == nil {

@@ -528,10 +528,10 @@ func TestAccountReturnLeavesOpenCredit(t *testing.T) {
 // payments (already net of change) plus the opening float less cash refunds.
 func TestTillExpectedCashIncludesFloatAndRefunds(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	f.openTill(5000)
 	f.saleOf("2", tender("cash", 2000)) // keeps 1198, change 802
-	f.saleOf("1", tender("card", 599))  // card; no cash, terminal settles it
+	f.saleOf("1", tender("card", 599))  // card; no cash, the simulated terminal runs it
 	// a cash return of 500 out of the drawer
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "customer_id": f.customerID.String(), "refund_method": "cash",
@@ -882,6 +882,10 @@ type fakeGateway struct {
 	refundErrs     []error
 	voidErrs       []error
 	refundStatuses []payment.GatewayStatus
+	// voidStatuses scripts one answer status per void call that answers
+	// with no error (a Run C is a DECLINED with a nil error); past the
+	// script a void answers VOIDED.
+	voidStatuses []payment.GatewayStatus
 	// onRefund runs at the start of every Refund call, outside the fake's
 	// mutex: the tests park a refund in flight or probe the database while
 	// the terminal is on the wire.
@@ -935,7 +939,11 @@ func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResu
 	if err != nil {
 		return nil, err
 	}
-	return &payment.GatewayResult{Status: payment.GatewayStatusVoided}, nil
+	status := payment.GatewayStatusVoided
+	if len(g.voidStatuses) > 0 {
+		status, g.voidStatuses = g.voidStatuses[0], g.voidStatuses[1:]
+	}
+	return &payment.GatewayResult{Status: status}, nil
 }
 
 func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {

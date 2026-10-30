@@ -316,7 +316,14 @@ func (s *Service) repriceSaleLines(ctx context.Context, sale *Sale, lines []sale
 // ListRegisters is the counter's register list: the registers the caller's
 // branch reach holds. The wall is the repository's.
 func (s *Service) ListRegisters(ctx context.Context) ([]CounterRegister, error) {
-	return s.repo.ListRegisters(ctx)
+	regs, err := s.repo.ListRegisters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range regs {
+		regs[i].CardTerminal = s.cardTerminalAt(regs[i].BranchID)
+	}
+	return regs, nil
 }
 
 func sameShipTo(a, b *uuid.UUID) bool {
