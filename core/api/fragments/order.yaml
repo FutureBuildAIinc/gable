@@ -660,6 +660,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -675,6 +676,17 @@ components:
       - is_special_order
       - vendor_id
       - special_order_unit_cost_ten_thousandths
+      - weight_source
+      - weight_gross_lb
+      - weight_tare_lb
+      - weight_net_lb
+      - weight_net_basis
+      - scale_device_id
+      - scale_ticket_id
+      - scale_ticket_number
+      - manual_weight_reason
+      - weight_captured_by
+      - weight_captured_at
       - created_at
       properties:
         id:
@@ -759,6 +771,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer
@@ -832,6 +849,63 @@ components:
           - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+          - type: string
+            enum: [scale, manual]
+          - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+          - string
+          - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+          - string
+          - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+          - string
+          - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+          - type: string
+            enum: [single_draft, double_draft]
+          - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+          - string
+          - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+          - string
+          - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+          - string
+          - 'null'
+        weight_captured_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -856,6 +930,7 @@ components:
       - stock_uom
       - stock_quantity
       - tally
+      - tint
       - unit_price_ten_thousandths
       - priced_unit_price_ten_thousandths
       - price_source
@@ -871,6 +946,17 @@ components:
       - is_special_order
       - vendor_id
       - special_order_unit_cost_ten_thousandths
+      - weight_source
+      - weight_gross_lb
+      - weight_tare_lb
+      - weight_net_lb
+      - weight_net_basis
+      - scale_device_id
+      - scale_ticket_id
+      - scale_ticket_number
+      - manual_weight_reason
+      - weight_captured_by
+      - weight_captured_at
       - created_at
       - quote_line_id
       - quantity_allocated
@@ -959,6 +1045,11 @@ components:
           - $ref: '#/components/schemas/Tally'
           - type: 'null'
           description: The pieces by length a random length line carries (ADR 0006 section 4); null on every other line.
+        tint:
+          oneOf:
+          - $ref: '#/components/schemas/LineTint'
+          - type: 'null'
+          description: The paint line's tint record (row CP-16); null on every other line.
         unit_price_ten_thousandths:
           type:
           - integer
@@ -1032,6 +1123,63 @@ components:
           - 'null'
           format: int64
           description: A unit cost at scale 4.
+        weight_source:
+          oneOf:
+          - type: string
+            enum: [scale, manual]
+          - type: 'null'
+          description: Where the line's weight came from (CP-19); null on a line that was not weighed. Only a counter line weighs.
+        weight_gross_lb:
+          type:
+          - string
+          - 'null'
+          description: The gross reading in pounds, a decimal string.
+        weight_tare_lb:
+          type:
+          - string
+          - 'null'
+          description: The tare used, whether read or stored.
+        weight_net_lb:
+          type:
+          - string
+          - 'null'
+          description: The net the quantity was priced from.
+        weight_net_basis:
+          oneOf:
+          - type: string
+            enum: [single_draft, double_draft]
+          - type: 'null'
+          description: Gable computes the net as the difference of two gross readings (double_draft), never as a scale tare operation.
+        scale_device_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The certified scale that produced the reading; null on a manual weight.
+        scale_ticket_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        scale_ticket_number:
+          type:
+          - string
+          - 'null'
+          description: The ticket's consecutive number (WT-000001).
+        manual_weight_reason:
+          type:
+          - string
+          - 'null'
+          description: The closed-list reason a typed weight carries; the documents print MAN WT.
+        weight_captured_by:
+          type:
+          - string
+          - 'null'
+        weight_captured_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -1273,6 +1421,9 @@ components:
       - updated_at
       - invoice_ids
       - deposit_unapplied_cents
+      - deposit_total_cents
+      - balance_due_after_deposits_cents
+      - deposits
       - ship_to
       - lines
       properties:
@@ -1421,6 +1572,37 @@ components:
           type: integer
           format: int64
           description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
+        deposit_total_cents:
+          type: integer
+          format: int64
+          description: 'Everything taken on the order (deposits), applied and unapplied both.'
+        balance_due_after_deposits_cents:
+          type: integer
+          format: int64
+          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+        deposits:
+          type: array
+          description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
+          items:
+            type: object
+            required: [id, number, received_on, method, amount_cents, unapplied_cents, reference, applications]
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string, description: "PAY-000001, the payment's own number."}
+              received_on: {type: string, format: date}
+              method: {type: string, enum: [cash, check, ach, other, card]}
+              amount_cents: {type: integer, format: int64}
+              unapplied_cents: {type: integer, format: int64}
+              reference: {type: [string, "null"]}
+              applications:
+                type: array
+                items:
+                  type: object
+                  required: [invoice_id, amount_cents, applied_on]
+                  properties:
+                    invoice_id: {type: string, format: uuid}
+                    amount_cents: {type: integer, format: int64}
+                    applied_on: {type: string, format: date}
         ship_to:
           type:
           - object

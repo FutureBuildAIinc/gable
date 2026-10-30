@@ -98,7 +98,7 @@ async function _happy() {
   const shipToRevision: number = shipTo.body.revision;
   const edited = await client.put(
     "/api/v1/customers/{id}",
-    { account_number: "A-1", name: "Acme", credit_limit_cents: null, po_required: true, payment_terms_id: "8f14e45f-ceea-467f-a830-aacd11a4" },
+    { account_number: "A-1", name: "Acme", credit_limit_cents: null, po_required: true, job_required: false, payment_terms_id: "8f14e45f-ceea-467f-a830-aacd11a4" },
     { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" }, headers: { "If-Match": '"3"' } },
   );
   const customerRevision: number = edited.body.revision;

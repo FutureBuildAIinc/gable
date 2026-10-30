@@ -14,6 +14,8 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/taxzone"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -90,7 +92,14 @@ type Repository interface {
 	OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, contactID, jobID *uuid.UUID) (shipToOK, contactOK, jobOK bool, err error)
 	ShipTo(ctx context.Context, shipToID uuid.UUID) (snapshot *ShipToSnapshot, rate *string, err error)
 	BranchTaxRate(ctx context.Context, branchID uuid.UUID) (*string, error)
-	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// CustomerExemption reads the certificate that exempts a sale on day
+	// through tax.ExemptionCovering: the one window rule the order path and
+	// the counter share (CP-10). Nil when no certificate covers the day.
+	CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error)
+	// TaxZone resolves a place of receipt to the zone that covers it (CP-10),
+	// nil when no zone does: the resolver then falls through to the typed
+	// rate and the branch rate.
+	TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error)
 
 	// The credit check reads documents, never customers.balance_due
 	// (ADR 0005 5.3).
@@ -391,7 +400,93 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 		return nil, err
 	}
 	o.Lines = lines
+	deposits, err := r.orderDeposits(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	o.Deposits = deposits
+	var taken int64
+	for _, d := range deposits {
+		taken += int64(d.AmountCents)
+	}
+	o.DepositTotalCents = httpx.Cents(taken)
+	o.BalanceDueAfterDepositsCents = o.TotalCents - httpx.Cents(taken)
 	return o, nil
+}
+
+// orderDeposits reads the posted payments taken against the order with their
+// live applications, oldest first: the deposit figures the order answer
+// carries (CP-07). Only the portion left unapplied at receipt is the order's
+// deposit; any part applied at receipt to settle an invoice (act_id = p.id)
+// is an invoice payment, not a deposit or a deposit application.
+func (r *PostgresRepository) orderDeposits(ctx context.Context, orderID uuid.UUID) ([]OrderDeposit, error) {
+	deposits := []OrderDeposit{}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT p.id, p.number, to_char(p.received_on, 'YYYY-MM-DD'), p.method,
+		       ROUND(p.amount * 100)::bigint - COALESCE((
+		           SELECT SUM(ROUND(a.amount * 100)::bigint)
+		           FROM ar_applications a
+		           WHERE a.payment_id = p.id AND a.act_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL
+		       ), 0),
+		       ROUND(p.amount_unapplied * 100)::bigint, p.reference
+		FROM payments p
+		WHERE p.order_id = $1 AND p.status = 'POSTED'
+		  AND ROUND(p.amount * 100)::bigint > COALESCE((
+		      SELECT SUM(ROUND(a.amount * 100)::bigint)
+		      FROM ar_applications a
+		      WHERE a.payment_id = p.id AND a.act_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL
+		  ), 0)
+		ORDER BY p.created_at, p.id`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the order's deposits: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d OrderDeposit
+		var amount, unapplied int64
+		if err := rows.Scan(&d.ID, &d.Number, &d.ReceivedOn, &d.Method, &amount, &unapplied, &d.Reference); err != nil {
+			return nil, err
+		}
+		d.AmountCents, d.UnappliedCents = httpx.Cents(amount), httpx.Cents(unapplied)
+		d.Method = strings.ToLower(d.Method)
+		deposits = append(deposits, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if len(deposits) == 0 {
+		return deposits, nil
+	}
+	apps := map[uuid.UUID][]OrderDepositApplication{}
+	appRows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT a.payment_id, a.invoice_id, ROUND(a.amount * 100)::bigint, to_char(a.applied_on, 'YYYY-MM-DD')
+		FROM ar_applications a JOIN payments p ON p.id = a.payment_id
+		WHERE p.order_id = $1 AND a.reversed_at IS NULL AND a.kind = 'PAYMENT' AND a.act_id <> p.id
+		ORDER BY a.created_at, a.id`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the deposits' applications: %w", err)
+	}
+	defer appRows.Close()
+	for appRows.Next() {
+		var paymentID, invoiceID uuid.UUID
+		var amount int64
+		var appliedOn string
+		if err := appRows.Scan(&paymentID, &invoiceID, &amount, &appliedOn); err != nil {
+			return nil, err
+		}
+		apps[paymentID] = append(apps[paymentID], OrderDepositApplication{InvoiceID: invoiceID, AmountCents: httpx.Cents(amount), AppliedOn: appliedOn})
+	}
+	if err := appRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range deposits {
+		deposits[i].Applications = apps[deposits[i].ID]
+		if deposits[i].Applications == nil {
+			deposits[i].Applications = []OrderDepositApplication{}
+		}
+	}
+	return deposits, nil
 }
 
 // GetOrderByNumber reads an order by its document number, behind the same
@@ -672,16 +767,19 @@ func (r *PostgresRepository) InsertOrder(ctx context.Context, o *Order) error {
 			delivery_type, ship_to_id, ship_to_snapshot, customer_po, ordered_by_contact_id,
 			salesperson_id, scheduled_delivery_date,
 			subtotal, tax_amount, tax_rate, tax_exempt, tax_source, total_amount,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
 			created_at, updated_at, branch_id
 		) VALUES ($1, $2, $3, $4, $5, $6, 1, $7,
 			$8, $9, $10, $11, $12, $13, $14::date,
 			$15::numeric / 100, $16::numeric / 100, $17, $18, $19, $20::numeric / 100,
-			$21, $21, COALESCE($22::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
+			$21, $22, $23,
+			$24, $24, COALESCE($25::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))`,
 		o.ID, o.Number, o.CustomerID, o.QuoteID, o.JobID, string(o.Status), o.Currency,
 		string(o.DeliveryType), o.ShipToID, shipSnapshot, nullIfEmpty(o.CustomerPO), o.OrderedByContactID,
 		o.SalespersonID, dateArg(o.ScheduledDeliveryDate),
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents), o.CreatedAt.Time, branchArg)
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource),
+		o.CreatedAt.Time, branchArg)
 	if err != nil {
 		return mapWriteError(err, "failed to insert order")
 	}
@@ -689,6 +787,15 @@ func (r *PostgresRepository) InsertOrder(ctx context.Context, o *Order) error {
 		return err
 	}
 	return r.insertLines(ctx, o)
+}
+
+// ratePartsArg carries the zone's frozen rate parts, or NULL when no zone
+// answered.
+func ratePartsArg(parts []byte) any {
+	if len(parts) == 0 {
+		return nil
+	}
+	return parts
 }
 
 // rateArg renders the wire percent for storage, or NULL when the provider
@@ -808,12 +915,13 @@ func (r *PostgresRepository) ReplaceDraft(ctx context.Context, o *Order) error {
 			ordered_by_contact_id = $7, salesperson_id = $8, scheduled_delivery_date = $9::date,
 			subtotal = $10::numeric / 100, tax_amount = $11::numeric / 100, tax_rate = $12,
 			tax_exempt = $13, tax_source = $14, total_amount = $15::numeric / 100,
+			tax_zone_id = $16, tax_rate_parts = $17, tax_zone_source = $18,
 			revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,
 		o.ID, o.CustomerID, o.JobID, string(o.DeliveryType), o.ShipToID, nullIfEmpty(o.CustomerPO),
 		o.OrderedByContactID, o.SalespersonID, dateArg(o.ScheduledDeliveryDate),
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents))
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource))
 	if err != nil {
 		return mapWriteError(err, "failed to update order header")
 	}
@@ -840,12 +948,13 @@ func (r *PostgresRepository) SaveTransition(ctx context.Context, o *Order) error
 			ship_to_id = COALESCE($6, ship_to_id), ship_to_snapshot = COALESCE($7, ship_to_snapshot),
 			subtotal = $8::numeric / 100, tax_amount = $9::numeric / 100, tax_rate = $10,
 			tax_exempt = $11, tax_source = $12, total_amount = $13::numeric / 100,
+			tax_zone_id = $14, tax_rate_parts = $15, tax_zone_source = $16,
 			revision = revision + 1, updated_at = NOW()
 		WHERE id = $1`,
 		o.ID, string(o.Status), holdReasonArg(o.HoldReason), nullIfEmpty(o.HoldNote), tsArg(o.ConfirmedAt),
 		o.ShipToID, shipSnapshot,
 		int64(o.SubtotalCents), int64(o.TaxCents), rateArg(o.TaxRatePercent), o.TaxExempt, string(o.TaxSource),
-		int64(o.TotalCents))
+		int64(o.TotalCents), o.TaxZoneID, ratePartsArg(o.TaxRateParts), nullIfEmpty(o.TaxZoneSource))
 	if err != nil {
 		return mapWriteError(err, "failed to write order transition")
 	}
@@ -1211,14 +1320,26 @@ func (r *PostgresRepository) BranchTaxRate(ctx context.Context, branchID uuid.UU
 	return rate, nil
 }
 
-func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error) {
-	var exempt bool
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM tax_exemptions WHERE customer_id = $1 AND is_active)`, customerID).Scan(&exempt)
-	if err != nil {
-		return false, fmt.Errorf("failed to read tax exemptions: %w", err)
+// TaxZone resolves a place of receipt through Gable's own zone tables
+// (CP-10), through the context's executor so it runs as well inside a
+// transaction as out. No zone is not an error: it answers nil.
+func (r *PostgresRepository) TaxZone(ctx context.Context, country, postal, region string, on time.Time) (*taxzone.Snapshot, error) {
+	zone, err := taxzone.Lookup(ctx, r.db, taxzone.LookupInput{Country: country, Postal: postal, Region: region, On: on})
+	if errors.Is(err, taxzone.ErrZoneNotFound) {
+		return nil, nil
 	}
-	return exempt, nil
+	if err != nil {
+		return nil, err
+	}
+	return zone, nil
+}
+
+func (r *PostgresRepository) CustomerExemption(ctx context.Context, customerID uuid.UUID, day time.Time) (*tax.ExemptionStanding, error) {
+	standing, err := tax.ExemptionCovering(ctx, r.db.GetExecutor(ctx), customerID, day)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tax exemptions: %w", err)
+	}
+	return standing, nil
 }
 
 // OpenReceivableCents is the customer's open receivable (documents, less unapplied cash) plus the unbilled

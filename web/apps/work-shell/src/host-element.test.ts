@@ -67,6 +67,13 @@ describe('gable-work-shell', () => {
     el.remove();
   });
 
+  it('states the frame\'s camera allowance for a tablet scanning at the counter', async () => {
+    const el = mountDesk();
+    await el.updateComplete;
+    expect(el.querySelector<HTMLIFrameElement>('iframe[data-testid="app-frame"]')?.getAttribute('allow')).toBe('camera');
+    el.remove();
+  });
+
   it('a rail choice event pins the rail and persists the choice', async () => {
     const el = mountDesk();
     await el.updateComplete;

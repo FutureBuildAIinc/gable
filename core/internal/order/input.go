@@ -5,6 +5,7 @@ package order
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -130,6 +131,13 @@ func (req *Request) parse(update bool) (*Draft, error) {
 		}
 	}
 
+	for i := range req.Lines {
+		if req.Lines[i].Tint != nil {
+			v.Check(false, fmt.Sprintf("lines[%d].tint", i),
+				"is not accepted on an order line: tint is recorded at the counter")
+			req.Lines[i].Tint = nil
+		}
+	}
 	d.Lines = salesdoc.ParseLines(v, req.Lines)
 
 	if err := v.Err(); err != nil {

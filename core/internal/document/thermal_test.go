@@ -24,13 +24,13 @@ func sampleReceipt() ThermalReceipt {
 	q1, _ := httpx.ParseQuantity("1")
 	q5, _ := httpx.ParseQuantity("5")
 	return ThermalReceipt{
-		SaleNumber: "SO-000099",
-		SoldAt:     time.Date(2026, 6, 30, 14, 5, 0, 0, time.UTC),
-		Cashier:    "Avi",
-		Customer:   "Acme Building Co",
+		SaleNumber:    "SO-000099",
+		SoldAt:        time.Date(2026, 6, 30, 14, 5, 0, 0, time.UTC),
+		Cashier:       "Avi",
+		Customer:      "Acme Building Co",
 		AccountNumber: "C-77",
-		PONumber:   "PO-9000",
-		JobName:    "Lakeview Patio",
+		PONumber:      "PO-9000",
+		JobName:       "Lakeview Patio",
 		Lines: []ThermalLine{
 			{SKU: "2X4-8", Description: "SPF Stud", Quantity: q2, UOM: "PCS", UnitPrice: httpx.Price(25000), PriceUOM: "PCS", LineTotal: httpx.Cents(5000)},
 			{SKU: "PT-4", Description: "Post", Quantity: q1, UOM: "EA", UnitPrice: httpx.Price(300000), PriceUOM: "EA", LineTotal: httpx.Cents(30000)},
@@ -253,6 +253,31 @@ func TestThermalReceiptOnAccountDrawsBalanceAndBlankSignature(t *testing.T) {
 	assertPDF(t, doc)
 	mustContain(t, doc, "Balance due: $250.00")
 	mustContain(t, doc, "Signature:")
+}
+
+// The cash rounding line (CP-18): it names the amount and the direction on a
+// rounded sale, and a sale the branch's rule did not touch carries no such
+// line.
+func TestThermalReceiptRoundingLine(t *testing.T) {
+	svc := brandedReceiptService(t)
+
+	rounded := sampleReceipt()
+	rounded.RoundingCents = httpx.Cents(2)
+	doc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, rounded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "Cash rounding: $0.02")
+	mustContain(t, doc, "Total: $1,073.50")
+
+	plain := sampleReceipt()
+	plainDoc, err := svc.GenerateThermalReceiptPDF(context.Background(), yardNorth, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, plainDoc)
+	mustNotContain(t, plainDoc, "Cash rounding")
 }
 
 // The receipt renders even without a profile or a yard, the way every other

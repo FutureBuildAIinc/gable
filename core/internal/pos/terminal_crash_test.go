@@ -504,4 +504,3 @@ func TestReviewTillClosesOverAnAuthorizedUnbookedLeg(t *testing.T) {
 		t.Fatalf("till close after booking = %d: %s", cl2.status, cl2.raw)
 	}
 }
-

@@ -21,13 +21,15 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import type { Payment } from '../../types/payment.ts';
 import { paymentService } from '../../services/paymentService.ts';
-import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
+import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin, Bell, FileCheck } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
+import './AlertList.ts';
 import './ShipToList.ts';
 import './CustomerForm.ts';
 import './ActivityFeed.ts';
+import './TaxExemptionPanel.ts';
 
 @customElement('gable-account-detail')
 export class GableAccountDetail extends LitElement {
@@ -53,7 +55,7 @@ export class GableAccountDetail extends LitElement {
     @state() private voidReason = '';
     @state() private paymentBusy = false;
     @state() private loading = true;
-    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
+    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
     @state() private salesTeam: SalesPerson[] = [];
     @state() private showSpDropdown = false;
@@ -135,6 +137,7 @@ export class GableAccountDetail extends LitElement {
                 this.txnCursor = led.page.next_cursor;
             } else {
                 this.ledgerNote = ledgerYardNote(cust.branch_ids);
+                this.editing = false;
                 this.transactions = [];
                 this.txnCursor = null;
             }
@@ -197,7 +200,7 @@ export class GableAccountDetail extends LitElement {
 
     /** A tab switch; the payments tab reads the unapplied cash and the open
      * invoices once it is first shown, not on every account load. */
-    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm') {
+    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm') {
         this.activeTab = tab;
         if (tab === 'payments' && !this.paymentsLoaded && this.customer && !this.ledgerNote) {
             this.paymentsLoaded = true;
@@ -272,6 +275,7 @@ export class GableAccountDetail extends LitElement {
                 ...request,
                 payment_terms_id: request.payment_terms_id ?? this.customer.payment_terms_id,
                 po_required: request.po_required ?? this.customer.po_required,
+                job_required: request.job_required ?? this.customer.job_required,
             };
             this.customer = await CustomerService.updateCustomer(this.customer.id, update, this.customer.revision);
             this.editing = false;
@@ -298,7 +302,7 @@ export class GableAccountDetail extends LitElement {
         this.showSpDropdown = !this.showSpDropdown;
     }
 
-    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
+    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'exemption' | 'contacts' | 'alerts' | 'crm', label: string, iconData: typeof Activity) {
         const active = this.activeTab === tabId;
         return html`
             <button
@@ -476,6 +480,7 @@ export class GableAccountDetail extends LitElement {
                             <dl class="flex flex-wrap items-center gap-x-6 gap-y-1 mt-3 text-sm" data-account-facts>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Terms</dt><dd class="text-white" data-fact="terms">${customer.payment_terms.code} - ${customer.payment_terms.name}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">PO required</dt><dd class="text-white" data-fact="po">${customer.po_required ? 'Yes' : 'No'}</dd></div>
+                                <div class="flex gap-2"><dt class="text-zinc-500">Job required</dt><dd class="text-white" data-fact="job">${customer.job_required ? 'Yes' : 'No'}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Currency</dt><dd class="font-mono text-white" data-fact="currency">${customer.effective_currency}${customer.currency === null ? ' (dealer default)' : ''}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Pricing program</dt><dd class="text-white" data-fact="price_profile_id">${customer.price_profile_id ?? ''}</dd></div>
                                 <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>
@@ -484,7 +489,8 @@ export class GableAccountDetail extends LitElement {
                         <div class="flex gap-2">
                             <button
                                 @click=${() => void this.openEdit()}
-                                ?disabled=${this.editing}
+                                ?disabled=${this.editing || this.ledgerNote !== ''}
+                                title=${this.ledgerNote ? 'This account is held at another yard: switch the yard to edit it' : ''}
                                 class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
                             >Edit Profile</button>
                             <a
@@ -616,6 +622,17 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-2 text-xs text-zinc-500">${noLimit ? 'No credit ceiling on this account' : customer.credit_limit_cents === 0 ? 'No credit: cash only' : 'Total approved credit line'}</div>
                     </div>
+
+                    <div class="p-5 border-l-4 border-l-violet-500 bg-gradient-to-br from-slate-steel to-transparent rounded-lg border border-white/10">
+                        <div class="flex items-center gap-3 mb-2 text-zinc-400 text-sm font-medium uppercase tracking-wide">
+                            ${icon(CreditCard, 16, 'text-violet-400')}
+                            Check Limit
+                        </div>
+                        <div class="text-3xl font-mono font-bold text-white" data-testid="account-check-limit">
+                            ${customer.check_limit_cents === null ? 'Counter rule' : formatCents(customer.check_limit_cents)}
+                        </div>
+                        <div class="mt-2 text-xs text-zinc-500">${customer.check_limit_cents === null ? 'Uses the dealer\'s counter rule' : customer.check_limit_cents === 0 ? 'No checks on this account' : 'The most any one check this customer may write'}</div>
+                    </div>
                 </div>
 
                 <!-- Tabs & Content -->
@@ -624,7 +641,9 @@ export class GableAccountDetail extends LitElement {
                         ${this.renderTab('ledger', 'Activity Ledger', Activity)}
                         ${this.renderTab('payments', 'Payments', CreditCard)}
                         ${this.renderTab('shipto', 'Ship-to Addresses', MapPin)}
+                        ${this.renderTab('exemption', 'Tax Exemption', FileCheck)}
                         ${this.renderTab('contacts', 'Contacts', Users)}
+                        ${this.renderTab('alerts', 'Alerts', Bell)}
                         ${this.renderTab('crm', 'CRM Activity', MessageSquare)}
                     </div>
 
@@ -748,9 +767,21 @@ export class GableAccountDetail extends LitElement {
                             </div>
                         ` : nothing}
 
+                        ${this.activeTab === 'exemption' ? html`
+                            <div class="mt-4">
+                                <gable-tax-exemption-panel customerId=${customer.id}></gable-tax-exemption-panel>
+                            </div>
+                        ` : nothing}
+
                         ${this.activeTab === 'contacts' ? html`
                             <div class="mt-4">
                                 <gable-contact-list customerId=${customer.id}></gable-contact-list>
+                            </div>
+                        ` : nothing}
+
+                        ${this.activeTab === 'alerts' ? html`
+                            <div class="mt-4">
+                                <gable-alert-list customerId=${customer.id}></gable-alert-list>
                             </div>
                         ` : nothing}
 

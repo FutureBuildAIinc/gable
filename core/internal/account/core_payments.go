@@ -40,9 +40,20 @@ type RecordPaymentIn struct {
 	Reference, Notes   string
 	ReceivedOn         time.Time
 	OrderID, ProjectID *uuid.UUID
+	TillSessionID      *uuid.UUID
 	Card               *CardFacts
 	Actor              string
 	Applications       []ApplyLine
+
+	// RoundingCents is the cash rounding this payment carries (CP-18): the
+	// signed difference between the rounded cash the drawer received and the
+	// exact cash the sale needed. A positive value (round-up) credits the
+	// branch's cash rounding income account (4095); a negative value
+	// (round-down) debits the branch's cash rounding loss account (5045).
+	// Both ride on the payment entry so the drawer, the books and the
+	// receipt all carry the same rounded figure, and the invoice settles in
+	// full as PAID.
+	RoundingCents int64
 }
 
 // RecordPayment writes the payment (POSTED, the whole amount unapplied), posts
@@ -54,6 +65,18 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	}
 	if in.AmountCents <= 0 {
 		return uuid.Nil, nil, invalidField("amount_cents", "must be greater than zero")
+	}
+	if in.RoundingCents >= in.AmountCents {
+		return uuid.Nil, nil, invalidField("rounding_cents", "must be less than the amount")
+	}
+	if in.RoundingCents < 0 {
+		var applied int64
+		for _, l := range in.Applications {
+			applied += l.AmountCents
+		}
+		if applied < -in.RoundingCents {
+			return uuid.Nil, nil, invalidField("rounding_cents", "a negative rounding requires an application that covers it")
+		}
 	}
 	if err := s.refuseDayToCome(ctx, in.BranchID, in.ReceivedOn, "received_on"); err != nil {
 		return uuid.Nil, nil, err
@@ -91,14 +114,25 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		card = &CardFacts{}
 	}
 	var number string
+	// The cash rounding is not cash the customer can still apply (CP-18):
+	// on a round-up the branch has taken it as its rounding income the
+	// moment the payment is written, so the payment's unapplied cash starts
+	// at the amount less the rounding; on a round-down the row starts at
+	// the cash received (within the table's range constraint) and the
+	// deposit leg carries the full invoice credit applied below.
+	initialUnapplied := in.AmountCents
+	if in.RoundingCents > 0 {
+		initialUnapplied = in.AmountCents - in.RoundingCents
+	}
 	err := s.ex(ctx).QueryRow(ctx, `
 		INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, reference, notes, received_on,
-			order_id, project_id, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
-		VALUES ($1, $2, $3, $4, $5, $6::bigint::numeric / 100, $6::bigint::numeric / 100, NULLIF($7, ''), NULLIF($8, ''), $9::date,
-			$10, $11, NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''))
+			order_id, project_id, till_session_id, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
+		VALUES ($1, $2, $3, $4, $5, $6::bigint::numeric / 100, $19::bigint::numeric / 100, NULLIF($7, ''), NULLIF($8, ''), $9::date,
+			$10, $11, $12, NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''))
 		RETURNING number`,
 		id, in.CustomerID, in.BranchID, in.Currency, in.Method, in.AmountCents, in.Reference, in.Notes, date(in.ReceivedOn),
-		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
+		in.OrderID, in.ProjectID, in.TillSessionID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode,
+		initialUnapplied).Scan(&number)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("failed to record the payment: %w", err)
 	}
@@ -107,11 +141,21 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	}
 	fx := &Effects{}
 	payID := id
+	// The cash rounding (CP-18) rides on the payment entry: the drawer holds
+	// the rounded cash, so the entry debits cash for the rounded figure and
+	// books the difference between it and the exact deposit to the branch's
+	// rounding income (4095) or rounding loss (5045) account.
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
+		{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents - in.RoundingCents},
+	}
+	if in.RoundingCents > 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Credit: in.RoundingCents})
+	} else if in.RoundingCents < 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingLoss, Description: "Cash Rounding Loss", Debit: -in.RoundingCents})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.ReceivedOn, Memo: "Payment " + number, Source: gl.SourcePayment,
-		SourceRefID: &payID, BranchID: in.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Debit: in.AmountCents},
-			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Credit: in.AmountCents},
-		}})
+		SourceRefID: &payID, BranchID: in.BranchID, Currency: in.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return uuid.Nil, nil, err
 	}
@@ -126,7 +170,13 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		if err != nil {
 			return uuid.Nil, nil, err
 		}
-		if err := s.applyLocked(ctx, fx, pay, in.Applications, in.ReceivedOn, in.Actor, "applications"); err != nil {
+		if in.RoundingCents < 0 {
+			pay.Unapplied -= in.RoundingCents
+		}
+		// Applications sent at receipt share the payment's own id as their
+		// act_id, so order deposit reads can tell receipt-time invoice
+		// settlement apart from later applications of a deposit.
+		if err := s.applyLocked(ctx, fx, pay, in.Applications, in.ReceivedOn, in.Actor, "applications", id); err != nil {
 			return uuid.Nil, nil, err
 		}
 	}
@@ -154,7 +204,7 @@ func (s *Service) Apply(ctx context.Context, in ApplyIn) (*Effects, error) {
 		return nil, conflict("payment_voided", "the payment is voided: it applies nothing")
 	}
 	fx := &Effects{}
-	if err := s.applyLocked(ctx, fx, pay, in.Lines, in.On, in.Actor, "applications"); err != nil {
+	if err := s.applyLocked(ctx, fx, pay, in.Lines, in.On, in.Actor, "applications", uuid.New()); err != nil {
 		return nil, err
 	}
 	return fx, nil
@@ -170,7 +220,7 @@ func lineField(prefix string, i int, name string) string {
 	return fmt.Sprintf("%s[%d].%s", prefix, i, name)
 }
 
-func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow, lines []ApplyLine, on time.Time, actor, prefix string) error {
+func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow, lines []ApplyLine, on time.Time, actor, prefix string, act uuid.UUID) error {
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
 	}
@@ -265,7 +315,9 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	if _, err := s.lockCustomer(ctx, pay.CustomerID); err != nil {
 		return err
 	}
-	act := uuid.New()
+	if act == uuid.Nil {
+		act = uuid.New()
+	}
 	var applied []uuid.UUID
 	for _, p := range plans {
 		inv, l := p.inv, p.line
@@ -759,8 +811,10 @@ type VoidPaymentIn struct {
 
 // VoidPayment reverses every live application (with its discounts), then posts
 // the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is
-// the amount less refunds, and ends the payment as VOIDED. A card payment is
-// refused (409 card_payment): it is refunded through the gateway.
+// the amount less refunds, and ends the payment as VOIDED. A rounded cash
+// payment pays the rounded cash back and reverses the rounding legs with it
+// (CP-18). A card payment is refused (409 card_payment): it is refunded
+// through the gateway.
 func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, error) {
 	if err := s.requireTx(ctx); err != nil {
 		return nil, err
@@ -832,12 +886,35 @@ func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, 
 		return nil, err
 	}
 	remaining := pay.Unapplied + r.paymentAdd
+	// Cash rounding without pennies (CP-18): a rounded counter payment kept
+	// the rounded cash while its entry booked the exact figure to the
+	// deposits and the difference to the rounding account. The void pays the
+	// rounded cash back and posts the rounding legs in reverse, so the cash,
+	// the deposits, the rounding accounts and the drawer's expectation all
+	// return to zero. The rounding is read from the payment's own entry.
+	var rounding int64
+	if err := s.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(ROUND(l.credit * 100)::bigint - ROUND(l.debit * 100)::bigint), 0)
+		FROM payments p
+		JOIN gl_journal_lines l ON l.journal_entry_id = p.gl_entry_id
+		JOIN gl_accounts a ON a.id = l.account_id
+		WHERE p.id = $1 AND a.code IN ($2, $3)`, pay.ID,
+		gl.AccountCodeRoundingIncome, gl.AccountCodeRoundingLoss).Scan(&rounding); err != nil {
+		return nil, fmt.Errorf("failed to read the payment's rounding: %w", err)
+	}
+	payout := remaining + rounding
 	payID := pay.ID
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: remaining},
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: payout},
+	}
+	if rounding > 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Debit: rounding})
+	} else if rounding < 0 {
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingLoss, Description: "Cash Rounding Loss", Credit: -rounding})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Void of payment " + pay.Number, Source: gl.SourcePayment,
-		SourceRefID: &payID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeCustomerDeposit, Description: "Customer Deposits", Debit: remaining},
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: remaining},
-		}})
+		SourceRefID: &payID, BranchID: pay.BranchID, Currency: pay.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return nil, err
 	}
@@ -919,6 +996,14 @@ type RefundCreditMemoIn struct {
 	GatewayRefundID string
 	Actor           string
 	On              time.Time
+
+	// RoundingCents is the cash rounding this refund carries (CP-18): the
+	// difference between the cash that leaves the drawer and the exact
+	// amount refunded against the customer's account. The branch's rule
+	// rounds the cash that leaves the drawer, and the difference rides on
+	// the refund entry in the direction opposite the sale that created it,
+	// so a sale and its return net to zero in the rounding account.
+	RoundingCents int64
 }
 
 // RefundCreditMemo pays credit out: DR 1020 / CR 1010, a REFUND subledger row
@@ -949,11 +1034,26 @@ func (s *Service) RefundCreditMemo(ctx context.Context, in RefundCreditMemoIn) (
 		return uuid.Nil, nil, err
 	}
 	refundID := uuid.New()
+	// The cash rounding (CP-18) rides on the refund entry: the drawer pays
+	// the rounded figure and the difference goes back to the branch's
+	// rounding account, in the direction opposite the sale that created it.
+	legs := []gl.Leg{
+		{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.AmountCents},
+		{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
+	}
+	if in.RoundingCents > 0 {
+		// The drawer paid more than the credit: the rounding income the
+		// sale credited takes it back.
+		legs[1].Credit += in.RoundingCents
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingIncome, Description: "Cash Rounding Income", Debit: in.RoundingCents})
+	} else if in.RoundingCents < 0 {
+		// The drawer paid less than the credit: the rounding loss the sale
+		// debited gives it back.
+		legs[1].Credit += in.RoundingCents
+		legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeRoundingLoss, Description: "Cash Rounding Loss", Credit: -in.RoundingCents})
+	}
 	entry, err := s.post(ctx, gl.PostingInput{EntryDate: in.On, Memo: "Refund of credit memo " + m.Number, Source: gl.SourceCreditMemo,
-		SourceRefID: &refundID, BranchID: m.BranchID, Currency: m.Currency, PostedBy: in.Actor, Legs: []gl.Leg{
-			{AccountCode: gl.AccountCodeAR, Description: "Accounts Receivable", Debit: in.AmountCents},
-			{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents},
-		}})
+		SourceRefID: &refundID, BranchID: m.BranchID, Currency: m.Currency, PostedBy: in.Actor, Legs: legs})
 	if err != nil {
 		return uuid.Nil, nil, err
 	}

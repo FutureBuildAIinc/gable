@@ -44,7 +44,8 @@
           "exempt_reason": "RESALE",
           "id": "<id-2>",
           "is_active": true,
-          "issuing_state": "BC"
+          "issuing_state": "BC",
+          "status": "active"
         }
       ]
     }

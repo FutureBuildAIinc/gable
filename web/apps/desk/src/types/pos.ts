@@ -8,6 +8,8 @@
 
 export type SaleStatus = 'open' | 'held' | 'completed' | 'voided';
 export type TenderMethod = 'cash' | 'check' | 'card' | 'account' | 'store_credit';
+/** The methods an exchange's difference can be tendered by (CP-17a). */
+export type ExchangeTenderMethod = 'cash' | 'check' | 'card';
 /** The kind of ID looked at beside a check or a charge; its number is never taken. */
 export type IdType = 'drivers_license' | 'state_id' | 'passport' | 'military_id' | 'other';
 export const ID_TYPES: Array<{ value: IdType; label: string }> = [
@@ -23,6 +25,34 @@ export type LineType = 'product' | 'kit' | 'component' | 'charge' | 'text';
 export type PriceSource = 'price_list' | 'quote' | 'override' | 'manual' | 'none';
 
 /** One line of a counter sale: the shared salesdoc shape (ADR 0005 2.2). */
+
+/** A colorant amount as the manufacturer guides print it: whole ounces, a count of the coarse 1/32 step and a count of the fine 1/denominator step. */
+export interface TintAmount {
+    whole_oz: number;
+    increments_coarse: number;
+    increments_fine: number;
+    unit_denominator: number;
+}
+
+/** One colorant of a tint. */
+export interface TintComponent {
+    colorant_code: string;
+    colorant_name: string;
+    amount: TintAmount;
+}
+
+/** A paint line's tint record (row CP-16): the base, the colour and the formula frozen on the sale. */
+export interface LineTint {
+    formula_id: string | null;
+    color_code: string;
+    color_name: string;
+    base_code: string;
+    container_size_code: string;
+    rescaled: boolean;
+    tint_charge_cents: number | null;
+    components: TintComponent[];
+}
+
 export interface SaleLine {
     id: string;
     position: number;
@@ -52,6 +82,20 @@ export interface SaleLine {
     is_special_order: boolean;
     vendor_id: string | null;
     special_order_unit_cost_ten_thousandths: number | null;
+    /** How this line's quantity was set: a live scale reading, or a manual entry. */
+    weight_source: 'scale' | 'manual' | null;
+    weight_gross_lb: string | null;
+    weight_tare_lb: string | null;
+    weight_net_lb: string | null;
+    weight_net_basis: 'single_draft' | 'double_draft' | null;
+    scale_device_id: string | null;
+    scale_ticket_id: string | null;
+    scale_ticket_number: string | null;
+    manual_weight_reason: string | null;
+    weight_captured_by: string | null;
+    weight_captured_at: string | null;
+    /** The paint line's tint record, null on every other line (row CP-16). */
+    tint: LineTint | null;
     created_at: string;
 }
 
@@ -98,6 +142,14 @@ export interface Sale {
     /** How many times the receipt has been printed. */
     print_count: number;
     exchange_return_id: string | null;
+    /** The sale's delivery answer (CP-10): a delivery is taxed at the ship to's zone, a pickup at the branch. */
+    delivery_type: 'pickup' | 'delivery';
+    /** The ship to a delivered sale carries. */
+    ship_to_id: string | null;
+    /** For a completed sale that has returns: sale line id -> quantity already returned. */
+    returned_quantities?: Record<string, string>;
+    /** Why there is no tax: the certificate that exempts this sale on the branch's business day. */
+    tax_exemption?: { certificate_number: string; expiry_day?: string } | null;
     lines: SaleLine[];
     tenders: Tender[];
 }
@@ -115,6 +167,7 @@ export interface CounterCustomer {
     account_number: string;
     name: string;
     po_required: boolean;
+    job_required: boolean;
     credit_limit_cents: number | null;
     open_receivable_cents: number;
     available_credit_cents: number | null;
@@ -124,7 +177,7 @@ export interface CounterCustomer {
 
 // --- Can this go on account? (GET /api/v1/pos/customers/{id}/standing) ---
 
-export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'manager_override';
+export type VerdictReason = '' | 'credit_hold' | 'credit_limit' | 'cash_only_terms' | 'account_hold' | 'manager_override';
 
 export interface WayForward {
     kind: 'pay_down' | 'manager_override' | 'switch_tender';
@@ -165,6 +218,83 @@ export interface CounterStanding {
     check_limit_cents: number | null;
     payment_options: TenderMethod[];
     on_account: OnAccountVerdict;
+    /** The customer's alerts that speak at the counter, oldest first. */
+    alerts: CounterAlert[];
+}
+
+/**
+ * An alert of the customer the counter reads: a note to read, or a warning
+ * that may ask to be acknowledged before the sale is taken.
+ */
+export interface CounterAlert {
+    id: string;
+    kind: 'note' | 'warning';
+    text: string;
+    /** The counter has to read this warning and say so before the sale is taken. */
+    acknowledge_required: boolean;
+}
+
+/** The dealer's check ID rule: never, every check, or checks over a figure. The ID's number is never taken. */
+export interface CheckIDRule {
+    mode: 'never' | 'every_check' | 'over_amount';
+    over_cents: number | null;
+}
+
+/** One tier of the dealer's tint charge rule: the base tier it covers, the colorant floor it covers and the charge. */
+export interface TintChargeTier {
+    /** The base tier this tier covers: '' is any base, 'flat' the ordinary one, 'deep' the deepest of the system. */
+    base_tier: '' | 'flat' | 'deep';
+    /** The lowest colorant total in fluid ounces this tier covers; '' is any total. */
+    min_colorant_oz: string;
+    /** The charge for a tint this tier covers, in cents. */
+    charge_cents: number;
+}
+
+/** The dealer's tint charge rule: the flat figure per container and the tiers that may cover it. */
+export interface TintChargeRule {
+    /** The charge per container when no tier covers the tint; 0 means the tint is folded into the shelf price. */
+    flat_cents: number;
+    /** The dealer's tiers: the most specific tier that covers the tint wins. */
+    tiers: TintChargeTier[];
+}
+
+/** The counter's named dealer rules (GET/PUT /api/v1/pos/settings). */
+export interface PosRules {
+    check_limit_cents: number | null;
+    check_id_required: CheckIDRule;
+    /** The restocking fee each return reason withholds, in basis points: the whole closed list. */
+    restocking_fees: Record<string, number>;
+    /** The suggested fee for each reason, read only (the read fills it; a write never carries it). */
+    restocking_fee_defaults?: Record<string, number>;
+    /** The dealer's tint charge rule (row CP-16). */
+    tint_charge?: TintChargeRule;
+    /** The dealer's tinted no return policy: a tinted can is not taken back. */
+    tinted_no_return?: boolean;
+}
+
+/** The figures of a return before it is taken (POST /api/v1/pos/returns/preview). */
+export interface ReturnFigures {
+    subtotal_cents: number;
+    tax_cents: number;
+    restocking_fee_cents: number;
+    total_cents: number;
+    /** The money that goes back, positive: the total's other sign. */
+    refund_cents: number;
+    lines: ReturnFigureLine[];
+}
+
+/** One line of the figures: the fee its reason withholds beside its refund. */
+export interface ReturnFigureLine {
+    line_id: string | null;
+    reason_code: string;
+    line_total_cents: number;
+    restocking_fee_cents: number;
+}
+
+/** The counter settings resource: its rules and the revision a write rides. */
+export interface PosSettings {
+    revision: number;
+    rules: PosRules;
 }
 
 export interface SaleSummary {
@@ -175,12 +305,16 @@ export interface SaleSummary {
     register_id: string;
     cashier_id: string;
     customer_id: string | null;
+    customer_name: string | null;
     currency: string;
     total_cents: number;
     status: SaleStatus;
     invoice_id: string | null;
+    invoice_number: string | null;
     completed_at: string | null;
     created_at: string;
+    /** The day the sale was made on in its branch's own zone (the search's date bound reads the same day). */
+    business_day: string;
     item_count: number;
 }
 
@@ -208,7 +342,7 @@ export interface ReturnLine {
 }
 
 /** The closed lowercase list of return reasons; an absent reason is other. */
-export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'other';
+export type ReturnReasonCode = 'defective' | 'damaged' | 'wrong_item' | 'ordered_wrong' | 'changed_mind' | 'overbought' | 'mis_tint' | 'other';
 
 export interface ReturnReason {
     code: ReturnReasonCode;
@@ -242,6 +376,30 @@ export interface CounterReturn {
     lines: ReturnLine[];
 }
 
+/** What the large cash preview answered (CP-17a): the rule family, the counted cash and whether the payer's details are required. */
+export interface LargeCashPreview {
+    country: string;
+    rule_family: string;
+    counted_cents: number;
+    aggregate_cents: number;
+    threshold_cents: number;
+    comparator: string;
+    asks_details: boolean;
+    fields: string[];
+    note?: string;
+    dealer_threshold: boolean;
+    /** The branch's walk-in identity floor in cents; zero when the branch has it off (CP-17a). */
+    walk_in_floor_cents: number;
+    /** True when this walk-in's cash sale passes the floor and no identity is captured yet: the counter asks before Pay. */
+    asks_floor: boolean;
+    /** True when the branch counts a walk-in's cash sales together once the walk-in is identified. */
+    walk_in_aggregated: boolean;
+    /** The plain sentence the counter shows when the branch's floor is off: the walk-in's cash is not aggregated. */
+    walk_in_note?: string;
+    /** True when this sale's counted cash crosses the rule's threshold: the payer's details are required and no decline answers it. */
+    threshold_crossed: boolean;
+}
+
 /** What an exchange comes to: the credit the return is worth, the replacement and the difference. */
 export interface ExchangeFigures {
     returned_cents: number;
@@ -249,6 +407,8 @@ export interface ExchangeFigures {
     replacement_cents: number;
     /** Replacement less return: positive is what the customer pays, negative what goes back. */
     difference_cents: number;
+    /** The branch country's large cash answer for this exchange (CP-17a): what the payer's capture needs. */
+    large_cash?: LargeCashPreview;
 }
 
 export interface Exchange extends ExchangeFigures {
@@ -363,6 +523,23 @@ export interface MovementRequest {
     reason_code?: MovementReason;
     note?: string;
     taken_by?: string;
+    /** A manager's step up approval: the manager it names is the taker. */
+    approval_token?: string;
+}
+
+/** A manager the step up picker offers: active, a PIN set, a role the act admits. */
+export interface StepUpManager {
+    id: string;
+    full_name: string;
+    staff_no: string;
+    role: string;
+}
+
+/** The single use approval a verified step up mints; one act spends it. */
+export interface StepUpApproval {
+    token: string;
+    manager_name: string;
+    expires_at: string;
 }
 
 export interface DayFigures {
@@ -502,4 +679,119 @@ export interface TerminalLostItem {
 export interface TerminalSweepResult {
     claimed_closed: number;
     dispatched_lost: number;
+}
+
+// --- Scale integration (CP-19) ---
+
+export type ScaleDirection = 'weigh_in' | 'weigh_out' | 'single';
+export type ScaleTicketStatus = 'open' | 'completed' | 'void';
+export type ScaleSource = 'scale' | 'manual';
+export type ScaleNetBasis = 'single_draft' | 'double_draft' | null;
+
+export interface ScaleDevice {
+    id: string;
+    name: string;
+    certificate_no: string;
+    location_note: string;
+}
+
+export interface ScaleReading {
+    weight_lb: string | null;
+    unit: 'lb' | 'kg';
+    mode: 'gross' | 'tare' | 'net';
+    motion: boolean;
+    at_zero: boolean;
+}
+
+export interface ScaleStatus {
+    configured: boolean;
+    device: ScaleDevice | null;
+    reading: ScaleReading | null;
+    detail?: string;
+}
+
+export interface ScaleTicket {
+    id: string;
+    ticket_number: string;
+    revision: number;
+    branch_id: string;
+    scale_device_id: string;
+    vehicle_ref: string;
+    direction: ScaleDirection;
+    status: ScaleTicketStatus;
+    gross_lb: string | null;
+    tare_lb: string | null;
+    net_lb: string | null;
+    reading_unit: 'lb' | 'kg';
+    source: ScaleSource;
+    manual_reason: string | null;
+    manual_note: string | null;
+    net_basis: ScaleNetBasis;
+    weigh_in_ticket_id: string | null;
+    sale_line_id: string | null;
+    captured_by: string;
+    captured_at: string;
+    void_reason: string | null;
+    created_at: string;
+}
+
+export type ManualWeightReasonCode = 'scale_offline' | 'scale_error' | 'preweighed' | 'other';
+
+export interface ManualWeightReason {
+    code: ManualWeightReasonCode;
+    label: string;
+    needs_note: boolean;
+}
+
+export interface WeighOutResponse {
+    sale: Sale;
+    ticket: ScaleTicket;
+}
+
+export interface ScaleSimulatorInput {
+    weight_lb?: string;
+    unit?: 'lb' | 'kg';
+    motion?: boolean;
+    status?: 'none' | 'over_capacity' | 'under_capacity' | 'zero_error' | 'initial_zero_error' | 'tare_error';
+}
+
+// --- Refund intents (CP-06) ---
+
+export type RefundIntentAct = 'void' | 'return' | 'payback';
+export type RefundIntentState = 'PENDING' | 'FAILED';
+export type RefundIntentOutcome = 'refund' | 'no_refund';
+
+/** One open refund claim waiting on a manager (GET /api/v1/pos/refund-intents). */
+export interface RefundIntent {
+    id: string;
+    sale_id: string;
+    sale_number: string;
+    tender_id: string;
+    tender_method: TenderMethod;
+    amount_cents: number;
+    act: RefundIntentAct;
+    state: RefundIntentState;
+    held_credit_cents: number;
+    created_at: string;
+}
+
+export interface RefundIntentResolved {
+    id: string;
+    sale_id: string;
+    tender_id: string;
+    act: RefundIntentAct;
+    state: 'DONE' | 'FAILED';
+    outcome: RefundIntentOutcome;
+    refund_tx_id: string | null;
+    reconciliation_reference: string | null;
+}
+
+export interface RefundIntentPaidBack {
+    id: string;
+    payback_id: string;
+    sale_id: string;
+    tender_id: string;
+    amount_cents: number;
+    refund_tx_id: string;
+    state: 'DONE';
 }

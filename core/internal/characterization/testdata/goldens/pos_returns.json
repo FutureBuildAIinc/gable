@@ -35,12 +35,14 @@
             "description": "returned lumber",
             "id": "<id-7>",
             "line_total_cents": -2500,
+            "mis_tint": false,
             "position": 0,
             "product_id": "<id-1>",
             "quantity": "2",
             "reason_code": "other",
             "restock": true,
             "restocking_fee_cents": 0,
+            "tinted_return": false,
             "unit_price_ten_thousandths": 125000,
             "uom": "PCS"
           }
@@ -96,12 +98,14 @@
             "description": "",
             "id": "<id-13>",
             "line_total_cents": -3000,
+            "mis_tint": false,
             "position": 0,
             "product_id": "<id-10>",
             "quantity": "1",
             "reason_code": "other",
             "restock": false,
             "restocking_fee_cents": 0,
+            "tinted_return": false,
             "unit_price_ten_thousandths": 300000,
             "uom": "PCS"
           }
@@ -310,12 +314,14 @@
             "description": "returned lumber",
             "id": "<id-7>",
             "line_total_cents": 2500,
+            "mis_tint": false,
             "position": 0,
             "product_id": "<id-1>",
             "quantity": "2",
             "reason_code": "other",
             "restock": true,
             "restocking_fee_cents": 0,
+            "tinted_return": false,
             "unit_price_ten_thousandths": 125000,
             "uom": "PCS"
           }

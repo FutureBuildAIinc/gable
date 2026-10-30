@@ -171,7 +171,7 @@ func resetTransactionalData(db *sql.DB) {
 		"customer_transactions", "payments", "credit_memos",
 		"purchase_orders", "purchase_order_lines", "reorder_runs",
 		"gl_journal_entries", "gl_journal_lines",
-		"pos_transactions", "pos_sync_log",
+		"pos_transactions", "pos_sync_log", "scale_tickets",
 		"pos_offline_exceptions", "pos_offline_snapshots", "pos_register_devices",
 		"till_movements", "till_day_closes",
 		"projects", "crm_activities", "customer_contacts",
@@ -227,12 +227,7 @@ const demoSeedEnv = "DEMO_SEED"
 // demoSeedRequested reports whether the operator explicitly asked for demo
 // data. Anything other than an affirmative value means no.
 func demoSeedRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoSeedEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return envIsTrue(demoSeedEnv)
 }
 
 // demoImportEnv opts the seed into the invented demo catalogue and its 120 day
@@ -242,12 +237,7 @@ const demoImportEnv = "DEMO_SEED_IMPORT"
 
 // demoImportRequested reports whether the operator asked for the demo import.
 func demoImportRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoImportEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return envIsTrue(demoImportEnv)
 }
 
 // demoHistoryEnv turns the import's 120 day history (section 22c) off when set
@@ -305,6 +295,21 @@ func Run() {
 	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
+	}
+
+	// The once guard, before anything is written. The seed below truncates the
+	// transactional tables, so a run that finds a marker and skips is what
+	// keeps a redeploy from wiping a demo tenant. The guard is off unless the
+	// operator asks for it (once.go).
+	if seedOnceRequested() {
+		if _, seeded := seedMarkerValue(db); seeded && !seedForced() {
+			log.Printf(
+				"%s: the marker %q is in system_settings, so nothing was truncated and no demo data was written. "+
+					"Set %s=1 to seed it again on purpose.",
+				seedSkipMessage, seedMarkerKey, seedForceEnv,
+			)
+			return
+		}
 	}
 
 	// Read the default branch before anything below changes it: dedupeBranches
@@ -401,6 +406,14 @@ func Run() {
 	if kelMainID != uuid.Nil {
 		db.Exec(`INSERT INTO system_settings (key, value) VALUES ('default_branch_id', $1)
 			ON CONFLICT (key) DO UPDATE SET value=$1`, kelMainID.String())
+	}
+
+	// The demo dealer is a British Columbia one: its branches take Canada as
+	// the dealer default country (CP-17a), so a branch saves without naming
+	// one. The Canadian dealer threshold stays off.
+	if _, err := db.Exec(`INSERT INTO system_settings (key, value) VALUES ('country.default', 'CA')
+		ON CONFLICT (key) DO UPDATE SET value = 'CA'`); err != nil {
+		log.Printf("Seed: country.default: %v", err)
 	}
 
 	// Child ZONEs under KEL-MAIN (trigger 058 inherits branch_id from parent).
@@ -1535,6 +1548,11 @@ func Run() {
 	fmt.Println("Seed: EDI Trading Partners")
 
 	dropPlaceholderBranch(db)
+
+	// The seed finished. The marker is written here, after the last row, so a
+	// run that failed part way leaves no marker and the next run tries again
+	// (once.go).
+	writeSeedMarker(db)
 
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE BUILDING SUPPLY (KELOWNA, BC)  ")

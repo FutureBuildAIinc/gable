@@ -355,7 +355,88 @@ func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]
 	if err := r.attachLineTallyRows(ctx, invoiceLinesOf(out), "invoice_line_id"); err != nil {
 		return nil, err
 	}
+	if err := r.attachLineTints(ctx, invoiceLinesOf(out), "invoice_line_id"); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// attachLineTints reads a document line slice's tint records (row CP-16)
+// back into the lines by the line column named, with their frozen
+// components: what the counter mixed, not what the catalogue holds today.
+func (r *PostgresRepository) attachLineTints(ctx context.Context, lines []*salesdoc.Line, lineColumn string) error {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+lineColumn+`, id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents
+		 FROM paint_line_tints WHERE `+lineColumn+` = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("failed to read the lines' tints: %w", err)
+	}
+	defer rows.Close()
+	byTint := map[uuid.UUID]*salesdoc.LineTint{}
+	lineOf := map[uuid.UUID]uuid.UUID{}
+	var tintIDs []uuid.UUID
+	for rows.Next() {
+		var lineID, tintID uuid.UUID
+		t := &salesdoc.LineTint{Components: []salesdoc.TintComponent{}}
+		var charge int64
+		if err := rows.Scan(&lineID, &tintID, &t.FormulaID, &t.ColorCode, &t.ColorName, &t.BaseCode,
+			&t.ContainerSizeCode, &t.Rescaled, &charge); err != nil {
+			return fmt.Errorf("failed to scan a line tint: %w", err)
+		}
+		// The charge is the one the invoice line was sold under, zero
+		// included: the frozen record states the charge, it does not leave it
+		// out.
+		c := httpx.Cents(charge)
+		t.TintChargeCents = &c
+		byTint[tintID] = t
+		lineOf[tintID] = lineID
+		tintIDs = append(tintIDs, tintID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(tintIDs) == 0 {
+		return nil
+	}
+	compRows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT line_tint_id, colorant_code, colorant_name, whole_oz, increments_coarse,
+			increments_fine, unit_denominator
+		 FROM paint_line_tint_components WHERE line_tint_id = ANY($1)
+		 ORDER BY line_tint_id, position`, tintIDs)
+	if err != nil {
+		return fmt.Errorf("failed to read the tints' colorants: %w", err)
+	}
+	defer compRows.Close()
+	for compRows.Next() {
+		var tintID uuid.UUID
+		var comp salesdoc.TintComponent
+		if err := compRows.Scan(&tintID, &comp.ColorantCode, &comp.ColorantName, &comp.Amount.WholeOZ,
+			&comp.Amount.Coarse, &comp.Amount.Fine, &comp.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to scan a tint colorant: %w", err)
+		}
+		if t, ok := byTint[tintID]; ok {
+			t.Components = append(t.Components, comp)
+		}
+	}
+	if err := compRows.Err(); err != nil {
+		return fmt.Errorf("failed to walk the tints' colorants: %w", err)
+	}
+	for i := range lines {
+		for tintID, lineID := range lineOf {
+			if lineID == lines[i].ID {
+				lines[i].Tint = byTint[tintID]
+			}
+		}
+	}
+	return nil
 }
 
 // invoiceLinesOf collects the embedded lines for the tally read.
@@ -661,16 +742,21 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
 			payment_terms_id, due_date, discount_due_date, discount_percent,
 			branch_id, currency, delivery_type, picked_up_by, delivery_id,
-			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at)
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
+			invoice_date, origin, paid_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, CASE WHEN $8::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
 			$5::numeric / 100, $6::numeric, $7::numeric / 100, $8::numeric / 100,
 			$9, $10::date, $11::date, $12::numeric / 10000,
 			$13, $14, $15, $16, $17,
-			$18, $19, $20, $21, $22, $23::date, 'ORDER', CASE WHEN $8::bigint = 0 THEN NOW() END, NOW(), NOW())`,
+			$18, $19, $20, $21, $22,
+			$23, $24, $25,
+			$26::date, 'ORDER', CASE WHEN $8::bigint = 0 THEN NOW() END, NOW(), NOW())`,
 		in.ID, in.Number, in.OrderID, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
 		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
 		in.BranchID, in.Currency, in.DeliveryType, in.PickedUpBy, in.DeliveryID,
-		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource, in.InvoiceDate)
+		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource,
+		in.TaxZoneID, in.TaxRateParts, taxZoneSourceArg(in.TaxZoneSource), in.InvoiceDate)
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}
@@ -732,17 +818,23 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
 			payment_terms_id, due_date, discount_due_date, discount_percent,
 			branch_id, currency, delivery_type, picked_up_by, delivery_id,
-			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at,
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source,
+			tax_zone_id, tax_rate_parts, tax_zone_source,
+			invoice_date, origin, paid_at, created_at, updated_at,
 			customer_po)
 		VALUES ($1, $2, NULL, $3, CASE WHEN $7::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
 			$4::numeric / 100, $5::numeric, $6::numeric / 100, $7::numeric / 100,
 			$8, $9::date, $10::date, $11::numeric / 10000,
-			$12, $13, 'PICKUP', $14, NULL,
-			NULL, NULL, $18::uuid, $15, $16, $17::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW(),
-			$19)`,
+			$12, $13, $14, $15, NULL,
+			$16, $17, $22::uuid, $18, $19,
+			$23, $24, $25,
+			$20::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW(),
+			$21)`,
 		in.ID, in.Number, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
 		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
-		in.BranchID, in.Currency, in.PickedUpBy, in.TaxExempt, in.TaxSource, in.InvoiceDate, in.ProjectID, in.CustomerPO)
+		in.BranchID, in.Currency, in.DeliveryType, in.PickedUpBy,
+		in.ShipToID, in.ShipToSnapshot, in.TaxExempt, in.TaxSource, in.InvoiceDate, in.CustomerPO, in.ProjectID,
+		in.TaxZoneID, in.TaxRateParts, taxZoneSourceArg(in.TaxZoneSource))
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}
@@ -783,8 +875,49 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 				return fmt.Errorf("failed to insert a tally row: %w", err)
 			}
 		}
+		if err := insertInvoiceLineTint(ctx, exec, l.ID, l.Tint); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// insertInvoiceLineTint freezes a paint line's tint record onto the invoice
+// line (row CP-16): the same child row shape the counter line carries, with
+// its own line reference.
+func insertInvoiceLineTint(ctx context.Context, exec database.Executor, lineID uuid.UUID, t *salesdoc.LineTint) error {
+	if t == nil {
+		return nil
+	}
+	var id uuid.UUID
+	if err := exec.QueryRow(ctx, `
+		INSERT INTO paint_line_tints (invoice_line_id, formula_id, color_code, color_name, base_code,
+			container_size_code, rescaled, tint_charge_cents)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id`,
+		lineID, t.FormulaID, t.ColorCode, t.ColorName, t.BaseCode, t.ContainerSizeCode,
+		t.Rescaled, tintCentsOrZero(t.TintChargeCents)).Scan(&id); err != nil {
+		return fmt.Errorf("failed to insert the invoice line's tint: %w", err)
+	}
+	for i, c := range t.Components {
+		if _, err := exec.Exec(ctx, `
+			INSERT INTO paint_line_tint_components (line_tint_id, position, colorant_code, colorant_name,
+				whole_oz, increments_coarse, increments_fine, unit_denominator)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, i, c.ColorantCode, c.ColorantName, c.Amount.WholeOZ, c.Amount.Coarse,
+			c.Amount.Fine, c.Amount.Denominator); err != nil {
+			return fmt.Errorf("failed to insert the tint's colorant: %w", err)
+		}
+	}
+	return nil
+}
+
+// taxZoneSourceArg carries the zone's provenance, or NULL when none answered.
+func taxZoneSourceArg(src *string) any {
+	if src == nil || *src == "" {
+		return nil
+	}
+	return *src
 }
 
 // ---------------------------------------------------------------------------
@@ -873,4 +1006,11 @@ func (r *PostgresRepository) BilledLines(ctx context.Context, invoiceID uuid.UUI
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+func tintCentsOrZero(c *httpx.Cents) int64 {
+	if c == nil {
+		return 0
+	}
+	return int64(*c)
 }

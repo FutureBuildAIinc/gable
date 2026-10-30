@@ -8,7 +8,7 @@ import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import { confirmDialog } from '../../../components/ui/app-dialog.ts';
+import { confirmDialog, promptDialog } from '../../../components/ui/app-dialog.ts';
 import { aiHeadline, aiIsOn, aiLeadLine, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
@@ -471,6 +471,54 @@ export class TechAdminPage extends LitElement {
         }
     }
 
+    /**
+     * Sets (or changes) a staff member's counter PIN: 4 to 8 digits, never a
+     * plain run. The PIN rides the request once; the roster reloads with the
+     * two facts the server answers.
+     */
+    private async _handleSetPin(member: StaffMember) {
+        const pin = await promptDialog({
+            title: `Set ${member.full_name}'s counter PIN`,
+            label: 'New PIN (4 to 8 digits)', required: true, confirmLabel: 'Set PIN', masked: true,
+        });
+        if (!pin) return;
+        try {
+            this.staffError = null;
+            await techAdminService.setCounterPin(member.id, pin.trim());
+            await this._loadStaff();
+        } catch (err: unknown) {
+            this.staffError = err instanceof Error ? err.message : 'Failed to set the counter PIN';
+        }
+    }
+
+    /** Clears a staff member's counter PIN whole. */
+    private async _handleClearPin(member: StaffMember) {
+        const yes = await confirmDialog({
+            title: `Clear ${member.full_name}'s counter PIN?`,
+            body: 'The manager will not be able to approve at the counter until a new PIN is set.',
+            confirmLabel: 'Clear PIN', tone: 'danger',
+        });
+        if (!yes) return;
+        try {
+            this.staffError = null;
+            await techAdminService.clearCounterPin(member.id);
+            await this._loadStaff();
+        } catch (err: unknown) {
+            this.staffError = err instanceof Error ? err.message : 'Failed to clear the counter PIN';
+        }
+    }
+
+    /** Lifts the lock five wrong tries impose; the PIN itself stands. */
+    private async _handleUnlockPin(member: StaffMember) {
+        try {
+            this.staffError = null;
+            await techAdminService.unlockCounterPin(member.id);
+            await this._loadStaff();
+        } catch (err: unknown) {
+            this.staffError = err instanceof Error ? err.message : 'Failed to unlock the counter PIN';
+        }
+    }
+
     private _renderTabs() {
         const tabs = [
             { id: 'keys' as const, label: 'API Keys', iconData: Key },
@@ -884,6 +932,7 @@ export class TechAdminPage extends LitElement {
                                 <th class="px-4 py-3">Role</th>
                                 <th class="px-4 py-3">Active</th>
                                 <th class="px-4 py-3 text-center">AI_LM Access</th>
+                                <th class="px-4 py-3">Counter PIN</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-white/5">
@@ -913,14 +962,29 @@ export class TechAdminPage extends LitElement {
                                                 title=${hasAccess ? 'Revoke AI_LM access' : 'Grant AI_LM access'}
                                             />
                                         </td>
+                                        <td class="px-4 py-3" data-testid="staff-pin-${member.id}">
+                                            ${member.locked ? html`
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-500/10 text-amber-400" data-testid="staff-pin-locked">Locked</span>
+                                                <button data-testid="staff-pin-unlock" @click=${() => this._handleUnlockPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Unlock</button>
+                                                <button data-testid="staff-pin-clear" @click=${() => this._handleClearPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Clear</button>
+                                                <button data-testid="staff-pin-set-new" @click=${() => this._handleSetPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Change</button>
+                                            ` : member.counter_pin_set ? html`
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gable-green/10 text-gable-green" data-testid="staff-pin-set">Set</span>
+                                                <button data-testid="staff-pin-set-new" @click=${() => this._handleSetPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Change</button>
+                                                <button data-testid="staff-pin-clear" @click=${() => this._handleClearPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Clear</button>
+                                            ` : html`
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-500/10 text-slate-500" data-testid="staff-pin-none">None</span>
+                                                <button data-testid="staff-pin-set-new" @click=${() => this._handleSetPin(member)} class="ml-2 text-xs text-slate-400 hover:text-white underline">Set PIN</button>
+                                            `}
+                                        </td>
                                     </tr>
                                 `;
                             })}
                             ${this.staffList.length === 0 && !this.staffLoading ? html`
-                                <tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No staff members yet.</td></tr>
+                                <tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">No staff members yet.</td></tr>
                             ` : nothing}
                             ${this.staffLoading && this.staffList.length === 0 ? html`
-                                <tr><td colspan="5" class="px-4 py-8 text-center text-slate-500 italic">Loading staff...</td></tr>
+                                <tr><td colspan="6" class="px-4 py-8 text-center text-slate-500 italic">Loading staff...</td></tr>
                             ` : nothing}
                         </tbody>
                     </table>

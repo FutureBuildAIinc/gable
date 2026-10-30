@@ -87,7 +87,7 @@ will-call, and what each item must build and test.
 | Units of measure | a stocked line is sold in its product's stocking unit (`products.uom_primary`); the price unit may differ through the conversion pair | cycle 3 adds unit conversions and lifts the stocking unit rule |
 | Pricing engine | wraps today's engine at the order and counter boundary, converting its result to a scale 4 price once | cycle 3 makes the engine return scaled prices |
 | Inventory cost | the cost basis is `products.average_unit_cost` (scale 4), read in the posting transaction | cycle 4 owns cost layers, lots and serials; it replaces the cost source behind one function (`costOf`, section 8.4) |
-| Tax | one rate per document, resolved from ship-to or branch, rounded once per document; a configured tax provider keeps answering through `tax.Service.PreviewTax` behind the resolver (section 3) | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
+| Tax | one rate per document, resolved by the order of section 3 (the exemption, then a delivery's ship-to zone in Gable's own zone tables, then the typed ship-to rate, then the branch), rounded once per document; a configured tax provider keeps answering through `tax.Service.PreviewTax` behind the resolver (section 3) | cycle 5's tax engine (GC-166) replaces the resolver; the per line `taxable` flag and the document fields stay |
 | Inventory receipts in the ledger | `1030` is debited only where an AP invoice line names it (today's `SyncVendorInvoice`); a stock receipt posts nothing, so COGS relief can drive `1030` below the receipts' value until cycle 4 | cycle 4 posts receipts to `1030` |
 | General ledger routes | GL keeps its routes; cycle 2 adds `currency` to journal entries and groups the GL reports by it | cycle 5 converts the GL module |
 | Multi company | none; the series key for numbers is the entity | cycle 5 (GC-207) may widen series keys |
@@ -285,13 +285,20 @@ The rate is resolved when the document is created: an order's is refreshed
 on every draft edit and at confirm; an invoice resolves its own rate at its
 create (it does not copy the order's, so a ship-to or branch rate changed
 since confirm applies to the bill); a credit memo that names an invoice takes
-that invoice's rate. The order:
+that invoice's rate. The order (CP-10, migration 141):
 
-1. the customer has an active `tax_exemptions` row: rate 0, `tax_exempt`
-   true;
-2. the document is a delivery and its ship-to has a `tax_rate`: that rate;
-3. the branch's `locations.default_tax_rate`;
-4. none configured: the act is refused, 409 `conflict` with a blocker
+1. the customer's certificate covers the day under the one window rule
+   (`tax.ExemptionCovering`: active, effective on or before the branch's
+   business day in its own zone, not yet expired): rate 0, source `EXEMPT`;
+2. the document is a delivery and its ship-to's place of receipt resolves
+   through Gable's own zone tables (`tax_zones`, `tax_zone_rates`,
+   `tax_zone_boundaries`, the combined rate the exact sum of the parts live
+   on the branch's business day, a zone with no live part on the day does
+   not match): that rate, source `ZONE_RATE`;
+3. the document is a delivery and its ship-to has a `tax_rate`: that rate,
+   source `SHIP_TO_RATE`;
+4. the branch's `locations.default_tax_rate`, source `BRANCH_RATE`;
+5. none configured: the act is refused, 409 `conflict` with a blocker
    `tax_rate_not_configured` naming the branch. Zero is a valid configured
    rate.
 
@@ -1311,14 +1318,22 @@ The order is by kind, whatever document the path names:
    day close and an offline late post take at this place (ADR 0011 section
    3.2);
 
-1a. the customer's credit serialization, taken by the acts that read a
-   customer's credit exposure (the confirm, the hold release and the
-   fulfilment) right after the order row: a transaction scoped advisory lock
-   keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
-   id>`). Without it two concurrent confirms of one customer's orders each read
-   an exposure that does not yet count the other (a draft is not counted) and
-   both pass the check. It is not a row lock, so it adds no edge to the order
-   below: the acts that take it hold their own order row and take inventory
+1a. the customer's credit and counter-alert serialization, taken by the acts
+   that read a customer's credit exposure or counter warnings (the confirm,
+   the hold release, the fulfilment, the counter sale completion for a named
+   customer, and the customer alert writes) right after the order or sale
+   row, and by the AR core's credit hold acts (place, override, release and
+   the sweep's placement and lift, in customer id order), which take it
+   before any `credit_holds` row and before the customer row at step 7 so a
+   hold cannot commit inside the window a counter charge sale's completion
+   leaves between its fact read and its commit: a transaction scoped advisory
+   lock keyed on the customer (`pg_advisory_xact_lock` over `order-credit:<customer
+   id>`). Without it two concurrent confirms of one customer's orders each
+   read an exposure that does not yet count the other (a draft is not
+   counted) and both pass the check, or an alert added while a counter sale
+   completes misses the completion's warning check. It is not a row lock, so
+   it adds no edge to the order below: the acts that take it hold their own
+   order or sale row and take inventory
    (step 6) after it, and the back order worker, which does not read credit,
    never takes it; the customer row (step 7) is left to the AR core as before,
    because locking it here would put a step 7 lock before step 6;
