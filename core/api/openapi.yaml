@@ -32007,7 +32007,7 @@ components:
         balance_due_after_deposits_cents:
           type: integer
           format: int64
-          description: 'The order total less everything taken on it: what the customer still owes on the order.'
+          description: 'The order total less everything taken on it and less what its invoices were already paid otherwise: what the customer still owes on the order.'
         deposits:
           type: array
           description: 'The posted payments taken against this order (deposits), oldest first, each with the invoices it settled.'
@@ -32539,6 +32539,7 @@ components:
         order_id: {type: string, format: uuid, description: "A deposit against this order."}
         job_id: {type: string, format: uuid}
         till_session_id: {type: string, format: uuid, description: "The open counter till session a cash or check counter deposit rides."}
+        id_checked: {type: boolean, description: "A check taken on a till session: the clerk looked at the payer's ID. The counter's ID rule asks for it."}
         applications:
           type: array
           items: {$ref: "#/components/schemas/PaymentApplicationRequest"}

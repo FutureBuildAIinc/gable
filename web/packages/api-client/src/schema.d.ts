@@ -15583,7 +15583,7 @@ export interface components {
             deposit_total_cents: number;
             /**
              * Format: int64
-             * @description The order total less everything taken on it: what the customer still owes on the order.
+             * @description The order total less everything taken on it and less what its invoices were already paid otherwise: what the customer still owes on the order.
              */
             balance_due_after_deposits_cents: number;
             /** @description The posted payments taken against this order (deposits), oldest first, each with the invoices it settled. */
@@ -16013,6 +16013,8 @@ export interface components {
              * @description The open counter till session a cash or check counter deposit rides.
              */
             till_session_id?: string;
+            /** @description A check taken on a till session: the clerk looked at the payer's ID. The counter's ID rule asks for it. */
+            id_checked?: boolean;
             applications?: components["schemas"]["PaymentApplicationRequest"][];
         };
         CardPaymentRequest: {
