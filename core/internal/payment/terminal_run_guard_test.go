@@ -320,11 +320,7 @@ func concurrentDispatchOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
 		t.Fatalf("sale row: %v", err)
 	}
-	defer func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
-	}()
+	defer removeRunSale(t, db, sale)
 	ledger := payment.NewTerminalLedger(db)
 	fs := newRunFake(t)
 	fs.fake.pollStep = func(string, int) (int, map[string]any) {
@@ -454,11 +450,7 @@ func concurrentReversalOnce(t *testing.T, db *database.DB, ctx context.Context, 
 		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
 		t.Fatalf("sale row: %v", err)
 	}
-	defer func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
-	}()
+	defer removeRunSale(t, db, sale)
 	ledger := payment.NewTerminalLedger(db)
 	fs := newRunFake(t)
 	release := fs.fake.holdPosts()
