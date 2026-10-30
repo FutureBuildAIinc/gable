@@ -710,7 +710,8 @@ func (s *Service) TestAIConnection(ctx context.Context) TestResult {
 // read time upgrade run at startup. A row that is already sealed, or any row
 // when no vault key exists, is left alone. It returns how many it sealed and
 // never loses a key: a value is replaced only by its own sealed form. The
-// market index source's feed key gets the same pass.
+// market index source's feed URL and feed key get the same pass: both are
+// secrets and both are sealed the way the AI keys are.
 func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
 	if s.vault == nil || !s.vault.Present() {
 		return 0, nil
@@ -737,16 +738,29 @@ func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
 	if err != nil {
 		return n, err
 	}
+	changed := false
+	if row.FeedURL != "" && !ai.IsSealedValue(row.FeedURL) {
+		sealed, err := ai.SealValue(s.vault, row.FeedURL)
+		if err != nil {
+			return n, err
+		}
+		row.FeedURL = sealed
+		changed = true
+		n++
+	}
 	if row.FeedKey != "" && !ai.IsSealedValue(row.FeedKey) {
 		sealed, err := ai.SealValue(s.vault, row.FeedKey)
 		if err != nil {
 			return n, err
 		}
 		row.FeedKey = sealed
+		changed = true
+		n++
+	}
+	if changed {
 		if err := s.repo.UpdateMarketIndexSource(ctx, row, row.Revision); err != nil {
 			return n, err
 		}
-		n++
 	}
 	return n, nil
 }
@@ -940,12 +954,15 @@ func (s *Service) DeleteRoutingSettings(ctx context.Context, pre Precondition) e
 // --- the market index source settings ---
 
 // marketIndexSourceDocument reads the settings row into the wire document.
-// The feed key is opened only to build its masked hint; a sealed key the
-// vault cannot open (the vault key changed) reads as not stored.
+// The feed URL and the feed key are secrets and never leave this function:
+// the document says only whether one is stored, and the header the key rides
+// in, which is configuration and not a credential. A sealed value the vault
+// cannot open (the vault key changed) reads as not stored.
 func (s *Service) marketIndexSourceDocument(row *MarketIndexSourceRow) *MarketIndexSourceSettings {
 	out := &MarketIndexSourceSettings{
 		Source:        row.Source,
-		FeedURL:       row.FeedURL,
+		FeedURLSet:    row.FeedURL != "",
+		FeedKeyHeader: row.FeedKeyHeader,
 		StalenessDays: row.StalenessDays,
 		LastPullAt:    httpx.PtrTimestamp(row.LastPullAt),
 		LastPullOK:    row.LastPullOK,
@@ -955,14 +972,14 @@ func (s *Service) marketIndexSourceDocument(row *MarketIndexSourceRow) *MarketIn
 	if row.FeedKey != "" {
 		if opened, err := ai.OpenValue(s.vault, row.FeedKey); err == nil && opened != "" {
 			out.FeedKeySet = true
-			out.FeedKeyHint = keyHint(opened)
 		}
 	}
 	return out
 }
 
-// GetMarketIndexSourceSettings reads the market index source document. No
-// key is ever returned, only its masked hint.
+// GetMarketIndexSourceSettings reads the market index source document. The
+// feed URL and the feed key are never returned; the document says only
+// whether one is stored.
 func (s *Service) GetMarketIndexSourceSettings(ctx context.Context) (*MarketIndexSourceSettings, error) {
 	row, err := s.repo.ReadMarketIndexSource(ctx)
 	if err != nil {
@@ -973,10 +990,10 @@ func (s *Service) GetMarketIndexSourceSettings(ctx context.Context) (*MarketInde
 
 // SaveMarketIndexSourceSettings writes the market index source in one
 // transaction on the client's revision: the settings row is locked, the
-// revision checked, the row written (the feed key sealed with the vault when
-// one is present), the revision moved, the audit row written and the event
-// written last. The audit row and the event never carry the key; they record
-// only that it changed.
+// revision checked, the row written (the feed URL and the feed key sealed
+// with the vault when one is present), the revision moved, the audit row
+// written and the event written last. The audit row and the event never
+// carry the URL or the key; they record only that they changed.
 func (s *Service) SaveMarketIndexSourceSettings(ctx context.Context, in MarketIndexSourceSave, pre Precondition) (*MarketIndexSourceSettings, error) {
 	var out *MarketIndexSourceSettings
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -991,19 +1008,32 @@ func (s *Service) SaveMarketIndexSourceSettings(ctx context.Context, in MarketIn
 		if in.Source != nil {
 			next.Source = *in.Source
 		}
+		if in.FeedKeyHeader != nil {
+			next.FeedKeyHeader = *in.FeedKeyHeader
+		}
 		if in.FeedURL != nil {
+			// The URL is itself a secret: it carries the feed's identity in
+			// its path. It is stored the way the AI keys are, sealed when a
+			// vault is present, so the value at rest is never the address.
 			next.FeedURL = *in.FeedURL
+			if *in.FeedURL != "" && s.vault != nil && s.vault.Present() {
+				sealed, serr := ai.SealValue(s.vault, *in.FeedURL)
+				if serr != nil {
+					return serr
+				}
+				next.FeedURL = sealed
+			}
 		}
 		if in.FeedKey != nil {
 			// The way the AI settings store their key: sealed when a vault is
 			// present, so the value at rest is never the key itself.
 			next.FeedKey = *in.FeedKey
 			if *in.FeedKey != "" && s.vault != nil && s.vault.Present() {
-				if sealed, serr := ai.SealValue(s.vault, *in.FeedKey); serr == nil {
-					next.FeedKey = sealed
-				} else {
+				sealed, serr := ai.SealValue(s.vault, *in.FeedKey)
+				if serr != nil {
 					return serr
 				}
+				next.FeedKey = sealed
 			}
 		}
 		if in.StalenessDays != nil {
@@ -1025,11 +1055,15 @@ func (s *Service) SaveMarketIndexSourceSettings(ctx context.Context, in MarketIn
 		if in.Source != nil {
 			changes["source"] = *in.Source
 		}
+		if in.FeedKeyHeader != nil {
+			changes["feed_key_header"] = *in.FeedKeyHeader
+		}
 		if in.StalenessDays != nil {
 			changes["staleness_days"] = *in.StalenessDays
 		}
 		if in.FeedURL != nil {
-			changes["feed_url_cleared"] = *in.FeedURL == ""
+			// Only that it changed, never the address.
+			changes["feed_url_changed"] = true
 		}
 		if in.FeedKey != nil {
 			// Only that it changed, never the key.

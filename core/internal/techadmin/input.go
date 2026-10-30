@@ -5,6 +5,8 @@ package techadmin
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -142,12 +144,13 @@ type SaveRoutingSettingsRequest struct {
 }
 
 // SaveMarketIndexSourceRequest is the body of PUT
-// /api/v1/admin/settings/market-index-source. FeedKey is a pointer so
-// omitted (leave the key as it is), present but empty (clear it) and a value
-// (replace it) stay distinct; it is never echoed back.
+// /api/v1/admin/settings/market-index-source. FeedURL and FeedKey are
+// pointers so omitted (leave it as it is), present but empty (clear it) and a
+// value (replace it) stay distinct; neither is ever echoed back.
 type SaveMarketIndexSourceRequest struct {
 	Source        *string         `json:"source"`
 	FeedURL       *string         `json:"feed_url"`
+	FeedKeyHeader *string         `json:"feed_key_header"`
 	FeedKey       *string         `json:"feed_key"`
 	StalenessDays json.RawMessage `json:"staleness_days"`
 	Revision      json.RawMessage `json:"revision"`
@@ -157,7 +160,7 @@ type SaveMarketIndexSourceRequest struct {
 // into one 400 before anything is written. A save must name something.
 func (r *SaveMarketIndexSourceRequest) Parse() (save MarketIndexSourceSave, revision *int64, err error) {
 	v := &httpx.Validator{}
-	if r.Source == nil && r.FeedURL == nil && r.FeedKey == nil && r.StalenessDays == nil {
+	if r.Source == nil && r.FeedURL == nil && r.FeedKeyHeader == nil && r.FeedKey == nil && r.StalenessDays == nil {
 		v.Check(false, "source", "a save must name something to change")
 	}
 	var source string
@@ -171,11 +174,19 @@ func (r *SaveMarketIndexSourceRequest) Parse() (save MarketIndexSourceSave, revi
 	if r.FeedURL != nil {
 		u := strings.TrimSpace(*r.FeedURL)
 		if u != "" {
-			if verr := ai.ValidateBaseURL(u); verr != nil {
+			if verr := validateFeedURL(u); verr != nil {
 				v.Check(false, "feed_url", verr.Error())
 			}
 		}
 		feedURL = &u
+	}
+	var feedKeyHeader *string
+	if r.FeedKeyHeader != nil {
+		h := strings.TrimSpace(*r.FeedKeyHeader)
+		if h != "" && !validHeaderName(h) {
+			v.Check(false, "feed_key_header", "must be an HTTP header name (letters, digits and - _ . only)")
+		}
+		feedKeyHeader = &h
 	}
 	var feedKey *string
 	if r.FeedKey != nil {
@@ -198,7 +209,7 @@ func (r *SaveMarketIndexSourceRequest) Parse() (save MarketIndexSourceSave, revi
 	if err := v.Err(); err != nil {
 		return MarketIndexSourceSave{}, nil, err
 	}
-	out := MarketIndexSourceSave{FeedURL: feedURL, FeedKey: feedKey}
+	out := MarketIndexSourceSave{FeedURL: feedURL, FeedKeyHeader: feedKeyHeader, FeedKey: feedKey}
 	if r.Source != nil {
 		out.Source = &source
 	}
@@ -206,6 +217,58 @@ func (r *SaveMarketIndexSourceRequest) Parse() (save MarketIndexSourceSave, revi
 		out.StalenessDays = staleness
 	}
 	return out, rev, nil
+}
+
+// validateFeedURL checks the FB Connect feed address before it is stored. It
+// is a secret, so it must be an absolute https URL (http only for loopback)
+// and must not carry credentials in its authority: a key has its own header,
+// and a userinfo would travel in the request line where it is logged.
+func validateFeedURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid feed URL: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("feed URL must be absolute (include scheme and host), e.g. https://connect.example.com/feed")
+	}
+	if u.User != nil {
+		return fmt.Errorf("feed URL must not carry credentials; the key rides in its own header")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackFeedHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("feed URL must use https (plaintext http is only allowed for localhost endpoints)")
+	default:
+		return fmt.Errorf("feed URL scheme must be http or https, got %q", u.Scheme)
+	}
+}
+
+// isLoopbackFeedHost reports whether host is a loopback literal or a
+// *.localhost name, which RFC 6761 reserves for loopback.
+func isLoopbackFeedHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return strings.HasSuffix(strings.ToLower(host), ".localhost")
+}
+
+// validHeaderName reports whether name is an HTTP header name (RFC 9110's
+// token): letters, digits and the punctuation a header name may carry.
+func validHeaderName(name string) bool {
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", r):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Parse validates the routing key save.

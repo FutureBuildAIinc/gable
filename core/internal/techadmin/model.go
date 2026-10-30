@@ -134,15 +134,20 @@ const (
 )
 
 // MarketIndexSourceSettings is the market index source document: where index
-// values come from, the feed's URL, the feed key's status (never the key
-// itself, only its masked hint), the staleness threshold in days, the last
-// pull's result (null until the pull exists) and the resource revision every
-// write must precondition on.
+// values come from, whether a feed URL is stored, the header the feed key
+// rides in, whether a feed key is stored, the staleness threshold in days,
+// the last pull's result (null until the pull exists) and the resource
+// revision every write must precondition on.
+//
+// Two facts are never answered: the feed URL and the feed key's value. The
+// URL is itself a secret (it carries the feed's identity in its path), so it
+// is written and masked exactly like the key. The document says only whether
+// one is stored, and the screen masks both and replaces them whole.
 type MarketIndexSourceSettings struct {
 	Source        string           `json:"source"` // "manual" or "fb_connect_feed"
-	FeedURL       string           `json:"feed_url"`
+	FeedURLSet    bool             `json:"feed_url_set"`
+	FeedKeyHeader string           `json:"feed_key_header"`
 	FeedKeySet    bool             `json:"feed_key_set"`
-	FeedKeyHint   *string          `json:"feed_key_hint"`
 	StalenessDays int              `json:"staleness_days"`
 	LastPullAt    *httpx.Timestamp `json:"last_pull_at"`
 	LastPullOK    *bool            `json:"last_pull_ok"`
@@ -151,11 +156,12 @@ type MarketIndexSourceSettings struct {
 }
 
 // MarketIndexSourceSave is the market index source write: every field is
-// optional. The feed key is write only: nil leaves it, an empty string clears
-// it, a value replaces it (sealed at rest).
+// optional. The feed URL and the feed key are write only: nil leaves one,
+// an empty string clears it, a value replaces it (both sealed at rest).
 type MarketIndexSourceSave struct {
 	Source        *string
 	FeedURL       *string
+	FeedKeyHeader *string
 	FeedKey       *string
 	StalenessDays *int
 }

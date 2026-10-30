@@ -255,11 +255,13 @@ func (r *PostgresRepository) BumpRevision(ctx context.Context, resource string, 
 }
 
 // MarketIndexSourceRow is the single market_index_source row (migration 159).
-// FeedKey holds the stored form, sealed when a vault sealed it; the service
-// opens it only to build the masked hint.
+// FeedURL and FeedKey hold the stored form, sealed when a vault sealed them;
+// the service never opens the URL, and opens the key only to learn whether
+// one is stored.
 type MarketIndexSourceRow struct {
 	Source        string
 	FeedURL       string
+	FeedKeyHeader string
 	FeedKey       string
 	StalenessDays int
 	LastPullAt    *time.Time
@@ -268,12 +270,12 @@ type MarketIndexSourceRow struct {
 	Revision      int64
 }
 
-const marketIndexSourceColumns = `source, feed_url, COALESCE(feed_key, ''), staleness_days,
+const marketIndexSourceColumns = `source, feed_url, feed_key_header, COALESCE(feed_key, ''), staleness_days,
 	last_pull_at, last_pull_ok, last_pull_error, revision`
 
 func scanMarketIndexSource(scan func(dest ...any) error) (*MarketIndexSourceRow, error) {
 	var row MarketIndexSourceRow
-	err := scan(&row.Source, &row.FeedURL, &row.FeedKey, &row.StalenessDays,
+	err := scan(&row.Source, &row.FeedURL, &row.FeedKeyHeader, &row.FeedKey, &row.StalenessDays,
 		&row.LastPullAt, &row.LastPullOK, &row.LastError, &row.Revision)
 	if err != nil {
 		return nil, err
@@ -320,9 +322,9 @@ func (r *PostgresRepository) LockMarketIndexSource(ctx context.Context) (*Market
 func (r *PostgresRepository) UpdateMarketIndexSource(ctx context.Context, row *MarketIndexSourceRow, toRevision int64) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`UPDATE market_index_source
-		 SET source = $1, feed_url = $2, feed_key = NULLIF($3, ''), staleness_days = $4,
-		     revision = $5, updated_at = NOW()
+		 SET source = $1, feed_url = $2, feed_key_header = $3, feed_key = NULLIF($4, ''),
+		     staleness_days = $5, revision = $6, updated_at = NOW()
 		 WHERE singleton`,
-		row.Source, row.FeedURL, row.FeedKey, row.StalenessDays, toRevision)
+		row.Source, row.FeedURL, row.FeedKeyHeader, row.FeedKey, row.StalenessDays, toRevision)
 	return err
 }
