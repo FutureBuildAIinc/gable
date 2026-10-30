@@ -692,9 +692,22 @@ mod tests {
             .find("pub fn run()")
             .expect("lib.rs defines run()");
         let run_end = run_start + production[run_start..].find("\n}\n").expect("run() closes");
+        // The code only: a comment in run() that names the call proves nothing
+        // (PR 246's final read, mutation M4).
+        let run_code: String = production[run_start..run_end]
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            production[run_start..run_end].contains("token_state("),
-            "run() builds its state through token_state()"
+            !run_code.contains("TokenState::"),
+            "run() builds no TokenState of its own"
+        );
+        // The exact call: run() handing token_state() no URL brings back a
+        // state with no sign in client (PR 246's final read, mutation M2).
+        assert!(
+            run_code.contains("token_state(custody.clone(), profile, override_url.as_ref())"),
+            "run() builds its state through token_state() with the Gable URL it resolved"
         );
     }
 }
