@@ -11,7 +11,7 @@
       "body": {
         "items": [
           {
-            "balance": 31341985,
+            "balance": 25430817,
             "code": "1010",
             "created_at": "<ts+0d>",
             "description": "Cash and checking accounts",
@@ -39,7 +39,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "balance": 8981814,
+            "balance": 12997198,
             "code": "1020",
             "created_at": "<ts+0d>",
             "description": "Customer balances due",
@@ -137,7 +137,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "balance": -4324797,
+            "balance": -4121679,
             "code": "2020",
             "created_at": "<ts+0d>",
             "description": "Collected sales tax awaiting remittance",
@@ -207,7 +207,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "balance": -35999002,
+            "balance": -34306336,
             "code": "4010",
             "created_at": "<ts+0d>",
             "description": "Revenue from material sales",
@@ -426,7 +426,7 @@
         "branch_id": "<id-28>",
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 128,
+        "entry_number": 116,
         "id": "<id-29>",
         "lines": [
           {

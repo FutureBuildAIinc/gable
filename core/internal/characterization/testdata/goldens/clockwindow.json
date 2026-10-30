@@ -54,6 +54,15 @@
             "total": 21202.12
           },
           {
+            "current": 20696.48,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 20696.48
+          },
+          {
             "current": 18816,
             "customer_id": "<customer>",
             "customer_name": "<customer>",
@@ -61,6 +70,24 @@
             "days_61_90": 0,
             "over_90": 0,
             "total": 18816
+          },
+          {
+            "current": 7699.42,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 9662.14,
+            "days_61_90": 0,
+            "over_90": 0,
+            "total": 17361.56
+          },
+          {
+            "current": 0,
+            "customer_id": "<customer>",
+            "customer_name": "<customer>",
+            "days_31_60": 0,
+            "days_61_90": 12273.26,
+            "over_90": 0,
+            "total": 12273.26
           },
           {
             "current": 12109.05,
@@ -111,10 +138,10 @@
             "current": 0,
             "customer_id": "<customer>",
             "customer_name": "<customer>",
-            "days_31_60": 5894.12,
+            "days_31_60": 0,
             "days_61_90": 0,
-            "over_90": 0,
-            "total": 5894.12
+            "over_90": 625.97,
+            "total": 625.97
           },
           {
             "current": 36.96,
@@ -126,11 +153,11 @@
             "total": 36.96
           }
         ],
-        "grand_total": 118664.31,
-        "total_31_60": 8994.43,
-        "total_61_90": 12373.56,
-        "total_current": 77688.46,
-        "total_over_90": 19607.86
+        "grand_total": 163727.46,
+        "total_31_60": 12762.449999999999,
+        "total_61_90": 24646.82,
+        "total_current": 106084.36,
+        "total_over_90": 20233.83
       }
     }
   },
@@ -146,10 +173,10 @@
       "body": {
         "end_date": "<day+0>",
         "invoice_count": 12,
-        "outstanding_ar": 42146.3,
+        "outstanding_ar": 62842.78,
         "start_date": "<day-30>",
-        "total_collected": 77305.25,
-        "total_invoiced": 95212.68
+        "total_collected": 71986.92,
+        "total_invoiced": 109572.92
       }
     }
   },
@@ -163,10 +190,10 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "active_orders": 22,
-        "outstanding_ar": 10860798,
-        "outstanding_ar_count": 16,
-        "pending_dispatch": 28,
+        "active_orders": 20,
+        "outstanding_ar": 14876182,
+        "outstanding_ar_count": 21,
+        "pending_dispatch": 23,
         "today_revenue": 198603,
         "today_revenue_change": -56.255423937128576
       }
@@ -185,6 +212,10 @@
         {
           "date": "<day-6>",
           "revenue": 60606
+        },
+        {
+          "date": "<day-5>",
+          "revenue": 929535
         },
         {
           "date": "<day-2>",
@@ -223,6 +254,12 @@
           "customer_id": "<customer>",
           "customer_name": "<customer>",
           "order_count": "<orders>",
+          "total_revenue": 2069648
+        },
+        {
+          "customer_id": "<customer>",
+          "customer_name": "<customer>",
+          "order_count": "<orders>",
           "total_revenue": 1881600
         },
         {
@@ -235,13 +272,7 @@
           "customer_id": "<customer>",
           "customer_name": "<customer>",
           "order_count": "<orders>",
-          "total_revenue": 1086982
-        },
-        {
-          "customer_id": "<customer>",
-          "customer_name": "<customer>",
-          "order_count": "<orders>",
-          "total_revenue": 906156
+          "total_revenue": 929535
         }
       ]
     }
@@ -331,7 +362,7 @@
         ],
         "status_breakdown": {
           "CANCELLED": 3,
-          "CONFIRMED": 16,
+          "CONFIRMED": 15,
           "DRAFT": 5,
           "FULFILLED": 10
         }
@@ -356,7 +387,7 @@
           "branch_id": "<id-13>",
           "credit": 5000,
           "currency": "USD",
-          "debit": 17055158
+          "debit": 12788545
         },
         {
           "account_code": "1010",
@@ -366,7 +397,7 @@
           "branch_id": "<id-14>",
           "credit": 0,
           "currency": "USD",
-          "debit": 5908199
+          "debit": 5165100
         },
         {
           "account_code": "1010",
@@ -376,7 +407,7 @@
           "branch_id": "<id-15>",
           "credit": 0,
           "currency": "USD",
-          "debit": 8396128
+          "debit": 7494672
         },
         {
           "account_code": "1020",
@@ -384,9 +415,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-13>",
-          "credit": 17040877,
+          "credit": 12774264,
           "currency": "USD",
-          "debit": 21129134
+          "debit": 20668325
         },
         {
           "account_code": "1020",
@@ -394,9 +425,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-14>",
-          "credit": 5949199,
+          "credit": 5206100,
           "currency": "USD",
-          "debit": 7119104
+          "debit": 7112400
         },
         {
           "account_code": "1020",
@@ -404,9 +435,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-15>",
-          "credit": 8396128,
+          "credit": 7494672,
           "currency": "USD",
-          "debit": 12123476
+          "debit": 10695205
         },
         {
           "account_code": "1030",
@@ -424,7 +455,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-13>",
-          "credit": 2263490,
+          "credit": 2214118,
           "currency": "USD",
           "debit": 0
         },
@@ -434,7 +465,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-14>",
-          "credit": 762760,
+          "credit": 762042,
           "currency": "USD",
           "debit": 0
         },
@@ -444,7 +475,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-15>",
-          "credit": 1298943,
+          "credit": 1145915,
           "currency": "USD",
           "debit": 0
         },
@@ -454,9 +485,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-13>",
-          "credit": 17048302,
+          "credit": 12781689,
           "currency": "USD",
-          "debit": 17045802
+          "debit": 12779189
         },
         {
           "account_code": "2200",
@@ -464,9 +495,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-14>",
-          "credit": 5908199,
+          "credit": 5165100,
           "currency": "USD",
-          "debit": 5908199
+          "debit": 5165100
         },
         {
           "account_code": "2200",
@@ -474,9 +505,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-15>",
-          "credit": 8396128,
+          "credit": 7494672,
           "currency": "USD",
-          "debit": 8396128
+          "debit": 7494672
         },
         {
           "account_code": "4010",
@@ -484,7 +515,7 @@
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
           "branch_id": "<id-13>",
-          "credit": 18872500,
+          "credit": 18461063,
           "currency": "USD",
           "debit": 75
         },
@@ -494,7 +525,7 @@
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
           "branch_id": "<id-14>",
-          "credit": 6356344,
+          "credit": 6350358,
           "currency": "USD",
           "debit": 41000
         },
@@ -504,7 +535,7 @@
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
           "branch_id": "<id-15>",
-          "credit": 10824533,
+          "credit": 9549290,
           "currency": "USD",
           "debit": 0
         },
@@ -542,20 +573,20 @@
         "currency": "USD",
         "end_date": "<day+0>",
         "expenses": [],
-        "gross_profit": 8250079,
-        "net_income": 8250079,
+        "gross_profit": 9532243,
+        "net_income": 9532243,
         "revenue": [
           {
             "account_code": "4010",
             "account_id": "<id-20>",
             "account_name": "Sales Revenue",
-            "amount": 8252179
+            "amount": 9534343
           }
         ],
         "start_date": "<day-30>",
         "total_cogs": 2100,
         "total_expenses": 0,
-        "total_revenue": 8252179
+        "total_revenue": 9534343
       }
     }
   },
@@ -575,13 +606,13 @@
             "account_code": "1010",
             "account_id": "<id-12>",
             "account_name": "Cash",
-            "amount": 31354485
+            "amount": 25443317
           },
           {
             "account_code": "1020",
             "account_id": "<id-16>",
             "account_name": "Accounts Receivable",
-            "amount": 8985510
+            "amount": 13000894
           },
           {
             "account_code": "1030",
@@ -597,7 +628,7 @@
             "account_code": "2020",
             "account_id": "<id-18>",
             "account_name": "Sales Tax Payable",
-            "amount": 4325193
+            "amount": 4122075
           },
           {
             "account_code": "2200",
@@ -606,10 +637,10 @@
             "amount": 2500
           }
         ],
-        "retained_earnings": 36010202,
-        "total_assets": 40337895,
-        "total_equity": 36010202,
-        "total_liabilities": 4327693
+        "retained_earnings": 34317536,
+        "total_assets": 38442111,
+        "total_equity": 34317536,
+        "total_liabilities": 4124575
       }
     }
   }
