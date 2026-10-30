@@ -8,6 +8,7 @@
 // an error the clerk can act on by emailing again or printing.
 
 import type { EmailDelivery } from '../../services/EmailDeliveryService.ts';
+import { OUTCOME_UNKNOWN } from '../../lib/emailOutcome.ts';
 import { emailOutcomeWords } from '../../lib/emailWords.ts';
 
 export interface ReceiptEmailAnswer {
@@ -15,9 +16,9 @@ export interface ReceiptEmailAnswer {
     refused: boolean;
 }
 
-export function receiptEmailAnswer(delivery: EmailDelivery | undefined): ReceiptEmailAnswer {
+export function receiptEmailAnswer(delivery: EmailDelivery | typeof OUTCOME_UNKNOWN | undefined): ReceiptEmailAnswer {
     return {
         note: emailOutcomeWords(delivery, 'receipt'),
-        refused: delivery?.status === 'failed',
+        refused: delivery !== OUTCOME_UNKNOWN && delivery?.status === 'failed',
     };
 }

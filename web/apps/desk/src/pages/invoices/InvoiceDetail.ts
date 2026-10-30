@@ -12,6 +12,7 @@ import { CreditMemoService } from '../../services/CreditMemoService.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { paymentService } from '../../services/paymentService.ts';
 import { EmailDeliveryService, type EmailDelivery } from '../../services/EmailDeliveryService.ts';
+import { OUTCOME_UNKNOWN } from '../../lib/emailOutcome.ts';
 import { emailOutcomeWords, emailDeliveryWords } from '../../lib/emailWords.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
 import { type Invoice, formatInvoiceStatus, getInvoiceStatusColor } from '../../types/invoice.ts';
@@ -160,7 +161,8 @@ export class GableInvoiceDetail extends LitElement {
                 ? await EmailDeliveryService.follow(queued.delivery_id, this.invoice.id)
                 : undefined;
             const words = emailOutcomeWords(delivery, 'invoice');
-            const kind = delivery?.status === 'failed' ? 'error' : delivery?.status === 'sent' ? 'success' : 'info';
+            const status = delivery === OUTCOME_UNKNOWN ? undefined : delivery?.status;
+            const kind = status === 'failed' ? 'error' : status === 'sent' ? 'success' : 'info';
             ToastService.show(words, kind);
             this.loadEmailSends(this.invoice.id);
         } catch (err) {

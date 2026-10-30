@@ -8,11 +8,15 @@
 // said as still sending, never as success.
 
 import type { EmailDelivery, EmailDeliveryStatus } from '../services/EmailDeliveryService.ts';
+import { OUTCOME_UNKNOWN } from './emailOutcome.ts';
 
 type DocumentNoun = 'receipt' | 'invoice';
 
 /** The sentence the counter and the invoice page say once a send resolves. */
-export function emailOutcomeWords(delivery: EmailDelivery | undefined, noun: DocumentNoun): string {
+export function emailOutcomeWords(delivery: EmailDelivery | typeof OUTCOME_UNKNOWN | undefined, noun: DocumentNoun): string {
+    if (delivery === OUTCOME_UNKNOWN) {
+        return `The ${noun} was sent on; this sign in cannot see whether it arrived`;
+    }
     if (!delivery || delivery.status === 'queued') {
         return `The ${noun} email is still being sent`;
     }

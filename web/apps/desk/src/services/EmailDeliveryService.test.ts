@@ -6,6 +6,7 @@
 // resolves it.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { EmailDeliveryService, type EmailDelivery } from './EmailDeliveryService'
+import { OUTCOME_UNKNOWN } from '../lib/emailOutcome'
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -68,5 +69,18 @@ describe('EmailDeliveryService', () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify(page([])), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const missing = await EmailDeliveryService.follow('d-1', 'doc-1', 20, 5)
     expect(missing).toBeUndefined()
+  })
+
+  it('says the outcome is unknown, not failed, when the delivery read is refused (403)', async () => {
+    fetchMock.mockImplementation(async () => new Response(
+      JSON.stringify({ error: { code: 'forbidden', message: 'insufficient role' }, meta: { request_id: 'r-1' } }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    ))
+    expect(await EmailDeliveryService.follow('d-1', 'doc-1', 20, 5)).toBe(OUTCOME_UNKNOWN)
+  })
+
+  it('still throws on a server error, which is not a refusal to read', async () => {
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 500, headers: { 'Content-Type': 'application/json' } }))
+    await expect(EmailDeliveryService.follow('d-1', 'doc-1', 20, 5)).rejects.toBeTruthy()
   })
 })

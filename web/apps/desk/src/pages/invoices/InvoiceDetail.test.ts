@@ -257,6 +257,25 @@ describe('gable-invoice-detail', () => {
       }
     })
 
+    it('says sent on, outcome unknown, never a failure, when the delivery read is refused', async () => {
+      const toasts = captureToasts()
+      try {
+        stub(invoice(), {
+          [`POST /api/v1/invoices/${INVOICE_ID}/email`]: () => ({ status: 'queued', delivery_id: 'd-1' }),
+          '/api/v1/email-deliveries': () => new Response(
+            JSON.stringify({ error: { code: 'forbidden', message: 'insufficient role' } }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          ),
+        })
+        el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+        buttonByText(el, 'Email').click()
+        await flush(); await flush(); await flush()
+        expect(toasts.toasts.at(-1)).toMatchObject({ message: 'The invoice was sent on; this sign in cannot see whether it arrived', type: 'info' })
+      } finally {
+        toasts.stop()
+      }
+    })
+
     it('lists the invoice email sends with their outcomes', async () => {
       stub(invoice(), {
         '/api/v1/email-deliveries': () => ({ items: [

@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { receiptEmailAnswer } from './receiptEmail'
 import type { EmailDelivery } from '../../services/EmailDeliveryService'
+import { OUTCOME_UNKNOWN } from '../../lib/emailOutcome'
 
 function delivery(status: EmailDelivery['status'], overrides: Partial<EmailDelivery> = {}): EmailDelivery {
   return {
@@ -26,6 +27,12 @@ function delivery(status: EmailDelivery['status'], overrides: Partial<EmailDeliv
 }
 
 describe('receiptEmailAnswer', () => {
+  it('does not call a send with an unreadable record a failure', () => {
+    const answer = receiptEmailAnswer(OUTCOME_UNKNOWN)
+    expect(answer.note).toContain('sent on')
+    expect(answer.refused).toBe(false)
+  })
+
   it('says sent with the address, plainly', () => {
     const answer = receiptEmailAnswer(delivery('sent'))
     expect(answer.note).toBe('Receipt sent to billing@example.test')

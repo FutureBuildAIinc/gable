@@ -7,7 +7,8 @@
 // an emailed receipt or invoice; the 202 alone never says the mail went out.
 
 import { fetchWithAuth } from './fetchClient';
-import { parseApiError } from './apiError';
+import { ApiError, parseApiError } from './apiError';
+import { OUTCOME_UNKNOWN } from '../lib/emailOutcome.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -51,16 +52,32 @@ export const EmailDeliveryService = {
     /**
      * Follows one queued delivery until the send resolves it, bounded: a slow
      * mail server keeps the row queued, and the bound running out returns the
-     * queued row (still sending), never a made up outcome.
+     * queued row (still sending), never a made up outcome. A refused read
+     * (403) returns OUTCOME_UNKNOWN: the send was accepted, the outcome is
+     * just not this sign in's to see, and that is never a failure. The wait
+     * between reads doubles up to a second, so a slow send costs few reads.
      */
-    async follow(deliveryId: string, documentId: string, boundMs = 6000, stepMs = 250): Promise<EmailDelivery | undefined> {
+    async follow(
+        deliveryId: string,
+        documentId: string,
+        boundMs = 6000,
+        stepMs = 250,
+    ): Promise<EmailDelivery | typeof OUTCOME_UNKNOWN | undefined> {
         const deadline = Date.now() + boundMs;
+        let wait = stepMs;
         for (;;) {
-            const rows = await this.listForDocument(documentId);
+            let rows: EmailDelivery[];
+            try {
+                rows = await this.listForDocument(documentId);
+            } catch (err) {
+                if (err instanceof ApiError && err.status === 403) return OUTCOME_UNKNOWN;
+                throw err;
+            }
             const row = rows.find((d) => d.id === deliveryId);
             if (row && row.status !== 'queued') return row;
-            if (Date.now() + stepMs > deadline) return row;
-            await sleep(stepMs);
+            if (Date.now() + wait > deadline) return row;
+            await sleep(wait);
+            wait = Math.min(wait * 2, 1000);
         }
     },
 };

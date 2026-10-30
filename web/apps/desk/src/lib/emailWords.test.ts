@@ -5,6 +5,7 @@
 // receipt and for an invoice, and the short words the sends list carries.
 import { describe, it, expect } from 'vitest'
 import { emailOutcomeWords, emailDeliveryWords } from './emailWords'
+import { OUTCOME_UNKNOWN } from './emailOutcome'
 import type { EmailDelivery } from '../services/EmailDeliveryService'
 
 function delivery(overrides: Partial<EmailDelivery> = {}): EmailDelivery {
@@ -26,6 +27,12 @@ function delivery(overrides: Partial<EmailDelivery> = {}): EmailDelivery {
 }
 
 describe('emailOutcomeWords', () => {
+  it('says sent on, outcome unknown, when the sign in may not read the delivery', () => {
+    const words = emailOutcomeWords(OUTCOME_UNKNOWN, 'receipt')
+    expect(words).toBe('The receipt was sent on; this sign in cannot see whether it arrived')
+    expect(words).not.toMatch(/not sent|failed|refused/i)
+  })
+
   it('says sent with the address it went to, for a receipt and for an invoice', () => {
     expect(emailOutcomeWords(delivery(), 'receipt')).toBe('Receipt sent to billing@example.test')
     expect(emailOutcomeWords(delivery(), 'invoice')).toBe('Invoice sent to billing@example.test')
