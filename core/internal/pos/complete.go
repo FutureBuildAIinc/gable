@@ -343,7 +343,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	var out *Sale
-	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged, payer, suspectedAvoidance, payerDeclined)
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced, nil, acknowledged, payer, suspectedAvoidance, payerDeclined, nil)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -365,10 +365,21 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 // tax and COGS, the payments, the audit row and the events, last. The tenders
 // and charges the caller resolved (the gateway charges made before it opened)
 // come with it.
+//
+// An offline verdict (ADR 0011 section 3.1) posts a sale a register made
+// offline: each check that judges whether the clerk MAY make the sale is the
+// snapshot verification the sync ran before this body, so the body skips the
+// account standing, the purchase order, job and buyer rules, the check limit
+// and ID rule and the alert acknowledgement (no override is spent), and books
+// the recorded tax on the session's business date; every check that guards
+// whether the server CAN post it (the session open, the tender arithmetic,
+// the stock units and on hand, the fiscal period) stays live. With no verdict
+// the body is exactly the live completion.
 func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
 	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
 	charges []*chargeResult, priced *providerTax, ex *exchangeLeg,
-	acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance, payerDeclined bool) (*Sale, error) {
+	acknowledged []uuid.UUID, payer *largecash.PayerIn, suspectedAvoidance, payerDeclined bool,
+	verdict *offlineVerdict) (*Sale, error) {
 	sums := sumTenders(tenders)
 	totalTendered, cashTendered, accountPortion := sums.total, sums.cash, sums.account
 	var out *Sale
@@ -439,7 +450,20 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		taxSource := ""
 		var zone *taxzone.Snapshot
 		var shipToRaw []byte
-		if priced != nil {
+		if verdict != nil {
+			// the tax recorded at the sale, verified against the snapshot
+			// before this body ran (ADR 0011 section 3.3): no provider
+			// call and no resolver, so nothing waits on the provider
+			taxCents = verdict.taxCents
+			taxExempt = verdict.exempt
+			if taxExempt {
+				taxSource = string(salesdoc.TaxSourceExempt)
+			} else {
+				rate := verdict.taxRate
+				taxRate = &rate
+				taxSource = string(salesdoc.TaxSourceOfflineRate)
+			}
+		} else if priced != nil {
 			if linesFingerprint(lines) != priced.fingerprint {
 				return conflict("tax_quote_stale",
 					"the sale's lines moved between the tax price and the completion: retry to price afresh")
@@ -592,22 +616,28 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				return conflict("walk_in_account",
 					"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
 			}
-			facts, err := s.repo.CustomerFacts(ctx, customerID)
-			if err != nil {
-				return err
-			}
-			if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
-				return conflict("po_required",
-					"the customer requires a purchase order number: name it on the sale before charging it to the account")
-			}
-			if err := jobRequiredRefusal(facts, sale.JobID); err != nil {
-				return err
-			}
-			if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
-				return err
-			}
-			if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, sums.storeCredit+credit, true, actor); err != nil {
-				return err
+			// an offline sale was judged on the account as the snapshot
+			// knew it (ADR 0011 section 3.4: never re-decided), so the
+			// standing, purchase order, job and buyer rules are not run
+			// again and no override is spent
+			if verdict == nil {
+				facts, err := s.repo.CustomerFacts(ctx, customerID)
+				if err != nil {
+					return err
+				}
+				if facts.PORequired && (sale.CustomerPO == nil || strings.TrimSpace(*sale.CustomerPO) == "") {
+					return conflict("po_required",
+						"the customer requires a purchase order number: name it on the sale before charging it to the account")
+				}
+				if err := jobRequiredRefusal(facts, sale.JobID); err != nil {
+					return err
+				}
+				if err := s.checkBuyer(ctx, customerID, facts, sale.BuyerContactID, accountPortion); err != nil {
+					return err
+				}
+				if err := s.checkOnAccount(ctx, saleID, customerID, facts, accountPortion, sums.storeCredit+credit, true, actor); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -622,7 +652,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			if err != nil {
 				return err
 			}
-			if err := alertAcknowledged(counterAlerts, acknowledged); err != nil {
+			if verdict != nil {
+				// nobody at an offline register could read the warning:
+				// the sale posts, and every warning it was sold past is
+				// kept for a manager (the CP-13 OW exception row)
+				verdict.warnings = requiredAlerts(counterAlerts)
+			} else if err := alertAcknowledged(counterAlerts, acknowledged); err != nil {
 				return err
 			}
 		}
@@ -630,11 +665,14 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		// The checks held to the customer's check limit, and the customer's
 		// open credit memos locked in id order (section 11, step 3) when the
 		// sale pays with store credit: both before the stock moves.
-		if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
-			return err
-		}
-		if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
-			return err
+		// an offline check was held to the snapshot's limit and ID rule
+		if verdict == nil {
+			if err := s.checkTenderLimits(ctx, saleID, customerID, tenders, true, actor); err != nil {
+				return err
+			}
+			if err := s.checkTenderIDRule(ctx, customerID, tenders); err != nil {
+				return err
+			}
 		}
 		var storeMemos []openMemo
 		if sums.storeCredit > 0 || credit > 0 {
@@ -682,8 +720,12 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 
 		// The invoice: origin POS, pickup, its lines the sale's, posted
 		// with the tax and the cost of goods sold (8.2 and 8.4).
-		date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
-		if err != nil {
+		// an offline sale's business day is its own session's, never
+		// the sync's (ADR 0011 section 3.3)
+		var date time.Time
+		if verdict != nil {
+			date = verdict.businessDate
+		} else if date, err = s.repo.BranchLocalDate(ctx, sale.BranchID, s.now()); err != nil {
 			return err
 		}
 		var pickedBy *string
@@ -968,6 +1010,18 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				}}); err != nil {
 				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
+			if verdict != nil {
+				it := verdict.item.Sale
+				if err := s.auditLog.Log(ctx, audit.Entry{
+					Action: "pos.offline_sale.posted", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
+					Changes: map[string]any{
+						"offline_ref": it.OfflineRef, "device_epoch": it.DeviceEpoch, "device_seq": it.DeviceSeq,
+						"snapshot_id": verdict.snapshotID, "signature_digest": verdict.item.Digest,
+						"sync_batch": verdict.batchID, "business_date": date.Format("2006-01-02"),
+					}}); err != nil {
+					return fmt.Errorf("failed to write the audit row: %w", err)
+				}
+			}
 			// The acknowledgements the clerk gave at the counter, on the sale:
 			// one row per alert, naming the alert and the cashier who read it.
 			for _, id := range acknowledgedAlerts(counterAlerts, acknowledged) {
@@ -1003,7 +1057,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			BranchID: &branch, Data: eventJSON(map[string]any{
 				"number": sale.Number, "customer_id": sale.CustomerID, "status": StatusCompleted.Status(),
 				"from_status": StatusOpen.Status(), "revision": sale.Revision + 1, "currency": sale.Currency,
-				"total_cents": total, "invoice_id": inv.ID, "change_cents": change,
+				"total_cents": total, "invoice_id": inv.ID, "change_cents": change, "offline": verdict != nil,
 			})}); err != nil {
 			return err
 		}
@@ -1345,6 +1399,18 @@ func alertAcknowledged(alerts []CounterAlert, acknowledged []uuid.UUID) error {
 			"the customer has a warning the counter must acknowledge before this sale is taken: "+a.Text)
 	}
 	return nil
+}
+
+// requiredAlerts names the customer's open counter alerts that ask to be
+// acknowledged, in the order the read gave them.
+func requiredAlerts(alerts []CounterAlert) []uuid.UUID {
+	out := []uuid.UUID{}
+	for _, a := range alerts {
+		if a.AcknowledgeRequired {
+			out = append(out, a.ID)
+		}
+	}
+	return out
 }
 
 // acknowledgedAlerts names the customer's open counter alerts the clerk
