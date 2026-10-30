@@ -436,8 +436,6 @@ func finish(m *collector) ([]byte, error) {
 	return doc.GetBytes(), nil
 }
 
-// GenerateInvoicePDF renders the invoice: the bill, with the total due and
-// the remit to.
 func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer) ([]byte, error) {
 	return s.GenerateDocumentPDF(ctx, inv, cust, DocumentInvoice)
 }
@@ -465,7 +463,7 @@ func (s *Service) SaleDocumentKind(ctx context.Context, inv *invoice.Invoice) Do
 
 // salePayment reads the money the counter sale behind an invoice took. An
 // invoice that is not a counter sale, and a reader that is not wired, have
-// none: the document prints no tenders.
+// none: the document prints no tenders and no rounding.
 func (s *Service) salePayment(ctx context.Context, invoiceID uuid.UUID) SalePayment {
 	if s.payments == nil {
 		return SalePayment{}
@@ -479,8 +477,9 @@ func (s *Service) salePayment(ctx context.Context, invoiceID uuid.UUID) SalePaym
 
 // GenerateDocumentPDF renders the invoice or the receipt of an invoice. The
 // invoice is a bill: the total due and the remit to. The receipt is what a
-// sale that took the money leaves behind: the tenders that paid it, no total
-// due and no remit to (CP-14).
+// sale that took the money leaves behind: the tenders that paid it, the cash
+// rounding the branch's rule made and the change, no total due and no remit
+// to (CP-14).
 func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer, kind DocumentKind) ([]byte, error) {
 	b := s.branding(ctx, inv.BranchID)
 	m := newDoc()
@@ -552,15 +551,16 @@ func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice,
 					props.Text{Size: 8}))
 			}
 			if line.Tint.TintChargeCents != nil && *line.Tint.TintChargeCents > 0 {
+				discounted := line.DiscountPercent != nil || line.DiscountAmount != nil
 				m.AddRow(4, text.NewCol(12,
-					fmt.Sprintf("  Tint charge: %s", b.style.Money(*line.Tint.TintChargeCents)),
+					fmt.Sprintf("  %s", tintChargeLine(b.style, *line.Tint.TintChargeCents, discounted)),
 					props.Text{Size: 8}))
 			}
 		}
 	}
 
 	// Subtotal and tax are shown separately, or the line extensions visibly do
-	// not add up to TOTAL DUE; the tax as its own line is also a statutory
+	// not add up to the total; the tax as its own line is also a statutory
 	// requirement in the GST/HST jurisdictions this product targets.
 	m.keepTogether()
 	m.AddRow(10,
@@ -584,6 +584,7 @@ func (s *Service) GenerateDocumentPDF(ctx context.Context, inv *invoice.Invoice,
 	m.AddRow(15,
 		text.NewCol(12, totalLabel+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
+
 	// The money the counter sale took: the cash rounding the branch's rule
 	// made (CP-18), the tenders that paid the sale and the change given.
 	pay := s.salePayment(ctx, inv.ID)

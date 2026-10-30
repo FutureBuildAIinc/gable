@@ -52,7 +52,7 @@ func TestThermalReceiptPrintsTheTintBlock(t *testing.T) {
 		"Base: DEEP GAL",
 		"B1 Black  1 OZ + 12/32",
 		"W1 White  2/384",
-		"Tint charge: $2.50",
+		"includes tint charge $2.50",
 	} {
 		mustContain(t, doc, want)
 	}
@@ -103,10 +103,9 @@ func TestThermalTintBlockWraps(t *testing.T) {
 	mustContain(t, doc, "Deep Gold With A Very")
 }
 
-// The invoice prints the same tint block under its line (row CP-16), so the
-// customer can reorder the colour from the invoice alone.
-func TestInvoicePDFPrintsTheTintBlock(t *testing.T) {
-	svc := brandedReceiptService(t)
+// tintedInvoiceLine is one painted invoice line with a tint of two
+// colorants.
+func tintedInvoiceLine() invoice.InvoiceLine {
 	line := mkLine("PT-INT", "Interior Eggshell", "1", "GAL", 749900, 7499)
 	line.Tint = &salesdoc.LineTint{
 		ColorCode: "HC-188", ColorName: "Essex Green", BaseCode: "DEEP",
@@ -119,6 +118,14 @@ func TestInvoicePDFPrintsTheTintBlock(t *testing.T) {
 				Amount: tint.Amount{Fine: 2, Denominator: 384}},
 		},
 	}
+	return line
+}
+
+// The invoice prints the same tint block under its line (row CP-16), so the
+// customer can reorder the colour from the invoice alone.
+func TestInvoicePDFPrintsTheTintBlock(t *testing.T) {
+	svc := brandedReceiptService(t)
+	line := tintedInvoiceLine()
 	inv := mkInvoice(7499, func(i *invoice.Invoice) { i.Lines = []invoice.InvoiceLine{line} })
 	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme Construction", AccountNumber: "C-1001"})
 	if err != nil {
@@ -130,7 +137,7 @@ func TestInvoicePDFPrintsTheTintBlock(t *testing.T) {
 		"base DEEP  size GAL",
 		"B1 Black  1 OZ + 12/32",
 		"W1 White  2/384",
-		"Tint charge: $2.50",
+		"includes tint charge $2.50",
 	} {
 		mustContain(t, doc, want)
 	}
@@ -142,4 +149,40 @@ func TestInvoicePDFPrintsTheTintBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustNotContain(t, doc2, "Tint:")
+}
+
+// RULE: the tint charge sits inside the unit price, so the line says so: it
+// names the charge as part of the price, not as a second charge to pay.
+func TestTheTintChargeSaysItIsInsideTheUnitPrice(t *testing.T) {
+	svc := brandedReceiptService(t)
+	line := tintedInvoiceLine()
+	inv := mkInvoice(7499, func(i *invoice.Invoice) { i.Lines = []invoice.InvoiceLine{line} })
+	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme Construction"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "includes tint charge $2.50")
+	// the old wording read as a charge to pay on top of the price
+	mustNotContain(t, doc, "Tint charge:")
+}
+
+// RULE: a discounted line says the charge it names is the undiscounted one:
+// the discount came off the very price the charge sat in, so the charge as
+// paid is smaller.
+func TestADiscountedLineSaysTheTintChargeIsTheUndiscountedOne(t *testing.T) {
+	svc := brandedReceiptService(t)
+	line := tintedInvoiceLine()
+	ten, err := httpx.ParseQuantity("10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line.DiscountPercent = &ten
+	inv := mkInvoice(6749, func(i *invoice.Invoice) { i.Lines = []invoice.InvoiceLine{line} })
+	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme Construction"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPDF(t, doc)
+	mustContain(t, doc, "includes tint charge $2.50 before discount")
 }

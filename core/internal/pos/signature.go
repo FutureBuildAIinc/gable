@@ -253,6 +253,10 @@ func (s *Service) ThermalReceipt(ctx context.Context, invoiceID uuid.UUID, print
 			PriceUOM:    priceUOM,
 			LineTotal:   *l.LineTotal,
 			Tint:        thermalTintOf(l.Tint),
+			// The discount the line was sold under, so the receipt can say
+			// the tint charge it names is the undiscounted one.
+			DiscountPercent: l.DiscountPercent,
+			DiscountAmount:  l.DiscountAmount,
 		}
 		// The weighed line's marking (CP-19): the ticket on the paper, MAN
 		// WT when the weight was typed.

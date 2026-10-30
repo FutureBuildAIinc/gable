@@ -112,6 +112,12 @@ type ThermalLine struct {
 	// in order to reorder the colour: the receipt is the only copy of the
 	// formula they will ever have.
 	Tint *ThermalTint
+
+	// The discount the line was sold under, when it carries one: the tint
+	// charge sits inside the unit price, so a discounted line says the
+	// charge it names is the undiscounted one.
+	DiscountPercent *httpx.Quantity
+	DiscountAmount  *httpx.Cents
 }
 
 // ThermalTint is the tint block of one paint line: the colour, the base, the
@@ -279,8 +285,9 @@ func (s *Service) GenerateThermalReceiptPDF(ctx context.Context, branch uuid.UUI
 				}
 			}
 			if l.Tint.TintChargeCents > 0 {
+				discounted := l.DiscountPercent != nil || l.DiscountAmount != nil
 				add(thermalRowTiny, text.NewCol(thermalGridSize,
-					"Tint charge: "+b.style.Money(l.Tint.TintChargeCents), props.Text{Size: 7}))
+					tintChargeLine(b.style, l.Tint.TintChargeCents, discounted), props.Text{Size: 7}))
 			}
 			if l.Tint.Rescaled {
 				add(thermalRowTiny, text.NewCol(thermalGridSize,
