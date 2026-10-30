@@ -313,6 +313,15 @@ func (s *Service) decideQuote(ctx context.Context, quoteID, customerID uuid.UUID
 		return nil, err
 	}
 
+	// The one expiry rule (QE-01-a) is the quote module's; ask it for the
+	// refusal so the portal's words are the desk's, in the portal's own
+	// shape, before any narrower portal rule answers.
+	if s.quoteSvc != nil {
+		if rerr := s.quoteSvc.ExpiredRefusal(branchctx.WithSystem(ctx), quoteID); rerr != nil {
+			return nil, &refusalWithReason{sentinel: ErrQuoteNotDecidable, reason: rerr.Error()}
+		}
+	}
+
 	if quote.QuoteState(current.ERPState) != quote.QuoteStateSent {
 		return nil, fmt.Errorf("%w: quote is %s, not %s",
 			ErrQuoteNotDecidable, current.Status, QuoteStatusPriced)

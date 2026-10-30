@@ -145,6 +145,14 @@ func (f *fakeRepo) GetQuoteByNumber(context.Context, string) (*Quote, error) {
 	return nil, ErrNotFound
 }
 
+func (f *fakeRepo) BranchZone(context.Context, uuid.UUID) (string, error) {
+	return "UTC", nil
+}
+
+func (f *fakeRepo) SentQuotesPastExpiry(context.Context, time.Time, int) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) StoreOriginalFile(context.Context, uuid.UUID, []byte, string, string) error {
 	return nil
 }

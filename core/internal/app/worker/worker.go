@@ -154,8 +154,12 @@ func Run() {
 	// worklist carries the mark.
 	largeCashDeadline := newLargeCashDeadlineRunner(db, logger)
 	largeCashDeadline.Start()
+	// The quote expiry sweep (QE-01-a): moves SENT quotes past their Valid
+	// until to EXPIRED through the quote service's own transition.
+	quoteExpiry := newQuoteExpiryRunner(db, logger)
+	quoteExpiry.Start()
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment,terminal-intent-sweep,large-cash-deadline-sweep")
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment,terminal-intent-sweep,large-cash-deadline-sweep,quote-expiry-sweep")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -163,6 +167,8 @@ func Run() {
 	// Step 1: stop the background jobs. Same reasoning as serve's job stops:
 	// no purge statement may start against a draining pool, and an in-flight
 	// batch (or drain window) finishes before step 2 closes it.
+	logger.Info("Shutdown step 1/2: stopping the quote expiry sweep...")
+	quoteExpiry.Stop()
 	logger.Info("Shutdown step 1/2: stopping the large cash deadline sweep...")
 	largeCashDeadline.Stop()
 	logger.Info("Shutdown step 1/2: stopping the terminal intent sweep...")

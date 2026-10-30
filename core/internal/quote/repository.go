@@ -103,6 +103,12 @@ type Repository interface {
 	GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error)
 	GetQuoteByNumber(ctx context.Context, number string) (*Quote, error)
 	StoreOriginalFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string) error
+	// BranchZone answers the branch's IANA zone, UTC when it has none, so the
+	// expiry refusal names the day in the branch's own calendar.
+	BranchZone(ctx context.Context, branch uuid.UUID) (string, error)
+	// SentQuotesPastExpiry lists the SENT quotes whose expires_at is at or
+	// before at, oldest first, at most limit: the expiry sweep's batch.
+	SentQuotesPastExpiry(ctx context.Context, at time.Time, limit int) ([]uuid.UUID, error)
 }
 
 type PostgresRepository struct {
@@ -1030,4 +1036,40 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 	}
 
 	return a, nil
+}
+
+// BranchZone answers the branch's IANA zone, UTC when it has none, so the
+// expiry refusal names the day in the branch's own calendar.
+func (r *PostgresRepository) BranchZone(ctx context.Context, branch uuid.UUID) (string, error) {
+	var zone string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COALESCE(timezone, 'UTC') FROM locations WHERE id = $1`, branch).Scan(&zone)
+	if err != nil {
+		return "UTC", fmt.Errorf("failed to read the branch zone: %w", err)
+	}
+	return zone, nil
+}
+
+// SentQuotesPastExpiry lists the SENT quotes whose expires_at is at or before
+// at, oldest expiry first, at most limit: the expiry sweep's batch. Only SENT
+// rows qualify, so a quote the sweep already moved, or the desk accepted
+// first, never appears again.
+func (r *PostgresRepository) SentQuotesPastExpiry(ctx context.Context, at time.Time, limit int) ([]uuid.UUID, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT id FROM quotes
+		WHERE state = 'SENT' AND expires_at IS NOT NULL AND expires_at <= $1
+		ORDER BY expires_at LIMIT $2`, at, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sent quotes past expiry: %w", err)
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

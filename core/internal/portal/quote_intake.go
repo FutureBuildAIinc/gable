@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -210,8 +209,11 @@ func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uu
 			return err
 		}
 
-		if current.ExpiresAt != nil && current.ExpiresAt.Before(time.Now().UTC()) {
-			return fmt.Errorf("%w: quote has expired", ErrQuoteNotConvertible)
+		// The one expiry rule (QE-01-a) is the quote module's; ask it for the
+		// refusal so the portal's words are the desk's, in the portal's own
+		// shape, before any narrower portal rule answers.
+		if rerr := s.quoteSvc.ExpiredRefusal(branchctx.WithSystem(txCtx), quoteID); rerr != nil {
+			return &refusalWithReason{sentinel: ErrQuoteNotConvertible, reason: rerr.Error()}
 		}
 
 		erpState := quote.QuoteState(current.ERPState)
@@ -224,6 +226,11 @@ func (s *Service) ConvertPortalQuote(ctx context.Context, quoteID, customerID uu
 
 		res, err := s.quoteSvc.ConvertInProcess(branchctx.WithSystem(txCtx), quoteID)
 		if err != nil {
+			// The rule may have bitten between the read above and the
+			// convert's own row lock: its words stand there too.
+			if msg, ok := quote.ExpiryRefusalMessage(err); ok {
+				return &refusalWithReason{sentinel: ErrQuoteNotConvertible, reason: msg}
+			}
 			var hErr *httpx.Error
 			if errors.As(err, &hErr) && (hErr.Status == 409 || hErr.Status == 422) {
 				return fmt.Errorf("%w: %s", ErrQuoteNotConvertible, hErr.Message)

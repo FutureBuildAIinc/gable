@@ -7,11 +7,12 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchAuthedBlobUrl } from '../../lib/authedPdf.ts';
-import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
+import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp, Pencil } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
+import { isQuoteExpired, quoteExpiredWords } from './quoteExpiry.ts';
 import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
 
@@ -183,6 +184,22 @@ export class GableQuoteDetail extends LitElement {
             const updated = await QuoteService.transition(this.quote.id, to, this.quote.revision);
             this.quote = updated;
             ToastService.show(`Quote marked as ${to}`, 'success');
+        } catch (error) {
+            if (await this.handleStale(error)) return;
+            ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
+        } finally {
+            this.processing = false;
+        }
+    }
+
+    /** Reopen an expired quote to a draft, then open the builder to give it a new Valid until. */
+    private async handleReopen() {
+        if (!this.quote) return;
+        this.processing = true;
+        try {
+            const updated = await QuoteService.transition(this.quote.id, 'draft', this.quote.revision);
+            this.quote = updated;
+            router.navigate(`/quotes/${updated.id}/edit`);
         } catch (error) {
             if (await this.handleStale(error)) return;
             ToastService.show(`Failed: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
@@ -573,6 +590,7 @@ export class GableQuoteDetail extends LitElement {
         }
 
         const quote = this.quote;
+        const expired = isQuoteExpired(quote);
 
         const tabs: { id: Tab; label: string; iconData: typeof FileText; show: boolean }[] = [
             { id: 'details', label: 'Details', iconData: FileText, show: true },
@@ -601,16 +619,30 @@ export class GableQuoteDetail extends LitElement {
                         </div>
                         <p class="text-muted-foreground">
                             ${quote.customer_name || quote.customer_id.slice(0, 8)} &middot; Created ${formatDate(quote.created_at)}
+                            ${quote.expires_at ? html`&middot; <span data-testid="quote-valid-until">Valid until ${formatDate(quote.expires_at)}</span>` : nothing}
+                            ${expired ? html`<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border uppercase bg-amber-500/20 text-amber-400 border-amber-500/30" data-testid="quote-expired-mark">Expired</span>` : nothing}
                         </p>
                     </div>
                     <div class="flex gap-2">
-                        ${quote.status === 'draft' ? html`
+                        ${quote.status === 'expired' ? html`
+                            <button @click=${() => this.handleReopen()} ?disabled=${this.processing}
+                                class="bg-amber-600 text-plate px-4 py-2 rounded hover:bg-amber-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                ${icon(Pencil, 14)} Reopen to edit
+                            </button>
+                        ` : nothing}
+                        ${quote.status === 'draft' && expired ? html`
+                            <button @click=${() => router.navigate(`/quotes/${quote.id}/edit`)} ?disabled=${this.processing}
+                                class="bg-amber-600 text-plate px-4 py-2 rounded hover:bg-amber-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                ${icon(Pencil, 14)} Edit to re-date
+                            </button>
+                        ` : nothing}
+                        ${quote.status === 'draft' && !expired ? html`
                             <button @click=${() => this.handleStateChange('sent')} ?disabled=${this.processing}
                                 class="bg-blue-600 text-plate px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Send, 14)} Mark Sent
                             </button>
                         ` : nothing}
-                        ${(quote.status === 'draft' || quote.status === 'sent') ? html`
+                        ${(quote.status === 'draft' || quote.status === 'sent') && !expired ? html`
                             <button @click=${() => this.handleStateChange('accepted')} ?disabled=${this.processing}
                                 class="bg-emerald-600 text-plate px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Check, 14)} Accept
@@ -620,7 +652,7 @@ export class GableQuoteDetail extends LitElement {
                                 ${icon(X, 14)} Reject
                             </button>
                         ` : nothing}
-                        ${(quote.status === 'draft' || quote.status === 'sent') ? html`
+                        ${(quote.status === 'draft' || quote.status === 'sent') && !expired ? html`
                             <button @click=${() => this.handleConvert()} ?disabled=${this.processing}
                                 class="bg-gable-green text-black px-4 py-2 rounded hover:bg-gable-green/90 transition-colors flex items-center gap-2 text-sm font-bold disabled:opacity-50">
                                 ${icon(ShoppingCart, 14)} Convert to Order
@@ -628,6 +660,12 @@ export class GableQuoteDetail extends LitElement {
                         ` : nothing}
                     </div>
                 </div>
+
+                ${expired ? html`
+                    <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 px-4 py-3 text-sm" role="status" data-testid="quote-expired-notice">
+                        ${quoteExpiredWords(quote)}
+                    </div>
+                ` : nothing}
 
                 <!-- Lumber index exposure / margin erosion (self-hides when not at risk) -->
                 <gable-exposure-banner
