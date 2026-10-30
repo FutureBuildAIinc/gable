@@ -3939,7 +3939,7 @@ export interface paths {
         put?: never;
         /**
          * Email invoice to customer
-         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
+         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender, which records the mail without sending it). Returns 202 Accepted immediately with the id of the queued delivery row; the email is dispatched asynchronously and resolves that row to sent (the SMTP server took it), logged (the log sender took it, nothing left the process) or failed, with the sender's answer or its error (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
          */
         post: operations["invoiceEmail"];
         delete?: never;
@@ -6264,7 +6264,7 @@ export interface paths {
         put?: never;
         /**
          * Email the sale's receipt
-         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"} with the queued delivery row's delivery_id; the send resolves that row to sent, logged or failed in email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
          */
         post: operations["posTransactionReceiptEmail"];
         delete?: never;
@@ -13199,8 +13199,11 @@ export interface components {
             document_id: string | null;
             /** @description The document's number; the account number for a statement. */
             document_number: string | null;
-            /** @enum {string} */
-            status: "sent" | "failed";
+            /**
+             * @description queued the moment the sending route answers 202, then sent (the SMTP server took it), logged (a log sender took it: nothing left the process, email is not set up on this server) or failed (the send errored).
+             * @enum {string}
+             */
+            status: "queued" | "sent" | "logged" | "failed";
             /** @description The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send. */
             sender_answer: string | null;
             error: string | null;
@@ -14281,9 +14284,15 @@ export interface components {
             /** @description Required by a void. */
             reason?: string;
         };
+        /** @description The queued send. The 202 alone never says the mail went out; the delivery row the delivery_id names is where the outcome lands. */
         InvoiceEmailResponse: {
             /** @enum {string} */
             status: "queued";
+            /**
+             * Format: uuid
+             * @description The queued email_deliveries row, already written; read its status (sent, logged or failed) from GET /api/v1/email-deliveries. Absent only when the row could not be written.
+             */
+            delivery_id?: string;
         };
         /** @description A credit memo header, used as a list item and as the head of the full document. */
         CreditMemoSummary: {
@@ -28652,7 +28661,7 @@ export interface operations {
                 /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
                 include?: components["parameters"]["Include"];
                 document_type?: "invoice" | "statement" | "quote" | "purchase_order";
-                status?: "sent" | "failed";
+                status?: "queued" | "sent" | "logged" | "failed";
                 document_id?: string;
             };
             header?: {
