@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::custody::{self, Address, Custody, CustodyError, OfflineSlot};
 use crate::fence::{BadOrigin, OriginFence};
@@ -23,15 +24,17 @@ use crate::tokens::{TokenSet, TokenStore};
 
 /// The permissions granted by the work shell's runtime capability to the
 /// configured Gable URL and `/pos` on the `main` window (ADR 0011 section 5.2):
-/// the two token commands, the two sign in commands that write and rotate the
-/// keychain token, and the four offline counter commands, and nothing else.
+/// the two token commands, the three sign in commands that write and rotate
+/// the keychain token, and the four offline counter commands, and nothing
+/// else.
 /// No page enrols the register, supplies the snapshot or writes the sync
 /// outcomes: the core takes each from the server itself (O2).
-pub const WORK_REMOTE_PERMISSIONS: [&str; 8] = [
+pub const WORK_REMOTE_PERMISSIONS: [&str; 9] = [
     "allow-core-token",
     "allow-clear-tokens",
     "allow-begin-sign-in",
     "allow-refresh-tokens",
+    "allow-sign-in-with-password",
     "allow-offline-enrolment-status",
     "allow-load-offline-snapshot",
     "allow-sign-and-queue-offline-sale",
@@ -263,6 +266,29 @@ pub fn begin_sign_in_answer(
             open,
             timeout,
         )
+        .map_err(sign_in_code)
+}
+
+/// Signs the register in by email and password for the app's own origin:
+/// the core's shell door answers the pair and it goes to the keychain. The
+/// answer is nothing at all: no token crosses back to the page, which reads
+/// the access token through `core_token` as before. The password is dropped
+/// (and wiped) when the call ends, whatever it answers.
+pub fn sign_in_with_password_answer(
+    state: &TokenState,
+    caller_url: &str,
+    email: &str,
+    password: Zeroizing<String>,
+) -> Result<(), String> {
+    if !state.fence.allows(caller_url) {
+        return Err(ERR_ORIGIN.to_string());
+    }
+    let client = state
+        .client
+        .as_ref()
+        .ok_or_else(|| ERR_NO_SERVER.to_string())?;
+    client
+        .sign_in_password(&state.store, state.profile.identifier, email, password)
         .map_err(sign_in_code)
 }
 

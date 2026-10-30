@@ -16,6 +16,11 @@
 //! - Refresh rotates both tokens, serialised by one lock so two callers in
 //!   this process never present the same refresh token (the core revokes the
 //!   whole family when one is presented twice).
+//! - A work shell can also sign a register in by the person's email and
+//!   password (`sign_in_password`): one POST to the core's shell door, the
+//!   pair into the keychain. The password is held only for that one call,
+//!   in a buffer wiped on drop, and is never stored, logged or put in an
+//!   error.
 //! - Nothing here logs or prints, and every failure is a code word, never a
 //!   value.
 
@@ -28,7 +33,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use url::Url;
-use zeroize::Zeroizing;
+/// The wiping holder the password arrives in; re-exported so a profile
+/// crate wraps it without a dependency of its own.
+pub use zeroize::Zeroizing;
 
 use crate::custody::CustodyError;
 use crate::tokens::{TokenSet, TokenStore};
@@ -47,8 +54,13 @@ pub enum SignInError {
     NoServer,
     /// The person did not come back in time.
     TimedOut,
-    /// The core refused (a person Gable does not admit, a used or wrong code).
+    /// The core refused (a person Gable does not admit, a used or wrong
+    /// code, a wrong email or password).
     Refused,
+    /// The dealer does not allow email and password sign in.
+    NotAllowed,
+    /// Too many sign in tries; the core asks the person to wait.
+    Limited,
     /// The core or the network could not be reached, or answered a fault.
     Unavailable,
     /// There is no session to refresh.
@@ -64,6 +76,8 @@ impl SignInError {
             SignInError::NoServer => "no_server",
             SignInError::TimedOut => "timed_out",
             SignInError::Refused => "sign_in_refused",
+            SignInError::NotAllowed => "sign_in_not_allowed",
+            SignInError::Limited => "sign_in_limited",
             SignInError::Unavailable => "sign_in_unavailable",
             SignInError::NoSession => "no_session",
             SignInError::Custody => "keychain_unavailable",
@@ -358,6 +372,14 @@ impl Transport for UreqTransport {
     }
 }
 
+/// The password door's body, serialised from borrowed fields so the only
+/// copy of the password it makes is the one in the zeroizing buffer.
+#[derive(serde::Serialize)]
+struct PasswordBody<'a> {
+    email: &'a str,
+    password: &'a str,
+}
+
 /// The shell's client of the core's token routes.
 pub struct SignInClient {
     transport: Arc<dyn Transport>,
@@ -421,6 +443,45 @@ impl SignInClient {
                 store.clear(profile)?;
                 Err(SignInError::NoSession)
             }
+            _ => Err(SignInError::Unavailable),
+        }
+    }
+
+    /// Signs this profile in by email and password at the core's shell door
+    /// and keeps the pair in the keychain. The password lives only for this
+    /// call: the caller's `Zeroizing` holder and the request body, sized up
+    /// front so it never grows and leaves a freed copy, are both wiped when
+    /// they drop. A refusal or fault stores nothing, leaves a held session
+    /// as it was, and answers a fixed code. Takes the rotation lock, so a
+    /// sign in and a refresh never interleave on one store.
+    pub fn sign_in_password(
+        &self,
+        store: &TokenStore,
+        profile: &str,
+        email: &str,
+        password: Zeroizing<String>,
+    ) -> Result<(), SignInError> {
+        let _one_at_a_time = self.rotation.lock().map_err(|_| SignInError::Unavailable)?;
+        let body = PasswordBody {
+            email,
+            password: &password,
+        };
+        // A JSON string escape is at most six bytes per input byte.
+        let mut buf = Zeroizing::new(Vec::with_capacity(32 + 6 * (email.len() + password.len())));
+        serde_json::to_writer(&mut *buf, &body).map_err(|_| SignInError::Unavailable)?;
+        let json = std::str::from_utf8(&buf).map_err(|_| SignInError::Unavailable)?;
+        let answer =
+            self.transport
+                .post_json(&self.route("/api/v1/auth/shell/signin"), None, json)?;
+        match answer.status {
+            200 => {
+                let pair = tokens_from(&answer.body)?;
+                store.store(profile, &pair)?;
+                Ok(())
+            }
+            400 | 401 => Err(SignInError::Refused),
+            403 => Err(SignInError::NotAllowed),
+            429 => Err(SignInError::Limited),
             _ => Err(SignInError::Unavailable),
         }
     }

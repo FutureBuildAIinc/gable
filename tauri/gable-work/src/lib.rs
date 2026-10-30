@@ -114,6 +114,29 @@ pub mod commands {
         .map_err(|_| shell::ERR_CUSTODY.to_string())?
     }
 
+    /// Signs the register in by email and password: one POST to the core's
+    /// shell door, and the pair goes to the keychain. Answers nothing (no
+    /// token crosses back) or a fixed code. The password is wrapped in a
+    /// wiping holder the moment it arrives and is dropped when the call
+    /// ends; it is never stored, logged or put in an error. On a blocking
+    /// thread, and only for the app's own origins.
+    #[tauri::command]
+    pub async fn sign_in_with_password(
+        window: tauri::WebviewWindow,
+        state: tauri::State<'_, TokenState>,
+        email: String,
+        password: String,
+    ) -> Result<(), String> {
+        let password = gable_shell_core::signin::Zeroizing::new(password);
+        let url = window.url().map_err(|_| shell::ERR_ORIGIN.to_string())?;
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            shell::sign_in_with_password_answer(&state, url.as_str(), &email, password)
+        })
+        .await
+        .map_err(|_| shell::ERR_CUSTODY.to_string())?
+    }
+
     /// Rotates the token pair and answers the new access token; the refresh
     /// token stays in the keychain.
     #[tauri::command]
@@ -212,6 +235,7 @@ pub fn run() {
             commands::clear_tokens,
             commands::begin_sign_in,
             commands::refresh_tokens,
+            commands::sign_in_with_password,
             commands::offline_enrolment_status,
             commands::load_offline_snapshot,
             commands::sign_and_queue_offline_sale,
