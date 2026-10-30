@@ -17,8 +17,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { LargeCashService } from '../../services/LargeCashService';
 import type { LargeCashForm8300, LargeCashStatement, LargeCashWorklistRow } from '../../types/largecash';
-import { deadlineWords, actionWords, moneyWords, statementLines } from './largeCashWords';
-import { formatCents } from '../../lib/utils.ts';
+import { deadlineWords, actionWords, moneyWords, regimeWords, rowMoney, statementLines } from './largeCashWords';
 
 const SURFACE = 'background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge))';
 const INK = 'color:rgb(var(--gb-till-text))';
@@ -176,8 +175,7 @@ export class LargeCashWorklist extends LitElement {
         <div>
           <h1 class="text-xl font-bold" style=${INK}>Large cash worklist</h1>
           <p class="mt-1 text-sm" style=${MUTED}>
-            Cash receipts over the threshold the dealer owes a filing on. Work them from the top:
-            the nearest deadline first.
+            Cash receipts at or over the threshold, with what each one needs. Work them from the top.
           </p>
         </div>
         ${this._error ? html`
@@ -204,7 +202,7 @@ export class LargeCashWorklist extends LitElement {
         <li class="rounded-xl p-4" style=${SURFACE} data-testid="large-cash-row" data-event-id=${row.event_id}>
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <div class="text-sm font-semibold" style=${INK}>
-              ${row.payer_name} &middot; ${formatCents(row.total_cents)}
+              ${row.payer_name} &middot; ${rowMoney(row, row.total_cents)}
             </div>
             <div class="font-mono text-xs" style=${MUTED}>
               ${row.branch_name}${row.contributed_branch_ids.length > 1
@@ -213,8 +211,8 @@ export class LargeCashWorklist extends LitElement {
             </div>
           </div>
           <div class="mt-1 font-mono text-xs" style=${MUTED}>
-            ${row.currency} ${row.total_cents} cents &middot; ${row.transaction_count} cash transaction${row.transaction_count === 1 ? '' : 's'}
-            &middot; threshold ${row.threshold_cents} cents
+            ${row.transaction_count} cash transaction${row.transaction_count === 1 ? '' : 's'}
+            &middot; ${regimeWords(row)}
           </div>
           <p class="mt-2 text-sm" style=${row.past_deadline ? 'color:rgb(var(--gb-till-bad))' : MUTED}
             data-testid="large-cash-deadline">${deadlineWords(row)}</p>
@@ -241,17 +239,17 @@ export class LargeCashWorklist extends LitElement {
                 class="min-h-11 rounded px-4 py-2 text-sm font-bold"
                 style="background:rgb(var(--gb-till-accent));color:rgb(var(--gb-deep-space));${this._busy ? 'opacity:0.4' : ''}">Issue the customer statement</button>
             </div>` : nothing}
-          <div class="mt-3 flex flex-wrap gap-2">
+          ${row.rule_family === 'CA_DEALER' ? nothing : html`<div class="mt-3 flex flex-wrap gap-2">
             <button data-testid="large-cash-form" @click=${() => this._showForm(row)} ?disabled=${this._busy}
               class="min-h-11 rounded border px-4 py-2 text-sm font-semibold"
               style="border-color:rgb(var(--gb-till-edge));${MUTED};${this._busy ? 'opacity:0.4' : ''}">Read the Form 8300 data set</button>
-          </div>
+          </div>`}
           ${form ? html`
             <div class="mt-3 rounded-lg p-3 text-sm" style=${FIELD} data-testid="large-cash-form-data">
               <div class="font-semibold" style=${INK}>${form.form} for ${form.payer.name}</div>
               <div class="mt-1" style=${MUTED}>${form.payer.address}</div>
               <div class="mt-1" style=${MUTED}>Taxpayer identification number ${form.payer.taxpayer_id}</div>
-              <div class="mt-1" style=${MUTED}>${form.currency} ${form.amount_cents} cents, received ${form.first_date} to ${form.last_date}</div>
+              <div class="mt-1" style=${MUTED}>${rowMoney(row, form.amount_cents, form.currency)} received ${form.first_date} to ${form.last_date}</div>
               <div class="mt-1" style=${MUTED}>Filed for ${form.filer.branch_name}. Due ${form.filing_deadline}.</div>
               <div class="mt-2" style=${INK}>${form.note}</div>
             </div>` : nothing}
