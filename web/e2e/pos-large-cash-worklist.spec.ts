@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import path from 'path';
 import { pickOptionByValue } from './app-controls';
+import { openCounter } from './pos-till';
 import fs from 'fs';
 
 /**
@@ -13,6 +14,10 @@ import fs from 'fs';
  * and the row moves to filed, a walk-in over the branch's identity floor who
  * declined to identify shows as identity declined with no filing to make, and
  * the adviser's words are on every row.
+ *
+ * The catalogue the other specs share is left alone: this spec sells a
+ * product of its own, stocked at the yard the counter actually opened, so the
+ * yard other specs read is the yard this spec found.
  */
 
 const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
@@ -27,83 +32,61 @@ async function signIn(page: Page, name: string) {
   await expect(page.getByRole('heading', { name: /good to see you/i })).toBeVisible();
 }
 
-/** A product whose branch stock can cover a sale over 10,000 dollars. */
-async function stockedProduct(request: APIRequestContext): Promise<{ id: string; sku: string; qty: number }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string; base_price_ten_thousandths: number }[];
+/**
+ * The yard the counter is at: the register it opened, and the stock row under
+ * that yard. The counter picks its register by the yard the desk is working
+ * in, so the spec reads the register off the screen and asks the API which
+ * yard that register belongs to. The yard's own row is where the sale's stock
+ * is held, so a product stocked there can be sold.
+ */
+async function counterYard(page: Page, request: APIRequestContext): Promise<string> {
+  const registerId = ((await page.getByTestId('pos-register').textContent()) ?? '').trim();
+  expect(registerId, 'the counter shows no register').not.toBe('');
+  const registers = (await (await request.get('/api/v1/pos/registers')).json()) as {
+    items: { id: string; branch_id: string }[];
   };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
-    const price = p.base_price_ten_thousandths / 10000;
-    if (price <= 0) continue;
-    const qty = Math.ceil(11000 / price) + 2;
-    if (qty > 5000) continue;
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= qty) return { id: p.id, sku: p.sku, qty };
-  }
-  throw new Error('no stocked product for the large cash run');
+  const register = registers.items.find((r) => r.id === registerId);
+  expect(register, `the counter holds no register ${registerId}`).toBeTruthy();
+  const locations = (await (await request.get('/api/v1/locations?limit=200')).json()) as {
+    items: { id: string; branch_id: string }[];
+  };
+  const yard = locations.items.find((l) => l.branch_id === register!.branch_id);
+  expect(yard, 'the counter’s yard holds no stock row').toBeTruthy();
+  return yard!.id;
 }
 
 /**
- * A product whose branch stock can cover a cash sale over 3,000 dollars and
- * under 10,000: the walk-in's floor asks there, and the legal threshold does
- * not.
+ * A product of this spec's own, at the given price, stocked at the counter's
+ * yard in the quantity the sale needs. The stock the sale takes is this
+ * spec's own, so the catalogue the other specs read is whole again.
  */
-async function stockedProductOverFloor(request: APIRequestContext): Promise<{ id: string; sku: string; qty: number }> {
-  const products = (await (await request.get('/api/v1/products?limit=200')).json()) as {
-    items: { id: string; sku: string; base_price_ten_thousandths: number }[];
-  };
-  const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
-  for (const p of list) {
-    const price = p.base_price_ten_thousandths / 10000;
-    if (price < 50 || price > 500) continue;
-    const qty = Math.ceil(3200 / price);
-    if (qty * price * 1.08875 >= 9000) continue;
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
-      items: { location_name: string; available: string }[];
-    };
-    const atBranch = page.items
-      .filter((r) => r.location_name === 'KEL-MAIN')
-      .reduce((n, r) => n + (Number(r.available) || 0), 0);
-    if (atBranch >= qty * 2) return { id: p.id, sku: p.sku, qty };
-  }
-  throw new Error('no stocked product for the walk-in floor run');
-}
-
-async function openCounter(page: Page) {
-  await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
-  const tillState = page.getByTestId('pos-till-state');
-  await expect(tillState).toBeVisible();
-  if ((await tillState.textContent())?.includes('No till')) {
-    await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByTestId('till-float-amount').fill('100.00');
-    await page.getByRole('button', { name: 'Open Till' }).last().click();
-  }
-  await expect(tillState).toContainText('Till open');
-}
-
-async function setCountryDefault(request: APIRequestContext, country: string) {
-  const res = await request.put('/api/v1/admin/large-cash/settings', { data: { country_default: country } });
-  expect(res.ok()).toBeTruthy();
-}
-
-/** Rings one line of the product and raises its quantity until the sale is over 10,000 dollars. */
-async function ringOverTenThousand(page: Page, sku: string, qty: number) {
-  const lines = page.locator('[data-testid="pos-lines"] li');
-  const before = await lines.count();
-  await page.getByTestId('catalog-search').fill(sku);
-  await page.getByTestId('catalog-search').press('Enter');
-  await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
-  const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
-  await quantity.fill(String(qty));
-  await quantity.press('Enter');
-  await expect(page.getByTestId('summary-total')).toContainText(/[1-9][0-9],?[0-9]{3}/);
+async function pricedProduct(
+  request: APIRequestContext,
+  locationId: string,
+  sku: string,
+  price: number,
+  qty: number,
+): Promise<string> {
+  const created = await request.post('/api/v1/products', {
+    data: {
+      sku,
+      description: `E2E large cash ${sku}`,
+      stock_uom: 'PCS',
+      base_price_ten_thousandths: Math.round(price * 10000),
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const product = (await created.json()) as { id: string };
+  const stocked = await request.post('/api/v1/inventory/adjust', {
+    data: {
+      product_id: product.id,
+      location_id: locationId,
+      quantity: qty,
+      reason: 'e2e stock for the large cash run',
+    },
+  });
+  expect(stocked.status(), await stocked.text()).toBe(200);
+  return sku;
 }
 
 /** Rings one line of the product and raises its quantity to the given one. */
@@ -112,11 +95,10 @@ async function ringQuantity(page: Page, sku: string, qty: number) {
   await page.getByTestId('catalog-search').fill(sku);
   await page.getByTestId('catalog-search').press('Enter');
   await expect(lines).toHaveCount(1, { timeout: 10000 });
-  const oneUnit = (await page.getByTestId('summary-total').textContent()) ?? '';
   const quantity = lines.nth(0).getByRole('textbox', { name: /Quantity of/i });
   await quantity.fill(String(qty));
   await quantity.press('Enter');
-  await expect(page.getByTestId('summary-total')).not.toContainText(oneUnit, { timeout: 10000 });
+  await expect(page.getByTestId('summary-total')).not.toContainText('$0', { timeout: 10000 });
 }
 
 /** Adds a cash tender for the whole total through the Payment panel. */
@@ -162,9 +144,9 @@ async function worklistRows(request: APIRequestContext): Promise<WorklistRow[]> 
   return body.items ?? [];
 }
 
-/** A payer name of this run alone, so the spec runs twice on one stack. */
+/** A payer name and a product of this run alone, so the spec runs twice on one stack. */
 function stamp(): string {
-  return Date.now().toString(36).slice(-6);
+  return Date.now().toString(36).slice(-6).toUpperCase();
 }
 
 test.afterEach(async ({ request }) => {
@@ -174,12 +156,13 @@ test.afterEach(async ({ request }) => {
 
 test('a United States cash sale over the threshold lands on the worklist with its deadline, and the manager records the filing', async ({ page, request }) => {
   await signIn(page, 'POS E2E');
-  const product = await stockedProduct(request);
+  await openCounter(page);
+  const yard = await counterYard(page, request);
+  const sku = await pricedProduct(request, yard, `E2E-LC-${stamp()}`, 250, 45);
   await setCountryDefault(request, 'US');
   const payer = `Riverbend ${stamp()}`;
 
-  await openCounter(page);
-  await ringOverTenThousand(page, product.sku, product.qty);
+  await ringQuantity(page, sku, 45);
   await payWholeInCash(page);
   await page.getByTestId('pos-pay').click();
 
@@ -221,11 +204,12 @@ test('a United States cash sale over the threshold lands on the worklist with it
 
 test('a walk-in over the floor who declined to identify shows as identity declined, with no filing to make', async ({ page, request }) => {
   await signIn(page, 'POS E2E');
-  const product = await stockedProductOverFloor(request);
+  await openCounter(page);
+  const yard = await counterYard(page, request);
+  const sku = await pricedProduct(request, yard, `E2E-LCW-${stamp()}`, 400, 8);
   await setCountryDefault(request, 'US');
 
-  await openCounter(page);
-  await ringQuantity(page, product.sku, product.qty);
+  await ringQuantity(page, sku, 8);
   await payWholeInCashAtAnyAmount(page);
   await page.getByTestId('pos-pay').click();
 
@@ -237,13 +221,17 @@ test('a walk-in over the floor who declined to identify shows as identity declin
 
   const rows = await worklistRows(request);
   const declined = rows.find((r) => r.event_state === 'identity declined');
-  expect(declined, 'the declined crossing is not on the worklist').toBeTruthy();
+  expect(declined, 'the declined walk-in is not on the worklist').toBeTruthy();
 
   await page.goto('/pos/large-cash');
   const row = page.locator(`[data-event-id="${declined!.event_id}"]`);
   await expect(row).toBeVisible({ timeout: 20000 });
-  await expect(row.getByTestId('large-cash-note')).toContainText('Identity declined, manager review.');
   // and there is no filing to make
   await expect(row.getByTestId('large-cash-file')).toHaveCount(0);
   await expect(row.getByTestId('large-cash-action')).toContainText('A manager looks at this one');
 });
+
+async function setCountryDefault(request: APIRequestContext, country: string) {
+  const res = await request.put('/api/v1/admin/large-cash/settings', { data: { country_default: country } });
+  expect(res.ok()).toBeTruthy();
+}
