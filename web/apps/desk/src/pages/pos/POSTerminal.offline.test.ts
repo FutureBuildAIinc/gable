@@ -407,6 +407,20 @@ describe('the counter when the connection drops', () => {
       el.remove();
     });
 
+    it('reads Signing in on the submit button while the call runs', async () => {
+      const el = await openForm();
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((r) => { release = r; });
+      const inner = core.invoke;
+      setOfflineInvoke(async (c, a) => { if (c === 'sign_in_with_password') { await held; return undefined; } return inner(c, a); });
+      (q(el, 'pos-offline-pw-submit') as HTMLButtonElement).click();
+      await settle(el);
+      expect(q(el, 'pos-offline-pw-submit')?.textContent?.trim()).toBe('Signing in');
+      release();
+      await settle(el);
+      el.remove();
+    });
+
     it('a degraded config shows the unreachable words, no form, and the next tap reads the config again', async () => {
       core.refuse['sync_offline_queue'] = noSession;
       auth.authMethodsConfig.mockResolvedValue(cfg([{ method: 'email_password', kind: 'form' }], true));

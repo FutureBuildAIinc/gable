@@ -489,7 +489,7 @@ export class POSTerminal extends LitElement {
           <span class="text-xs uppercase tracking-wider text-muted-foreground">Password</span>
           <input type="password" data-testid="pos-offline-pw-password" aria-label="Password" autocomplete="current-password" class=${input} @keydown=${enter} />
         </label>
-        <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${NO_SESSION_ASK}</button>
+        <button type="button" data-testid="pos-offline-pw-submit" ?disabled=${this._pwBusy} class="min-h-11 rounded-lg bg-gable-green px-4 font-semibold text-deep-space disabled:opacity-60" @click=${() => void this._submitPassword()}>${this._pwBusy ? 'Signing in' : NO_SESSION_ASK}</button>
         <button type="button" data-testid="pos-offline-pw-cancel" class="min-h-11 rounded-lg border border-white/20 px-4 font-semibold" @click=${() => void this._cancelPasswordForm()}>Cancel</button>
         ${this._pwError ? html`<p class="basis-full text-sm text-amber-400" role="alert" data-testid="pos-offline-pw-error">${this._pwError}</p>` : nothing}
       </form>`;
