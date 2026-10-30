@@ -156,6 +156,7 @@ GET	/api/v1/admin/settings/routing	internal/techadmin	h.GetRoutingSettings
 PUT	/api/v1/admin/settings/routing	internal/techadmin	h.SaveRoutingSettings
 GET	/api/v1/admin/staff	internal/staff	h.ListStaff
 POST	/api/v1/admin/staff	internal/staff	h.CreateStaff
+GET	/api/v1/admin/staff/sign-in-people	internal/staffauth	l.handlePeople
 GET	/api/v1/admin/staff/{id}	internal/staff	h.GetStaff
 PUT	/api/v1/admin/staff/{id}	internal/staff	h.UpdateStaff
 DELETE	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.ClearStaffCounterPIN
@@ -163,6 +164,8 @@ PUT	/api/v1/admin/staff/{id}/counter-pin	internal/staff	h.SetStaffCounterPIN
 POST	/api/v1/admin/staff/{id}/counter-pin/unlock	internal/staff	h.UnlockStaffCounterPIN
 POST	/api/v1/admin/staff/{id}/modules	internal/staff	h.GrantModule
 DELETE	/api/v1/admin/staff/{id}/modules/{module_id}	internal/staff	h.RevokeModule
+DELETE	/api/v1/admin/staff/{id}/sign-in-link	internal/staffauth	l.handleClear
+PUT	/api/v1/admin/staff/{id}/sign-in-link	internal/staffauth	l.handleSet
 GET	/api/v1/ap/aging	internal/ap	h.HandleGetAgingSummary
 GET	/api/v1/ap/invoices	internal/ap	h.HandleList
 POST	/api/v1/ap/invoices	internal/ap	h.HandleCreate
@@ -198,6 +201,10 @@ GET	/api/v1/ar/worklist	internal/account	wrap(guard, h.HandleWorklist)
 GET	/api/v1/auth/config	internal/signinmethods	h.GetConfig
 GET	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.GetAllowlist)
 PUT	/api/v1/auth/methods	internal/signinmethods	guarded(g.Admin, h.PutAllowlist)
+POST	/api/v1/auth/refresh	internal/staffauth	h.Refresh
+GET	/api/v1/auth/session	internal/staffauth	h.Session
+POST	/api/v1/auth/signin	internal/staffauth	h.SignIn
+POST	/api/v1/auth/signout	internal/staffauth	h.SignOut
 POST	/api/v1/auth/start/{method}	internal/signinmethods	h.Start
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount

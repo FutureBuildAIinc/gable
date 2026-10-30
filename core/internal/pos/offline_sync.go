@@ -34,6 +34,8 @@ const (
 	OfflineDuplicate = "duplicate"
 	OfflineRefused   = "refused"
 	OfflineHeld      = "held"
+	// offlineFault: the server could not judge the item; retried next sync
+	offlineFault = "error"
 )
 
 // The reasons an exception row carries that the sync writes (ADR 0011 3.4).
@@ -186,6 +188,25 @@ func (s *Service) SyncOffline(ctx context.Context, batch *OfflineBatch, actor st
 		Items: []OfflineItemOutcome{}}
 	log := LogBatch{BatchID: batch.BatchID, RegisterID: batch.RegisterID}
 	epochs := map[int64]bool{}
+	// a re-offer that faults is answered as an error item, like a fault in
+	// syncOfflineItem, and that epoch is not re-offered again in this sync,
+	// so the confirmed mark and the log are still written
+	faulted := map[int64]bool{}
+	reoffer := func(epoch int64) error {
+		if faulted[epoch] {
+			return nil
+		}
+		reoffered, fault, err := s.reofferHeld(ctx, batch.BatchID, batch.RegisterID, epoch, actor)
+		if err != nil {
+			return err
+		}
+		faulted[epoch] = fault
+		for i := range reoffered {
+			res.Items = append(res.Items, reoffered[i])
+			s.countOutcome(&log, &reoffered[i])
+		}
+		return nil
+	}
 	for _, it := range items {
 		out, err := s.syncOfflineItem(ctx, *branch, batch.BatchID, it, actor)
 		if err != nil {
@@ -197,20 +218,15 @@ func (s *Service) SyncOffline(ctx context.Context, batch *OfflineBatch, actor st
 			log.ErrorCount++
 			msg := err.Error()
 			res.Items = append(res.Items, OfflineItemOutcome{ClientID: it.Sale.ClientID, DeviceEpoch: it.Sale.DeviceEpoch,
-				DeviceSeq: it.Sale.DeviceSeq, Outcome: "error", ReasonMessage: &msg})
+				DeviceSeq: it.Sale.DeviceSeq, Outcome: offlineFault, ReasonMessage: &msg})
 			continue
 		}
 		res.Items = append(res.Items, *out)
 		epochs[it.Sale.DeviceEpoch] = true
 		s.countOutcome(&log, out)
 		// a held item the mark now reaches is re-offered at once
-		reoffered, err := s.reofferHeld(ctx, batch.BatchID, batch.RegisterID, it.Sale.DeviceEpoch, actor)
-		if err != nil {
+		if err := reoffer(it.Sale.DeviceEpoch); err != nil {
 			return nil, err
-		}
-		for i := range reoffered {
-			res.Items = append(res.Items, reoffered[i])
-			s.countOutcome(&log, &reoffered[i])
 		}
 	}
 	// and at the end of every sync of the register (ADR 0011 3.4)
@@ -218,13 +234,8 @@ func (s *Service) SyncOffline(ctx context.Context, batch *OfflineBatch, actor st
 		epochs[batch.DeviceEpoch] = true
 	}
 	for epoch := range epochs {
-		reoffered, err := s.reofferHeld(ctx, batch.BatchID, batch.RegisterID, epoch, actor)
-		if err != nil {
+		if err := reoffer(epoch); err != nil {
 			return nil, err
-		}
-		for i := range reoffered {
-			res.Items = append(res.Items, reoffered[i])
-			s.countOutcome(&log, &reoffered[i])
 		}
 	}
 	// the mark the server confirms, and the device's own mark it reported
@@ -261,6 +272,9 @@ func (s *Service) countOutcome(log *LogBatch, out *OfflineItemOutcome) {
 	case OfflineHeld:
 		log.Gaps++
 		log.Details = append(log.Details, SyncItemResult{ClientID: out.ClientID, Reason: "held: " + derefString(out.ReasonCode)})
+	case offlineFault:
+		log.ErrorCount++
+		log.Errors = append(log.Errors, SyncItemResult{ClientID: out.ClientID, Reason: derefString(out.ReasonMessage)})
 	}
 }
 
@@ -280,6 +294,11 @@ type itemClass struct {
 	advance bool
 	// supersede: bad copies of the item's id that its true sale closes
 	supersede bool
+	// held: the held broken_chain row a re-offered item already has; a
+	// warning the posting was sold past goes onto that row (one row per
+	// sale id), and heldWarned says it did
+	held       *uuid.UUID
+	heldWarned bool
 }
 
 // classifyOfflineItem is the duplicate check of ADR 0011 section 2 and the
@@ -463,7 +482,7 @@ func (s *Service) postOfflineSale(ctx context.Context, branch uuid.UUID, batchID
 		return nil, err
 	}
 	if len(v.warnings) > 0 {
-		if err := s.recordSoldPastWarning(ctx, branch, it, v, done, actor); err != nil {
+		if err := s.recordSoldPastWarning(ctx, branch, it, v, done, cls, actor); err != nil {
 			return nil, err
 		}
 	}
@@ -492,8 +511,8 @@ func (s *Service) postOfflineSale(ctx context.Context, branch uuid.UUID, batchID
 
 // insertOfflineSale writes the sale row with the client's id and the offline
 // provenance, its lines as recorded and their tally rows, and settles the
-// replaced cart, in the order of ADR 0011 section 3.2 step 1 (the sale rows
-// in id order).
+// replaced cart, in the order of ADR 0011 section 3.2 step 1 and ADR 0005
+// section 11 (the replaced cart, the session and step 1a before the insert).
 func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *offlineVerdict) (*Sale, error) {
 	id := uuid.MustParse(it.Sale.ClientID)
 	walkInID, defaultCurrency, err := s.repo.WalkInCustomer(ctx)
@@ -517,9 +536,23 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 		r := uuid.MustParse(*it.Sale.ReplacesSaleID)
 		replaced = &r
 	}
-	// the replaced cart's row first when its id sorts first
-	if replaced != nil && replaced.String() < id.String() {
+	// ADR 0005 section 11 before any write: the replaced cart's row (step
+	// 1, whatever its id: the new sale row is not yet visible, so no other
+	// act can wait on it), the session FOR SHARE (1b) and the customer's
+	// credit lock (1a), all before the sale row's insert, whose customer
+	// foreign key takes the customer row FOR KEY SHARE; a live completion of
+	// the cart or the customer holds the cart and 1a, then the customer row
+	// FOR UPDATE (step 7)
+	if replaced != nil {
 		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.repo.LockTillSession(ctx, session, false); err != nil {
+		return nil, err
+	}
+	if sale.CustomerID != nil {
+		if err := s.repo.LockCustomerCredit(ctx, *sale.CustomerID); err != nil {
 			return nil, err
 		}
 	}
@@ -528,11 +561,6 @@ func (s *Service) insertOfflineSale(ctx context.Context, it *offlineItem, v *off
 	}
 	if err := s.repo.MarkOfflineSale(ctx, id, it, v.snapshotID); err != nil {
 		return nil, err
-	}
-	if replaced != nil && replaced.String() >= id.String() {
-		if err := s.settleReplacedCart(ctx, it, *replaced); err != nil {
-			return nil, err
-		}
 	}
 	lines, err := s.offlineLines(ctx, it)
 	if err != nil {
@@ -652,19 +680,30 @@ func (s *Service) settleReplacedCart(ctx context.Context, it *offlineItem, cartI
 // warning an offline sale was sold past (the CP-13 OW exception: reason
 // sold_past_warning, the oldest id in warning_alert_id and every id in
 // warning_alert_ids), with one audit row per warning, in the posting's own
-// transaction. The sale itself posted; the warning stays open.
-func (s *Service) recordSoldPastWarning(ctx context.Context, branch uuid.UUID, it *offlineItem, v *offlineVerdict, done *Sale, actor string) error {
-	row := s.exceptionRowOf(branch, it, &offlineRefusal{code: reasonSoldPastWarn,
-		message: "sold offline past an open counter warning"}, "open")
-	row.WarningAlertIDs = v.warnings
-	row.PostedSaleID = &done.ID
-	session := uuid.MustParse(it.Sale.TillSessionID)
-	row.TillSessionID = &session
-	row.BusinessDate = v.businessDate
-	snap := v.snapshotID
-	row.SnapshotID = &snap
-	if _, err := s.repo.InsertOfflineException(ctx, row); err != nil {
-		return err
+// transaction. The sale itself posted; the warning stays open. A re-offered
+// held item already has its row (one row per sale id): the warning is
+// written onto that row instead, which then reads sold_past_warning and open
+// for the manager in place of relinked.
+func (s *Service) recordSoldPastWarning(ctx context.Context, branch uuid.UUID, it *offlineItem, v *offlineVerdict, done *Sale,
+	cls *itemClass, actor string) error {
+	const message = "sold offline past an open counter warning"
+	if cls.held != nil {
+		if err := s.repo.MarkHeldSoldPastWarning(ctx, *cls.held, done.ID, v.warnings, reasonSoldPastWarn, message); err != nil {
+			return err
+		}
+		cls.heldWarned = true
+	} else {
+		row := s.exceptionRowOf(branch, it, &offlineRefusal{code: reasonSoldPastWarn, message: message}, "open")
+		row.WarningAlertIDs = v.warnings
+		row.PostedSaleID = &done.ID
+		session := uuid.MustParse(it.Sale.TillSessionID)
+		row.TillSessionID = &session
+		row.BusinessDate = v.businessDate
+		snap := v.snapshotID
+		row.SnapshotID = &snap
+		if _, err := s.repo.InsertOfflineException(ctx, row); err != nil {
+			return err
+		}
 	}
 	if s.auditLog != nil {
 		for _, a := range v.warnings {
@@ -789,11 +828,16 @@ func (s *Service) exceptionRowOf(branch uuid.UUID, it *offlineItem, why *offline
 // arrived, one transaction per item under 0a and 0b, the posting inside a
 // savepoint (ADR 0011 3.4): posted, the held row reads relinked; refused for
 // a reason of its own, the held row takes that reason and opens for a
-// manager. Either way the mark advances over it, and the next is tried.
-func (s *Service) reofferHeld(ctx context.Context, batchID, register string, epoch int64, actor string) ([]OfflineItemOutcome, error) {
-	var outs []OfflineItemOutcome
+// manager. Either way the mark advances over it, and the next is tried. A
+// fault in a held item's own transaction rolls it back and is answered as an
+// error item (retried at the next sync), with faulted set so the caller
+// stops re-offering the epoch; a fault before any held item is read is
+// returned.
+func (s *Service) reofferHeld(ctx context.Context, batchID, register string, epoch int64, actor string) (
+	outs []OfflineItemOutcome, faulted bool, err error) {
 	for {
 		var out *OfflineItemOutcome
+		var cur *offlineItem
 		err := s.inTx(ctx, func(ctx context.Context) error {
 			dev, err := s.repo.LockRegisterDevice(ctx, register, epoch)
 			if err != nil || dev == nil {
@@ -807,6 +851,7 @@ func (s *Service) reofferHeld(ctx context.Context, batchID, register string, epo
 			if err != nil {
 				return err
 			}
+			cur = it
 			head := dev.ChainHead
 			if head == "" {
 				head = offlineChainGenesis
@@ -814,7 +859,7 @@ func (s *Service) reofferHeld(ctx context.Context, batchID, register string, epo
 			if it.Sale.PrevDigest != head && head != offlineChainRestart {
 				return nil
 			}
-			cls := &itemClass{inOrder: true}
+			cls := &itemClass{inOrder: true, held: &held.ID}
 			var posted *OfflineItemOutcome
 			var refused *offlineRefusal
 			perr := s.db.RunInSavepoint(ctx, func(ctx context.Context) error {
@@ -842,18 +887,26 @@ func (s *Service) reofferHeld(ctx context.Context, batchID, register string, epo
 				out = &OfflineItemOutcome{ClientID: it.Sale.ClientID, DeviceEpoch: epoch, DeviceSeq: it.Sale.DeviceSeq,
 					Outcome: OfflineRefused, ExceptionID: &exID, ReasonCode: &code, ReasonMessage: &msg}
 			} else {
-				if err := s.repo.MarkHeldRelinked(ctx, held.ID, *posted.SaleID); err != nil {
-					return err
+				if !cls.heldWarned {
+					if err := s.repo.MarkHeldRelinked(ctx, held.ID, *posted.SaleID); err != nil {
+						return err
+					}
 				}
 				out = posted
 			}
 			return s.repo.AdvanceDeviceMark(ctx, dev.ID, it.Sale.DeviceSeq, it.Digest)
 		})
 		if err != nil {
-			return nil, err
+			if cur == nil {
+				return nil, false, err
+			}
+			msg := err.Error()
+			outs = append(outs, OfflineItemOutcome{ClientID: cur.Sale.ClientID, DeviceEpoch: epoch,
+				DeviceSeq: cur.Sale.DeviceSeq, Outcome: offlineFault, ReasonMessage: &msg})
+			return outs, true, nil
 		}
 		if out == nil {
-			return outs, nil
+			return outs, false, nil
 		}
 		outs = append(outs, *out)
 	}

@@ -31,7 +31,7 @@ import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
-import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+import { intentIdOfRefusal, cardOverWords, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
 import { receiptEmailAnswer, type ReceiptTone } from './receiptEmail';
 import { EmailDeliveryService } from '../../services/EmailDeliveryService';
 
@@ -1615,6 +1615,10 @@ export class POSTerminal extends LitElement {
         if (why) return why;
       }
     }
+    if (entry.method === 'card') {
+      const over = cardOverWords(entry.amount_cents, this._owedCents, fmt(this._owedCents));
+      if (over) return over;
+    }
     if (entry.method === 'store_credit') {
       const held = this._standing?.open_credit_memo_cents ?? 0;
       if (entry.amount_cents > held) return `The account holds ${money(held)} of store credit`;
@@ -3082,6 +3086,10 @@ export class POSTerminal extends LitElement {
           ${tendersOver ? html`
             <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
               ${overWords}
+            </div>` : nothing}
+          ${this._tenderMethod === 'card' && entry !== null && cardOverWords(entry.amount_cents, owed, fmt(owed)) ? html`
+            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-card-over">
+              ${cardOverWords(entry.amount_cents, owed, fmt(owed))}
             </div>` : nothing}
           ${this._walkInNote !== '' ? html`
             <div class="mt-2 rounded-lg border border-white/10 bg-deep-space/60 p-3 text-sm text-slate-300" role="status" data-testid="pos-walk-in-note">

@@ -23,7 +23,7 @@ func (w *arWorld) draftMemo() uuid.UUID {
 	memo := uuid.New()
 	w.exec(`INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount, subtotal, tax_amount,
 			total_amount, status, memo_date)
-		VALUES ($1, $2, `+arBranch+`, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
+		VALUES ($1, $2, `+w.branchSQL()+`, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, w.customerID)
 	return memo
 }
 
@@ -189,9 +189,9 @@ func TestARBusinessDayIsTheBranchsOwnDay(t *testing.T) {
 			w.exec(`INSERT INTO locations (id, type, code, timezone) VALUES ($1, 'BRANCH', $2, $3)`, branch, "ZN-"+branch.String()[:8], zone)
 			t.Cleanup(func() {
 				// the world's own cleanup removes the payment; the branch goes after
-				w.exec(`UPDATE payments SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
-				w.exec(`UPDATE gl_journal_lines SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
-				w.exec(`UPDATE gl_journal_entries SET branch_id = `+arBranch+` WHERE branch_id = $1`, branch)
+				w.exec(`UPDATE payments SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, branch)
+				w.exec(`UPDATE gl_journal_lines SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, branch)
+				w.exec(`UPDATE gl_journal_entries SET branch_id = `+w.branchSQL()+` WHERE branch_id = $1`, branch)
 				w.exec(`DELETE FROM locations WHERE id = $1`, branch)
 			})
 			today, err := w.svc.LocalDate(context.Background(), branch, w.svc.Now())

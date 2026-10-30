@@ -24,7 +24,7 @@ func TestARAgingByCustomerPagesThroughItsCursor(t *testing.T) {
 	// A second customer owing, so a page of one has a next page.
 	other := uuid.New()
 	w.side = append(w.side, other)
-	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Core Second Co', $2, `+arBranch+`)`,
+	w.exec(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'AR Core Second Co', $2, `+w.branchSQL()+`)`,
 		other, "ARC-"+uuid.NewString()[:8])
 	w.invoice(10000, today.AddDate(0, 0, -3))
 	w.invoiceOn(other, 20000, today.AddDate(0, 0, -3))

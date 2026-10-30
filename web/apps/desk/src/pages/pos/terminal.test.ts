@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, expect, it } from 'vitest';
-import { intentIdOfRefusal, cardWaitWords, lostKindWords, lateWords, needsReference, CARD_CANCEL_WORDS, CARD_DECLINED_WORDS } from './terminal';
+import { intentIdOfRefusal, cardWaitWords, lostKindWords, lateWords, needsReference, cardOverWords, CARD_CANCEL_WORDS, CARD_DECLINED_WORDS } from './terminal';
 import type { TerminalIntent, TerminalLostItem } from '../../types/pos';
 
 const INTENT_ID = '9c8b7a6d-5e4f-4c3b-2a19-080715d4e3f2';
@@ -88,5 +88,16 @@ describe('the device\'s late word on a lost answer', () => {
     expect(needsReference(lost({ provider_ref: 'devref-1' }), 'authorized')).toBe(false);
     expect(needsReference(lost({ late_provider_ref: 'devref-2' }), 'authorized')).toBe(false);
     expect(needsReference(lost(), 'declined')).toBe(false);
+  });
+});
+
+describe('a card is held to what is owed on it', () => {
+  it('lets the remainder and anything under it through', () => {
+    expect(cardOverWords(500, 599, '$5.99')).toBeNull();
+    expect(cardOverWords(599, 599, '$5.99')).toBeNull();
+  });
+
+  it('refuses more than the remainder in the counter\'s words', () => {
+    expect(cardOverWords(1599, 599, '$5.99')).toBe('The card can be charged at most $5.99: the rest is cash change.');
   });
 });

@@ -19,6 +19,14 @@ components:
         issuer. Role guards run per module (the census column in ROUTES.txt
         names the registering module; cmd/server/main.go names the roles each
         module registers with). AUTH_MODE=dev disables verification entirely.
+    StaffSession:
+      type: apiKey
+      in: cookie
+      name: gable_session
+      description: >-
+        The staff session cookie the sign in sets (ADR 0012): HttpOnly,
+        Secure, SameSite=Strict, Path /api. A state changing request
+        authenticated by it must also carry the X-Gable-CSRF header.
     IntegrationKey:
       type: apiKey
       in: header

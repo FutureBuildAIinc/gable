@@ -104,7 +104,7 @@ func rowFor(t *testing.T, list *largecash.Worklist, eventID uuid.UUID) largecash
 func TestWorklistCarriesTheDeadlineTheSeverityAndTheAction(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 
@@ -163,7 +163,7 @@ func TestWorklistCarriesTheDeadlineTheSeverityAndTheAction(t *testing.T) {
 func TestFilingIsRefusedForACanadianRecordAndAnIdentityDeclinedCrossing(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	// the Canadian dealer policy, on, at the threshold
 	if err := svc.SaveSettings(ctx, &largecash.Settings{CountryDefault: "US", CAEnabled: true,
 		CAThresholdCents: largecash.ThresholdCents}, "statement-refusal-test"); err != nil {
@@ -213,7 +213,7 @@ func TestFilingIsRefusedForACanadianRecordAndAnIdentityDeclinedCrossing(t *testi
 func TestThreeManagersFilingTheSameCrossingHaveOneWinner(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {
@@ -269,7 +269,7 @@ func TestThreeManagersFilingTheSameCrossingHaveOneWinner(t *testing.T) {
 func TestTheFilingRaceHasOneWinner(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {
@@ -332,7 +332,7 @@ func TestTheFilingRaceHasOneWinner(t *testing.T) {
 func TestTheForm8300ExportCarriesTheTinAndNothingElseDoes(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {
@@ -375,7 +375,7 @@ func TestTheForm8300ExportCarriesTheTinAndNothingElseDoes(t *testing.T) {
 func TestTheStatementRefusesTheSuspicion(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {
@@ -399,7 +399,7 @@ func TestTheStatementRefusesTheSuspicion(t *testing.T) {
 func TestTheStatementCarriesTheContentAndItsState(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {
@@ -458,7 +458,7 @@ func TestTheStatementCarriesTheContentAndItsState(t *testing.T) {
 func TestTheDeadlineSweepMarksAndIsIdempotent(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	svc := largecash.NewService(db, nil, "")
+	svc := keyedService(t, db)
 	eventID := seedCrossing(t, db, svc, crossingOptions{country: "US",
 		cashCents: largecash.ThresholdCents + 200_000, payer: usPayer()})
 	t.Cleanup(func() {

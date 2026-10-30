@@ -6528,7 +6528,7 @@ export interface paths {
         put?: never;
         /**
          * What the large cash rule asks of this payment
-         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. Writes nothing; the completion's own capture is the authority.
+         * @description The counter's look before Pay (CP-17a): the server classifies the named tenders against the sale it holds under the branch's country rule (the United States Form 8300 family, or the Canadian dealer threshold when the dealer has it on) and answers whether the payer's details will be required and which fields the rule needs. The branch's walk-in identity floor rides the same answer: over the floor the counter asks a walk-in who paid cash to identify themselves, so their cash sales are counted together, and the identity the counter already holds may be carried here so the preview and the completion key the same person. A payer carried on a server with no valid vault key is refused 503 with the blocker large_cash_vault_unavailable, as the completion refuses it. Writes nothing; the completion's own capture is the authority.
          */
         post: operations["posLargeCashPreview"];
         delete?: never;
@@ -9656,6 +9656,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/signin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign a staff member in with email and password
+         * @description Public. The core opens an Appwrite session server side, reads the account and the membership in the dealer's Team, ends the Appwrite session at once and, when the person is admitted, issues its own session: a fresh random id every time (a presented one is ignored), set as an HttpOnly, Secure, SameSite=Strict cookie on Path /api with no Domain. The request must carry the X-Gable-CSRF header or an Origin that is Gable's own. Every refusal (wrong credentials, unconfirmed or absent membership, blocked or deleted user, unverified email, no mapped role, an Appwrite Team owner, multi factor on) gets the one fixed 401 answer. Limited per client address and per email; past the limit a 429 with Retry-After.
+         */
+        post: operations["authSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-read the signed in person's membership now
+         * @description The session cookie and the X-Gable-CSRF header are required. The core re-reads the account and the membership with its key; a definite answer that the person may no longer enter revokes the session (401), changed roles replace the snapshot. An answer that is not definite keeps the session on its snapshot until the snapshot reaches its maximum age.
+         */
+        post: operations["authRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/signout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out
+         * @description Revokes the session behind the cookie and clears the cookie. The X-Gable-CSRF header is required. Answers 204 whatever the cookie held.
+         */
+        post: operations["authSignOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed in person's display data
+         * @description The subject and role set of the session behind the cookie. No email: a staff session carries none.
+         */
+        get: operations["authSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/sign-in-people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The people who have signed in, for the roster link
+         * @description Owner and admin. The distinct subjects the core's sessions have seen, each with the email read from Appwrite by the stored Appwrite user id (the session row holds none) and the staff row it is linked to, if any. This is the list the staff screen picks from to link a roster row.
+         */
+        get: operations["adminStaffSignInPeople"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{id}/sign-in-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Link a staff row to a person who has signed in
+         * @description Owner and admin. Sets the staff row's sub to a person the sessions have seen, audited. A sub no session has seen is a 400, an unknown staff row a 404, and a staff row or a person already linked a 409 (the link is unique when set).
+         */
+        put: operations["adminStaffSignInLinkSet"];
+        post?: never;
+        /**
+         * Clear a staff row's sign in link
+         * @description Owner and admin. Clears the link, audited; clearing an unlinked row is a no-op.
+         */
+        delete: operations["adminStaffSignInLinkClear"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tax/exemptions": {
         parameters: {
             query?: never;
@@ -10090,7 +10214,7 @@ export interface paths {
         };
         /**
          * Serve an uploaded file
-         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles do not include admin, owner or user is a 403; a machine key is a 403 on this path whatever scope it holds.
+         * @description Authenticated access to the dealer file store under the uploads directory. The path after /uploads/ is the file path within the uploads directory. Content-Type is derived from the file extension first and by content sniffing when the extension is unknown; Content-Disposition is always attachment; X-Content-Type-Options is nosniff. A nonexistent file is a 404. The mount registers for every HTTP method and the file server ignores the method, so any other method on the same path answers the same file with the same status. A user JWT whose roles include none of the staff roles (owner, admin, sales, finance, purchasing, warehouse, cashier, driver) is a 403; a machine key is a 403 on this path whatever scope it holds.
          */
         get: operations["uploadsFile"];
         put?: never;
@@ -17418,7 +17542,7 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this payment takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the sale goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -17844,7 +17968,7 @@ export interface components {
             picked_up_by?: string | null;
             /** @description The customer's counter alerts the clerk read and acknowledged before taking the exchange's replacement sale. A warning that asks to be acknowledged must be named here, or the exchange is refused with 409 alert_unacknowledged and nothing is written. */
             acknowledged_alert_ids?: string[];
-            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them. */
+            /** @description The payer's details the counter captured for a large cash crossing (CP-17a); required when this exchange's cash difference takes the payer over the branch's threshold, refused 409 payer_details_required without them, and refused 503 large_cash_vault_unavailable on a server with no valid vault key, never stored in clear. */
             payer?: components["schemas"]["PosPayerCapture"];
             /** @description The counter's record that the walk-in declined to identify over the branch's walk-in identity floor (CP-17a); the exchange goes ahead and the fact is recorded for the manager's worklist as an identity declined. */
             payer_declined?: boolean;
@@ -21452,6 +21576,32 @@ export interface components {
                 /** @description The display label; optional on the oidc method, refused on any other. */
                 oidc_label?: string;
             }[];
+        };
+        StaffSignInPeople: {
+            items: {
+                /** Format: uuid */
+                sub: string;
+                email: string;
+                /** Format: uuid */
+                linked_staff_id: string | null;
+            }[];
+        };
+        StaffSignInLinkRequest: {
+            /** Format: uuid */
+            sub: string;
+        };
+        StaffSignInRequest: {
+            email: string;
+            password: string;
+        };
+        StaffIdentity: {
+            /**
+             * Format: uuid
+             * @description The name based subject UUID of the Appwrite user.
+             */
+            sub: string;
+            /** @description The Gable roles of the person, in the fixed role order. */
+            roles: ("owner" | "admin" | "sales" | "finance" | "purchasing" | "warehouse" | "cashier" | "driver")[];
         };
         TaxExemption: {
             /** Format: uuid */
@@ -35944,6 +36094,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     posTransactionVoid: {
@@ -42240,6 +42391,182 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["WireInternalError"];
+        };
+    };
+    authSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Signed in; the session cookie is set. */
+            200: {
+                headers: {
+                    /** @description The gable_session cookie (HttpOnly, Secure, SameSite=Strict, Path=/api, no Domain). */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authRefresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The roles the session now holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    authSignOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out; the cookie is cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    authSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subject and roles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffIdentity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    adminStaffSignInPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The people. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffSignInPeople"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    adminStaffSignInLinkSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSignInLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Linked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+        };
+    };
+    adminStaffSignInLinkClear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The staff row. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     taxExemptionCreate: {
