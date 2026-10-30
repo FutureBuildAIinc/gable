@@ -21,9 +21,13 @@ async function signIn(page: Page, name: string) {
 }
 
 test('a manager sets the yard\'s offline selling and finds it saved', async ({ page, request }) => {
+  // the yard is the counter's register's yard, as the other counter specs find it
+  const registers = (await (await request.get('/api/v1/pos/registers')).json()) as { items: { id: string; branch_id: string }[] };
+  const register = registers.items.find((r) => r.id === 'REG-01') ?? registers.items[0];
+  expect(register, 'the counter has a register').toBeTruthy();
+  const yard = register.branch_id;
+  await page.addInitScript((id) => localStorage.setItem('gable_current_branch_id', id), yard);
   await signIn(page, 'Playwright Admin');
-  const yard = await page.evaluate(() => localStorage.getItem('gable_current_branch_id'));
-  expect(yard, 'the desk session works a yard').toBeTruthy();
   const headers = { 'X-Branch-Id': yard as string };
   try {
     await page.goto('/admin/offline-counter');
