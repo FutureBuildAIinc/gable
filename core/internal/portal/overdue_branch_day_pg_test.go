@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
@@ -62,19 +63,28 @@ func installBranchDayClock(t *testing.T, db *database.DB) *branchDayClock {
 // the setting are the ones those reads see. The session's day and the
 // simulated day's UTC date are the same day, so the session reads as it would
 // on the day the clock names.
-func (c *branchDayClock) at(ctx context.Context, db *database.DB, hourUTC string) error {
+//
+// The instant the shadow names comes back with it, because the database's
+// clock and Go's clock have to be one instant: the SQL clock shadow does not
+// reach Go's time.Now, so a service that dates money in Go needs the instant
+// handed to it.
+func (c *branchDayClock) at(ctx context.Context, db *database.DB, hourUTC string) (time.Time, error) {
 	exec := db.GetExecutor(ctx)
 	if _, err := exec.Exec(ctx, `SET LOCAL search_path TO `+c.schema+`, public, pg_catalog`); err != nil {
-		return fmt.Errorf("search path: %w", err)
+		return time.Time{}, fmt.Errorf("search path: %w", err)
 	}
 	if _, err := exec.Exec(ctx, `SET LOCAL TIME ZONE 'UTC'`); err != nil {
-		return fmt.Errorf("time zone: %w", err)
+		return time.Time{}, fmt.Errorf("time zone: %w", err)
 	}
 	if _, err := exec.Exec(ctx,
 		`SELECT set_config('gc539.now', CURRENT_DATE::text || ' ' || $1, true)`, hourUTC); err != nil {
-		return fmt.Errorf("clock: %w", err)
+		return time.Time{}, fmt.Errorf("clock: %w", err)
 	}
-	return nil
+	var instant time.Time
+	if err := exec.QueryRow(ctx, `SELECT (current_setting('gc539.now'))::timestamptz`).Scan(&instant); err != nil {
+		return time.Time{}, fmt.Errorf("the shadowed instant: %w", err)
+	}
+	return instant.UTC(), nil
 }
 
 // overdueAnswers is what the desk and the portal said about the same
@@ -91,6 +101,8 @@ type overdueAnswers struct {
 	overdueCount int                // the billing summary's overdue invoice count
 	pastDue      float64            // the AR summary's past due total
 	balance      float64            // the AR summary's open balance
+	pastDueCents int64              // the billing summary's past due tile, in cents
+	agingAsOf    string             // the billing summary's aging as of
 }
 
 // overdueWorld is one branch, one customer and three open invoices: one due
@@ -99,6 +111,8 @@ type overdueAnswers struct {
 type overdueWorld struct {
 	customerID   uuid.UUID
 	invoiceIDs   []uuid.UUID // in the order of dueOld, dueYesterday, dueToday
+	sessionDay   string
+	issued       string
 	dueOld       string
 	dueYesterday string
 	dueToday     string
@@ -107,6 +121,12 @@ type overdueWorld struct {
 // seedOverdueWorld writes the branch, the customer and the invoices. The
 // branch's zone is the test's: America/Vancouver for a branch west of UTC,
 // America/New_York for one in the United States.
+//
+// The invoices are issued a week before the session's day, so the receivable
+// ages on either the session's day or the branch's day (a branch behind UTC
+// is a day behind the session): the aging counts an invoice issued on or
+// before the day it ages on, and an invoice issued on the session's day would
+// be an invoice from the branch's future.
 func seedOverdueWorld(ctx context.Context, db *database.DB, zone string) (overdueWorld, error) {
 	exec := db.GetExecutor(ctx)
 	var sessionDay string
@@ -118,6 +138,8 @@ func seedOverdueWorld(ctx context.Context, db *database.DB, zone string) (overdu
 		return overdueWorld{}, fmt.Errorf("the session's day: %w", err)
 	}
 	w := overdueWorld{
+		sessionDay:   sessionDay,
+		issued:       day.AddDate(0, 0, -7).Format("2006-01-02"),
 		dueOld:       day.AddDate(0, 0, -2).Format("2006-01-02"),
 		dueYesterday: day.AddDate(0, 0, -1).Format("2006-01-02"),
 		dueToday:     day.Format("2006-01-02"),
@@ -142,7 +164,7 @@ func seedOverdueWorld(ctx context.Context, db *database.DB, zone string) (overdu
 			`INSERT INTO invoices (id, customer_id, status, branch_id, total_amount, subtotal,
 				tax_amount, amount_open, due_date, invoice_date)
 				VALUES ($1, $2, 'UNPAID', $3, 100.00, 100.00, 0.00, 100.00, $4::date, $5::date)`,
-			id, w.customerID, branchID, due, w.dueToday); err != nil {
+			id, w.customerID, branchID, due, w.issued); err != nil {
 			return overdueWorld{}, fmt.Errorf("an invoice due %s: %w", due, err)
 		}
 		w.invoiceIDs = append(w.invoiceIDs, id)
@@ -151,8 +173,10 @@ func seedOverdueWorld(ctx context.Context, db *database.DB, zone string) (overdu
 }
 
 // readOverdueAnswers reads the same invoices through the desk and through
-// every portal surface that says whether an invoice is overdue.
-func readOverdueAnswers(ctx context.Context, db *database.DB, w overdueWorld) (overdueAnswers, error) {
+// every portal surface that says whether an invoice is overdue. The instant
+// is the clock's, because the portal dates its money in Go and the SQL clock
+// shadow does not reach Go's time.Now.
+func readOverdueAnswers(ctx context.Context, db *database.DB, w overdueWorld, instant time.Time) (overdueAnswers, error) {
 	out := overdueAnswers{
 		desk:   map[uuid.UUID]bool{},
 		list:   map[uuid.UUID]bool{},
@@ -193,13 +217,17 @@ func readOverdueAnswers(ctx context.Context, db *database.DB, w overdueWorld) (o
 	if out.todayCount, err = repo.TodayInvoicesCount(ctx, w.customerID); err != nil {
 		return out, fmt.Errorf("the portal's Today count: %w", err)
 	}
-	svc := NewService(repo, testSecret, testLogger(), nil, nil, nil, nil, nil)
+	svc := NewService(repo, testSecret, testLogger(), nil, nil, nil, nil, nil).
+		WithAccountService(account.NewService(db, nil, testLogger())).
+		WithClockForTest(func() time.Time { return instant })
 	summary, err := svc.GetBillingSummary(ctx, w.customerID)
 	if err != nil {
 		return out, fmt.Errorf("the portal's billing summary: %w", err)
 	}
 	out.openCount = summary.BalanceTiles.OpenInvoiceCount
 	out.overdueCount = summary.BalanceTiles.OverdueInvoiceCount
+	out.pastDueCents = summary.BalanceTiles.PastDueCents
+	out.agingAsOf = summary.Aging.AsOf
 	balance, _, pastDue, err := repo.GetCustomerARSummary(ctx, w.customerID)
 	if err != nil {
 		return out, fmt.Errorf("the portal's AR summary: %w", err)
@@ -274,19 +302,22 @@ func overdueLeg(t *testing.T, db *database.DB, clock *branchDayClock, phase over
 	t.Helper()
 	ctx := context.Background()
 	var (
-		world overdueWorld
-		got   overdueAnswers
+		world   overdueWorld
+		got     overdueAnswers
+		instant time.Time
 	)
 	err := db.RunInTx(ctx, func(ctx context.Context) error {
-		if err := clock.at(ctx, db, phase.hour); err != nil {
+		at, err := clock.at(ctx, db, phase.hour)
+		if err != nil {
 			return err
 		}
+		instant = at
 		w, err := seedOverdueWorld(ctx, db, phase.zone)
 		if err != nil {
 			return err
 		}
 		world = w
-		got, err = readOverdueAnswers(ctx, db, w)
+		got, err = readOverdueAnswers(ctx, db, w, instant)
 		return err
 	})
 	if err != nil {
@@ -366,6 +397,32 @@ func overdueLeg(t *testing.T, db *database.DB, clock *branchDayClock, phase over
 	if got.balance != 300 {
 		t.Errorf("the AR summary's balance is %v, want 300", got.balance)
 	}
+
+	// The billing summary's past due tile is the money the desk calls
+	// overdue: the same set, in the same cents. It ages the receivable on the
+	// branch's own day, so the tile and the overdue count beside it are one
+	// answer, and the answer is the branch's day.
+	if got.pastDueCents != gc539InvoiceCents*int64(wantOverdue) {
+		t.Errorf("the billing summary's past due is %d cents, the overdue set is %d cents",
+			got.pastDueCents, gc539InvoiceCents*int64(wantOverdue))
+	}
+	wantAsOf := branchDayOf(world, phase.branchDayBehind)
+	if got.agingAsOf != wantAsOf {
+		t.Errorf("the billing summary's aging is as of %s, want the branch's day %s", got.agingAsOf, wantAsOf)
+	}
+}
+
+// gc539InvoiceCents is what one of the world's invoices is worth, in cents.
+const gc539InvoiceCents = 10000
+
+// branchDayOf is the branch's own calendar day in the world: the session's
+// day less how far the branch's day sits behind it.
+func branchDayOf(w overdueWorld, behind int) string {
+	d, err := time.Parse("2006-01-02", w.sessionDay)
+	if err != nil {
+		return w.sessionDay
+	}
+	return d.AddDate(0, 0, -behind).Format("2006-01-02")
 }
 
 // dueOf names the due date of an invoice, for the failure messages.
