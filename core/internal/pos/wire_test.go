@@ -528,10 +528,10 @@ func TestAccountReturnLeavesOpenCredit(t *testing.T) {
 // payments (already net of change) plus the opening float less cash refunds.
 func TestTillExpectedCashIncludesFloatAndRefunds(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDB(t), withTerminal(payment.SimApprove, 0))
 	f.openTill(5000)
 	f.saleOf("2", tender("cash", 2000)) // keeps 1198, change 802
-	f.saleOf("1", tender("card", 599))  // card; no cash, terminal settles it
+	f.saleOf("1", tender("card", 599))  // card; no cash, the simulated terminal runs it
 	// a cash return of 500 out of the drawer
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "customer_id": f.customerID.String(), "refund_method": "cash",

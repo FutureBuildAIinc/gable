@@ -459,4 +459,7 @@ type CounterRegister struct {
 	BranchID   uuid.UUID `json:"branch_id"`
 	BranchCode string    `json:"branch_code"`
 	BranchName string    `json:"branch_name"`
+	// CardTerminal is the card path of the register's counter (CP-05 A1):
+	// run, simulator or none. With none the Pay screen disables Card.
+	CardTerminal CardTerminalState `json:"card_terminal"`
 }
