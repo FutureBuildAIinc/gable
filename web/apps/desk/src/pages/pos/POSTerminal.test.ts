@@ -364,6 +364,17 @@ describe('the counter as the Panels layout', () => {
       expect(el.querySelector('[data-testid="pos-lines"]')?.textContent).toContain('$42.00');
     });
 
+    it('wraps a ticket line so the Tint button never sits over the price text at 390', async () => {
+      const twelve = { ...line('x', 4200), quantity: '1', unit_price_ten_thousandths: 55000 };
+      svc.addItem.mockResolvedValue(sale({ lines: [twelve as never], subtotal_cents: 550, total_cents: 550 }));
+      const el = await mount(sale({ lines: [] }));
+      add(el, '1');
+      await flush(el);
+      const li = el.querySelector('[data-testid="pos-line"]') as HTMLElement;
+      expect(li.className).toContain('flex-wrap');
+      expect(li.firstElementChild?.nextElementSibling?.className ?? li.children[0].className).toContain('min-w-0');
+    });
+
     it('allows a decimal quantity for a length unit', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));

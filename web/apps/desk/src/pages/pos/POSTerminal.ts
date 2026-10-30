@@ -3586,12 +3586,12 @@ export class POSTerminal extends LitElement {
           <p class="mt-3 text-sm text-slate-400" data-testid="pos-no-lines">No items yet</p>` : html`
           <ul class="mt-3 space-y-3" aria-label="Ticket lines" data-testid="pos-lines">
             ${productLines.map((item) => html`
-              <li class="flex items-center gap-3">
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="pos-line">
                 ${this._renderThumb(item)}
-                <div class="min-w-0 flex-1">
+                <div class="min-w-0 flex-1 basis-40">
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   ${weightBadgeText(item) ? html`<div class="font-mono text-xs text-gable-green" data-testid="pos-line-weight-badge">${weightBadgeText(item)}</div>` : nothing}
-                  <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice2(item.unit_price_ten_thousandths) : '-'}</div>
+                  <div class="break-words font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice2(item.unit_price_ten_thousandths) : '-'}</div>
                   ${item.tint ? html`
                     <div class="font-mono text-xs text-slate-400" data-testid="pos-line-tint">
                       ${item.tint.color_name}${item.tint.color_code ? ` (${item.tint.color_code})` : ''} on ${item.tint.base_code} ${item.tint.container_size_code}
