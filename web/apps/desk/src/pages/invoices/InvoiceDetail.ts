@@ -11,6 +11,8 @@ import { InvoiceService } from '../../services/InvoiceService.ts';
 import { CreditMemoService } from '../../services/CreditMemoService.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { paymentService } from '../../services/paymentService.ts';
+import { EmailDeliveryService, type EmailDelivery } from '../../services/EmailDeliveryService.ts';
+import { emailOutcomeWords, emailDeliveryWords } from '../../lib/emailWords.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
 import { type Invoice, formatInvoiceStatus, getInvoiceStatusColor } from '../../types/invoice.ts';
 import {
@@ -55,6 +57,7 @@ export class GableInvoiceDetail extends LitElement {
     @state() private orderNumber: string | null = null;
     @state() private applications: PaymentApplication[] = [];
     @state() private creditMemos: CreditMemoSummary[] = [];
+    @state() private emailSends: EmailDelivery[] = [];
     @state() private loading = true;
     @state() private error = false;
     @state() private isPaymentModalOpen = false;
@@ -78,6 +81,18 @@ export class GableInvoiceDetail extends LitElement {
         this.loadInvoice(id);
         this.loadPayments(id);
         this.loadCreditMemos(id);
+        this.loadEmailSends(id);
+    }
+
+    /** The invoice's email sends and what each delivery row says of them. */
+    private async loadEmailSends(id: string) {
+        try {
+            this.emailSends = await EmailDeliveryService.listForDocument(id);
+        } catch {
+            // the sends list is a convenience beside the invoice; a refused
+            // read (a sign in that may not list deliveries) leaves it empty
+            this.emailSends = [];
+        }
     }
 
     private async loadInvoice(id: string) {
@@ -135,11 +150,19 @@ export class GableInvoiceDetail extends LitElement {
         }
     }
 
+    /** Queues the invoice's email, then follows the delivery the 202 names:
+     * the toast says what actually happened, never success on the 202 alone. */
     private async handleEmailInvoice() {
         if (!this.invoice?.id) return;
         try {
-            await InvoiceService.emailInvoice(this.invoice.id);
-            ToastService.show('Invoice emailed successfully', 'success');
+            const queued = await InvoiceService.emailInvoice(this.invoice.id);
+            const delivery = queued.delivery_id
+                ? await EmailDeliveryService.follow(queued.delivery_id, this.invoice.id)
+                : undefined;
+            const words = emailOutcomeWords(delivery, 'invoice');
+            const kind = delivery?.status === 'failed' ? 'error' : delivery?.status === 'sent' ? 'success' : 'info';
+            ToastService.show(words, kind);
+            this.loadEmailSends(this.invoice.id);
         } catch (err) {
             ToastService.show(apiErrorMessage(err, 'Failed to email invoice'), 'error');
         }
@@ -296,6 +319,37 @@ export class GableInvoiceDetail extends LitElement {
                                                     <td class="p-3 text-zinc-300">${formatReasonCode(cm.reason_code)}</td>
                                                     <td class="p-3 font-mono text-right ${creditTextClass(cm.total_cents)}">${formatCents(cm.total_cents)}</td>
                                                     <td class="p-3"><span class=${chipClass(getCreditMemoStatusColor(cm.status))}>${formatCreditMemoStatus(cm.status)}</span></td>
+                                                </tr>
+                                            `)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `}
+                        </div>
+
+                        <!-- Email sends of this invoice: what each delivery row says -->
+                        <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden" data-testid="invoice-email-sends">
+                            <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+                                <h2 class="font-semibold text-white">Email sends</h2>
+                            </div>
+                            ${this.emailSends.length === 0 ? html`
+                                <p class="px-6 py-4 text-sm text-zinc-500">This invoice has not been emailed.</p>
+                            ` : html`
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm" aria-label="Email sends of this invoice">
+                                        <thead class="bg-white/5">
+                                            <tr>
+                                                <th class="p-3 text-muted-foreground font-medium">Sent to</th>
+                                                <th class="p-3 text-muted-foreground font-medium">When</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Outcome</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-white/5">
+                                            ${this.emailSends.map(send => html`
+                                                <tr data-delivery-status=${send.status}>
+                                                    <td class="p-3 text-zinc-300">${send.recipient}</td>
+                                                    <td class="p-3 text-zinc-400">${formatDateTime(send.created_at)}</td>
+                                                    <td class="p-3 text-zinc-300">${emailDeliveryWords(send.status)}</td>
                                                 </tr>
                                             `)}
                                         </tbody>

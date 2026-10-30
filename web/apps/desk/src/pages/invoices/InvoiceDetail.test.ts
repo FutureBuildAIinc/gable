@@ -12,7 +12,34 @@ import './InvoiceDetail'
 import type { GableInvoiceDetail } from './InvoiceDetail'
 import { mountAsync, text, flush } from '../../test/dom'
 import { creditMemoSummary, invoice, invoiceLine, routedFetch, INVOICE_ID, ORDER_ID } from '../../test/salesFixtures'
+import { ToastService } from '../../lib/toast-service'
 import type { Invoice } from '../../types/invoice'
+import type { EmailDelivery } from '../../services/EmailDeliveryService'
+
+function emailDelivery(overrides: Partial<EmailDelivery> = {}): EmailDelivery {
+  return {
+    id: 'd-1',
+    created_at: '2026-08-11T15:00:00Z',
+    branch_id: null,
+    recipient: 'billing@example.test',
+    subject: 'Invoice IN-000042 from Gable Building Supply',
+    document_type: 'invoice',
+    document_id: INVOICE_ID,
+    document_number: 'IN-000042',
+    status: 'logged',
+    sender_answer: 'logged by the log sender, not sent',
+    error: null,
+    sent_by: null,
+    ...overrides,
+  } as EmailDelivery
+}
+
+function captureToasts() {
+  const toasts: { message: string; type: string }[] = []
+  const onToast = (e: Event) => toasts.push((e as CustomEvent).detail)
+  ToastService.addEventListener('toast', onToast)
+  return { toasts, stop: () => ToastService.removeEventListener('toast', onToast) }
+}
 
 function stub(inv: Invoice, extra: Record<string, (url: URL, init?: RequestInit) => unknown> = {}) {
   const state = routedFetch({
@@ -180,6 +207,72 @@ describe('gable-invoice-detail', () => {
     expect(table.querySelector('td.text-red-400')).not.toBeNull()
   })
 
+  describe('emailing the invoice', () => {
+    it('says sent with the address the delivery row names', async () => {
+      const toasts = captureToasts()
+      try {
+        stub(invoice(), {
+          [`POST /api/v1/invoices/${INVOICE_ID}/email`]: () => ({ status: 'queued', delivery_id: 'd-1' }),
+          '/api/v1/email-deliveries': () => ({ items: [emailDelivery({ status: 'sent', sender_answer: '250 2.0.0 Ok' })], next_cursor: null, limit: 20 }),
+        })
+        el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+        buttonByText(el, 'Email').click()
+        await flush(); await flush(); await flush()
+        expect(toasts.toasts.at(-1)).toMatchObject({ message: 'Invoice sent to billing@example.test', type: 'success' })
+      } finally {
+        toasts.stop()
+      }
+    })
+
+    it('says not sent and that email is not set up here when the log sender took it, not success', async () => {
+      const toasts = captureToasts()
+      try {
+        stub(invoice(), {
+          [`POST /api/v1/invoices/${INVOICE_ID}/email`]: () => ({ status: 'queued', delivery_id: 'd-1' }),
+          '/api/v1/email-deliveries': () => ({ items: [emailDelivery({ status: 'logged' })], next_cursor: null, limit: 20 }),
+        })
+        el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+        buttonByText(el, 'Email').click()
+        await flush(); await flush(); await flush()
+        expect(toasts.toasts.at(-1)).toMatchObject({ message: 'Email is not set up on this server: the invoice was not sent', type: 'info' })
+      } finally {
+        toasts.stop()
+      }
+    })
+
+    it('says the mail server refused as an error when the send failed', async () => {
+      const toasts = captureToasts()
+      try {
+        stub(invoice(), {
+          [`POST /api/v1/invoices/${INVOICE_ID}/email`]: () => ({ status: 'queued', delivery_id: 'd-1' }),
+          '/api/v1/email-deliveries': () => ({ items: [emailDelivery({ status: 'failed', error: 'smtp dial: connection refused' })], next_cursor: null, limit: 20 }),
+        })
+        el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+        buttonByText(el, 'Email').click()
+        await flush(); await flush(); await flush()
+        expect(toasts.toasts.at(-1)?.type).toBe('error')
+        expect(toasts.toasts.at(-1)?.message).toContain('the mail server refused or could not be reached')
+      } finally {
+        toasts.stop()
+      }
+    })
+
+    it('lists the invoice email sends with their outcomes', async () => {
+      stub(invoice(), {
+        '/api/v1/email-deliveries': () => ({ items: [
+          emailDelivery({ status: 'logged' }),
+          emailDelivery({ id: 'd-2', status: 'sent', recipient: 'accounts@example.test', sender_answer: '250 2.0.0 Ok' }),
+        ], next_cursor: null, limit: 20 }),
+      })
+      el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+      const section = el.querySelector('[data-testid="invoice-email-sends"]')!
+      expect(text(section)).toContain('billing@example.test')
+      expect(text(section)).toContain('Not sent: email not set up')
+      expect(text(section)).toContain('accounts@example.test')
+      expect(text(section)).toContain('Sent')
+    })
+  })
+
   describe('voiding', () => {
     it('requires a reason, sends the revision and shows the VOID banner afterwards', async () => {
       const state = stub(invoice(), {
@@ -240,7 +333,7 @@ describe('gable-invoice-detail', () => {
     stub(invoice({ status: 'void', void_reason: 'entered against the wrong customer', open_cents: 0 }))
     el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
     expect(text(el.querySelector('[data-testid="void-banner"]'))).toContain('entered against the wrong customer')
-    expect(text(el)).not.toContain('Email')
+    expect(buttonByText(el, 'Email')).toBeFalsy()
     expect(el.querySelector('a[href^="/credit-memos/new"]')).toBeNull()
   })
 })

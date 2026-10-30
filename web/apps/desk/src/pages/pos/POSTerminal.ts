@@ -32,6 +32,8 @@ import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels
 import { roundCashFor, type CashRoundingMode } from '../../lib/cashRounding';
 import './PosOrderDeposit';
 import { intentIdOfRefusal, cardWaitWords, CARD_DECLINED_WORDS, CARD_CANCEL_WORDS } from './terminal';
+import { receiptEmailAnswer } from './receiptEmail';
+import { EmailDeliveryService } from '../../services/EmailDeliveryService';
 
 /**
  * The money guard at the yard: the field shell's own offline words, so a
@@ -3288,15 +3290,24 @@ export class POSTerminal extends LitElement {
       </section>`;
   }
 
-  /** Sends the sale's receipt to the contact on the account; the server says in words if there is none. */
+  /** Sends the sale's receipt to the contact on the account, then follows the
+   *  queued delivery the 202 names: the note says what actually happened
+   *  (sent, not sent because email is not set up here, not sent because the
+   *  mail server refused, or still sending), never success on the 202 alone.
+   *  The server says in words if there is no contact to send to. */
   private async _emailReceipt(saleId: string) {
     if (this._receiptBusy) return;
     this._receiptBusy = true;
     try {
       this._error = null;
-      await posService.emailReceipt(saleId);
-      this._receiptNote = 'Receipt sent to the contact on the account';
-      this._receiptRefused = false;
+      const queued = await posService.emailReceipt(saleId);
+      const invoiceId = this._sale?.invoice_id ?? null;
+      const delivery = queued.delivery_id && invoiceId
+        ? await EmailDeliveryService.follow(queued.delivery_id, invoiceId)
+        : undefined;
+      const answer = receiptEmailAnswer(delivery);
+      this._receiptNote = answer.note;
+      this._receiptRefused = answer.refused;
     } catch (err: unknown) {
       this._receiptNote = err instanceof Error ? err.message : 'Failed to email the receipt';
       this._receiptRefused = true;
