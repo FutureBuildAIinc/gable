@@ -36,6 +36,7 @@ const sale = (lines: Sale['lines'] = []): Sale => ({
   tax_cents: 0,
   total_cents: 0,
   change_cents: 0,
+  rounding_cents: 0,
   till_session_id: 't1',
   status: 'open',
   invoice_id: null,
