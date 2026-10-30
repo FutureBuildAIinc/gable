@@ -102,6 +102,20 @@ describe('Tint catalogue screen', () => {
     expect(text(q(el, '[data-testid="tint-base-link-DEEP"]'))).toContain('Not linked')
   })
 
+  it('shows each outcome in the card that asked for it, and only one at a time', async () => {
+    refuse = jsonResponse({ error: { message: 'no such product' } }, 422)
+    const el = await open()
+    await type(el, '[data-testid="tint-base-find-DEEP"]', 'paint')
+    await click(el, '[data-testid="tint-base-pick-DEEP-PAINT-GAL"]')
+    const error = q(el, '[data-testid="tint-error"]')
+    expect(error.closest('[data-testid="tint-base-DEEP"]')).not.toBeNull()
+    await type(el, '[data-testid="tint-new-colorant-code"]', 'R1')
+    await type(el, '[data-testid="tint-new-colorant-name"]', 'Red')
+    await click(el, '[data-testid="tint-add-colorant"]')
+    expect(el.querySelector('[data-testid="tint-error"]')).toBeNull()
+    expect(q(el, '[data-testid="tint-success"]').closest('[data-testid="tint-colorants"]')).not.toBeNull()
+  })
+
   it('adds a base, a colorant and a colour to the chosen system', async () => {
     const el = await open()
     await type(el, '[data-testid="tint-new-base-code"]', 'MID')

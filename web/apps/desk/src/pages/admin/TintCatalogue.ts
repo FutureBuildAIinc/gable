@@ -42,8 +42,8 @@ export class GableTintCatalogue extends LitElement {
     @state() private _colors: TintColor[] = [];
     @state() private _loading = true;
     @state() private _busy = false;
-    @state() private _error: string | null = null;
-    @state() private _success: string | null = null;
+    /** The message of the last action, by the card it belongs to: it shows beside that action. */
+    @state() private _notes: Record<string, { kind: 'error' | 'ok'; text: string }> = {};
     /** The product search per base id: the text typed and what it found. */
     @state() private _search: Record<string, { text: string; found: QuickSearchResult[] }> = {};
     /** The product each linked base shows, by product id, once picked here. */
@@ -63,16 +63,20 @@ export class GableTintCatalogue extends LitElement {
         return this._systems.find((s) => s.id === this._systemId);
     }
 
-    private async _run(done: string, work: () => Promise<void>) {
+    private _note(card: string, kind: 'error' | 'ok', text: string) {
+        this._notes = { [card]: { kind, text } };
+    }
+
+    /** Runs one write; its outcome is shown in the card that asked for it. */
+    private async _run(card: string, done: string, work: () => Promise<void>) {
         if (this._busy) return;
         this._busy = true;
-        this._error = null;
-        this._success = null;
+        this._notes = {};
         try {
             await work();
-            this._success = done;
+            this._note(card, 'ok', done);
         } catch (err) {
-            this._error = apiErrorMessage(err, 'Could not save the change');
+            this._note(card, 'error', apiErrorMessage(err, 'Could not save the change'));
         } finally {
             this._busy = false;
         }
@@ -85,7 +89,7 @@ export class GableTintCatalogue extends LitElement {
             if (this._systemId === '' && this._systems.length > 0) this._systemId = this._systems[0].id;
             await this._loadSystem();
         } catch (err) {
-            this._error = apiErrorMessage(err, 'Could not read the tint catalogue');
+            this._note('page', 'error', apiErrorMessage(err, 'Could not read the tint catalogue'));
         } finally {
             this._loading = false;
         }
@@ -114,14 +118,14 @@ export class GableTintCatalogue extends LitElement {
         try {
             await this._loadSystem();
         } catch (err) {
-            this._error = apiErrorMessage(err, 'Could not read the tint system');
+            this._note('page', 'error', apiErrorMessage(err, 'Could not read the tint system'));
         }
     }
 
     private async _addSystem() {
         const n = this._newSystem;
         const denominator = Number(n.denominator);
-        await this._run('Tint system added', async () => {
+        await this._run('system', 'Tint system added', async () => {
             const made = await tintService.createSystem({
                 code: n.code.trim(), name: n.name.trim(), manufacturer: n.manufacturer.trim(), unit_denominator: denominator,
             });
@@ -133,7 +137,7 @@ export class GableTintCatalogue extends LitElement {
 
     private async _addBase() {
         const n = this._newBase;
-        await this._run('Base added', async () => {
+        await this._run('bases', 'Base added', async () => {
             await tintService.createBase({
                 tint_system_id: this._systemId, code: n.code.trim(), name: n.name.trim(),
                 fill_volume_oz: Number(n.fill), is_deepest: n.deepest,
@@ -145,7 +149,7 @@ export class GableTintCatalogue extends LitElement {
 
     private async _addColorant() {
         const n = this._newColorant;
-        await this._run('Colorant added', async () => {
+        await this._run('colorants', 'Colorant added', async () => {
             await tintService.createColorant({ tint_system_id: this._systemId, code: n.code.trim(), name: n.name.trim() });
             this._newColorant = { code: '', name: '' };
             await this._loadSystem();
@@ -154,7 +158,7 @@ export class GableTintCatalogue extends LitElement {
 
     private async _addColor() {
         const n = this._newColor;
-        await this._run('Colour added', async () => {
+        await this._run('colors', 'Colour added', async () => {
             await tintService.createColor({
                 tint_system_id: this._systemId, manufacturer_code: n.code.trim() || undefined, name: n.name.trim(),
             });
@@ -169,13 +173,13 @@ export class GableTintCatalogue extends LitElement {
             const found = await posService.searchProducts(text.trim());
             this._search = { ...this._search, [base.id]: { text, found } };
         } catch (err) {
-            this._error = apiErrorMessage(err, 'Could not search the products');
+            this._note(`base:${base.id}`, 'error', apiErrorMessage(err, 'Could not search the products'));
         }
     }
 
     /** Links the base to the product, or clears the link when the product is null. */
     private async _link(base: TintBase, product: QuickSearchResult | null) {
-        await this._run(product ? 'Base linked' : 'Base unlinked', async () => {
+        await this._run(`base:${base.id}`, product ? 'Base linked' : 'Base unlinked', async () => {
             const updated = await tintService.updateBase(base.id, { product_id: product ? product.product_id : null });
             this._bases = this._bases.map((b) => (b.id === base.id ? updated : b));
             this._search = { ...this._search, [base.id]: { text: '', found: [] } };
@@ -200,7 +204,7 @@ export class GableTintCatalogue extends LitElement {
     private async _addFormula() {
         const f = this._formula;
         const denominator = this._system?.unit_denominator ?? 0;
-        await this._run('Formula added', async () => {
+        await this._run('formulas', 'Formula added', async () => {
             await tintService.createFormula({
                 color_id: f.colorId, base_id: f.baseId, container_size_code: f.size.trim().toUpperCase(),
                 container_volume_oz: Number(f.volume), source: 'manual',
@@ -233,6 +237,17 @@ export class GableTintCatalogue extends LitElement {
             </div>`;
     }
 
+    /** The outcome of the last action when it belongs to this card. */
+    private _noteFor(card: string) {
+        const n = this._notes[card];
+        if (!n) return nothing;
+        return n.kind === 'error'
+            ? html`<div role="alert" data-testid="tint-error" data-card=${card}
+                class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">${n.text}</div>`
+            : html`<div role="status" data-testid="tint-success" data-card=${card}
+                class="bg-gable-green/10 border border-gable-green/20 rounded-lg p-3 text-sm text-gable-green">${n.text}</div>`;
+    }
+
     private _baseRow(b: TintBase) {
         const s = this._search[b.id] ?? { text: '', found: [] };
         const linked = b.product_id ? (this._labels[b.product_id] ?? 'A product is linked') : null;
@@ -254,6 +269,7 @@ export class GableTintCatalogue extends LitElement {
                     <input type="text" placeholder="Find the product by SKU or name" data-testid="tint-base-find-${b.code}"
                         .value=${s.text} @input=${(e: Event) => this._find(b, (e.target as HTMLInputElement).value)}
                         class=${FIELD_CLASS} />
+                    ${this._noteFor(`base:${b.id}`)}
                     ${s.found.length > 0 ? html`
                         <ul class="border border-white/10 rounded divide-y divide-white/5">
                             ${s.found.map((p) => html`
@@ -283,10 +299,7 @@ export class GableTintCatalogue extends LitElement {
                         as, the colorants, the colours and the formulas. A base with no product cannot be tinted at the counter.
                     </p>
                 </div>
-                ${this._error ? html`<div role="alert" data-testid="tint-error"
-                    class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">${this._error}</div>` : nothing}
-                ${this._success ? html`<div role="status" data-testid="tint-success"
-                    class="bg-gable-green/10 border border-gable-green/20 rounded-lg p-3 text-sm text-gable-green">${this._success}</div>` : nothing}
+                ${this._noteFor('page')}
 
                 <section class="${card}" data-testid="tint-systems">
                     <h2 class="text-lg font-semibold text-white">Tint system</h2>
@@ -301,6 +314,7 @@ export class GableTintCatalogue extends LitElement {
                     </div>
                     <button class=${BUTTON_CLASS} data-testid="tint-add-system" ?disabled=${this._busy || n.code.trim() === '' || n.name.trim() === ''}
                         @click=${() => this._addSystem()}>Add tint system</button>
+                    ${this._noteFor('system')}
                 </section>
 
                 ${sys ? html`
@@ -321,6 +335,7 @@ export class GableTintCatalogue extends LitElement {
                     <button class=${BUTTON_CLASS} data-testid="tint-add-base"
                         ?disabled=${this._busy || this._newBase.code.trim() === '' || this._newBase.name.trim() === ''}
                         @click=${() => this._addBase()}>Add base</button>
+                    ${this._noteFor('bases')}
                 </section>
 
                 <section class="${card}" data-testid="tint-colorants">
@@ -334,6 +349,7 @@ export class GableTintCatalogue extends LitElement {
                     <button class=${BUTTON_CLASS} data-testid="tint-add-colorant"
                         ?disabled=${this._busy || this._newColorant.code.trim() === '' || this._newColorant.name.trim() === ''}
                         @click=${() => this._addColorant()}>Add colorant</button>
+                    ${this._noteFor('colorants')}
                 </section>
 
                 <section class="${card}" data-testid="tint-colors">
@@ -347,6 +363,7 @@ export class GableTintCatalogue extends LitElement {
                     <button class=${BUTTON_CLASS} data-testid="tint-add-color"
                         ?disabled=${this._busy || this._newColor.name.trim() === ''}
                         @click=${() => this._addColor()}>Add colour</button>
+                    ${this._noteFor('colors')}
                 </section>
 
                 <section class="${card}" data-testid="tint-formulas">
@@ -376,6 +393,7 @@ export class GableTintCatalogue extends LitElement {
                             ?disabled=${this._busy || f.colorId === '' || f.baseId === '' || f.components.length === 0}
                             @click=${() => this._addFormula()}>Add formula</button>
                     </div>
+                    ${this._noteFor('formulas')}
                 </section>` : nothing}
             </div>`;
     }
