@@ -64,7 +64,7 @@ func TestChainWithSessionsAndNoJWKSFailsClosed(t *testing.T) {
 // before a session exists.
 func TestStaffSessionRoutesArePublicPaths(t *testing.T) {
 	want := map[string]bool{"/api/v1/auth/signin": false, "/api/v1/auth/refresh": false, "/api/v1/auth/signout": false,
-		"/api/v1/auth/start/": false, "/api/v1/auth/callback": false}
+		"/api/v1/auth/start/": false, "/api/v1/auth/callback": false, "/api/v1/auth/shell/": false}
 	for _, p := range publicAPIPaths {
 		if _, ok := want[p]; ok {
 			want[p] = true

@@ -21662,6 +21662,33 @@ paths:
           schema:
             type: string
             enum: [google, microsoft, oidc]
+        - name: client
+          in: query
+          required: false
+          description: >-
+            Set to shell by a Tauri shell. A shell start must also carry code_challenge, code_challenge_method and return_to; a web start takes no query at all.
+          schema:
+            type: string
+            enum: [shell]
+        - name: code_challenge
+          in: query
+          required: false
+          description: The PKCE S256 challenge, 43 base64url characters.
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [S256]
+        - name: return_to
+          in: query
+          required: false
+          description: >-
+            Where the callback sends the shell's browser with its one time code: gable://auth/callback, or http://127.0.0.1:{port}/auth/callback or http://[::1]:{port}/auth/callback. Any other target is a 400.
+          schema:
+            type: string
       responses:
         "302":
           description: To Appwrite's provider redirect; the state cookie is set.
@@ -21673,6 +21700,8 @@ paths:
             Location:
               schema:
                 type: string
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
@@ -21911,6 +21940,99 @@ paths:
                 $ref: "#/components/schemas/WireError"
         "503":
           $ref: "#/components/responses/WireUnavailable"
+  /api/v1/auth/shell/redeem:
+    post:
+      operationId: authShellRedeem
+      tags: [auth]
+      summary: Redeem a shell's one time code
+      description: >-
+        Public. A Tauri shell spends the one time code its callback returned, with the PKCE verifier whose S256 challenge it started with. The code is claimed with one conditional update, so it works once, before it expires; a wrong verifier changes nothing. The membership is read afresh before the session is issued. The answer is an opaque access token (prefix gst_) and a rotating refresh token. Every refusal gets the one fixed 401. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellRedeemRequest"
+      responses:
+        "200":
+          description: The shell's tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellTokens"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/auth/shell/refresh:
+    post:
+      operationId: authShellRefresh
+      tags: [auth]
+      summary: Rotate a shell's tokens
+      description: >-
+        Public. Swaps the shell's access and refresh tokens for new ones in one conditional update, only when the presented refresh token is the family's current one. A rotated refresh token presented again revokes the whole token family. Limited per client address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShellRefreshRequest"
+      responses:
+        "200":
+          description: The new tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShellTokens"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+  /api/v1/auth/shell/signout:
+    post:
+      operationId: authShellSignOut
+      tags: [auth]
+      summary: Sign a shell out
+      description: >-
+        Public path; the shell's access token rides as the Bearer credential. Revokes the session behind it and answers 204 whatever the header held. Limited per client address.
+      security: []
+      responses:
+        "204":
+          description: Signed out.
+        "429":
+          description: Too many attempts; retry after the Retry-After seconds.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
   /api/v1/admin/staff/sign-in-people:
     get:
       operationId: adminStaffSignInPeople
@@ -39988,6 +40110,41 @@ components:
               oidc_label:
                 type: string
                 description: The display label; optional on the oidc method, refused on any other.
+    ShellRedeemRequest:
+      type: object
+      additionalProperties: false
+      required: [code, code_verifier]
+      properties:
+        code:
+          type: string
+        code_verifier:
+          type: string
+          description: The PKCE verifier, 43 to 128 unreserved characters.
+    ShellRefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+    ShellTokens:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, expires_in, sub, roles]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Seconds until the session's absolute limit.
+        sub:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
     StaffMagicLinkRequest:
       type: object
       additionalProperties: false

@@ -49,6 +49,7 @@ type Handler struct {
 	// client address and per email (the callback shares the address one).
 	startByAddress *limiter
 	startByEmail   *limiter
+	shellByAddress *limiter
 	allowed        func(ctx context.Context, method string) bool
 
 	// emailPasswordAllowed, when set, is consulted before any credential is
@@ -81,6 +82,7 @@ func NewHandler(svc *Service, cfg HandlerConfig) *Handler {
 
 		startByAddress: newLimiter(cfg.PerAddress, cfg.Window),
 		startByEmail:   newLimiter(cfg.PerEmail, cfg.Window),
+		shellByAddress: newLimiter(cfg.PerAddress, cfg.Window),
 		cookieSecure:   !cfg.Insecure,
 	}
 }
@@ -97,6 +99,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/start/{method}", h.StartRedirect)
 	mux.HandleFunc("POST /api/v1/auth/start/magic_link", h.StartMagicLink)
 	mux.HandleFunc("GET /api/v1/auth/callback", h.Callback)
+	// The shell's token path (ADR 0012 section 3): redeem the one time code,
+	// rotate the refresh token, sign out by the access token. Not cookie
+	// requests, so no CSRF header; each is limited per client address.
+	mux.HandleFunc("POST /api/v1/auth/shell/redeem", h.ShellRedeem)
+	mux.HandleFunc("POST /api/v1/auth/shell/refresh", h.ShellRefresh)
+	mux.HandleFunc("POST /api/v1/auth/shell/signout", h.ShellSignOut)
 }
 
 type identityBody struct {

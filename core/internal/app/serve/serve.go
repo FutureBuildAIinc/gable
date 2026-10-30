@@ -111,6 +111,8 @@ var publicAPIPaths = []string{
 	"/api/v1/auth/start/",
 	// The callback every redirect method ends at (ADR 0012 section 4).
 	"/api/v1/auth/callback",
+	// The shell token path: redeem, refresh and sign out (ADR 0012 section 3).
+	"/api/v1/auth/shell/",
 	// The staff session routes read the cookie themselves (ADR 0012).
 	"/api/v1/auth/signin",
 	"/api/v1/auth/refresh",

@@ -18,6 +18,14 @@ zeroize = "1"
 # Origin parsing for the token and offline counter commands' fence; the same
 # url crate the shell graph already carries through Tauri.
 url = "2"
+# PKCE (S256), the random verifier, and the shell's HTTP client for the core's
+# redeem, refresh and sign out routes (blocking, rustls, no redirect).
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# The system browser, for the start of a redirect sign in.
+open = "5"
 # Serialization for the offline counter's snapshot copy, canonical JSON
 # signing payload, and keychain custody records.
 serde = { version = "1", features = ["derive"] }
@@ -29,7 +37,6 @@ ring = "0.17"
 # snapshot copy.
 rusqlite = { version = "0.31", features = ["bundled"] }
 hex = "0.4"
-base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 
 # The OS keychain through the keyring crate, one backend per desktop target:

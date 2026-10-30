@@ -9840,6 +9840,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/shell/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a shell's one time code
+         * @description Public. A Tauri shell spends the one time code its callback returned, with the PKCE verifier whose S256 challenge it started with. The code is claimed with one conditional update, so it works once, before it expires; a wrong verifier changes nothing. The membership is read afresh before the session is issued. The answer is an opaque access token (prefix gst_) and a rotating refresh token. Every refusal gets the one fixed 401. Limited per client address.
+         */
+        post: operations["authShellRedeem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/shell/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a shell's tokens
+         * @description Public. Swaps the shell's access and refresh tokens for new ones in one conditional update, only when the presented refresh token is the family's current one. A rotated refresh token presented again revokes the whole token family. Limited per client address.
+         */
+        post: operations["authShellRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/shell/signout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign a shell out
+         * @description Public path; the shell's access token rides as the Bearer credential. Revokes the session behind it and answers 204 whatever the header held. Limited per client address.
+         */
+        post: operations["authShellSignOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/staff/sign-in-people": {
         parameters: {
             query?: never;
@@ -21783,6 +21843,22 @@ export interface components {
                 /** @description The display label; optional on the oidc method, refused on any other. */
                 oidc_label?: string;
             }[];
+        };
+        ShellRedeemRequest: {
+            code: string;
+            /** @description The PKCE verifier, 43 to 128 unreserved characters. */
+            code_verifier: string;
+        };
+        ShellRefreshRequest: {
+            refresh_token: string;
+        };
+        ShellTokens: {
+            access_token: string;
+            refresh_token: string;
+            /** @description Seconds until the session's absolute limit. */
+            expires_in: number;
+            sub: string;
+            roles: string[];
         };
         StaffMagicLinkRequest: {
             email: string;
@@ -42639,7 +42715,15 @@ export interface operations {
     };
     authStartRedirect: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Set to shell by a Tauri shell. A shell start must also carry code_challenge, code_challenge_method and return_to; a web start takes no query at all. */
+                client?: "shell";
+                /** @description The PKCE S256 challenge, 43 base64url characters. */
+                code_challenge?: string;
+                code_challenge_method?: "S256";
+                /** @description Where the callback sends the shell's browser with its one time code: gable://auth/callback, or http://127.0.0.1:{port}/auth/callback or http://[::1]:{port}/auth/callback. Any other target is a 400. */
+                return_to?: string;
+            };
             header?: never;
             path: {
                 method: "google" | "microsoft" | "oidc";
@@ -42658,6 +42742,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["WireBadRequest"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["WireNotFound"];
             /** @description Too many attempts; retry after the Retry-After seconds. */
@@ -42933,6 +43018,107 @@ export interface operations {
                 };
             };
             503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authShellRedeem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShellRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description The shell's tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellTokens"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    authShellRefresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShellRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description The new tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellTokens"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+        };
+    };
+    authShellSignOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many attempts; retry after the Retry-After seconds. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
         };
     };
     adminStaffSignInPeople: {

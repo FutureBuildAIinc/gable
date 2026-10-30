@@ -83,15 +83,17 @@ func (s *Service) callbackURL(state string, failure bool) string {
 }
 
 // filePending files a new redirect sign in and returns its raw state.
-func (s *Service) filePending(ctx context.Context, method string) (string, error) {
+func (s *Service) filePending(ctx context.Context, method string, shell *ShellStart) (string, error) {
 	state, err := newSessionID()
 	if err != nil {
 		return "", err
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
-	err = s.store.CreatePending(ctx, Pending{
-		StateHash: hashID(state), Method: method, ClientKind: "web", ExpiresAt: now.Add(pendingTTL),
-	}, now)
+	p := Pending{StateHash: hashID(state), Method: method, ClientKind: "web", ExpiresAt: now.Add(pendingTTL)}
+	if shell != nil {
+		p.ClientKind, p.CodeChallenge, p.ReturnTarget = "shell", shell.CodeChallenge, shell.ReturnTarget
+	}
+	err = s.store.CreatePending(ctx, p, now)
 	return state, err
 }
 
@@ -99,7 +101,7 @@ func (s *Service) filePending(ctx context.Context, method string) (string, error
 // the pending row and returns the raw state, for the cookie, and the Appwrite
 // address the browser navigates to. Both Appwrite return URLs are Gable's
 // callback and nothing else.
-func (s *Service) StartRedirect(ctx context.Context, method string) (state, location string, err error) {
+func (s *Service) StartRedirect(ctx context.Context, method string, shell *ShellStart) (state, location string, err error) {
 	provider, ok := providerOf(method)
 	if !ok {
 		return "", "", ErrMethod
@@ -107,7 +109,7 @@ func (s *Service) StartRedirect(ctx context.Context, method string) (state, loca
 	if !s.redirectsOpen(ctx) {
 		return "", "", ErrUnavailable
 	}
-	if state, err = s.filePending(ctx, method); err != nil {
+	if state, err = s.filePending(ctx, method, shell); err != nil {
 		return "", "", err
 	}
 	return state, s.rdir.OAuth2TokenURL(provider, s.callbackURL(state, false), s.callbackURL(state, true)), nil
@@ -119,6 +121,10 @@ func (s *Service) StartRedirect(ctx context.Context, method string) (state, loca
 // nothing; it creates no Appwrite user, because it only ever passes the id of
 // one Appwrite already holds. Only a closed redirect floor is reported.
 func (s *Service) StartMagicLink(ctx context.Context, email string) (string, error) {
+	// A magic link is opened in whatever browser the person's mail opens in,
+	// and the state cookie binds it to the browser that asked: a shell's
+	// request is made by the shell, not by a browser, so the magic link is a
+	// web method only (see the slice 5 report's open question).
 	if !s.redirectsOpen(ctx) {
 		return "", ErrUnavailable
 	}
@@ -177,27 +183,47 @@ func (s *Service) sendMagicLink(ctx context.Context, email, state string) (bool,
 	return true, "sent"
 }
 
+// CallbackResult is how a callback ended. A web sign in carries the raw
+// session id for the cookie. A shell's callback never sets a cookie: it
+// carries the address to send the browser back to, which holds the one time
+// code (success) or a fixed refusal word (any refusal after the state was
+// claimed).
+type CallbackResult struct {
+	SessionID     string
+	Identity      Identity
+	ShellRedirect string
+}
+
 // Callback finishes a redirect sign in. The state in the cookie and the state
 // in the query must match; the pending row is claimed with one conditional
 // update, committed, before Appwrite is called, so a state is spent once; then
 // the user id and one time secret are exchanged for an Appwrite session that
-// the shared tail reads, ends and turns into the core's own session.
-func (s *Service) Callback(ctx context.Context, cookieState, queryState, userID, secret string, providerFailed bool) (string, Identity, error) {
+// the shared tail reads, ends and turns into the core's own session (a web
+// sign in) or into a one time code for the shell (a shell sign in).
+func (s *Service) Callback(ctx context.Context, cookieState, queryState, userID, secret string, providerFailed bool) (CallbackResult, error) {
 	if cookieState == "" || queryState == "" || subtle.ConstantTimeCompare([]byte(cookieState), []byte(queryState)) != 1 {
-		return s.refuseCallback(ctx, queryState, "", "state_mismatch")
+		_, _, err := s.refuseCallback(ctx, queryState, "", "state_mismatch")
+		return CallbackResult{}, err
 	}
 	hash := hashID(queryState)
 	if !s.redirectsOpen(ctx) {
-		return "", Identity{}, ErrUnavailable
+		return CallbackResult{}, ErrUnavailable
 	}
 	pending, claimed, err := s.store.ClaimPending(ctx, hash, s.now().UTC())
 	if err != nil {
-		return "", Identity{}, err
+		return CallbackResult{}, err
 	}
 	if !claimed {
-		return s.refuseCallback(ctx, queryState, "", "state_unusable")
+		_, _, err := s.refuseCallback(ctx, queryState, "", "state_unusable")
+		return CallbackResult{}, err
 	}
 	method := pending.Method
+	// A refusal after the claim sends a shell back to its own target with
+	// one fixed word, so its system browser does not land on the web page.
+	refusal := CallbackResult{}
+	if pending.ClientKind == "shell" {
+		refusal.ShellRedirect = pending.ReturnTarget + "?error=refused"
+	}
 	refuse := func(reason string, err error) (string, Identity, error) {
 		s.auditEvent(ctx, "staff.sign_in_refused", callbackAttempt(hash), "", map[string]any{
 			"reason": reason, "method": method, "client_kind": pending.ClientKind,
@@ -205,7 +231,8 @@ func (s *Service) Callback(ctx context.Context, cookieState, queryState, userID,
 		return "", Identity{}, err
 	}
 	if providerFailed || userID == "" || secret == "" {
-		return refuse("provider_failed", ErrRefused)
+		_, _, err := refuse("provider_failed", ErrRefused)
+		return refusal, err
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.set.CallTimeout)
 	aws, err := s.rdir.CreateSessionFromToken(cctx, userID, secret)
@@ -213,19 +240,30 @@ func (s *Service) Callback(ctx context.Context, cookieState, queryState, userID,
 	if err != nil {
 		var ae *appwrite.Error
 		if errors.As(err, &ae) && ae.StatusCode >= 400 && ae.StatusCode < 500 && ae.StatusCode != http.StatusTooManyRequests {
-			return refuse("bad_token", ErrRefused)
+			_, _, err := refuse("bad_token", ErrRefused)
+			return refusal, err
 		}
 		s.log.Warn("appwrite token exchange unavailable", "error", err)
-		return "", Identity{}, ErrUnavailable
+		return CallbackResult{}, ErrUnavailable
 	}
 	id, who, err := s.admitSession(ctx, aws, pending.ClientKind, refuse)
 	if err != nil {
-		return "", Identity{}, err
+		if errors.Is(err, ErrRefused) {
+			return refusal, err
+		}
+		return CallbackResult{}, err
+	}
+	if pending.ClientKind == "shell" {
+		target, err := s.shellCallbackDone(ctx, hash, pending, who, aws.UserID)
+		if err != nil {
+			return refusal, err
+		}
+		return CallbackResult{Identity: who, ShellRedirect: target}, nil
 	}
 	if err := s.store.AttachPerson(ctx, hash, who.Sub, aws.UserID); err != nil {
 		s.log.Warn("recording the person on the pending sign in failed", "error", err)
 	}
-	return id, who, nil
+	return CallbackResult{SessionID: id, Identity: who}, nil
 }
 
 func callbackAttempt(stateHash []byte) uuid.UUID {
