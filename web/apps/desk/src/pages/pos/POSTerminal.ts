@@ -18,7 +18,7 @@ import { CustomerService } from '../../services/CustomerService';
 import type { ShipTo } from '../../types/customer';
 import {
   chargeRefusal, standingOf, money, PO_REFUSAL, JOB_REFUSAL, verdictLine, waysForward, wayLabel, buyerRefusal, checkRefusal,
-  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, type CheckIDRule,
+  storeCreditOffer, tenderMethods, idRefusal, idRequired, idRequiredWords, holdStanding, cardRefusal, type CheckIDRule,
 } from './standing';
 import { differenceOf, exchangeTotals, reasonLabel, returnRefusal } from './exchange';
 import { signatureRefusal, sealedWords } from './signatureLogic';
@@ -1112,6 +1112,11 @@ export class POSTerminal extends LitElement {
     }
   }
 
+  /** Why Card is not offered, or null when it is: the register has no card terminal (CP-05 A1). */
+  private get _cardRefusal(): string | null {
+    return cardRefusal(this._register);
+  }
+
   /** Why the charge to the account is not offered, or null when it is. */
   private get _accountRefusal(): string | null {
     // What is left to charge once the cash, check or card tenders are taken.
@@ -1600,8 +1605,9 @@ export class POSTerminal extends LitElement {
         return open && (this._step === 'payment' || this._step === 'summary');
       case 'tender-cash':
       case 'tender-check':
-      case 'tender-card':
         return till && open && hasLines && this._changing.size === 0;
+      case 'tender-card':
+        return till && open && hasLines && this._changing.size === 0 && this._cardRefusal === null;
       case 'tender-account':
         return till && open && hasLines && this._changing.size === 0 && this._accountRefusal === null;
       case 'pay':
@@ -1934,6 +1940,13 @@ export class POSTerminal extends LitElement {
     if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
+      if (refusal) {
+        this._error = refusal;
+        return;
+      }
+    }
+    if (method === 'card') {
+      const refusal = this._cardRefusal;
       if (refusal) {
         this._error = refusal;
         return;
@@ -3368,13 +3381,14 @@ export class POSTerminal extends LitElement {
           <div class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">How is the customer paying?</div>
           <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
             ${tenderMethods(this._standing).map((m) => {
-              const refused = m === 'account' ? this._accountRefusal : null;
+              const refused = m === 'account' ? this._accountRefusal : m === 'card' ? this._cardRefusal : null;
               const chosen = this._tenderMethod === m && this._till !== null;
               const noCredit = m === 'store_credit' && storeCreditOffer(this._standing, owed) <= 0;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
                   ?disabled=${this._till === null || !hasLines || !open || refused !== null || noCredit}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account')
+                    : m === 'card' ? (refused ?? '')
                     : m === 'store_credit' ? `The account holds ${money(this._standing?.open_credit_memo_cents ?? 0)} of store credit` : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
                   class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'store_credit' ? 'col-span-2 min-[768px]:col-span-1 ' : ''}${m === 'account' || m === 'store_credit' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
@@ -3382,6 +3396,8 @@ export class POSTerminal extends LitElement {
                 </button>`;
             })}
           </div>
+          ${this._cardRefusal !== null && this._till !== null ? html`
+            <p class="mt-2 text-xs text-slate-400" data-testid="pos-card-refusal">${this._cardRefusal}</p>` : nothing}
           ${accountWhy !== null ? html`
             <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400" data-testid="pos-account-refusal">
               <p>${accountWhy}</p>
