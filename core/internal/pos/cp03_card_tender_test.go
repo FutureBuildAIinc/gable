@@ -146,3 +146,18 @@ func TestCP03_RacingCardCompletesChargeTheCardOnce(t *testing.T) {
 		t.Fatalf("the stored CARD tender is %d cents, wanted %d once", got, total)
 	}
 }
+
+// A card under the total beside a few coins whose exact cash leg rounds to
+// nothing (CP-18): the pre-check takes the 2 cents exactly, as the transaction
+// does, so the sale completes and the card is not called over.
+func TestCP03_RoundedCoinsBesideAnUnderCardPass(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.noTax()
+	f.setRounding("NEAREST_5_CENTS")
+	saleID, _ := f.saleAtPrice(103)
+	r := f.completeSale(saleID, tender("card", 101), tender("cash", 5))
+	if r.status != http.StatusOK {
+		t.Fatalf("a card of 101 on a 103 sale with 5 cents cash = %d, wanted 200: %s", r.status, r.raw)
+	}
+}
