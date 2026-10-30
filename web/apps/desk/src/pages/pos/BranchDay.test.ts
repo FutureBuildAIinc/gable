@@ -73,6 +73,16 @@ describe('the branch end of day', () => {
     expect(text(q(el, '[data-testid="day-card"]'))).toBe('$0.00');
   });
 
+  it('stacks each register row as labelled lines under sm so the table never spills at 390', async () => {
+    handler = () => jsonResponse(day());
+    const el = await mountAsync<GableBranchDay>('gable-branch-day');
+    const table = q(el, '[data-testid="day-registers"]');
+    expect(table.className).toContain('block sm:table');
+    const labels = [...q(el, '[data-testid="day-register-REG-01"]').querySelectorAll('td')].map((td) => td.getAttribute('data-label'));
+    expect(labels).toEqual(['Register', 'Drawers', 'Sales', 'Expected cash', 'Counted cash', 'Over / short']);
+    expect(q(el, '[data-testid="day-slip-input"]').className).toContain('w-full');
+  });
+
   it('closes the day with the slip reference once every drawer is settled', async () => {
     handler = (method) => (method === 'POST' ? jsonResponse(day({ close: closed }), 201) : jsonResponse(day()));
     const el = await mountAsync<GableBranchDay>('gable-branch-day');
