@@ -103,6 +103,7 @@
         "subtotal_cents": 1045,
         "tax_cents": 0,
         "tax_exempt": true,
+        "tax_lines": null,
         "tax_rate_percent": "0",
         "tax_source": "exempt",
         "total_cents": 1045,

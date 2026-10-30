@@ -164,7 +164,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "balance_due_after_deposits_cents": 1064,
+        "balance_due_after_deposits_cents": 1065,
         "branch_id": "<id-10>",
         "confirmed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
@@ -246,11 +246,27 @@
         "ship_to_id": null,
         "status": "confirmed",
         "subtotal_cents": 950,
-        "tax_cents": 114,
+        "tax_cents": 115,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 48,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 67,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
-        "total_cents": 1064,
+        "total_cents": 1065,
         "total_commission_cents": 0,
         "total_cost_cents": 700,
         "total_margin_cents": 250,
@@ -302,7 +318,7 @@
             "is_overdue": false,
             "job_id": null,
             "number": "IN-000053",
-            "open_cents": 1064,
+            "open_cents": 1065,
             "order_id": "<id-7>",
             "origin": "order",
             "paid_at": null,
@@ -312,11 +328,12 @@
             "ship_to_id": null,
             "status": "unpaid",
             "subtotal_cents": 950,
-            "tax_cents": 114,
+            "tax_cents": 115,
             "tax_exempt": false,
+            "tax_lines": null,
             "tax_rate_percent": "12",
             "tax_source": "legacy",
-            "total_cents": 1064,
+            "total_cents": 1065,
             "updated_at": "<ts+0d>",
             "void_reason": null,
             "voided_at": null,
@@ -349,8 +366,8 @@
         "payment_terms": "NET30",
         "status": "UNPAID",
         "subtotal": 9.5,
-        "tax_amount": 1.14,
-        "total_amount": 10.64,
+        "tax_amount": 1.15,
+        "total_amount": 10.65,
         "updated_at": "<ts-106751d>"
       }
     }

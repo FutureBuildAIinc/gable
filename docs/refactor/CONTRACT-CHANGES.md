@@ -16,6 +16,11 @@ get an entry.
 
 | Item | Route / seam | Before | After |
 |---|---|---|---|
+| CP-14 A1 | `GET`, `PUT /api/v1/dealer-profile` (migration 154) | The profile carried no GST/HST registration | The profile carries `gst_hst_number` (nine digits, RT, four digits, stored normalized; spaces and hyphens are dropped; anything else is a 400 naming the field) and `gst_hst_not_registered` (the small supplier switch); the two never hold together (400); a write that leaves either out keeps it |
+| CP-14 A1 | `GET /api/v1/tax/setup` | No such route | New route (admin, owner, finance): the Tech Admin tax setup panel's standing warnings: whether a branch is Canadian, a missing GST/HST number, the provinces of active Canadian ship-tos no zone covers, and the count of ship-tos with no country or no province |
+| CP-14 A1 | the tax of every Canadian document: order save and confirm, the invoice from order, the counter's running total, completion and exchange preview; `tax_lines` on `Invoice`, `InvoiceSummary`, `Order`, `OrderSummary`, `PosTransaction` | A Canadian branch charged its combined `default_tax_rate` rounded once and printed one tax line; a delivery whose ship-to no zone covered fell to the typed or branch rate | A branch whose country resolves to CA charges its own province's zone on a pickup and the destination's zone on a delivery, each part (GST, PST) rounded on its own, the tax their sum, frozen with each part's cents in `tax_rate_parts`; the source stays `branch_rate` on a pickup. No zone answering is 409 `tax_parts_not_configured` with words naming the province and, for a delivery, the two ways forward; a ship-to with no province is refused in its own words. The not registered switch drops the GST part. `tax_lines` (`DocumentTaxLine`: part, label, rate_percent, cents, exempt) carries the frozen parts, null on a document with none. A US branch is unchanged |
+| CP-14 A1 | `GET /api/v1/pos/offline/snapshot`, `POST /api/v1/pos/sync` | The snapshot carried the branch rate alone; a signed sale carried one tax figure | A Canadian branch's snapshot carries its zone's parts with labels (`zone_id`, `data_source`, `country`, `province`, `parts`), the branch rate being their sum, and an unzoned Canadian branch is refused the snapshot; a signed Canadian sale carries `tax_lines`, checked part by part against the snapshot (any difference is `tax_unverified`), and a posted sale freezes them on its invoice. A US snapshot and sale are unchanged |
+| CP-14 A1 | the invoice PDF (print, email, portal download) and the 80mm receipt | One `TAX @ 12%` line on every BC document, no registration number | A Canadian document prints each part as its own line (`GST 5%: $1.65`, `PST 7%: $2.31`) at every total, and the GST/HST number under the dealer block (`GST/HST No. 123456789 RT0001`), or `GST/HST No.: not on file`, or nothing for a dealer marked not registered. The goldens were re-recorded: every changed body is listed under "CP-14 A1 golden refresh" below |
 | CP-S09 (CP-14) | `POST /api/v1/invoices/{id}/email`, `POST /api/v1/pos/transactions/{id}/receipt/email`, `POST /api/v1/ar/customers/{id}/statement/email`, `POST /api/v1/quotes/{id}/email` (the 202 body), `GET /api/v1/email-deliveries` (the `status` filter, the `EmailDelivery.status` vocabulary and who may follow a send), migration 150 | The 202 answered `{"status":"queued"}` alone, so a desk could only guess success on it; the delivery row was written once, after the send, with only `sent` or `failed`, and a send the log sender took (no SMTP on the server) recorded `sent` with a sender answer that disclosed nothing had left the process | Every email route's 202 (invoice, receipt, statement and quote) carries `delivery_id`, the row already written `queued` on the sending thread (absent only when the row could not be written); the send resolves that row to `sent` (the SMTP server's own answer), `logged` (the log sender took it, nothing left the process) or `failed` (the error). The list filter `status` accepts `queued`, `sent`, `logged` and `failed`. A read that names a `document_id` is also open to sales and cashier, held to the document types the role sends (sales: invoice, quote, statement; cashier: invoice), so it must name a `document_type` in that set or answer 403; admin, owner and finance read every type, and the whole list stays theirs alone. The `document_invoice` golden was re-recorded for the `delivery_id` the `invoice.email` step's 202 now carries |
 | CP-17a | POST /api/v1/pos/transactions/{id}/complete | The tenders carried no instrument kind, the body carried no payer and no avoidance mark, and no completion was ever refused for a large cash crossing | A check tender may name its instrument (personal_check, cashiers_check, bank_draft, travelers_check, money_order); the body may carry the captured payer (name, address, occupation, date of birth, ID kind and number, taxpayer identification number, third party flag) and the manager's suspected_avoidance mark. A payment that takes the payer over the branch country's large cash threshold refuses 409 with the blocker payer_details_required until the payer is captured, and the capture (the counted tenders with their classification reason, the payer row with the sensitive values sealed, the crossing's event row) rides the completion's transaction |
 | CP-17a | POST /api/v1/pos/large-cash/preview | No such route: the counter had no way to ask what a payment's large cash treatment would be | New route: the server classifies the named tenders against the sale it holds under the branch's country rule and answers the rule family, the counted cash, the aggregate, the threshold and its comparator shape, whether the payer's details are required, the fields the rule needs, and (for a Canadian branch) the note that the capture is for the dealer's own records and is not a FINTRAC report. The route takes the counter's roles (admin, owner, cashier) behind the branch middleware, and a sale outside the caller's branches answers 404 as a missing one does; a branch bound key is refused |
@@ -547,3 +552,130 @@ get an entry.
 | CP-13-O2 (ADR 0011 slice O2) | new routes `GET` and `POST /api/v1/pos/offline/registers/{id}/device`, `POST /api/v1/pos/offline/registers/{id}/device/revoke`, `GET /api/v1/pos/offline/snapshot`; schemas `PosRegisterDevice`, `PosRegisterEnrolment`, `PosRegisterSessionsEnded`, `PosEnrolDeviceRequest`, `PosRevokeDeviceRequest`, `PosOfflineSnapshot` | No route enrolled or revoked a register's device, and no route issued an offline snapshot; `pos_register_devices` and `pos_offline_snapshots` (migration 146) had no writer | The device read (admin, owner and finance) answers the register's live enrolment, its last revoked one and `next_epoch`. The enrolment and the revocation (admin and owner, never a machine key, refused to branch bound keys) take the counter PIN of an owner or admin (the step up's own check, failure count and lock: 403 `step_up_refused`, `step_up_locked`, `step_up_role`); an enrolment names the register's `next_epoch` (409 `epoch_moved`), a key never enrolled before (409 `public_key_reused`), revokes the previous key in the same transaction and starts the chain at `GENESIS`; its `previous_epoch_mark` records an `unknown_tail` exception over the numbers the server never recorded; a revocation of an epoch with no live enrolment is 409 `device_not_enrolled`; both are audited (`pos.register_device.enrolled`, `pos.register_device.revoked`) with events, and a revocation answers what it did to the register's web sessions (`sessions.supported` false while no sign in method can end them). The snapshot (the counter's person, never a machine key, held to the register's branch) is 409 `device_not_enrolled`, `money_never_queues` (policy off), `till_not_open`, `branch_rate_missing` or `queue_not_drained` (the `high_seq` query above the server's recorded mark, or an open bad copy of the epoch); it answers the document the shell's core and the sync read, with the digest as its `ETag` (304 on `If-None-Match`). No golden moves. |
 | CP-13-C2 (ADR 0011 slice C2) | `POST /api/v1/pos/sync` (new body and a 200 answer; golden `pos_sync` re-recorded); `GET /api/v1/pos/till/{id}/report` and the close's report gain `offline_held_by_method`; schemas `PosSyncRequest` (rewritten), `PosOfflineSignedSale`, `PosSyncResult`, `PosSyncItemOutcome` (new), `PosSyncSale` (removed) | The route refused every batch that parsed with 409 `money_never_queues` (S6) and took the retired unsigned shape (`items[].items` lines, `items[].tenders`); a machine key reached it; a refused offline sale's money was in no drawer figure | The body is the register's signed batch: `batch_id`, `register_id`, `device_epoch` (one or more), `reported_seq` (zero or more, the device's own mark) and `items`, each the signed sale exactly as the device signed it. The sync is a person's act: a machine key is 403 before anything is read, and the register's branch wall holds the caller. A branch with no offline policy keeps 409 `money_never_queues` (the message now says at this branch) before anything is written, so the golden's three batches keep their refusal; the scenario moved onto the signed shape, its validation steps name the new required fields, and a step for the missing epoch and mark was added (re-recorded for that reason). With the policy on, the answer is 200: every item's outcome (`posted`, `duplicate`, `refused`, `held`, `resolved` for an exception a manager resolved with nothing posted, so the register settles it, or `error` for an item the server could not judge, sent again next sync), the mark the server confirms (`confirmed_seq`) and `open_exception_count`, the register's exception rows waiting on a manager with nothing posted. A sale that cannot be posted keeps its money visible (CP-13 OW): the till report's `expected_by_method` carries the cash and check of the session's open or held exception rows with nothing posted (a bad copy and a replay mismatch carry none), shown apart in `offline_held_by_method`, until a resolution posts the sale or writes it off. |
 | CP-13-C2 (ADR 0011 5.3) | `POST /api/v1/pos/transactions/{id}/replaced-cart-answer` (new) | On reconnect the counter had nowhere to record whether an offline sale that abandoned the cart whose result was unknown was the same customer and goods | New route, a person's act (a machine key is 403; REFUSED to a branch bound key), held to the sale's branch: body `same_goods`; a no sets the offline sale's `different_customer`, so the manager's list shows it beside the abandoned cart; either answer writes a `pos.offline_sale.replaced_cart_answered` audit row; answered once (409 `answer_recorded`), and refused 409 `not_replacing`, `cart_not_abandoned` or `already_declared` with nothing written. |
+
+## CP-14 A1 golden refresh
+
+The characterization fixture is the demo's BC dealer (the demo seed, KEL-MAIN in Kelowna, `country.default` CA), so
+CP-14 A1 changes its documents on purpose (lead rulings on both stops, option A). The seed now writes the BC zone,
+prices its historical invoices part by part and names BC and CA on its ship-tos, so the seed wide AR and GL totals
+move by the cents per part rounding makes. Every changed body, old to new:
+
+- **clockwindow.json**
+  - `reports.ar_aging`: `buckets[4]/current` 7931.32 to 7931.33
+  - `reports.ar_aging`: `buckets[4]/total` 11719.78 to 11719.79
+  - `reports.ar_aging`: `grand_total` 118664.31 to 118664.31999999999
+  - `reports.ar_aging`: `total_current` 77688.46 to 77688.47
+  - `reports.sales_summary`: `total_collected` 77305.25 to 77305.26
+  - `reports.sales_summary`: `total_invoiced` 95212.68 to 95212.7
+  - `dashboard.summary`: `outstanding_ar` 10860798 to 10860799
+  - `dashboard.revenue_trend`: `[1]/revenue` 1259336 to 1259337
+  - `dashboard.top_customers`: `[2]/total_revenue` 1443590 to 1443592
+  - `dashboard.order_activity`: `recent_orders[2]/total_amount` 616 to 617
+  - `gl.trial_balance`: `[0]/debit` 17055158 to 17055159
+  - `gl.trial_balance`: `[1]/debit` 5908199 to 5908200
+  - `gl.trial_balance`: `[2]/debit` 8396128 to 8396129
+  - `gl.trial_balance`: `[3]/credit` 17040877 to 17040878
+  - `gl.trial_balance`: `[3]/debit` 21129134 to 21129136
+  - `gl.trial_balance`: `[4]/credit` 5949199 to 5949200
+  - `gl.trial_balance`: `[4]/debit` 7119104 to 7119105
+  - `gl.trial_balance`: `[5]/credit` 8396128 to 8396129
+  - `gl.trial_balance`: `[5]/debit` 12123476 to 12123477
+  - `gl.trial_balance`: `[7]/credit` 2263490 to 2263492
+  - `gl.trial_balance`: `[8]/credit` 762760 to 762761
+  - `gl.trial_balance`: `[9]/credit` 1298943 to 1298944
+  - `gl.trial_balance`: `[10]/credit` 17048302 to 17048303
+  - `gl.trial_balance`: `[10]/debit` 17045802 to 17045803
+  - `gl.trial_balance`: `[11]/credit` 5908199 to 5908200
+  - `gl.trial_balance`: `[11]/debit` 5908199 to 5908200
+  - `gl.trial_balance`: `[12]/credit` 8396128 to 8396129
+  - `gl.trial_balance`: `[12]/debit` 8396128 to 8396129
+  - `gl.balance_sheet`: `assets[0]/amount` 31354485 to 31354488
+  - `gl.balance_sheet`: `assets[1]/amount` 8985510 to 8985511
+  - `gl.balance_sheet`: `liabilities[0]/amount` 4325193 to 4325197
+  - `gl.balance_sheet`: `total_assets` 40337895 to 40337899
+  - `gl.balance_sheet`: `total_liabilities` 4327693 to 4327697
+- **delivery_delivered.json**
+  - `order.create.c_delivered`: `tax_lines` added, null
+- **deposit.json**
+  - `deposit.order.create`: `tax_lines` added: GST 5% 2475, PST 7% 3465
+  - `deposit.order.confirm`: `tax_lines` added: GST 5% 2475, PST 7% 3465
+- **document_invoice.json**
+  - `document.print_invoice`: `binary/length` 8688 to 9328
+  - `document.print_invoice`: `binary/text_sha256` "039e6c8e250e79291261219bd717746575405af2ad746ac6fce29bd4c4b6bc81" to "bf2277086cfe782d28b6ab69b8a24b683da453fcbf10251a294acfeea8ede567"
+- **gl.json**
+  - `gl.accounts.list`: `items[0]/balance` 31341985 to 31341988
+  - `gl.accounts.list`: `items[2]/balance` 8981814 to 8981815
+  - `gl.accounts.list`: `items[9]/balance` -4324797 to -4324801
+- **gl_accounts_entries.json**
+  - `gl.journal_entry.list`: `items[46]/total_credit` 1528233 to 1528234
+  - `gl.journal_entry.list`: `items[46]/total_debit` 1528233 to 1528234
+  - `gl.journal_entry.list`: `items[47]/total_credit` 1528233 to 1528234
+  - `gl.journal_entry.list`: `items[47]/total_debit` 1528233 to 1528234
+  - `gl.journal_entry.list`: `items[48]/total_credit` 1528233 to 1528234
+  - `gl.journal_entry.list`: `items[48]/total_debit` 1528233 to 1528234
+- **invoice.json**
+  - `order.confirm`: `tax_lines` added: GST 5% 165, PST 7% 231
+  - `order.allocate`: `tax_lines` added: GST 5% 165, PST 7% 231
+  - `order.fulfill`: `tax_lines` added: GST 5% 165, PST 7% 231
+  - `invoice.list_newest`: `items[0]/tax_lines` added: GST 5% 165, PST 7% 231
+  - `invoice.get`: `tax_lines` added: GST 5% 165, PST 7% 231
+- **order.json**
+  - `order.create`: `balance_due_after_deposits_cents` 3080 to 3081
+  - `order.create`: `tax_cents` 330 to 331
+  - `order.create`: `tax_lines` added: GST 5% 138, PST 7% 193
+  - `order.create`: `total_cents` 3080 to 3081
+  - `order.get`: `balance_due_after_deposits_cents` 3080 to 3081
+  - `order.get`: `tax_cents` 330 to 331
+  - `order.get`: `tax_lines` added: GST 5% 138, PST 7% 193
+  - `order.get`: `total_cents` 3080 to 3081
+  - `order.update`: `tax_lines` added: GST 5% 165, PST 7% 231
+  - `order.list.status_filter`: `items[0]/tax_lines` added: GST 5% 165, PST 7% 231
+  - `order.list.status_filter`: `items[1]/tax_lines` added: GST 5% 550, PST 7% 770
+  - `order.list`: `items[0]/tax_lines` added: GST 5% 165, PST 7% 231
+  - `order.create.for_cancel`: `balance_due_after_deposits_cents` 616 to 617
+  - `order.create.for_cancel`: `tax_cents` 66 to 67
+  - `order.create.for_cancel`: `tax_lines` added: GST 5% 28, PST 7% 39
+  - `order.create.for_cancel`: `total_cents` 616 to 617
+  - `order.cancel`: `balance_due_after_deposits_cents` 616 to 617
+  - `order.cancel`: `tax_cents` 66 to 67
+  - `order.cancel`: `tax_lines` added: GST 5% 28, PST 7% 39
+  - `order.cancel`: `total_cents` 616 to 617
+- **portal_billing.json**
+  - `portal_billing.erp_confirm`: `balance_due_after_deposits_cents` 1064 to 1065
+  - `portal_billing.erp_confirm`: `tax_cents` 114 to 115
+  - `portal_billing.erp_confirm`: `tax_lines` added: GST 5% 48, PST 7% 67
+  - `portal_billing.erp_confirm`: `total_cents` 1064 to 1065
+  - `portal_billing.erp_invoices`: `items[0]/open_cents` 1064 to 1065
+  - `portal_billing.erp_invoices`: `items[0]/tax_cents` 114 to 115
+  - `portal_billing.erp_invoices`: `items[0]/tax_lines` added, null
+  - `portal_billing.erp_invoices`: `items[0]/total_cents` 1064 to 1065
+  - `portal_billing.invoice.get`: `tax_amount` 1.14 to 1.15
+  - `portal_billing.invoice.get`: `total_amount` 10.64 to 10.65
+- **portal_orders.json**
+  - `portal_orders.list.by_project`: `[0]/total_amount` 10.64 to 10.65
+  - `portal_orders.get`: `total_amount` 10.64 to 10.65
+  - `portal_orders.project.detach`: `total_amount` 10.64 to 10.65
+  - `portal_orders.project.attach`: `total_amount` 10.64 to 10.65
+- **pos.json**
+  - `pos.transaction.start`: `tax_lines` added, null
+- **pos_sync.json**
+  - `pos.transaction.list.after_sync`: `items[3]/total_cents` 4043 to 4044
+- **pos_transactions.json**
+  - `pos.transaction.start.c`: `tax_lines` added, null
+  - `pos.transaction.start.c_void`: `tax_lines` added, null
+  - `pos.transaction.start.c_voidpaid`: `tax_lines` added, null
+  - `pos.item.add`: `tax_lines` added, null
+  - `pos.item.add.second`: `tax_lines` added, null
+  - `pos.item.remove`: `tax_lines` added, null
+  - `pos.transaction.get`: `tax_lines` added, null
+  - `pos.transaction.complete`: `tax_lines` added, null
+  - `pos.item.add.void_tx`: `tax_cents` 433 to 434
+  - `pos.item.add.void_tx`: `tax_lines` added, null
+  - `pos.item.add.void_tx`: `total_cents` 4043 to 4044
+  - `pos.item.add.voidpaid_tx`: `tax_lines` added, null
+  - `pos.transaction.complete.voidpaid_split_tender`: `tax_lines` added: GST 5% 26, PST 7% 37
+  - `pos.transaction.void.completed`: `tax_lines` added: GST 5% 26, PST 7% 37
+  - `pos.transaction.get.after`: `tax_lines` added, null
+  - `pos.transaction.list.after`: `items[3]/total_cents` 4043 to 4044
+- **quote.json**
+  - `quote.convert`: `tax_lines` added: GST 5% 550, PST 7% 770

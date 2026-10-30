@@ -98,6 +98,7 @@
         "status": "open",
         "subtotal_cents": 0,
         "tax_cents": 0,
+        "tax_lines": null,
         "tenders": [],
         "till_session_id": "<id-3>",
         "total_cents": 0

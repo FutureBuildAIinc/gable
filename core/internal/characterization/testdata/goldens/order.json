@@ -19,7 +19,7 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "balance_due_after_deposits_cents": 3080,
+        "balance_due_after_deposits_cents": 3081,
         "branch_id": "<id-3>",
         "confirmed_at": null,
         "created_at": "<ts+0d>",
@@ -101,11 +101,27 @@
         "ship_to_id": null,
         "status": "draft",
         "subtotal_cents": 2750,
-        "tax_cents": 330,
+        "tax_cents": 331,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 138,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 193,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
-        "total_cents": 3080,
+        "total_cents": 3081,
         "total_commission_cents": 0,
         "total_cost_cents": 1750,
         "total_margin_cents": 1000,
@@ -196,7 +212,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "balance_due_after_deposits_cents": 3080,
+        "balance_due_after_deposits_cents": 3081,
         "branch_id": "<id-3>",
         "confirmed_at": null,
         "created_at": "<ts+0d>",
@@ -278,11 +294,27 @@
         "ship_to_id": null,
         "status": "draft",
         "subtotal_cents": 2750,
-        "tax_cents": 330,
+        "tax_cents": 331,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 138,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 193,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
-        "total_cents": 3080,
+        "total_cents": 3081,
         "total_commission_cents": 0,
         "total_cost_cents": 1750,
         "total_margin_cents": 1000,
@@ -396,6 +428,22 @@
         "subtotal_cents": 3300,
         "tax_cents": 396,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 165,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 231,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
         "total_cents": 3696,
@@ -506,6 +554,22 @@
             "subtotal_cents": 3300,
             "tax_cents": 396,
             "tax_exempt": false,
+            "tax_lines": [
+              {
+                "cents": 165,
+                "exempt": false,
+                "label": "GST",
+                "part": "GOODS_TAX",
+                "rate_percent": "5"
+              },
+              {
+                "cents": 231,
+                "exempt": false,
+                "label": "PST",
+                "part": "PROVINCIAL_SALES_TAX",
+                "rate_percent": "7"
+              }
+            ],
             "tax_rate_percent": "12",
             "tax_source": "branch_rate",
             "total_cents": 3696,
@@ -542,6 +606,22 @@
             "subtotal_cents": 11000,
             "tax_cents": 1320,
             "tax_exempt": false,
+            "tax_lines": [
+              {
+                "cents": 550,
+                "exempt": false,
+                "label": "GST",
+                "part": "GOODS_TAX",
+                "rate_percent": "5"
+              },
+              {
+                "cents": 770,
+                "exempt": false,
+                "label": "PST",
+                "part": "PROVINCIAL_SALES_TAX",
+                "rate_percent": "7"
+              }
+            ],
             "tax_rate_percent": "12",
             "tax_source": "branch_rate",
             "total_cents": 12320,
@@ -635,6 +715,22 @@
             "subtotal_cents": 3300,
             "tax_cents": 396,
             "tax_exempt": false,
+            "tax_lines": [
+              {
+                "cents": 165,
+                "exempt": false,
+                "label": "GST",
+                "part": "GOODS_TAX",
+                "rate_percent": "5"
+              },
+              {
+                "cents": 231,
+                "exempt": false,
+                "label": "PST",
+                "part": "PROVINCIAL_SALES_TAX",
+                "rate_percent": "7"
+              }
+            ],
             "tax_rate_percent": "12",
             "tax_source": "branch_rate",
             "total_cents": 3696,
@@ -669,7 +765,7 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "balance_due_after_deposits_cents": 616,
+        "balance_due_after_deposits_cents": 617,
         "branch_id": "<id-3>",
         "confirmed_at": null,
         "created_at": "<ts+0d>",
@@ -751,11 +847,27 @@
         "ship_to_id": null,
         "status": "draft",
         "subtotal_cents": 550,
-        "tax_cents": 66,
+        "tax_cents": 67,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 28,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 39,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
-        "total_cents": 616,
+        "total_cents": 617,
         "total_commission_cents": 0,
         "total_cost_cents": 350,
         "total_margin_cents": 200,
@@ -778,7 +890,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "balance_due_after_deposits_cents": 616,
+        "balance_due_after_deposits_cents": 617,
         "branch_id": "<id-3>",
         "confirmed_at": null,
         "created_at": "<ts+0d>",
@@ -860,11 +972,27 @@
         "ship_to_id": null,
         "status": "cancelled",
         "subtotal_cents": 550,
-        "tax_cents": 66,
+        "tax_cents": 67,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 28,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 39,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
-        "total_cents": 616,
+        "total_cents": 617,
         "total_commission_cents": 0,
         "total_cost_cents": 350,
         "total_margin_cents": 200,

@@ -72,13 +72,13 @@
             "total": 12109.05
           },
           {
-            "current": 7931.32,
+            "current": 7931.33,
             "customer_id": "<customer>",
             "customer_name": "<customer>",
             "days_31_60": 0,
             "days_61_90": 0,
             "over_90": 3788.46,
-            "total": 11719.78
+            "total": 11719.79
           },
           {
             "current": 4717.65,
@@ -126,10 +126,10 @@
             "total": 36.96
           }
         ],
-        "grand_total": 118664.31,
+        "grand_total": 118664.31999999999,
         "total_31_60": 8994.43,
         "total_61_90": 12373.56,
-        "total_current": 77688.46,
+        "total_current": 77688.47,
         "total_over_90": 19607.86
       }
     }
@@ -148,8 +148,8 @@
         "invoice_count": 12,
         "outstanding_ar": 42146.3,
         "start_date": "<day-30>",
-        "total_collected": 77305.25,
-        "total_invoiced": 95212.68
+        "total_collected": 77305.26,
+        "total_invoiced": 95212.7
       }
     }
   },
@@ -164,7 +164,7 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 22,
-        "outstanding_ar": 10860798,
+        "outstanding_ar": 10860799,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
         "today_revenue": 198603,
@@ -188,7 +188,7 @@
         },
         {
           "date": "<day-2>",
-          "revenue": 1259336
+          "revenue": 1259337
         },
         {
           "date": "<day-1>",
@@ -229,7 +229,7 @@
           "customer_id": "<customer>",
           "customer_name": "<customer>",
           "order_count": "<orders>",
-          "total_revenue": 1443590
+          "total_revenue": 1443592
         },
         {
           "customer_id": "<customer>",
@@ -277,7 +277,7 @@
             "customer_name": "<customer>",
             "order_id": "<id-4>",
             "status": "CANCELLED",
-            "total_amount": 616
+            "total_amount": 617
           },
           {
             "created_at": "<ts+0d>",
@@ -356,7 +356,7 @@
           "branch_id": "<id-13>",
           "credit": 5000,
           "currency": "USD",
-          "debit": 17055158
+          "debit": 17055159
         },
         {
           "account_code": "1010",
@@ -366,7 +366,7 @@
           "branch_id": "<id-14>",
           "credit": 0,
           "currency": "USD",
-          "debit": 5908199
+          "debit": 5908200
         },
         {
           "account_code": "1010",
@@ -376,7 +376,7 @@
           "branch_id": "<id-15>",
           "credit": 0,
           "currency": "USD",
-          "debit": 8396128
+          "debit": 8396129
         },
         {
           "account_code": "1020",
@@ -384,9 +384,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-13>",
-          "credit": 17040877,
+          "credit": 17040878,
           "currency": "USD",
-          "debit": 21129134
+          "debit": 21129136
         },
         {
           "account_code": "1020",
@@ -394,9 +394,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-14>",
-          "credit": 5949199,
+          "credit": 5949200,
           "currency": "USD",
-          "debit": 7119104
+          "debit": 7119105
         },
         {
           "account_code": "1020",
@@ -404,9 +404,9 @@
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
           "branch_id": "<id-15>",
-          "credit": 8396128,
+          "credit": 8396129,
           "currency": "USD",
-          "debit": 12123476
+          "debit": 12123477
         },
         {
           "account_code": "1030",
@@ -424,7 +424,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-13>",
-          "credit": 2263490,
+          "credit": 2263492,
           "currency": "USD",
           "debit": 0
         },
@@ -434,7 +434,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-14>",
-          "credit": 762760,
+          "credit": 762761,
           "currency": "USD",
           "debit": 0
         },
@@ -444,7 +444,7 @@
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
           "branch_id": "<id-15>",
-          "credit": 1298943,
+          "credit": 1298944,
           "currency": "USD",
           "debit": 0
         },
@@ -454,9 +454,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-13>",
-          "credit": 17048302,
+          "credit": 17048303,
           "currency": "USD",
-          "debit": 17045802
+          "debit": 17045803
         },
         {
           "account_code": "2200",
@@ -464,9 +464,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-14>",
-          "credit": 5908199,
+          "credit": 5908200,
           "currency": "USD",
-          "debit": 5908199
+          "debit": 5908200
         },
         {
           "account_code": "2200",
@@ -474,9 +474,9 @@
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
           "branch_id": "<id-15>",
-          "credit": 8396128,
+          "credit": 8396129,
           "currency": "USD",
-          "debit": 8396128
+          "debit": 8396129
         },
         {
           "account_code": "4010",
@@ -575,13 +575,13 @@
             "account_code": "1010",
             "account_id": "<id-12>",
             "account_name": "Cash",
-            "amount": 31354485
+            "amount": 31354488
           },
           {
             "account_code": "1020",
             "account_id": "<id-16>",
             "account_name": "Accounts Receivable",
-            "amount": 8985510
+            "amount": 8985511
           },
           {
             "account_code": "1030",
@@ -597,7 +597,7 @@
             "account_code": "2020",
             "account_id": "<id-18>",
             "account_name": "Sales Tax Payable",
-            "amount": 4325193
+            "amount": 4325197
           },
           {
             "account_code": "2200",
@@ -607,9 +607,9 @@
           }
         ],
         "retained_earnings": 36010202,
-        "total_assets": 40337895,
+        "total_assets": 40337899,
         "total_equity": 36010202,
-        "total_liabilities": 4327693
+        "total_liabilities": 4327697
       }
     }
   }

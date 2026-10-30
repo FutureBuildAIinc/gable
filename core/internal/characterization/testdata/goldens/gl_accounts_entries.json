@@ -1494,8 +1494,8 @@
             "source": "PAYMENT",
             "source_ref_id": "<id-117>",
             "status": "POSTED",
-            "total_credit": 1528233,
-            "total_debit": 1528233,
+            "total_credit": 1528234,
+            "total_debit": 1528234,
             "updated_at": "<ts-50d>"
           },
           {
@@ -1509,8 +1509,8 @@
             "source": "PAYMENT",
             "source_ref_id": "<id-119>",
             "status": "POSTED",
-            "total_credit": 1528233,
-            "total_debit": 1528233,
+            "total_credit": 1528234,
+            "total_debit": 1528234,
             "updated_at": "<ts-50d>"
           },
           {
@@ -1524,8 +1524,8 @@
             "source": "INVOICE",
             "source_ref_id": "<id-121>",
             "status": "POSTED",
-            "total_credit": 1528233,
-            "total_debit": 1528233,
+            "total_credit": 1528234,
+            "total_debit": 1528234,
             "updated_at": "<ts-57d>"
           },
           {

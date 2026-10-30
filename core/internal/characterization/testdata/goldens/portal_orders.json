@@ -366,7 +366,7 @@
           "project_id": "<id-4>",
           "project_name": "Golden Orders Project",
           "status": "DRAFT",
-          "total_amount": 10.64,
+          "total_amount": 10.65,
           "updated_at": "<ts+0d>"
         }
       ]
@@ -465,7 +465,7 @@
         "project_id": "<id-4>",
         "project_name": "Golden Orders Project",
         "status": "DRAFT",
-        "total_amount": 10.64,
+        "total_amount": 10.65,
         "updated_at": "<ts+0d>"
       }
     }
@@ -537,7 +537,7 @@
         "project_id": null,
         "project_name": null,
         "status": "DRAFT",
-        "total_amount": 10.64,
+        "total_amount": 10.65,
         "updated_at": "<ts+0d>"
       }
     }
@@ -569,7 +569,7 @@
         "project_id": "<id-4>",
         "project_name": "Golden Orders Project",
         "status": "DRAFT",
-        "total_amount": 10.64,
+        "total_amount": 10.65,
         "updated_at": "<ts+0d>"
       }
     }

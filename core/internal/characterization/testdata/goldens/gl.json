@@ -11,7 +11,7 @@
       "body": {
         "items": [
           {
-            "balance": 31341985,
+            "balance": 31341988,
             "code": "1010",
             "created_at": "<ts+0d>",
             "description": "Cash and checking accounts",
@@ -39,7 +39,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "balance": 8981814,
+            "balance": 8981815,
             "code": "1020",
             "created_at": "<ts+0d>",
             "description": "Customer balances due",
@@ -137,7 +137,7 @@
             "updated_at": "<ts+0d>"
           },
           {
-            "balance": -4324797,
+            "balance": -4324801,
             "code": "2020",
             "created_at": "<ts+0d>",
             "description": "Collected sales tax awaiting remittance",

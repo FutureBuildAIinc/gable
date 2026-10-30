@@ -104,6 +104,22 @@
         "subtotal_cents": 49500,
         "tax_cents": 5940,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 2475,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 3465,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
         "total_cents": 55440,
@@ -212,6 +228,22 @@
         "subtotal_cents": 49500,
         "tax_cents": 5940,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 2475,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 3465,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
         "total_cents": 55440,

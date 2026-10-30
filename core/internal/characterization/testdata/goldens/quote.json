@@ -715,6 +715,22 @@
         "subtotal_cents": 11000,
         "tax_cents": 1320,
         "tax_exempt": false,
+        "tax_lines": [
+          {
+            "cents": 550,
+            "exempt": false,
+            "label": "GST",
+            "part": "GOODS_TAX",
+            "rate_percent": "5"
+          },
+          {
+            "cents": 770,
+            "exempt": false,
+            "label": "PST",
+            "part": "PROVINCIAL_SALES_TAX",
+            "rate_percent": "7"
+          }
+        ],
         "tax_rate_percent": "12",
         "tax_source": "branch_rate",
         "total_cents": 12320,
