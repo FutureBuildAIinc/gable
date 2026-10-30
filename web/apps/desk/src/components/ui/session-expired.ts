@@ -4,12 +4,11 @@
 /**
  * Rendered over the ERP surfaces when a request comes back 401.
  *
- * The ERP has no sign-in page of its own — authentication is an external
- * identity provider (the backend validates against JWKS_URL) and the bearer
- * token is placed in localStorage out of band. fetchClient used to hard-navigate
- * to `/login`, which is not in routes.ts, so an expired session showed the 404
- * page. This panel says what actually happened and offers the one recovery the
- * app can honestly perform: reload once a fresh token is in place.
+ * The desk has no sign-in page of its own: the front door at / is the one
+ * place staff sign in (ADR 0012), and the session is the cookie the core set
+ * there. fetchClient fires `gable:session-expired` on a 401 after custody has
+ * dropped its display data, and this panel says what happened and offers the
+ * recovery: go back to the door and sign in again.
  */
 import { LitElement, html } from 'lit';
 import { customElement } from 'lit/decorators.js';
@@ -37,15 +36,14 @@ export class GableSessionExpired extends LitElement {
             Your session has expired
           </h1>
           <p class="text-sm text-zinc-400">
-            The server rejected this request as unauthenticated. Sign in again
-            with your identity provider, then reload to continue. Any unsaved
-            work on this page will be lost.
+            You were signed out, or the session ran out. Sign in again to
+            continue. Any unsaved work on this page will be lost.
           </p>
           <button
-            @click=${() => window.location.reload()}
+            @click=${() => window.location.assign('/')}
             class="mt-6 inline-flex items-center gap-2 rounded-lg bg-gable-green/10 px-4 py-2 text-sm font-medium text-gable-green ring-1 ring-inset ring-gable-green/20 transition-colors hover:bg-gable-green/20"
           >
-            Reload
+            Sign in again
           </button>
         </div>
       </div>
