@@ -748,7 +748,13 @@ func TestWire_PriceWall1_NothingOfTheContractorsMarkupReachesTheDealer(t *testin
 	}
 	check("dealer accept", s.do("POST", "/api/v1/pro-projects/"+id+"/accept", asDesk, nil), true)
 	check("the converted order", s.do("GET", "/api/v1/orders/"+orderID, asDesk, nil), false)
-	check("the order list", s.do("GET", "/api/v1/orders", asDesk, nil), false)
+	// the order list is scoped to this stack's customer, so the wall holds
+	// over the test's own orders only, never over another stack's rows
+	orderList := s.do("GET", "/api/v1/orders?customer_id="+s.custA.String(), asDesk, nil)
+	check("the order list", orderList, false)
+	if !bytes.Contains(orderList.body, []byte(orderID)) {
+		t.Errorf("the order list does not hold the converted order: %s", truncate(orderList.body))
+	}
 	// The dealer's cost is the order's price: studs at the dealer's $5.50.
 	r := s.do("GET", "/api/v1/orders/"+orderID, asDesk, nil)
 	if !bytes.Contains(r.body, []byte(`"unit_price_ten_thousandths":55000`)) {
