@@ -56,8 +56,8 @@ up)
       APPWRITE_API_KEY="$(jq -r .apiKey "$APPWRITE_SEED_JSON")" \
       GABLE_PUBLIC_URL="http://127.0.0.1:$WEB_PORT" CORS_ORIGINS="http://127.0.0.1:$WEB_PORT" \
       PORT="$CORE_PORT" DATABASE_URL="$DATABASE_URL" RATE_LIMIT_PER_MINUTE=5000 \
-      PORTAL_JWT_SECRET="${PORTAL_JWT_SECRET:-e2e-portal-test-pattern-not-a-secret-0123456789}" \
-      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}" \
+      PORTAL_JWT_SECRET="${PORTAL_JWT_SECRET:-$(openssl rand -hex 32)}" \
+      PAYMENT_VAULT_KEY="${PAYMENT_VAULT_KEY:-$(openssl rand -hex 32)}" \
       setsid "$E2E_DIR/core" serve >"$E2E_DIR/core.log" 2>&1 &
   else
     PROBE_PATH=/api/v1/apps
