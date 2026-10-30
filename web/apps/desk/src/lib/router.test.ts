@@ -161,7 +161,7 @@ describe('router — navigation', () => {
   })
 })
 
-describe('router — role gate', () => {
+describe('router: role gate', () => {
   it('lets every role into a route that names none', () => {
     expect(rolesAllow(undefined, ['cashier'])).toBe(true)
     expect(rolesAllow([], ['cashier'])).toBe(true)
