@@ -3043,7 +3043,9 @@ export class POSTerminal extends LitElement {
             <gable-select .value=${this._returnMethod}
               .options=${[
                 { value: 'cash', label: 'Cash (out of the drawer)' },
-                { value: 'card', label: 'Card (back on the card)' },
+                this._cardRefusal !== null
+                  ? { value: 'card', label: `Card (${this._cardRefusal})`, disabled: true }
+                  : { value: 'card', label: 'Card (back on the card)' },
                 { value: 'account', label: 'Account credit' },
               ]}
               @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
