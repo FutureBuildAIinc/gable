@@ -231,6 +231,8 @@ export class POSTerminal extends LitElement {
   @state() private _tillReport: TillReport | null = null;
   @state() private _counts: Record<string, string> = {};
   @state() private _closeResult: TillReport | null = null;
+  // Tenders left without a count when the blind count was posted, named in the result.
+  @state() private _closeUncounted: string[] = [];
   @state() private _tillBusy = false;
   // The drawer's cash movements dialog (CP-08).
   @state() private _showMovement = false;
@@ -451,7 +453,8 @@ export class POSTerminal extends LitElement {
     }
     const cents = dollarsToCents(this._openingFloat);
     if (isNaN(cents) || cents < 0) {
-      this._error = 'Enter a valid opening float';
+      // inside the dialog: the page's error band sits under this overlay
+      this._tillFloatError = 'Enter a valid opening float, zero or more.';
       return;
     }
     try {
@@ -501,6 +504,7 @@ export class POSTerminal extends LitElement {
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
       this._closeResult = null;
+      this._closeUncounted = [];
       this._showTillClose = true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to load till report';
@@ -516,9 +520,11 @@ export class POSTerminal extends LitElement {
       const cents = dollarsToCents(val);
       if (!isNaN(cents)) counted[method] = cents;
     }
+    const uncounted = Object.keys(this._counts).filter((m) => !(m in counted));
     try {
       this._tillBusy = true;
       this._closeResult = await posService.closeTill(this._till.id, counted, '');
+      this._closeUncounted = uncounted;
       this._till = null; // session closed
       this._sale = null;
       this._completed = null;
@@ -2449,7 +2455,7 @@ export class POSTerminal extends LitElement {
       <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Opening float ($)</label>
       <input type="number" step="0.01" .value=${this._openingFloat} data-testid="till-float-amount"
         @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; this._tillFloatError = ''; }}
-        class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
+        class="placeholder:font-normal placeholder:text-sm placeholder:opacity-70 placeholder:text-[rgb(var(--gb-till-muted))]"
         style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="Type the counted amount" />
       ${this._tillFloatError ? html`<p role="alert" data-testid="till-float-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._tillFloatError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
@@ -2560,6 +2566,7 @@ export class POSTerminal extends LitElement {
             })}
           </tbody>
         </table>
+        ${this._closeUncounted.length ? html`<p data-testid="till-close-uncounted" style="margin:12px 0 0;font-size:13px;color:rgb(var(--gb-till-warn))">Not counted, posted as nothing: ${this._closeUncounted.map((m) => methodLabel(m as TenderMethod)).join(', ')}.</p>` : nothing}
         <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-top:14px">${r.sale_count} sales \u00b7 ${fmt(r.sales_total_cents)} rung \u00b7 ${fmt(r.tax_total_cents)} tax \u00b7 ${fmt(r.change_cents)} change given</div>
         <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">Done</button>
       `);

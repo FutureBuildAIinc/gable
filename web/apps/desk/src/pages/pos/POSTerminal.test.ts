@@ -2318,6 +2318,37 @@ describe('the blind count at close', () => {
   });
 });
 
+describe('Close Till and an empty count', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('says which tenders were left uncounted once the count is posted', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { cash: 25000, check: 0, card: 9000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { over_short_cents: 0, expected_by_method: { cash: 25000 }, counted_by_method: { cash: 25000 } },
+      sale_count: 2, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const inputs = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    inputs[0].value = '250.00'; inputs[0].dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    ([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const note = q(el, 'till-close-uncounted');
+    expect(note.textContent).toContain('Check');
+    expect(note.textContent).toContain('Card');
+    expect(note.textContent).not.toContain('Cash');
+    el.remove();
+  });
+});
+
 describe('PR 150 fix round 1: quantity edits, controls and the blind count', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
@@ -2712,6 +2743,33 @@ describe('the opening float field', () => {
     expect(note.getAttribute('role')).toBe('alert');
     expect(note.textContent?.toLowerCase()).toContain('opening float');
     expect(document.activeElement).toBe(q(el, 'till-float-amount'));
+    el.remove();
+  });
+
+  it('an invalid float is refused inside the dialog, not in the page band behind it', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    field.value = '-5';
+    field.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    openTillButton(el).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.openTill).not.toHaveBeenCalled();
+    const note = q(el, 'till-float-error');
+    expect(note.getAttribute('role')).toBe('alert');
+    expect(note.textContent?.toLowerCase()).toContain('valid opening float');
+    expect((el as unknown as { _error: string | null })._error ?? null).toBeNull();
+    el.remove();
+  });
+
+  it('the hint is smaller and dimmer than a typed value', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    expect(field.className).toContain('placeholder:text-sm');
+    expect(field.className).toContain('placeholder:opacity-70');
     el.remove();
   });
 
