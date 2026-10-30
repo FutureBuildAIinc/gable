@@ -412,12 +412,72 @@ func runSaleRow(t *testing.T, branch uuid.UUID) uuid.UUID {
 		sale, "REG-M29-"+sale.String()[:8], uuid.New(), branch, "POS-"+sale.String()[:8]); err != nil {
 		t.Fatalf("sale row: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
-	})
+	t.Cleanup(func() { removeRunSale(t, db, sale) })
 	return sale
+}
+
+// removeRunSale deletes one run suite sale with its intents and manager
+// items. The M29 delete guard (installM29DeleteGuard) silently skips a delete
+// of a terminal row whose sale is an open REG-M29 sale, so the sale is voided
+// first, as the base fixture's own cleanup does; every statement's error is
+// reported, and the sale is checked gone, so a silent skip cannot pass.
+func removeRunSale(t *testing.T, db *database.DB, sale uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	for _, q := range []string{
+		`UPDATE pos_transactions SET status = 'VOIDED' WHERE id = $1`,
+		`DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`,
+		`DELETE FROM payment_terminal_intents WHERE transaction_id = $1`,
+		`DELETE FROM pos_transactions WHERE id = $1`,
+	} {
+		if _, err := db.Pool.Exec(ctx, q, sale); err != nil {
+			t.Errorf("remove run sale %s: %s: %v", sale, q, err)
+		}
+	}
+	var left int
+	if err := db.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM payment_terminal_intents WHERE transaction_id = $1)
+		+ (SELECT count(*) FROM payment_terminal_lost_items WHERE transaction_id = $1)
+		+ (SELECT count(*) FROM pos_transactions WHERE id = $1)`, sale).Scan(&left); err != nil {
+		t.Errorf("count the run sale's rows: %v", err)
+	} else if left != 0 {
+		t.Errorf("the run sale %s left %d rows behind", sale, left)
+	}
+}
+
+// TestRunSuiteCleanupLeavesNoRows: a run suite sale, its intent and its
+// manager item are gone once the scenario's cleanup ran, with the M29 delete
+// guard installed (it skips a delete of an open REG-M29 sale's terminal rows
+// in silence). Rows left behind are open manager items every other test
+// that reads the queue then counts.
+func TestRunSuiteCleanupLeavesNoRows(t *testing.T) {
+	ledger, branch := newRunLedger(t)
+	db := testutil.RequireDB(t)
+	installM29DeleteGuard(t, db)
+	var sale uuid.UUID
+	t.Run("scenario", func(t *testing.T) {
+		sale = runSaleRow(t, branch)
+		in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
+			RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 700,
+			Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
+			LeaseUntil: time.Now().Add(-time.Minute)}
+		if !claimRunLegIntent(t, ledger, in) {
+			t.Skip("another suite's cleanup took the leg")
+		}
+		if _, err := db.Pool.Exec(context.Background(), `INSERT INTO payment_terminal_lost_items
+			(intent_id, branch_id, register_id, transaction_id, kind, amount_cents, device_id, provider_ref)
+			VALUES ($1, $2, $3, $4, $5, $6, '', '')`, in.ID, branch, in.RegisterID, sale, string(in.Kind), in.AmountCents); err != nil {
+			t.Fatalf("manager item: %v", err)
+		}
+	})
+	var left int
+	if err := db.Pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM payment_terminal_intents WHERE transaction_id = $1)
+		+ (SELECT count(*) FROM payment_terminal_lost_items WHERE transaction_id = $1)
+		+ (SELECT count(*) FROM pos_transactions WHERE id = $1)`, sale).Scan(&left); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if left != 0 {
+		t.Fatalf("the scenario's cleanup left %d rows of sale %s behind", left, sale)
+	}
 }
 
 // runFakeServer pairs the fake with its server.
@@ -1008,7 +1068,7 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 	}
 	term := newRunDriver(t, fs, ledger)
 	in := &payment.TerminalIntent{ID: uuid.New(), TransactionID: sale, LegKey: "card-0",
-		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 100,
+		RegisterID: "REG-" + sale.String()[:12], BranchID: branch, AmountCents: 2500,
 		Kind: payment.TerminalKindSale, IdempotencyKey: "sale-" + sale.String() + "-card-0",
 		LeaseUntil: time.Now().Add(40 * time.Millisecond)}
 	if !claimRunLegIntent(t, ledger, in) {
@@ -1086,8 +1146,6 @@ func raceOnce(t *testing.T, db *database.DB, ctx context.Context, branch uuid.UU
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_lost_items WHERE transaction_id = $1`, sale)
-	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM payment_terminal_intents WHERE transaction_id = $1`, sale)
-	_, _ = db.Pool.Exec(context.Background(), `DELETE FROM pos_transactions WHERE id = $1`, sale)
+	removeRunSale(t, db, sale)
 	return true
 }

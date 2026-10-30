@@ -344,7 +344,9 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
 		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
 		w.scoped("finance", "owner"),
-		w.scoped(append(append([]string{}, roles...), "finance")...))
+		w.scoped(append(append([]string{}, roles...), "finance")...),
+		w.scoped("admin", "owner"),
+		w.scoped("admin", "owner", "finance"))
 }
 
 // largeCash mounts the large cash routes: the preview rides the counter's

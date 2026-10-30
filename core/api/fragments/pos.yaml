@@ -99,7 +99,7 @@ paths:
         - name: status
           in: query
           required: false
-          schema: {type: string, enum: [open, held, completed, voided]}
+          schema: {type: string, enum: [open, held, completed, voided, abandoned]}
         - name: q
           in: query
           required: false
@@ -1428,6 +1428,79 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/offline/policy:
+    get:
+      operationId: posOfflinePolicyGet
+      tags: [pos]
+      summary: A branch's offline counter policy
+      description: >-
+        The branch's resolved offline selling policy (ADR 0011 section 4): the
+        branch's own row in pos_offline_policy when set (source branch), else
+        the database wide defaults in system_settings (source default), else
+        off (source none). Includes enrolled_register_count and
+        max_account_exposure_cents (account_cap_cents times the branch's
+        enrolled registers). Admin, owner and finance; a branch the caller may
+        not target is 403, and an unknown branch is 404.
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The resolved offline counter policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflinePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      operationId: posOfflinePolicyPut
+      tags: [pos]
+      summary: Set or clear a branch's offline counter policy
+      description: >-
+        Sets the branch's own offline counter policy in pos_offline_policy, or
+        clears it with clear true so the database wide defaults (or none) apply
+        again. Only cash, check and account tenders may be allowed offline.
+        Admin and owner only (finance may read, not write), never a machine key; a branch the caller may
+        not target is 403, and an unknown branch is 404. Audited as
+        pos.offline.policy in the same transaction.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosOfflinePolicyRequest"
+      responses:
+        "200":
+          description: The offline counter policy now in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosOfflinePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/end-of-day:
@@ -2909,7 +2982,7 @@ components:
   schemas:
     PosStatus:
       type: string
-      enum: [open, held, completed, voided]
+      enum: [open, held, completed, voided, abandoned]
     PosTenderMethod:
       type: string
       enum: [cash, check, card, account, store_credit]
@@ -3949,6 +4022,58 @@ components:
       properties:
         branch_id: {type: string, format: uuid}
         variance_threshold_cents: {type: [integer, "null"], format: int64, minimum: 0, description: "Null clears the branch's override."}
+    PosOfflineTender:
+      type: string
+      enum: [cash, check, account]
+    PosOfflinePolicy:
+      type: object
+      required:
+        - branch_id
+        - enabled
+        - tenders
+        - sale_cap_cents
+        - check_cap_cents
+        - account_cap_cents
+        - queue_total_cap_cents
+        - max_queued
+        - enrolled_register_count
+        - max_account_exposure_cents
+        - source
+        - updated_by
+        - updated_at
+        - revision
+      properties:
+        branch_id: {type: string, format: uuid}
+        enabled: {type: boolean}
+        tenders:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineTender"}
+        sale_cap_cents: {type: integer, format: int64, minimum: 0}
+        check_cap_cents: {type: integer, format: int64, minimum: 0}
+        account_cap_cents: {type: integer, format: int64, minimum: 0}
+        queue_total_cap_cents: {type: integer, format: int64, minimum: 0}
+        max_queued: {type: integer, minimum: 0}
+        enrolled_register_count: {type: integer, minimum: 0, description: "Active (unrevoked) enrolled registers on the branch."}
+        max_account_exposure_cents: {type: integer, format: int64, minimum: 0, description: "Worst case exposure for one account across the branch's enrolled registers (account_cap_cents times enrolled_register_count)."}
+        source: {type: string, enum: [branch, default, none]}
+        updated_by: {type: [string, "null"]}
+        updated_at: {type: [string, "null"], format: date-time}
+        revision: {type: [integer, "null"], format: int64}
+    PosOfflinePolicyRequest:
+      type: object
+      required: [branch_id]
+      properties:
+        branch_id: {type: string, format: uuid}
+        clear: {type: boolean, description: "When true, deletes the branch override so the database wide defaults or none apply."}
+        enabled: {type: boolean, description: "Required unless clear is true."}
+        tenders:
+          type: array
+          items: {$ref: "#/components/schemas/PosOfflineTender"}
+        sale_cap_cents: {type: integer, format: int64, minimum: 0}
+        check_cap_cents: {type: integer, format: int64, minimum: 0}
+        account_cap_cents: {type: integer, format: int64, minimum: 0}
+        queue_total_cap_cents: {type: integer, format: int64, minimum: 0}
+        max_queued: {type: integer, minimum: 0, maximum: 100000}
     PosSettings:
       type: object
       required: [revision, rules]
